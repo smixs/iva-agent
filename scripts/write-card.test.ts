@@ -577,16 +577,24 @@ test("UPDATE и NOOP читают пустой history_entry как отсутс
   };
   const created = await call(base);
   assert.equal(created.ok, true);
-  for (const blank of ["", "   "]) {
+  // Тела разные намеренно: повтор уже лежащего факта даёт "updated", а не "merged".
+  for (const [blank, fact] of [
+    ["", "Первый новый факт."],
+    ["   ", "Второй новый факт."],
+  ]) {
     const updated = await call({
       ...base,
       operation: "UPDATE",
-      body: `Новый факт ${blank.length}.`,
+      body: fact,
       history_entry: blank,
     });
     assert.equal(updated.ok, true, updated.error);
     assert.equal(updated.action, "merged");
-    const noop = await call({ ...base, operation: "NOOP", history_entry: blank });
+    const noop = await call({
+      ...base,
+      operation: "NOOP",
+      history_entry: blank,
+    });
     assert.equal(noop.ok, true, noop.error);
     assert.equal(noop.action, "noop");
   }
