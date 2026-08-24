@@ -334,6 +334,36 @@ const coreBeforeTurn = period === "daily" ? readCoreText(CORE_PATH) : "";
 const saved = loadSession();
 let sessionCreatedAt = saved?.createdAt ?? Date.now();
 let session = saved ? client.session(saved.state) : client.session();
+// Промпт строится один раз: он же — эталон для проверки, что result() вернул именно
+// наш ход (см. ниже «протухший результат»).
+const mainPrompt = buildPrompt(period, today);
+// Ресинк курсора ДО send(): eve-клиент (0.30.8) читает поток с сохранённого
+// streamIndex и отдаёт ПЕРВУЮ встреченную границу хода, не сверяя её с отправленным
+// сообщением. Отставший курсор (сервер умеет писать вторую терминальную тройку на
+// тот же turnId — её хвост остаётся непрочитанным) превращает result() в чтение
+// старого хода: инцидент 24.08.2026 — пять ночей подряд в Telegram уходил отчёт
+// пятидневной давности, а падение реального хода по квоте прошло незамеченным.
+// stream({follow:false}) дочитывает до хвоста и сдвигает session.state.streamIndex;
+// в норме курсор уже на хвосте и цикл не делает ни одной итерации. Зовём перед
+// КАЖДЫМ send в эту сессию (main, core-correction, format-feedback): вторая тройка
+// может появиться и после нашего же основного хода.
+async function drainStreamToTail(label: string): Promise<void> {
+  try {
+    for await (const _ of session.stream({ follow: false })) {
+      /* события не нужны — важен только сдвиг курсора */
+    }
+  } catch (e) {
+    console.error(
+      `rollup ${period}: ${label}: pre-send stream drain failed (${(e as Error).message}) — continuing with current cursor`,
+    );
+  }
+}
+if (saved) await drainStreamToTail("main-turn");
+// Нижняя граница времени для проверки принадлежности результата: события нашего хода
+// не могут быть старше старта скрипта (минус минута на всякий случай — часы у скрипта
+// и сервера одни, оба на этом хосте). Без неё повторный запуск в ту же дату принял бы
+// message.received первой попытки за свой: промпт уникален за дату, но не за попытку.
+const sentNotBefore = new Date(Date.now() - 60_000).toISOString();
 let result;
 let accepted = false;
 let sendRejected = false;
@@ -341,7 +371,7 @@ let acceptedTurnResult: Promise<MessageResult> | undefined;
 try {
   result = await guardedTurn(
     session,
-    buildPrompt(period, today),
+    mainPrompt,
     "main-turn",
     (turnResult) => {
       accepted = true;
@@ -383,16 +413,34 @@ try {
   sessionCreatedAt = Date.now();
   // Ровно одна попытка: второй сбой уходит наверх и роняет юнит с ненулевым кодом.
   try {
-    result = await guardedTurn(
-      session,
-      buildPrompt(period, today),
-      "main-turn",
-    );
+    result = await guardedTurn(session, mainPrompt, "main-turn");
   } catch (retryError) {
     if ((retryError as { code?: string }).code === "ROLLUP_TURN_TIMEOUT")
       await cancelTurnQuietly(session);
     throw retryError;
   }
+}
+// Страховка от протухшего результата (второй эшелон после ресинка выше): свой ход
+// опознаём по собственному message.received с точным текстом промпта — промпт содержит
+// дату и уникален за ночь. Чужой результат не доставляем и не сохраняем курсор:
+// сломанный курсор выбрасываем, следующая ночь начнёт свежую сессию.
+const ownTurn = result.events.some(
+  (ev) =>
+    ev.type === "message.received" &&
+    ev.data.message === mainPrompt &&
+    ev.meta.at >= sentNotBefore,
+);
+if (!ownTurn) {
+  console.error(
+    `rollup ${period}: result does not match the prompt just sent (stale stream cursor) — dropping session`,
+  );
+  logAbandoned(session.state, "stale-result");
+  try {
+    rmSync(SESSION_FILE, { force: true });
+  } catch {
+    /* курсор — кэш, его потеря не должна ронять ночь */
+  }
+  process.exit(1);
 }
 saveSession(session.state, sessionCreatedAt);
 
@@ -478,6 +526,7 @@ if (period === "daily") {
     // Таймаут здесь не заводит новую сессию: это просто «коррекция не удалась» — файл
     // перечитывается как есть, и дальше срабатывает существующая проверка капа.
     try {
+      await drainStreamToTail("core-correction");
       await guardedTurn(
         session,
         `Re-open ${CORE_PATH}: it is ${oldLength} characters, above the hard ${CORE_CAP}-character cap. ` +
@@ -577,6 +626,7 @@ if (REPORTS_TO_TELEGRAM[period]) {
     // Best-effort ход: отчёт уже доставлен, поэтому сбой или таймаут здесь только логируем —
     // ронять из-за подсказки о форматировании всю ночь незачем.
     try {
+      await drainStreamToTail("format-feedback");
       await guardedTurn(
         session,
         `The last report failed Telegram parse_mode=HTML (${r.error}) and went out as flat text. ` +
