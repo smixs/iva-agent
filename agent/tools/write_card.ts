@@ -299,8 +299,13 @@ export default defineTool({
     const file = id.file;
     const rel = relative(VAULT(), file).split(sep).join("/");
 
+    // Пустой/пробельный history_entry ничего не вытесняет и не подделывает архив: для UPDATE
+    // и NOOP он равен отсутствующему — так же, как SUPERSEDE читает его через trim(). Модели,
+    // заполняющие все поля схемы, шлют "" и без этого зацикливаются на одном отказе.
+    const historyEntry = history_entry?.trim() ? history_entry : undefined;
+
     if (operation === "NOOP") {
-      if (replace_body || history_entry !== undefined) {
+      if (replace_body || historyEntry !== undefined) {
         return {
           ok: false,
           error: "NOOP не принимает replace_body или history_entry.",
@@ -345,7 +350,7 @@ export default defineTool({
       });
       // history_entry несёт вытесненную истину, которой у ADD ещё нет: там он шум и молча
       // отбрасывается (с записью в журнал), а у UPDATE — попытка подделать архив.
-      if (history_entry !== undefined && effectiveOperation === "UPDATE") {
+      if (historyEntry !== undefined && effectiveOperation === "UPDATE") {
         return {
           ok: false,
           error: "history_entry допустим только для SUPERSEDE.",
@@ -403,7 +408,9 @@ export default defineTool({
         replaceBody: replace_body === true,
         // Сырая operation: по её отсутствию mergeCard узнаёт легаси-путь replace_body.
         operation,
-        historyEntry: history_entry,
+        // ADD получает сырое поле: пустую строку он отбрасывает сам и фиксирует это в журнале.
+        historyEntry:
+          effectiveOperation === "ADD" ? history_entry : historyEntry,
       });
       if (action !== "noop") atomicWrite(file, content);
       if (ignoredHistoryEntry) logIgnoredHistoryEntry();

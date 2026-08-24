@@ -566,6 +566,53 @@ test("ADD отбрасывает шумовой history_entry один раз, �
   }
 });
 
+test("UPDATE и NOOP читают пустой history_entry как отсутствующий, непустой — по-прежнему отказ", async () => {
+  const base = {
+    operation: "ADD",
+    type: "note",
+    title: "Blank history entry",
+    description: "пустое поле не подделывает архив",
+    tags: ["note", "blank"],
+    body: "Текущая истина.",
+  };
+  const created = await call(base);
+  assert.equal(created.ok, true);
+  for (const blank of ["", "   "]) {
+    const updated = await call({
+      ...base,
+      operation: "UPDATE",
+      body: `Новый факт ${blank.length}.`,
+      history_entry: blank,
+    });
+    assert.equal(updated.ok, true, updated.error);
+    assert.equal(updated.action, "merged");
+    const noop = await call({ ...base, operation: "NOOP", history_entry: blank });
+    assert.equal(noop.ok, true, noop.error);
+    assert.equal(noop.action, "noop");
+  }
+  const out = read(created.file);
+  assert.doesNotMatch(out, /^## History$/gm);
+  assert.match(out, /^## Log$/m);
+
+  const before = out;
+  const forged = await call({
+    ...base,
+    operation: "UPDATE",
+    body: "Ещё факт.",
+    history_entry: "2026-01-01: прежняя истина",
+  });
+  assert.equal(forged.ok, false);
+  assert.match(forged.error, /допустим только для SUPERSEDE/);
+  assert.equal(read(created.file), before);
+  const forgedNoop = await call({
+    ...base,
+    operation: "NOOP",
+    history_entry: "2026-01-01: прежняя истина",
+  });
+  assert.equal(forgedNoop.ok, false);
+  assert.match(forgedNoop.error, /NOOP не принимает/);
+});
+
 test("ADD отбрасывает пустой и длинный однострочный history_entry, не создавая пустых полей", async () => {
   const previousWarn = console.warn;
   const warnings: string[] = [];
