@@ -145,7 +145,7 @@ void test("global reset plan includes workflow and all Telegram control-state ta
   ]);
 });
 
-void test("update rewrite expires valid chats and preserves cleanup fields", () => {
+void test("update rewrite expires running chats and preserves cleanup fields", () => {
   const dataDir = mkdtempSync(join(tmpdir(), "wf-store-run-status-"));
   const dir = join(dataDir, "run-status.d");
   const file = join(dir, "chat.json");
@@ -155,7 +155,7 @@ void test("update rewrite expires valid chats and preserves cleanup fields", () 
     file,
     JSON.stringify({
       generation: 1,
-      status: "idle",
+      status: "running",
       updatedAt: Date.now(),
       sessionId: "session-to-reset",
       statusMessageId: 4242,
@@ -186,4 +186,37 @@ void test("update rewrite expires valid chats and preserves cleanup fields", () 
   );
   assert.equal(statSync(file).mode & 0o777, 0o600);
   assert.equal(readFileSync(damagedFile, "utf8"), "{not json");
+});
+
+void test("update rewrite leaves terminal chats alone and does not re-arm a notice", () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "wf-store-idle-status-"));
+  const dir = join(dataDir, "run-status.d");
+  mkdirSync(dir);
+  const records = {
+    idle: {
+      generation: 4,
+      status: "idle",
+      updatedAt: 1234,
+      resetAt: 1233,
+    },
+    failed: {
+      generation: 5,
+      status: "failed",
+      updatedAt: 2345,
+      sessionId: "finished-session",
+    },
+  } as const;
+  for (const [name, record] of Object.entries(records))
+    writeFileSync(join(dir, `${name}.json`), JSON.stringify(record), {
+      mode: 0o600,
+    });
+
+  rewriteRunStatusesForUpdate(dataDir);
+  rewriteRunStatusesForUpdate(dataDir);
+
+  for (const [name, record] of Object.entries(records))
+    assert.deepEqual(
+      JSON.parse(readFileSync(join(dir, `${name}.json`), "utf8")),
+      record,
+    );
 });
