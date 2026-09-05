@@ -115,7 +115,7 @@ function writeRunStatusAtomicSync(path: string, value: unknown): void {
   }
 }
 
-/** Make every saved chat immediately reapable after an update clears sessions. */
+/** Make only interrupted runs immediately reapable after an update clears sessions. */
 export function rewriteRunStatusesForUpdate(dataDir: string): void {
   const dir = join(dataDir, "run-status.d");
   let names: string[];
@@ -137,6 +137,10 @@ export function rewriteRunStatusesForUpdate(dataDir: string): void {
         Array.isArray(parsed)
       )
         continue;
+      // An update interrupts an in-flight turn, not an idle or terminal chat. Rewriting
+      // every saved record re-arms the stale-run notification after every plugin build,
+      // even when the owner has sent nothing and there is no session to reset.
+      if ((parsed as { status?: unknown }).status !== "running") continue;
       writeRunStatusAtomicSync(file, {
         ...parsed,
         status: "running",

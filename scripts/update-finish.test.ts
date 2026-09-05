@@ -66,7 +66,7 @@ test("update quarantines session state and rewrites chat status in place", (t) =
   writeFileSync(
     join(data, "run-status.d/chat.json"),
     JSON.stringify({
-      status: "idle",
+      status: "running",
       updatedAt: 123,
       statusMessageId: 42,
       sessionId: "old-session",
