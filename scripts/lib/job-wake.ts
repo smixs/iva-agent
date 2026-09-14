@@ -70,6 +70,16 @@ export async function runJobWake(
     return "failed";
   }
 
+  if (fact.ok) {
+    const recorded = await recordOutcome(deps, name, startedAt, {
+      at: now(),
+      status: "empty",
+      error: null,
+    });
+    log(`wake: ${name} succeeded; no agent turn needed`);
+    return recorded ? "empty" : "failed";
+  }
+
   let message: string;
   try {
     const turn = await deps.runTurn(jobWakePrompt(fact, deps.tr));

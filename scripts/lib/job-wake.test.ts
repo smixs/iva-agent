@@ -114,11 +114,7 @@ test("status failed остаётся провалом хода", async () => {
 
 test("непустой ответ уходит владельцу, факт говорит answered", async () => {
   const factsFile = file();
-  await recordFact(
-    factsFile,
-    fact({ ok: true, error: null, exitCode: 0 }),
-    NOW,
-  );
+  await recordFact(factsFile, fact(), NOW);
   const sent: string[] = [];
   const status = await runJobWake("memory-daily", NOW - 1000, {
     factsFile,
@@ -176,7 +172,7 @@ test("отказ доставки — провал хода, а не состо�
 
 test("исключение транспорта — тоже провал хода, причина в строке", async () => {
   const factsFile = file();
-  await recordFact(factsFile, fact({ ok: true, error: null }), NOW);
+  await recordFact(factsFile, fact(), NOW);
   const status = await runJobWake("memory-daily", NOW - 1000, {
     factsFile,
     tr,
@@ -240,4 +236,28 @@ test("T30 №10: отказ записи исхода — failed, а не answer
     chmodSync(root, 0o755);
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("успешное расписание не открывает модельный ход и фиксируется как empty", async () => {
+  const factsFile = file();
+  await recordFact(
+    factsFile,
+    fact({ ok: true, error: null, exitCode: 0 }),
+    NOW,
+  );
+  let calls = 0;
+  const status = await runJobWake("memory-daily", NOW - 1000, {
+    factsFile,
+    tr,
+    runTurn: () => {
+      calls += 1;
+      return Promise.resolve({ status: "completed", message: "" });
+    },
+    send: () => Promise.resolve(true),
+    now: () => NOW + 5,
+    log: () => {},
+  });
+  assert.equal(status, "empty");
+  assert.equal(calls, 0);
+  assert.equal((await readFacts(factsFile))[0]?.wake?.status, "empty");
 });
