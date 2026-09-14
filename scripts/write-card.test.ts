@@ -33,6 +33,19 @@ mkdirSync(join(VAULT, "cards", "contacts"), { recursive: true });
 mkdirSync(join(VAULT, "cards", "notes"), { recursive: true });
 cpSync(join(REPO, "vault-template", "schema.json"), join(VAULT, "schema.json"));
 
+// Цели ссылок из фикстур: write_card отказывает в записи ссылки, которая ни во что не
+// резолвится, поэтому карточки-адресаты должны лежать в вольте до первого вызова.
+for (const rel of [
+  "cards/notes/hub.md",
+  "cards/notes/sibling.md",
+  "cards/notes/ok.md",
+  "cards/notes/majento.md",
+  "cards/notes/aimasters.md",
+  "cards/contacts/alice.md",
+  "cards/contacts/bob.md",
+])
+  writeFileSync(join(VAULT, rel), "фикстура: цель ссылки\n", "utf8");
+
 process.on("exit", () => rmSync(VAULT, { recursive: true, force: true }));
 
 // Модуль читает схему на импорте — env выставлен выше.

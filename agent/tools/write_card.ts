@@ -14,6 +14,12 @@ import { parseFrontmatterOrSkip } from "../lib/frontmatter.js";
 import { resolveTimeZone } from "../lib/timezone.js";
 import { resolveVaultDir } from "@iva/vault-dir";
 import { vaultDirErrorText } from "../lib/vault-error.ts";
+import {
+  brokenLinksError,
+  relatedTarget,
+  unresolvedLinkTargets,
+  wikilinkTargets,
+} from "../lib/vault-links.ts";
 
 // Строго типизированная запись карточки памяти. Заменяет «write_file по наитию» для карточек:
 // zod-enum на type/status берётся из autograph schema.json (единый источник правды), поэтому
@@ -416,6 +422,19 @@ export default defineTool({
           historyEntry:
             effectiveOperation === "ADD" ? history_entry : historyEntry,
         });
+        // Ссылка в никуда роняет health score графа, а ночной graph.fix её не чинит:
+        // резолвится она ничем. Проверяется ВХОД (тело и related), а не слитая карточка:
+        // за старые битые ссылки в ней отвечает не этот вызов. Место — перед записью,
+        // после структурных отказов: их текст точнее, и он должен доходить первым.
+        const broken = unresolvedLinkTargets(
+          [...wikilinkTargets(body), ...(related ?? []).map(relatedTarget)],
+          {
+            vaultDir: resolveVaultDir(process.cwd()),
+            source: rel.replace(/\.md$/, ""),
+          },
+        );
+        if (broken.length)
+          return { ok: false, error: brokenLinksError(broken) };
         if (action !== "noop") atomicWrite(file, content);
         if (ignoredHistoryEntry) logIgnoredHistoryEntry();
         return {

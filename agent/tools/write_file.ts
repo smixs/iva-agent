@@ -1,10 +1,16 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 import { existsSync, realpathSync } from "node:fs";
-import { join, resolve, sep } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { writeFileAtomic } from "../lib/fs-atomic.js";
+import { parseFrontmatterOrSkip } from "../lib/frontmatter.js";
 import { resolveVaultDir } from "@iva/vault-dir";
 import { vaultDirErrorText } from "../lib/vault-error.ts";
+import {
+  brokenLinksError,
+  unresolvedLinkTargets,
+  wikilinkTargets,
+} from "../lib/vault-links.ts";
 
 // Host-native запись файла. Переопределяет встроенный write_file eve: пишет реальный
 // файл на VPS через каноническую атомарную запись, создавая родительские директории.
@@ -69,6 +75,21 @@ function cardVerdict(path: string): CardVerdict {
   };
 }
 
+// Ссылки [[…]] внутри вольта: цель, которой нет, режет health score графа, и ночной
+// graph.fix её не чинит. Проверяется только markdown внутри вольта — файл снаружи и
+// не-markdown к графу отношения не имеют. Корень берём реальный (симлинк не должен
+// увести путь мимо проверки), а если вольта нет — проверять нечего и не по чему.
+function vaultRelPath(path: string): string | null {
+  if (!path.toLowerCase().endsWith(".md")) return null;
+  const vault = resolveVaultDir(process.cwd());
+  const root = probe(vault);
+  if (root.kind !== "path") return null;
+  const abs = resolve(path);
+  const rel = relative(root.path, abs);
+  if (rel.startsWith("..") || isAbsolute(rel)) return null;
+  return rel.split(sep).join("/").replace(/\.md$/i, "");
+}
+
 export default defineTool({
   description:
     "Записать файл (UTF-8) на хост; директории создаются, файл перезаписывается целиком. " +
@@ -80,8 +101,10 @@ export default defineTool({
   }),
   async execute({ path, content }) {
     let verdict: CardVerdict;
+    let source: string | null;
     try {
       verdict = cardVerdict(path);
+      source = vaultRelPath(path);
     } catch (error) {
       const text = vaultDirErrorText(error);
       if (text !== null) return { ok: false, path, error: text };
@@ -100,6 +123,18 @@ export default defineTool({
           "Карточка уже существует — write_file затёр бы её целиком (поля вне схемы и старый текст). " +
           "Используй write_card: он сливает новое содержимое со старым.",
       };
+    }
+    if (source !== null) {
+      // Ночной обход графа читает ТЕЛО карточки; ссылка во frontmatter ему не ссылка,
+      // и отказывать по ней нельзя. Битый frontmatter — читаем файл целиком, как graph.py.
+      const body =
+        parseFrontmatterOrSkip(content, path, () => {})?.body || content;
+      const broken = unresolvedLinkTargets(wikilinkTargets(body), {
+        vaultDir: resolveVaultDir(process.cwd()),
+        source,
+      });
+      if (broken.length)
+        return { ok: false, path, error: brokenLinksError(broken) };
     }
     await writeFileAtomic(path, content);
     return { ok: true, path, bytes: Buffer.byteLength(content, "utf8") };

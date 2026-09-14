@@ -27,6 +27,7 @@ import {
   rollupRanBefore,
 } from "../lib/notice-policy.ts";
 import { resolveDataDir } from "../lib/data-dir.ts";
+import { childLinkRule } from "../lib/rollup-children.ts";
 import { resolveTimeZone } from "../lib/timezone.ts";
 import { notificationChat } from "../lib/notification-chat.ts";
 import { readCore } from "./read-core.ts";
@@ -155,6 +156,9 @@ function buildPrompt(p: Period, now: string): string {
         `resolve every listed same-entity conflict by superseding the stale card. ` +
         `Then assemble a daily-summary for ${yesterday} with the day's topics and MOC links down to the cards ` +
         `and to the raw transcript daily/${yesterday}.md. ` +
+        `Link a card only by the 'file' path write_card returned in this turn, or by a path memory_search ` +
+        `or read_file showed you; never derive a path from a title — a slug is lowercased, its punctuation ` +
+        `becomes '-', and it is cut at 60 characters, so a derived path points at no file. ` +
         `Then ${VAULT()}/CORE.md, per the ${INSTRUCTIONS}/rules/core-format.md rule. If the day produced ` +
         `no new durable fact, preference, goal or behavioral lesson, do not open or write CORE.md. ` +
         `Otherwise edit only the affected lines; never rewrite the file; keep every existing section, ` +
@@ -175,6 +179,7 @@ function buildPrompt(p: Period, now: string): string {
         `Assemble a weekly-summary for the completed week (7 days ending ${yesterday}): ` +
         `read the daily-summaries of those 7 days, pull out cross-cutting topics and the week's takeaways, ` +
         `create a weekly-summary with MOC links down to those daily-summaries. ` +
+        childLinkRule("weekly", yesterday, VAULT()) +
         tail
       );
     case "monthly":
@@ -183,6 +188,7 @@ function buildPrompt(p: Period, now: string): string {
         `Assemble a monthly-summary for the completed month ${prevMonth}: ` +
         `read the weekly-summaries of month ${prevMonth}, pull out the main topics and the month's takeaways, ` +
         `create a monthly-summary with MOC links down to the weekly summaries. ` +
+        childLinkRule("monthly", prevMonth, VAULT()) +
         tail
       );
     case "yearly":
@@ -191,6 +197,7 @@ function buildPrompt(p: Period, now: string): string {
         `Assemble a yearly-summary for the completed year ${prevYear}: ` +
         `read the monthly-summaries of year ${prevYear}, pull out the main topics and the year's takeaways, ` +
         `create a yearly-summary with MOC links down to the monthly summaries. ` +
+        childLinkRule("yearly", prevYear, VAULT()) +
         tail
       );
   }
