@@ -65,6 +65,41 @@ def _normalize_tool_arguments(body: bytes) -> bytes:
     return json.dumps(request, separators=(",", ":")).encode()
 
 
+class NormalizeToolArgumentsMiddleware:
+    """Normalize nullable tool-call arguments before FastMCP validates them."""
+
+    def __init__(self, app):
+        """Wrap an ASGI application that receives MCP HTTP requests."""
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        """Pass a normalized request body to the wrapped ASGI application."""
+        if scope["type"] != "http" or scope["method"] != "POST":
+            await self.app(scope, receive, send)
+            return
+        chunks = []
+        more_body = True
+        while more_body:
+            message = await receive()
+            if message["type"] != "http.request":
+                await self.app(scope, receive, send)
+                return
+            chunks.append(message.get("body", b""))
+            more_body = message.get("more_body", False)
+        body = _normalize_tool_arguments(b"".join(chunks))
+        delivered = False
+
+        async def receive_normalized():
+            """Supply the normalized body, then preserve later ASGI events."""
+            nonlocal delivered
+            if not delivered:
+                delivered = True
+                return {"type": "http.request", "body": body, "more_body": False}
+            return await receive()
+
+        await self.app(scope, receive_normalized, send)
+
+
 async def _health_payload(client) -> dict[str, str]:
     """Report authorization from the proxy's existing Telethon client."""
     return {"state": "ready" if await client.is_user_authorized() else "unauthorized"}
@@ -337,37 +372,6 @@ def main() -> None:
             except Exception as exc:  # noqa: BLE001
                 print(f"telegram-userbot: reconnect failed: {exc}", file=sys.stderr)
             return await call_next(request)
-
-    class NormalizeToolArgumentsMiddleware:
-        """Normalize nullable tool-call arguments before FastMCP validates them."""
-
-        def __init__(self, app):
-            self.app = app
-
-        async def __call__(self, scope, receive, send):
-            if scope["type"] != "http" or scope["method"] != "POST":
-                await self.app(scope, receive, send)
-                return
-            chunks = []
-            more_body = True
-            while more_body:
-                message = await receive()
-                if message["type"] != "http.request":
-                    await self.app(scope, receive, send)
-                    return
-                chunks.append(message.get("body", b""))
-                more_body = message.get("more_body", False)
-            body = _normalize_tool_arguments(b"".join(chunks))
-            delivered = False
-
-            async def receive_normalized():
-                nonlocal delivered
-                if not delivered:
-                    delivered = True
-                    return {"type": "http.request", "body": body, "more_body": False}
-                return await receive()
-
-            await self.app(scope, receive_normalized, send)
 
     async def health(_request):
         return JSONResponse(await _health_payload(client))
