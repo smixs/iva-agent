@@ -1012,6 +1012,23 @@ def main():
                  {'source': 'cards/notes/audio', 'target': 'missing-note.ogg'}
              ], str(audio_graph['broken_link_list']))
 
+        attachment_vault = tmp / 'existing-arbitrary-attachment-vault'
+        (attachment_vault / 'attachments/2026-09-15').mkdir(parents=True)
+        (attachment_vault / 'cards/notes').mkdir(parents=True)
+        (attachment_vault / 'attachments/2026-09-15/brief.custombin').write_bytes(b'fixture')
+        (attachment_vault / 'cards/notes/attachment.md').write_text(
+            "---\ntype: note\ndescription: Attachment reference\n---\n# Attachment\n"
+            "![[attachments/2026-09-15/brief.custombin]] "
+            "![[attachments/2026-09-15/missing.custombin]]\n"
+        )
+        attachment_graph = build_graph(attachment_vault, health_schema, today=date(2026, 8, 5))
+        test("existing attachment with arbitrary extension is valid",
+             attachment_graph['stats']['broken_links'] == 1
+             and attachment_graph['broken_link_list'] == [
+                 {'source': 'cards/notes/attachment',
+                  'target': 'attachments/2026-09-15/missing.custombin'}
+             ], str(attachment_graph['broken_link_list']))
+
         # graph orphans
         code, out, _ = run([py, str(SCRIPTS_DIR / 'graph.py'), 'orphans',
                             str(vault_dir), str(schema_path)])
