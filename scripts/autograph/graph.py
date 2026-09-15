@@ -160,6 +160,11 @@ def build_graph(vault_dir: Path, schema: dict, today: date | None = None) -> dic
                 # ссылка порвётся. fix доводит её до пути (title_link_list).
                 if strategy == 'unique_title':
                     title_links.append((rp_noext, target_clean))
+            elif target_clean.startswith('attachments/') and (vault_dir / target_clean).is_file():
+                # Attachments are valid only when the exact file exists. This is deliberately
+                # extension-agnostic: DOCX and future attachment types must not become broken
+                # merely because their suffix is absent from a hard-coded media allowlist.
+                continue
             elif any(target.lower().endswith(ext) for ext in EMBED_EXTS):
                 # A Markdown note may legitimately end in an attachment-like suffix
                 # (voice.ogg.md). Resolution must win before the embed exemption.
