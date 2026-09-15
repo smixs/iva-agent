@@ -118,6 +118,24 @@ def expected_future_link(source: str, target: str, today: date | None = None) ->
     return False
 
 
+def _is_existing_attachment(vault_dir: Path, target: str) -> bool:
+    """Return whether an attachment is a regular file contained by the vault."""
+    vault_root = vault_dir.resolve()
+    target_path = Path(target)
+    if target_path.is_absolute() or any(part in {".", ".."} for part in target_path.parts):
+        return False
+    candidate = vault_root
+    for part in target_path.parts:
+        candidate /= part
+        if candidate.is_symlink():
+            return False
+    try:
+        candidate.resolve().relative_to(vault_root)
+    except ValueError:
+        return False
+    return candidate.is_file()
+
+
 def build_graph(vault_dir: Path, schema: dict, today: date | None = None) -> dict:
     """Scan vault, build full graph structure."""
     vault_dir = Path(vault_dir)
@@ -160,6 +178,13 @@ def build_graph(vault_dir: Path, schema: dict, today: date | None = None) -> dic
                 # ссылка порвётся. fix доводит её до пути (title_link_list).
                 if strategy == 'unique_title':
                     title_links.append((rp_noext, target_clean))
+            elif target_clean.startswith('attachments/') and _is_existing_attachment(
+                vault_dir, target_clean
+            ):
+                # Attachments are valid only when the exact file exists. This is deliberately
+                # extension-agnostic: DOCX and future attachment types must not become broken
+                # merely because their suffix is absent from a hard-coded media allowlist.
+                continue
             elif any(target.lower().endswith(ext) for ext in EMBED_EXTS):
                 # A Markdown note may legitimately end in an attachment-like suffix
                 # (voice.ogg.md). Resolution must win before the embed exemption.
