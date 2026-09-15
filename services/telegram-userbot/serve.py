@@ -27,6 +27,7 @@ Env:
                          telegram-userbot.session, beside the proxy token. The production
                          unit passes ASSISTANT_DATA_DIR as one canonical absolute path.
 """
+import json
 import os
 import shutil
 import sys
@@ -35,6 +36,33 @@ from pathlib import Path
 SESSION_NAME = "telegram-userbot.session"
 # SQLite keeps these beside the database while a write is in flight.
 SESSION_SIDECARS = ("-journal", "-wal", "-shm")
+
+
+def _normalize_tool_arguments(body: bytes) -> bytes:
+    """Represent JSON null tool arguments as omitted optional arguments.
+
+    telegram-mcp 2.0.1 exposes several optional Python ``str = None`` arguments
+    as JSON Schema strings with a ``null`` default.  Tool clients therefore send
+    ``null`` as the schema advertises, while FastMCP rejects it before the handler
+    receives the call.  Python's omitted optional argument has the intended
+    ``None`` value, so normalizing at the proxy boundary preserves the tool's
+    semantics and keeps the upstream proxy isolated.
+    """
+    try:
+        request = json.loads(body)
+    except (TypeError, ValueError, UnicodeDecodeError):
+        return body
+    if not isinstance(request, dict) or request.get("method") != "tools/call":
+        return body
+    params = request.get("params")
+    if not isinstance(params, dict) or not isinstance(params.get("arguments"), dict):
+        return body
+    arguments = params["arguments"]
+    normalized = {key: value for key, value in arguments.items() if value is not None}
+    if len(normalized) == len(arguments):
+        return body
+    request = {**request, "params": {**params, "arguments": normalized}}
+    return json.dumps(request, separators=(",", ":")).encode()
 
 
 async def _health_payload(client) -> dict[str, str]:
@@ -310,6 +338,37 @@ def main() -> None:
                 print(f"telegram-userbot: reconnect failed: {exc}", file=sys.stderr)
             return await call_next(request)
 
+    class NormalizeToolArgumentsMiddleware:
+        """Normalize nullable tool-call arguments before FastMCP validates them."""
+
+        def __init__(self, app):
+            self.app = app
+
+        async def __call__(self, scope, receive, send):
+            if scope["type"] != "http" or scope["method"] != "POST":
+                await self.app(scope, receive, send)
+                return
+            chunks = []
+            more_body = True
+            while more_body:
+                message = await receive()
+                if message["type"] != "http.request":
+                    await self.app(scope, receive, send)
+                    return
+                chunks.append(message.get("body", b""))
+                more_body = message.get("more_body", False)
+            body = _normalize_tool_arguments(b"".join(chunks))
+            delivered = False
+
+            async def receive_normalized():
+                nonlocal delivered
+                if not delivered:
+                    delivered = True
+                    return {"type": "http.request", "body": body, "more_body": False}
+                return await receive()
+
+            await self.app(scope, receive_normalized, send)
+
     async def health(_request):
         return JSONResponse(await _health_payload(client))
 
@@ -334,9 +393,11 @@ def main() -> None:
 
         app = mcp.streamable_http_app()
         app.add_route("/healthz", health, methods=["GET"])
-        # add_middleware stacks outermost-last: BearerAuth runs first (reject before
-        # we bother reconnecting), then EnsureConnected.
+        # add_middleware stacks outermost-last: BearerAuth rejects before parsing a
+        # request body, then nullable tool arguments are normalized, then the proxy
+        # checks Telegram connectivity.
         app.add_middleware(EnsureConnectedMiddleware)
+        app.add_middleware(NormalizeToolArgumentsMiddleware)
         app.add_middleware(BearerAuthMiddleware)
 
         print(f"telegram-userbot: listening on http://{host}:{port}/mcp", file=sys.stderr)
