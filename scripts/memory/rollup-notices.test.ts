@@ -116,3 +116,28 @@ test("the delivery rule names every scheduled sender", () => {
   // Режимов доставки в персоне нет: путь один — код шлёт текст в срок и будит агента.
   assert.doesNotMatch(instructions, /verbatim|mode:/iu);
 });
+
+test("a noise report is skipped before it reaches the policy", () => {
+  const block = deliveryBlock();
+  // Шум-гейт стоит ДО deliverMemoryReport: «.» и другой мусор не доходят до политики.
+  const guardAt = block.indexOf("noise guard");
+  const deliveryAt = block.indexOf("await deliverMemoryReport({");
+  assert.notEqual(guardAt, -1, "the noise guard must stay one readable place");
+  assert.ok(
+    guardAt < deliveryAt,
+    "the noise guard must run before the delivery policy",
+  );
+  assert.match(block, /hasTextSubstance\(/u);
+  assert.match(block, /reportText\.length < 8/u);
+  // Роллап при этом успешен: шум не роняет ночь.
+  assert.match(block, /process\.exit\(0\)/u);
+});
+
+test("hasTextSubstance treats punctuation-only text as noise", async () => {
+  const { hasTextSubstance } = await import("../lib/notice-policy.ts");
+  assert.equal(hasTextSubstance("."), false);
+  assert.equal(hasTextSubstance("   "), false);
+  assert.equal(hasTextSubstance("—"), false);
+  assert.equal(hasTextSubstance("Отчёт за день"), true);
+  assert.equal(hasTextSubstance("42"), true);
+});

@@ -489,3 +489,12 @@ export function alertResolved(dataDir: string, key: string): void {
   delete state[key];
   writeAlertState(dataDir, state);
 }
+
+/**
+ * Есть ли в тексте что-то осмысленное, кроме знаков препинания и пробелов.
+ * Шум-гейт ночного отчёта: модель могла вернуть "." или другой короткий мусор —
+ * такой текст владельцу не доставляем.
+ */
+export function hasTextSubstance(text: string): boolean {
+  return /[\p{L}\p{N}]/u.test(text);
+}

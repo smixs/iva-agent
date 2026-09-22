@@ -308,6 +308,60 @@ function sectionsOf(text: string): Map<string, string> {
 }
 
 /**
+ * Насколько заголовок похож на другой. Считаем общие слова и общие пары слов (bigram-ки)
+ * нормализованными на длину; ровно одна формула для обеих сторон, чтобы и «слегка
+ * перефразировали», и «дописали уточнение» вели себя симметрично. Пустые стороны — 0.
+ */
+function headingSimilarity(a: string, b: string): number {
+  const words = (value: string): string[] =>
+    value
+      .toLowerCase()
+      .split(/[^a-zа-яё0-9]+/u)
+      .filter(Boolean);
+  const wa = words(a);
+  const wb = words(b);
+  if (wa.length === 0 || wb.length === 0) return 0;
+  const bigrams = (list: string[]): string[] =>
+    list.length === 1
+      ? [`*${list[0]}*`]
+      : list.slice(0, -1).map((word, index) => `${word} ${list[index + 1]}`);
+  const sets = (list: string[]): Set<string> => new Set(list);
+  const intersect = (x: readonly string[], y: readonly string[]): number => {
+    const ys = sets([...y]);
+    let count = 0;
+    for (const item of x) if (ys.has(item)) count += 1;
+    return count;
+  };
+  const ba = bigrams(wa);
+  const bb = bigrams(wb);
+  const numerator = 2 * (intersect(wa, wb) + intersect(ba, bb));
+  const denominator = wa.length + wb.length + ba.length + bb.length;
+  return denominator === 0 ? 0 : numerator / denominator;
+}
+
+/** Порог: ниже — считаем секцию потерянной, выше — переименованием (ночным сжатием). */
+const RENAME_SIMILARITY = 0.45;
+
+/** Заголовок из `after`, который можно считать переименованием `before`. */
+function bestRenameMatch(
+  before: string,
+  afterHeadings: readonly string[],
+  taken: ReadonlySet<string>,
+): string | null {
+  let best: string | null = null;
+  let bestScore = 0;
+  for (const candidate of afterHeadings) {
+    if (taken.has(candidate)) continue;
+    const score = headingSimilarity(before, candidate);
+    if (score > bestScore) {
+      bestScore = score;
+      best = candidate;
+    }
+  }
+  return bestScore >= RENAME_SIMILARITY ? best : null;
+}
+
+/**
  * Что ночной ход снёс в CORE: сравнение файла до и после. Судим по заголовкам и телам
  * секций, а не по строкам — правка строк это работа ночи, а исчезнувшая секция или
  * опустевшее тело под уцелевшим заголовком (в том числе пользовательские, которых нет
@@ -316,11 +370,26 @@ function sectionsOf(text: string): Map<string, string> {
 export function coreDamage(before: string, after: string): CoreDamage {
   const beforeSections = sectionsOf(before);
   const afterSections = sectionsOf(after);
+  const afterHeadings = [...afterSections.keys()];
+
+  // Переименования: заголовок до → достаточно похожий заголовок после. Каждый заголовок
+  // после может быть парой только одного пропавшего (жадный по лучшей похожести).
+  const renamed = new Map<string, string>();
+  const taken = new Set<string>();
+  for (const heading of beforeSections.keys()) {
+    const match = bestRenameMatch(heading, afterHeadings, taken);
+    if (!match) continue;
+    renamed.set(heading, match);
+    taken.add(match);
+  }
+
   const lostHeadings = [...beforeSections.keys()].filter(
-    (heading) => !afterSections.has(heading),
+    (heading) => !afterSections.has(heading) && !renamed.has(heading),
   );
   const hollowedHeadings = [...beforeSections.keys()].filter((heading) => {
-    const kept = afterSections.get(heading);
+    const afterName = afterSections.has(heading) ? heading : renamed.get(heading);
+    if (afterName === undefined) return false;
+    const kept = afterSections.get(afterName);
     return (
       (beforeSections.get(heading) as string).trim() !== "" &&
       kept !== undefined &&

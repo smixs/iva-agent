@@ -23,6 +23,7 @@ import {
   coreDamageAlert,
   CORE_DAMAGE_ALERT_KEY,
   deliverMemoryReport,
+  hasTextSubstance,
   memoryReportTail,
   memoryReportsEnabled,
   rollupRanBefore,
@@ -666,6 +667,16 @@ if (REPORTS_TO_TELEGRAM[period]) {
       `rollup ${period}: no TELEGRAM_BOT_TOKEN/TELEGRAM_DIGEST_CHAT_ID — report not sent`,
     );
     process.exit(1);
+  }
+  // Шум-гейт: итог роллапа в чат уходит только если это осмысленный отчёт. Модель могла
+  // вернуть "." (или другой короткий/знаковый мусор) — такой текст владельцу
+  // не доставляем, роллап при этом считается успешным (память записана, код выходит 0).
+  const reportText = (result.message as string).trim();
+  if (reportText.length < 8 || !hasTextSubstance(reportText)) {
+    console.log(
+      `rollup ${period}: report is ${reportText.length} chars (substance=${hasTextSubstance(reportText)}), skipping chat delivery (noise guard)`,
+    );
+    process.exit(0);
   }
   const delivery = await deliverMemoryReport({
     dataDir: DATA_DIR,
