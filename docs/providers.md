@@ -98,6 +98,16 @@ CUSTOM_MODEL=Qwen/Qwen3-32B-Instruct
 CUSTOM_CONTEXT_WINDOW=32768
 ```
 
+A hosted example, [NeuralDeep](https://hub.neuraldeep.ru): an OpenAI-compatible endpoint billed in roubles and reachable from Russia without a VPN. `qwen3.6-35b-a3b` calls tools and reads images, so `CUSTOM_VISION_MODEL` stays empty:
+
+```bash
+MODEL_PROVIDER=custom
+CUSTOM_BASE_URL=https://api.neuraldeep.ru/v1
+CUSTOM_API_KEY=sk-...                        # from hub.neuraldeep.ru/app
+CUSTOM_MODEL=qwen3.6-35b-a3b
+CUSTOM_CONTEXT_WINDOW=262144
+```
+
 ## Vision
 
 Attachments are never inlined into the model request. A photo lands in the vault, the agent gets its file path, and the provider's own vision model writes the description — OCR plus visual detail — into the daily transcript. Same key as the text model, no extra subscription. Each provider's default is a `*_VISION_MODEL` line in `.env` and a step in `iva config`; `custom` has no default there, so an endpoint whose chat model reads images needs nothing, and one whose model doesn't needs a `CUSTOM_VISION_MODEL` and a `CUSTOM_API_KEY` to call it with. Being on a provider's model list is not the same as reading images: on Go the default is `qwen3.7-plus`, and several of the larger models there refuse a picture outright.
