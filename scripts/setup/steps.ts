@@ -88,6 +88,8 @@ export type SetupBackend = {
   opencodeModels: (key: string) => Promise<string[]>;
   openrouterKeyCheck: (key: string) => Promise<string | null>;
   openrouterModelCheck: (key: string, model: string) => Promise<string | null>;
+  requestyKeyCheck: (key: string) => Promise<string | null>;
+  requestyModelCheck: (key: string, model: string) => Promise<string | null>;
   /** Статус Claude Code CLI: у вендора claude нет ключа, вход живёт на этом же сервере. */
   claudeCli: () => Promise<ClaudeStatus>;
   deepgramCheck: (key: string) => Promise<string | null>;
@@ -294,6 +296,95 @@ async function askOpenrouterSettings(
 ): Promise<void> {
   await askOpenrouterModel(state, ctx);
   await askOpenrouterVision(state, ctx);
+}
+
+/** Модель Requesty: id и живой тест (включая tool calling), как у OpenRouter. */
+async function askRequestyModel(
+  state: SetupState,
+  ctx: SetupContext,
+): Promise<void> {
+  const { existing, out } = state;
+  ctx.print(
+    `\n  ${ctx.t("Requesty key", "Ключ Requesty")}: ${C.c}https://app.requesty.ai/api-keys${C.x} ${ctx.t("(create a key and copy it).", "(создайте ключ и скопируйте его).")}`,
+  );
+  out.REQUESTY_API_KEY = await ctx.askRequired(
+    `  ${ctx.t("Paste the Requesty key", "Вставьте ключ Requesty")}`,
+    {
+      existing:
+        ctx.envValue("REQUESTY_API_KEY") || existing.REQUESTY_API_KEY || "",
+      validate: ctx.requestyKeyCheck,
+    },
+  );
+  ctx.print(
+    `\n  ${ctx.t("Now the model.", "Теперь модель.")} ${ctx.t("Open", "Откройте")} ${C.c}https://www.requesty.ai/models${C.x}, ${ctx.t("pick a model and copy its id", "выберите модель и скопируйте её id")}`,
+  );
+  ctx.print(
+    `  (${ctx.t("e.g.", "напр.")} ${C.g}gpt-5.5${C.x}, ${C.g}claude-sonnet-5${C.x}, ${C.g}openai/gpt-4o-mini${C.x}).`,
+  );
+  ctx.print(
+    `  ${C.y}${ctx.t("I'll send a live test (incl. tool/function calling, which Iva needs), so a wrong or chat-only model can't slip through and leave the bot mute.", "Сразу отправлю живой тест (включая поддержку инструментов, она нужна Iva), чтобы кривая или chat-only модель не проскочила и бот не остался немым.")}${C.x}`,
+  );
+  for (;;) {
+    const m = (
+      await ctx.ask(
+        `  ${ctx.t("Requesty model id", "Id модели Requesty")}`,
+        out.REQUESTY_MODEL || CATALOG.requesty.def || "",
+      )
+    ).trim();
+    if (!m) {
+      ctx.print(
+        `${C.y}  ⚠ ${ctx.t("Required: paste a model id from requesty.ai/models.", "Обязательно: вставьте id модели с requesty.ai/models.")}${C.x}\n`,
+      );
+      continue;
+    }
+    ctx.write(
+      `  ${ctx.t("testing the model answers…", "проверяю, что модель отвечает…")} `,
+    );
+    const err = await ctx.requestyModelCheck(out.REQUESTY_API_KEY, m);
+    if (err) {
+      ctx.print(
+        `${C.r}${ctx.t("not ok", "не ок")}${C.x}\n${C.y}  ⚠ ${err}${C.x}\n`,
+      );
+      continue;
+    }
+    ctx.print(
+      `${C.g}${ctx.t("ok, the model answered", "ок, модель ответила")}${C.x}`,
+    );
+    out.REQUESTY_MODEL = m;
+    break;
+  }
+}
+
+/** Vision-модель Requesty и окно контекста. */
+async function askRequestyVision(
+  state: SetupState,
+  ctx: SetupContext,
+): Promise<void> {
+  const { out } = state;
+  const visionDef = CATALOG.requesty.visionDef ?? "";
+  ctx.print(
+    `\n  ${ctx.t("Vision model (photos)", "Vision-модель (фото)")}: ${ctx.t("a model that accepts images, any vendor.", "модель, принимающая картинки, любого вендора.")} ${ctx.t("Enter keeps", "Enter оставит")} ${C.g}${visionDef}${C.x}.`,
+  );
+  out.REQUESTY_VISION_MODEL =
+    (
+      await ctx.ask(
+        `  ${ctx.t("Requesty vision model", "Vision-модель Requesty")}`,
+        out.REQUESTY_VISION_MODEL || visionDef,
+      )
+    ).trim() || visionDef;
+  out.REQUESTY_CONTEXT_WINDOW = out.REQUESTY_CONTEXT_WINDOW || "131072";
+  ctx.print(
+    `  → ${ctx.t("model", "модель")}: ${C.g}${out.REQUESTY_MODEL}${C.x}`,
+  );
+  ctx.print(`  → vision: ${C.g}${out.REQUESTY_VISION_MODEL}${C.x}`);
+}
+
+async function askRequestySettings(
+  state: SetupState,
+  ctx: SetupContext,
+): Promise<void> {
+  await askRequestyModel(state, ctx);
+  await askRequestyVision(state, ctx);
 }
 
 async function askCustomEndpoint(
@@ -559,6 +650,7 @@ export async function askProviderSettings(
   else if (provider === "opencode") await askOpencodeSettings(state, ctx);
   else if (provider === "openrouter") await askOpenrouterSettings(state, ctx);
   else if (provider === "custom") await askCustomSettings(state, ctx);
+  else if (provider === "requesty") await askRequestySettings(state, ctx);
   else if (provider === "claude") await askClaudeSettings(state, ctx);
   else await askCodexSettings(state, ctx);
   ctx.print(
@@ -1042,6 +1134,7 @@ function printSetupSummary(
     codex: out.CODEX_MODEL,
     claude: out.CLAUDE_MODEL,
     custom: out.CUSTOM_MODEL,
+    requesty: out.REQUESTY_MODEL,
   }[provider];
   ctx.print();
   ctx.hr();
@@ -1084,6 +1177,7 @@ export async function writeSetupEnv(
     codex: { model: "CODEX_MODEL", key: null },
     claude: { model: "CLAUDE_MODEL", key: null },
     custom: { model: "CUSTOM_MODEL", key: "CUSTOM_API_KEY" },
+    requesty: { model: "REQUESTY_MODEL", key: "REQUESTY_API_KEY" },
   }[provider];
   if (!selected) throw new Error(`unknown provider: ${provider}`);
   ctx.write(

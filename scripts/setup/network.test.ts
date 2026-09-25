@@ -41,6 +41,7 @@ test("key checks: a working key passes, 401/403 is named, a network failure does
   for (const name of [
     "opencodeCheck",
     "openrouterKeyCheck",
+    "requestyKeyCheck",
     "deepgramCheck",
   ] as const) {
     assert.equal(await checks(status(200)).net[name]("k"), null, name);
@@ -64,10 +65,12 @@ test("key checks: a working key passes, 401/403 is named, a network failure does
   const { net, urls } = checks(status(200));
   await net.opencodeCheck("k");
   await net.openrouterKeyCheck("k");
+  await net.requestyKeyCheck("k");
   await net.deepgramCheck("k");
   assert.deepEqual(urls, [
     "https://opencode.ai/zen/go/v1/models",
     "https://openrouter.ai/api/v1/key",
+    "https://router.requesty.ai/v1/models",
     "https://api.deepgram.com/v1/projects",
   ]);
 });
@@ -156,6 +159,41 @@ test("openrouterModelCheck: failure — refusals name the reason and the hint", 
   const offline = checks(() => new Error("socket hang up"));
   assert.match(
     String(await offline.net.openrouterModelCheck("k", "a/b")),
+    /^request failed: /u,
+  );
+});
+
+test("requestyModelCheck: an answer passes, refusals point to the Requesty model list", async () => {
+  const answered = checks(() =>
+    Response.json({ choices: [{ message: { tool_calls: [{ id: "1" }] } }] }),
+  );
+  assert.equal(await answered.net.requestyModelCheck("k", "gpt-5.5"), null);
+  assert.deepEqual(answered.urls, [
+    "https://router.requesty.ai/v1/chat/completions",
+  ]);
+  assert.deepEqual(answered.printed, []);
+
+  const empty = checks(() => Response.json({ choices: [{ message: {} }] }));
+  assert.equal(await empty.net.requestyModelCheck("k", "gpt-5.5"), null);
+  assert.match(empty.printed.join("\n"), /model replied empty/u);
+
+  const unknown = checks(
+    () =>
+      new Response(
+        JSON.stringify({
+          error: { origin: "router", message: "no such model" },
+        }),
+        { status: 404 },
+      ),
+  );
+  assert.match(
+    String(await unknown.net.requestyModelCheck("k", "openai/nope")),
+    /^the model can't be used: .*no such model.*requesty\.ai\/models/u,
+  );
+
+  const offline = checks(() => new Error("socket hang up"));
+  assert.match(
+    String(await offline.net.requestyModelCheck("k", "gpt-5.5")),
     /^request failed: /u,
   );
 });

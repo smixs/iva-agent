@@ -32,6 +32,7 @@ export const MODEL_PROVIDER_NAMES = [
   "claude",
   "openrouter",
   "custom",
+  "requesty",
 ] as const;
 
 export type ModelProviderName = (typeof MODEL_PROVIDER_NAMES)[number];
@@ -147,6 +148,19 @@ export const MODEL_PROVIDERS = {
     // (ADR-0012). Пусто — дефолта нет, и картинку смотрит выбранная текстовая модель.
     visionModelVar: "CUSTOM_VISION_MODEL",
     defaultVisionModel: null,
+  },
+  requesty: {
+    // Id модели Requesty: managed policy (напр. gpt-5.5) или vendor/model (напр.
+    // openai/gpt-5.5). Задаётся мастером с живой проверкой, как у openrouter.
+    modelVar: "REQUESTY_MODEL",
+    defaultModel: "gpt-5.5",
+    compatibleReasoning: false,
+    replaysReasoning: false,
+    toolNameMax: TOOL_NAME_MAX,
+    // Мультимодальная модель для картинок, как у openrouter: выбранная текстовая может быть
+    // text-only. Переопределяется REQUESTY_VISION_MODEL.
+    visionModelVar: "REQUESTY_VISION_MODEL",
+    defaultVisionModel: "gemini-3.5-flash",
   },
 } as const satisfies Record<
   ModelProviderName,

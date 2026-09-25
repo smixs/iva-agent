@@ -105,6 +105,11 @@ const PROVIDERS = {
     apiKey: process.env.CUSTOM_API_KEY,
     contextWindow: 131072,
   },
+  requesty: {
+    baseURL: "https://router.requesty.ai/v1",
+    apiKey: process.env.REQUESTY_API_KEY,
+    contextWindow: 131072,
+  },
 } as const satisfies Record<
   ModelProviderName,
   {

@@ -100,6 +100,18 @@ test("model provider selection preserves each supported provider identity", () =
   );
   assert.deepEqual(
     resolveModelProvider({
+      MODEL_PROVIDER: "requesty",
+      REQUESTY_MODEL: "openai/gpt-4o-mini",
+    }),
+    {
+      name: "requesty",
+      model: "openai/gpt-4o-mini",
+      visionModel: "gemini-3.5-flash",
+      compatibleReasoning: false,
+    },
+  );
+  assert.deepEqual(
+    resolveModelProvider({
       MODEL_PROVIDER: "codex",
       CODEX_MODEL: "codex-model",
     }),
@@ -147,6 +159,7 @@ test("every supported provider keeps its own default model", () => {
       "gpt-5.5",
       "claude-fable-5-1",
       "openai/gpt-5.1",
+      "gpt-5.5",
     ],
   );
 });
@@ -230,6 +243,7 @@ test("every supported provider keeps its own default vision model", () => {
       "gpt-5.5",
       "claude-fable-5-1",
       "google/gemini-2.5-flash",
+      "gemini-3.5-flash",
     ],
   );
 });
@@ -349,7 +363,15 @@ test("only OpenCode loses the wizard prefix from a configured model", () => {
 test("model provider selection rejects values that would split runtime identity", () => {
   assert.deepEqual(
     [...MODEL_PROVIDER_NAMES],
-    ["ollama", "opencode", "codex", "claude", "openrouter", "custom"],
+    [
+      "ollama",
+      "opencode",
+      "codex",
+      "claude",
+      "openrouter",
+      "custom",
+      "requesty",
+    ],
   );
   const garbage = [
     "ollmaa", // опечатка из issue #161
@@ -386,7 +408,7 @@ test("the refusal names the bad value, every accepted name and the fix", () => {
   const message = invalidModelProviderMessage("ollmaa");
   assert.equal(
     message,
-    'Invalid MODEL_PROVIDER "ollmaa"; expected one of: ollama, opencode, codex, claude, openrouter, custom — run: iva config',
+    'Invalid MODEL_PROVIDER "ollmaa"; expected one of: ollama, opencode, codex, claude, openrouter, custom, requesty — run: iva config',
   );
   for (const name of MODEL_PROVIDER_NAMES)
     assert.match(message, new RegExp(name));
@@ -495,7 +517,7 @@ test("runtime startup rejects an invalid provider before choosing a config", () 
     assert.notEqual(result.status, 0, module);
     assert.match(
       result.stderr,
-      /Invalid MODEL_PROVIDER "ollmaa"; expected one of: ollama, opencode, codex, claude, openrouter, custom — run: iva config/,
+      /Invalid MODEL_PROVIDER "ollmaa"; expected one of: ollama, opencode, codex, claude, openrouter, custom, requesty — run: iva config/,
       module,
     );
   }
@@ -508,6 +530,7 @@ test("runtime startup rejects an invalid context window", () => {
     ["openrouter", "OPENROUTER_CONTEXT_WINDOW"],
     ["codex", "CODEX_CONTEXT_WINDOW"],
     ["claude", "CLAUDE_CONTEXT_WINDOW"],
+    ["requesty", "REQUESTY_CONTEXT_WINDOW"],
   ] as const;
   for (const [provider, variable] of cases) {
     for (const value of ["NaN", "0", "-7", "1.5"]) {
@@ -724,7 +747,7 @@ test("property: every value outside the list is refused, with the list in the re
       // Перечень в отказе — канонический порядок целиком, а не «одно из».
       assert.ok(
         invalidModelProviderMessage(value).includes(
-          "ollama, opencode, codex, claude, openrouter, custom",
+          "ollama, opencode, codex, claude, openrouter, custom, requesty",
         ),
       );
     }),

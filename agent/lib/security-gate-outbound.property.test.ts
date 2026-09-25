@@ -56,6 +56,10 @@ const KEY_SHAPES: ReadonlyArray<{
     make: (r) => `sk-or-v1-${chars(r, `${ALNUM}_-`, between(r, 24, 48))}`,
   },
   {
+    name: "requesty",
+    make: (r) => `rqsty-${chars(r, `${ALNUM}+/=_-`, between(r, 24, 60))}`,
+  },
+  {
     name: "anthropic",
     make: (r) => `sk-ant-api03-${chars(r, `${ALNUM}_-`, between(r, 24, 60))}`,
   },

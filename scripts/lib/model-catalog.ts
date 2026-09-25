@@ -205,6 +205,28 @@ export const CATALOG: Record<string, ProviderCatalogEntry> = {
     // мастер спрашивает id текстом.
     models: [],
   },
+  requesty: {
+    label: "Requesty",
+    auth: "key",
+    base: "https://router.requesty.ai/v1",
+    baseVar: null,
+    keyVar: "REQUESTY_API_KEY",
+    modelVar: "REQUESTY_MODEL",
+    def: "gpt-5.5",
+    visionVar: "REQUESTY_VISION_MODEL",
+    visionDef: "gemini-3.5-flash",
+    // Always static, like OpenRouter: the live catalog has hundreds of models. Curated
+    // managed policy ids (GET /v1/models/managed) that support tool calling; any
+    // vendor/model id from GET /v1/models works as well.
+    models: [
+      "gpt-5.5",
+      "gpt-5.4-mini",
+      "claude-sonnet-5",
+      "gemini-3.5-flash",
+      "deepseek-v4-pro",
+      "kimi-k3",
+    ],
+  },
 };
 
 // The one place the CLI half turns a configured MODEL_PROVIDER into a provider. Exact match,
@@ -416,7 +438,7 @@ async function liveSource(
   // ошибка, а запасной путь: модель всё равно надо выбрать во время настройки.
   if (provider === "claude")
     return await claudeCatalog(listClaudeCatalog, claudeEnv);
-  if (endpoint && provider !== "openrouter")
+  if (endpoint && provider !== "openrouter" && provider !== "requesty")
     return await httpCatalog(provider, key, endpoint, fetchFn);
   return null;
 }

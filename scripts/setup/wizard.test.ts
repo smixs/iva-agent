@@ -83,6 +83,8 @@ function wizard(
     opencodeModels: () => Promise.resolve(["deepseek-v4-pro"]),
     openrouterKeyCheck: () => Promise.resolve(null),
     openrouterModelCheck: () => Promise.resolve(null),
+    requestyKeyCheck: () => Promise.resolve(null),
+    requestyModelCheck: () => Promise.resolve(null),
     claudeCli: () =>
       Promise.resolve({
         installed: true,
@@ -201,7 +203,7 @@ test("failure: an invalid provider is named and the wizard walks the steps", asy
   });
   await assert.rejects(
     h.run(),
-    /no answer for:\s+Provider \(1\/2\/3\/4\/5\/6\) \[1\]: /u,
+    /no answer for:\s+Provider \(1\/2\/3\/4\/5\/6\/7\) \[1\]: /u,
   );
   assert.ok(
     h.screen.some((line) => /MODEL_PROVIDER is invalid \(ollmaa\)/u.test(line)),
@@ -268,6 +270,7 @@ test(`provider menu: the default number picks the current provider back; any cho
     "claude",
     "openrouter",
     "custom",
+    "requesty",
   ];
   for (const provider of providers)
     assert.equal(providerFor(Number(providerDefault(provider))), provider);

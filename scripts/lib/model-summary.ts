@@ -15,6 +15,7 @@ const PROVIDERS: Record<string, { label: string; context: string }> = {
   codex: { label: "OpenAI", context: "CODEX_CONTEXT_WINDOW" },
   claude: { label: "Claude", context: "CLAUDE_CONTEXT_WINDOW" },
   custom: { label: "Custom", context: "CUSTOM_CONTEXT_WINDOW" },
+  requesty: { label: "Requesty", context: "REQUESTY_CONTEXT_WINDOW" },
 };
 
 /** Имена провайдеров, которые умеет подписать этот экран. Сверяются с рантаймом в тесте. */

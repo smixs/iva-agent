@@ -181,6 +181,52 @@ test("OpenRouter classifies non-JSON auth failures before parsing the body", asy
   }
 });
 
+test("Requesty validation sends the same tool-call probe to its own endpoint", async () => {
+  let requestUrl = "";
+  let requestBody: Record<string, unknown> = {};
+  let auth: string | null = null;
+  const result = await validateModelSelection(
+    { provider: "requesty", model: "gpt-5.5", key: "secret" },
+    {
+      fetchFn: async (url, init) => {
+        requestUrl = url instanceof Request ? url.url : url.toString();
+        auth = new Headers(init?.headers).get("authorization");
+        requestBody = JSON.parse(
+          typeof init?.body === "string" ? init.body : "",
+        ) as Record<string, unknown>;
+        return response({
+          model: "gpt-5.5-2026-04-23",
+          choices: [{ message: { tool_calls: [{ id: "1" }] } }],
+        });
+      },
+    },
+  );
+  assert.equal(result.id, "gpt-5.5");
+  assert.equal(requestUrl, "https://router.requesty.ai/v1/chat/completions");
+  assert.equal(auth, "Bearer secret");
+  assert.equal(requestBody.model, "gpt-5.5");
+  assert.equal(requestBody.max_tokens, 32);
+
+  for (const [status, code] of [
+    [403, "auth_rejected"],
+    [404, "model_unavailable"],
+  ] as const) {
+    await assert.rejects(
+      validateModelSelection(
+        { provider: "requesty", model: "openai/nope", key: "secret" },
+        {
+          fetchFn: async () =>
+            response(
+              { error: { origin: "router", message: "rejected" } },
+              status,
+            ),
+        },
+      ),
+      (error) => error instanceof ModelValidationError && error.code === code,
+    );
+  }
+});
+
 // ─── custom: чужой эндпоинт ничего не обещал ──────────────────────────────────────────
 // GET /models спецификацией OpenAI-совместимости не требуется. Отсутствие каталога — не
 // поломка конфигурации, а её нормальный вид; отказ по ключу остаётся отказом.

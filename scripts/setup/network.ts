@@ -1,6 +1,9 @@
 // Сетевые проверки мастера установки: ключи провайдеров, списки моделей, бот Telegram и
 // кто ему писал. `fetch` приходит параметром: в бою глобальный, в тестах подменный.
-import { probeOpenRouterModel } from "../lib/model-validation.ts";
+import {
+  probeOpenRouterModel,
+  probeRequestyModel,
+} from "../lib/model-validation.ts";
 import { openrouterErrReason } from "./openrouter.ts";
 import {
   C,
@@ -41,6 +44,8 @@ export type NetworkChecks = Pick<
   | "opencodeModels"
   | "openrouterKeyCheck"
   | "openrouterModelCheck"
+  | "requestyKeyCheck"
+  | "requestyModelCheck"
   | "deepgramCheck"
   | "telegramGetMe"
   | "fetchTelegramUserIds"
@@ -55,6 +60,7 @@ type Net = {
 const OLLAMA_BASE = "https://ollama.com/v1";
 const OPENCODE_BASE = "https://opencode.ai/zen/go/v1";
 const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
+const REQUESTY_BASE = "https://router.requesty.ai/v1";
 // OpenCode Go (ex-Zen; путь /zen/ устарел, но живой) — голый ID модели без префикса
 // "opencode-go/": ровно его ждёт /v1 в теле запроса (с префиксом отвечает "Model ... is not
 // supported"). Мастер берёт живой список из GET /models; этот — только запасной без сети.
@@ -100,6 +106,18 @@ export function createNetworkChecks(net: Net): NetworkChecks {
         ),
       ),
     openrouterModelCheck: (key, model) => openrouterModelCheck(net, key, model),
+    // Requesty: GET /models с ключом отвечает 403 на чужой ключ и токенов не тратит.
+    requestyKeyCheck: (key) =>
+      authRejection(
+        net,
+        `${REQUESTY_BASE}/models`,
+        bearer(key),
+        net.t(
+          "Requesty rejected the key (401/403). Copy it in full from https://app.requesty.ai/api-keys.",
+          "Requesty не принял ключ (401/403). Скопируйте целиком с https://app.requesty.ai/api-keys.",
+        ),
+      ),
+    requestyModelCheck: (key, model) => requestyModelCheck(net, key, model),
     deepgramCheck: (key) =>
       authRejection(
         net,
@@ -188,6 +206,48 @@ async function openrouterModelCheck(
   } catch (error) {
     return modelRefusal(net, error as ThrownSetupError);
   }
+}
+
+// Requesty: тот же живой тест модели с tools-блоком, что у OpenRouter. Причину отказа
+// Requesty кладёт прямо в error.message, разворачивать нечего.
+async function requestyModelCheck(
+  net: Net,
+  key: string,
+  model: string,
+): Promise<string | null> {
+  try {
+    const result = await probeRequestyModel(
+      { model, key },
+      { fetchFn: net.fetchFn },
+    );
+    if (!result.answered) {
+      net.print(
+        `${C.y}${net.t("(model replied empty, maybe a reasoning model / max_tokens; proceeding)", "(модель ответила пусто, возможно reasoning-модель / max_tokens; продолжаю)")}${C.x}`,
+      );
+    }
+    return null;
+  } catch (error) {
+    return requestyRefusal(net, error as ThrownSetupError);
+  }
+}
+
+// Подсказка своя: id Requesty бывают и без вендора (managed policy вида gpt-5.5).
+function requestyRefusal(net: Net, caught: ThrownSetupError): string {
+  if (!MODEL_REFUSALS.has(codeOf(caught))) return modelRefusal(net, caught);
+  const reason = caught.message;
+  const hint = TOOL_ISSUE.test(reason)
+    ? net.t(
+        "Iva needs a chat model with tool/function calling, pick one on https://www.requesty.ai/models.",
+        "Iva нужна chat-модель с поддержкой инструментов (function calling), выберите такую на https://www.requesty.ai/models.",
+      )
+    : net.t(
+        "pick another model on https://www.requesty.ai/models.",
+        "выберите другую модель на https://www.requesty.ai/models.",
+      );
+  return net.t(
+    `the model can't be used: ${reason}. ${hint}`,
+    `модель не подходит: ${reason}. ${hint}`,
+  );
 }
 
 function modelRefusal(net: Net, caught: ThrownSetupError): string {

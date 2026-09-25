@@ -445,7 +445,7 @@ test("the setup wizard treats an invalid provider as unconfigured, not as comple
     const { output } = await runWizard(
       t,
       value,
-      /Provider \(1\/2\/3\/4\/5\/6\)/u,
+      /Provider \(1\/2\/3\/4\/5\/6\/7\)/u,
     );
 
     assert.doesNotMatch(output, /already configured/u, value);
@@ -456,7 +456,7 @@ test("the setup wizard treats an invalid provider as unconfigured, not as comple
       value,
     );
     // И он именно СПРАШИВАЕТ провайдера, а не проходит мимо шага.
-    assert.match(output, /Provider \(1\/2\/3\/4\/5\/6\)/u, value);
+    assert.match(output, /Provider \(1\/2\/3\/4\/5\/6\/7\)/u, value);
   }
 });
 
@@ -494,7 +494,7 @@ test("the setup wizard writes grep without leaking host secrets", async (t) => {
     "invalid",
     /Ready — settings validated for apply/u,
     [
-      "2", // Provider (1/2/3/4/5/6) -> OpenCode
+      "2", // Provider (1/2/3/4/5/6/7) -> OpenCode
       "test-key", // Paste the OpenCode API key
       "", // Model number -> default (deepseek-v4-pro)
       "", // Vision model (photos) -> default from the same live list
@@ -549,7 +549,7 @@ test("the setup wizard sees the key the agent process will get, not the file tex
   );
 
   assert.doesNotMatch(output, /Iva is already configured/u, output);
-  assert.match(output, /Provider \(1\/2\/3\/4\/5\/6\)/u, output);
+  assert.match(output, /Provider \(1\/2\/3\/4\/5\/6\/7\)/u, output);
 });
 
 // Полный прогон: владелец вставляет ключ с решёткой — сервис и команда прочитали бы
@@ -561,7 +561,7 @@ test("the setup wizard re-asks on an unstorable answer instead of losing the run
     "invalid",
     /Ready — settings validated for apply/u,
     [
-      "2", // Provider (1/2/3/4/5/6) -> OpenCode
+      "2", // Provider (1/2/3/4/5/6/7) -> OpenCode
       "ab#cd", // Paste the OpenCode API key -> hash: .env cannot hold it, ask again
       "sk-live_ABC-123.xyz", // …and this one both parsers read the same way
       "", // Model number -> default (deepseek-v4-pro)

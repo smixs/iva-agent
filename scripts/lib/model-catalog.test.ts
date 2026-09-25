@@ -145,6 +145,19 @@ test("heterogeneous OpenRouter catalog does not invent reasoning choices", async
   assert.ok(options.every((option) => option.reasoningLevels.length === 0));
 });
 
+test("Requesty catalog is the pinned list, offline and without reasoning choices", async () => {
+  const options = await fetchModelOptions("requesty", "unused", {
+    fetchFn: async () => {
+      throw new Error("no network expected");
+    },
+  });
+  assert.deepEqual(
+    options.map((option) => option.id),
+    CATALOG.requesty.models,
+  );
+  assert.ok(options.every((option) => option.reasoningLevels.length === 0));
+});
+
 // ─── claude: список моделей отдаёт чужой CLI, а не сеть ─────────────────────────────
 // Рукопожатие initialize отвечает пикером подписки. Когда CLI не ответил (нет бинаря,
 // нет входа, чужой вывод) — остаётся вшитый список: это не отказ, а запасной путь, иначе
@@ -225,6 +238,10 @@ test("required env keys cover the key and the model, and codex asks for neither 
   assert.deepEqual(providerEnvKeys(CATALOG.openrouter), [
     "OPENROUTER_API_KEY",
     "OPENROUTER_MODEL",
+  ]);
+  assert.deepEqual(providerEnvKeys(CATALOG.requesty), [
+    "REQUESTY_API_KEY",
+    "REQUESTY_MODEL",
   ]);
   // codex входит по OAuth — ключа в .env нет вовсе.
   assert.deepEqual(providerEnvKeys(CATALOG.codex), ["CODEX_MODEL"]);

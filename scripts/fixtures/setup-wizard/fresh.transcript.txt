@@ -17,7 +17,8 @@
     4) Claude (Pro/Max subscription) — claude.ai (the claude CLI signed in on this server, no API key)
     5) OpenRouter — https://openrouter.ai (one key → 300+ models, pay-as-you-go)
     6) Custom — your own OpenAI-compatible endpoint (proxy, vLLM, LiteLLM, a vendor plan)
-  Provider (1/2/3/4/5/6) [1]: 2⏎
+    7) Requesty: https://requesty.ai (one key → 700+ models, pay-as-you-go)
+  Provider (1/2/3/4/5/6/7) [1]: 2⏎
 
   OpenCode key: https://opencode.ai/auth (subscribe to Go → copy the API key).
   Paste the OpenCode API key: oc-key-123456⏎

@@ -63,16 +63,37 @@ const validationError = (error: unknown): ModelValidationError => {
   );
 };
 
+type ProbeOptions = {
+  fetchFn?: typeof fetch;
+  errorReason?: OpenRouterErrorReason;
+};
+type ProbeResult = { id: string; reasoningLevels: string[]; answered: boolean };
+
 export async function probeOpenRouterModel(
+  selection: { model: string; key?: string },
+  options: ProbeOptions = {},
+): Promise<ProbeResult> {
+  return probeToolCallModel("openrouter", selection, options);
+}
+
+// Requesty, like OpenRouter, serves far more models than its static list, so a model is
+// accepted by the same live tool-call request instead of a catalog lookup.
+export async function probeRequestyModel(
+  selection: { model: string; key?: string },
+  options: ProbeOptions = {},
+): Promise<ProbeResult> {
+  return probeToolCallModel("requesty", selection, options);
+}
+
+async function probeToolCallModel(
+  provider: "openrouter" | "requesty",
   { model, key }: { model: string; key?: string },
-  {
-    fetchFn = fetch,
-    errorReason,
-  }: { fetchFn?: typeof fetch; errorReason?: OpenRouterErrorReason } = {},
-): Promise<{ id: string; reasoningLevels: string[]; answered: boolean }> {
+  { fetchFn = fetch, errorReason }: ProbeOptions,
+): Promise<ProbeResult> {
+  const { base, label } = CATALOG[provider];
   let response: Response;
   try {
-    response = await fetchFn(`${CATALOG.openrouter.base}/chat/completions`, {
+    response = await fetchFn(`${base}/chat/completions`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${key}`,
@@ -99,7 +120,7 @@ export async function probeOpenRouterModel(
   } catch (cause) {
     throw new ModelValidationError(
       "catalog_unavailable",
-      "OpenRouter request failed",
+      `${label} request failed`,
       {
         cause,
       },
@@ -108,7 +129,7 @@ export async function probeOpenRouterModel(
   if (response.status === 401 || response.status === 403) {
     throw new ModelValidationError(
       "auth_rejected",
-      `OpenRouter rejected credentials (${response.status})`,
+      `${label} rejected credentials (${response.status})`,
       {
         status: response.status,
       },
@@ -120,7 +141,7 @@ export async function probeOpenRouterModel(
   } catch (cause) {
     throw new ModelValidationError(
       "catalog_invalid",
-      "OpenRouter returned invalid JSON",
+      `${label} returned invalid JSON`,
       {
         status: response.status,
         cause,
@@ -140,7 +161,7 @@ export async function probeOpenRouterModel(
     const reason = detail ? `: ${detail as string}` : "";
     throw new ModelValidationError(
       "model_unavailable",
-      `OpenRouter rejected model ${model}${reason}`,
+      `${label} rejected model ${model}${reason}`,
       { status: response.status },
     );
   }
@@ -171,6 +192,8 @@ export async function validateModelSelection(
   const selected = selectionOf(provider, model);
   if (provider === "openrouter")
     return probeOpenRouterModel({ model: selected, key }, { fetchFn });
+  if (provider === "requesty")
+    return probeRequestyModel({ model: selected, key }, { fetchFn });
   // У вендора без ключа проверка одна: живой запрос через CLI на этой же машине.
   if (provider === "claude")
     return await probeClaudeSelection(selected, probeClaude);

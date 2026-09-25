@@ -67,6 +67,7 @@ test("modelSummary uses the exact context-window resolver", () => {
     ["opencode", "OPENCODE_CONTEXT_WINDOW"],
     ["openrouter", "OPENROUTER_CONTEXT_WINDOW"],
     ["codex", "CODEX_CONTEXT_WINDOW"],
+    ["requesty", "REQUESTY_CONTEXT_WINDOW"],
   ] as const;
 
   for (const [provider, variable] of cases) {

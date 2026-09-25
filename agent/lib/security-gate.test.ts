@@ -278,7 +278,7 @@ await test("scanOutbound redacts every confirmed named-secret carrier", () => {
 });
 
 // The key shapes this installation's providers actually issue: agent/provider.ts
-// (ollama, opencode, openrouter, codex/OpenAI) and agent/lib/embeddings.ts (jina,
+// (ollama, opencode, openrouter, codex/OpenAI, requesty) and agent/lib/embeddings.ts (jina,
 // deepinfra). The custom provider is absent by design: its endpoint is the owner's, so
 // its key has no shape to list - CUSTOM_API_KEY is caught by name (named_secret) only.
 // Values are invented, the shapes are real - a shape the Gate does not
@@ -286,6 +286,7 @@ await test("scanOutbound redacts every confirmed named-secret carrier", () => {
 // what must not survive, in whole or in part (the name beside a prefixless key may).
 const PREFIXED_KEYS: ReadonlyArray<readonly [provider: string, key: string]> = [
   ["openrouter", `sk-or-v1-${"4f9c1e77ab3d5602".repeat(4)}`],
+  ["requesty", `rqsty-${"aB3+dE7/".repeat(5)}gH==`],
   [
     "openai project",
     "sk-proj-Qw3rTy_uIoP-asdfGhJk1234567890zXcVbNmT3BlbkFJmNbVcXz0987654321kJhGfDs",

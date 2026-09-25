@@ -476,7 +476,7 @@ function judgeInbound(
 }
 
 // The shapes the providers of this installation actually issue - agent/provider.ts
-// (ollama, opencode, openrouter, codex/OpenAI, custom) and agent/lib/embeddings.ts
+// (ollama, opencode, openrouter, codex/OpenAI, custom, requesty) and agent/lib/embeddings.ts
 // (jina, deepinfra) - plus the neighbours that share the same .env. A key body carries
 // hyphens and underscores (sk-proj-…, sk-or-v1-…, sk-ant-api03-…_…), so a class that
 // stops at the first hyphen lets a live key through whole: that is the leak these
@@ -497,6 +497,8 @@ const API_KEY_PATTERNS: readonly Pattern[] = [
   ["named_secret", NAMED_SECRET_PATTERN],
   ["openai", /(?<![A-Za-z0-9])sk-(?!ant-|or-)[A-Za-z0-9_-]{20,}/g],
   ["openrouter", /(?<![A-Za-z0-9])sk-or-(?:v\d+-)?[A-Za-z0-9_-]{20,}/g],
+  // Requesty: rqsty-sk-… with a base64 body, so + / = sit next to the usual - and _.
+  ["requesty", /(?<![A-Za-z0-9])rqsty-[A-Za-z0-9+/=_-]{20,}/g],
   ["anthropic", /(?<![A-Za-z0-9])sk-ant-[A-Za-z0-9_-]{20,}/g],
   ["groq", /(?<![A-Za-z0-9])gsk_[A-Za-z0-9]{20,}/g],
   ["jina", /(?<![A-Za-z0-9])jina_[A-Za-z0-9_-]{20,}/g],

@@ -67,6 +67,7 @@ const PROVIDER_MENU = [
   "claude",
   "openrouter",
   "custom",
+  "requesty",
 ];
 const LANGUAGES = new Set(["en", "ru"]);
 
@@ -321,7 +322,7 @@ async function chooseProvider(p: Progress): Promise<boolean> {
   );
   printProviderMenu(ctx);
   const choice = await ctx.ask(
-    `  ${ctx.t("Provider", "Провайдер")} (1/2/3/4/5/6)`,
+    `  ${ctx.t("Provider", "Провайдер")} (1/2/3/4/5/6/7)`,
     providerDefault(p.config.prov0),
   );
   p.provider = providerFor(menuChoice(choice));
@@ -360,6 +361,9 @@ function printProviderMenu(ctx: SetupContext): void {
   );
   ctx.print(
     `    6) ${ctx.t("Custom — your own OpenAI-compatible endpoint", "Custom — свой OpenAI-совместимый эндпоинт")} ${ctx.t("(proxy, vLLM, LiteLLM, a vendor plan)", "(прокси, vLLM, LiteLLM, вендорская подписка)")}`,
+  );
+  ctx.print(
+    `    7) Requesty: ${C.c}https://requesty.ai${C.x} ${ctx.t("(one key → 700+ models, pay-as-you-go)", "(один ключ → 700+ моделей, оплата по факту)")}`,
   );
 }
 
