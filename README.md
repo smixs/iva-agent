@@ -141,7 +141,7 @@ The installer reuses the existing checkout instead of re-cloning, keeps `.env` a
 
 ## Providers & cost
 
-Six model providers. Pick one and fill its block in `.env`:
+Seven model providers. Pick one and fill its block in `.env`:
 
 | Provider         | How you pay                            |
 | ---------------- | -------------------------------------- |
@@ -151,6 +151,7 @@ Six model providers. Pick one and fill its block in `.env`:
 | OpenAI (ChatGPT) | your Plus/Pro subscription, no API key |
 | Claude (Pro/Max) | your Pro/Max subscription, no API key  |
 | Custom           | your own OpenAI-compatible endpoint    |
+| Requesty         | API key, pay-as-you-go, 700+ models    |
 
 Default model is deepseek-v4-pro, 131k context. On Go it runs about $14–15/mo all-in ($10 model + $4–5 VPS; the model's first month is $5), no markup; voice rides Deepgram's free starter credit. Model lists, limits and the search matrix: [docs/providers.md](docs/providers.md).
 

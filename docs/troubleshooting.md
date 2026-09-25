@@ -115,11 +115,11 @@ iva restart
 
 ### Agent dead after editing MODEL_PROVIDER
 
-Cause: exactly five names are accepted — `ollama`, `opencode`, `codex`, `openrouter`, `custom`. Anything else, a typo or a different case included, is refused at startup instead of quietly running Ollama under the wrong name, so the service stops and says which names it takes:
+Cause: exactly seven names are accepted — `ollama`, `opencode`, `codex`, `claude`, `openrouter`, `custom`, `requesty`. Anything else, a typo or a different case included, is refused at startup instead of quietly running Ollama under the wrong name, so the service stops and says which names it takes:
 
 ```bash
 journalctl --user -u iva.service -n 20 --no-pager
-# Error: Invalid MODEL_PROVIDER "ollmaa"; expected one of: ollama, opencode, codex, claude, openrouter, custom — run: iva config
+# Error: Invalid MODEL_PROVIDER "ollmaa"; expected one of: ollama, opencode, codex, claude, openrouter, custom, requesty — run: iva config
 ```
 
 `iva doctor` prints the same line, and the bridge is a separate service, so `/menu` → 📊 Status still answers and shows the provider as `invalid (ollmaa)`. Fix it with `iva config`, with the `/model` wizard in Telegram, or by hand — then `iva restart`. Removing the variable altogether is not a typo: that still means `ollama`.

@@ -12,18 +12,19 @@ Iva runs on your server with your keys. Here is every external service it talks 
 | **OpenAI (ChatGPT subscription)** | your existing Plus/Pro/Team  | the models your plan exposes (`gpt-6-sol`, `gpt-6-luna`, `gpt-5.x`), fetched live                                                                | same subscription (multimodal), no variable                        |
 | **Claude (Pro/Max subscription)** | your existing Pro/Max plan   | Fable 5.1, Opus 5.5, Sonnet 5 (`claude-fable-5-1`, `claude-opus-5-5`, `claude-sonnet-5`), the ones the plan's picker has                         | same subscription (multimodal), no variable                        |
 | **Custom (OpenAI-compatible)**    | whatever your endpoint costs | whatever your endpoint serves — the wizard reads `GET {base}/models` when there is one, otherwise you type the id                                | the chat model itself, or a slug in `CUSTOM_VISION_MODEL`          |
+| **Requesty**                      | pay-as-you-go                | 700+ models across vendors: a managed id (`gpt-5.5`, `claude-sonnet-5`) or any `vendor/model` id                                                 | `gemini-3.5-flash`, override with `REQUESTY_VISION_MODEL`          |
 
-The first three are plain API keys, `codex` and `claude` ride subscriptions you already pay for, and `custom` is an address you supply:
+The first three and Requesty are plain API keys, `codex` and `claude` ride subscriptions you already pay for, and `custom` is an address you supply:
 
-- 🔌 **OpenAI-compatible** — Go, Ollama and OpenRouter share the same wire format, so switching is one line in `.env`
+- 🔌 **OpenAI-compatible** — Go, Ollama, OpenRouter and Requesty share the same wire format, so switching is one line in `.env`
 - 🌍 **Any IP** — all answer from any server location, no region blocks
 - 💸 **No markup** — you pay the provider directly; Iva adds nothing on top
 
 ```bash
-MODEL_PROVIDER=opencode   # or ollama / openrouter / codex / claude / custom, then `iva restart`
+MODEL_PROVIDER=opencode   # or ollama / openrouter / codex / claude / custom / requesty, then `iva restart`
 ```
 
-Those six names, spelled exactly. Anything else — `ollmaa`, `OLLAMA` — stops the agent at startup with the list of accepted names, instead of running Ollama under a name nobody configured ([troubleshooting.md](troubleshooting.md)).
+Those seven names, spelled exactly. Anything else — `ollmaa`, `OLLAMA` — stops the agent at startup with the list of accepted names, instead of running Ollama under a name nobody configured ([troubleshooting.md](troubleshooting.md)).
 
 OpenCode Go only serves clients that identify themselves: every request carries Iva's own `User-Agent` (`iva/<version>`) and a stable conversation id in `x-opencode-session` — the eve session id, or one id per process where there is no session (planner, vision). Without them Go answers `MissingSessionID` on every turn ([Go docs](https://opencode.ai/docs/go/#where-can-i-use-it)). Other providers get neither header.
 
@@ -66,6 +67,16 @@ One key for [300+ models](https://openrouter.ai/models) (Anthropic, OpenAI, Goog
 3. `iva config` → provider `4` → paste the key, then the slug. Setup fires a live test **with a tool call** and continues only once the model answers — a mistyped slug or a no-tools model is rejected on the spot, not later as a silent bot.
 
 Set `OPENROUTER_CONTEXT_WINDOW` to the model's real window. Vision runs through `google/gemini-2.5-flash` regardless of your text model (billed to your OpenRouter credit); `OPENROUTER_VISION_MODEL` takes any other image-capable slug.
+
+### Requesty (`requesty`)
+
+One key for [700+ models](https://www.requesty.ai/models) through the Requesty gateway (`https://router.requesty.ai/v1`), billed pay-as-you-go. Like OpenRouter, setup takes the model id from you and tests it live:
+
+1. Key at [app.requesty.ai/api-keys](https://app.requesty.ai/api-keys).
+2. Copy a model id from [requesty.ai/models](https://www.requesty.ai/models). Both forms work: a managed policy id such as `gpt-5.5` or `claude-sonnet-5` (Requesty keeps the provider fallbacks for it), or a `vendor/model` id such as `openai/gpt-4o-mini`. Ids ending in `@eu` (e.g. `gpt-5-mini@eu`) are served only by EU providers. The model must support **tool/function calling**, same as on OpenRouter.
+3. `iva config` → provider `7` → paste the key, then the id. Setup sends the same live test **with a tool call** and continues only once the model answers.
+
+Set `REQUESTY_CONTEXT_WINDOW` to the model's real window. Vision runs through `gemini-3.5-flash` by default; `REQUESTY_VISION_MODEL` takes any other image-capable id. Docs: [docs.requesty.ai](https://docs.requesty.ai).
 
 ### Your own OpenAI-compatible endpoint (`custom`)
 

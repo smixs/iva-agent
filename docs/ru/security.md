@@ -44,7 +44,7 @@ Iva живёт на вашем сервере с полноценным shell и
 
 Всё, что уходит в Telegram через Outbox, сканируется перед отправкой — ответ модели, служебные реплики канала с runtime-контентом, мост, апдейтер и ночные отчёты:
 
-- 🔑 **Секреты** — формы ключей, которые реально выдают все провайдеры этой инсталляции (OpenAI, OpenRouter, Anthropic, Groq, Jina, Google, GitHub, Slack, токены Telegram-ботов, AWS, Stripe, SendGrid, Vercel, Supabase, fal, JWT, `Bearer …`), плюс ловушки на ключ без опознавательного префикса: имя рядом с ним (`*_API_KEY=…`, `"api key": …`, `password=` / `secret=`) и креды в userinfo адреса.
+- 🔑 **Секреты** — формы ключей, которые реально выдают все провайдеры этой инсталляции (OpenAI, OpenRouter, Requesty, Anthropic, Groq, Jina, Google, GitHub, Slack, токены Telegram-ботов, AWS, Stripe, SendGrid, Vercel, Supabase, fal, JWT, `Bearer …`), плюс ловушки на ключ без опознавательного префикса: имя рядом с ним (`*_API_KEY=…`, `"api key": …`, `password=` / `secret=`) и креды в userinfo адреса.
 - 📁 **Чувствительные пути** — `~/.ssh`, `/etc/shadow`, `/proc/*/environ` и строки `KEY=value`, похожие на содержимое `.env`.
 - 🕳️ **Ссылки-эксфильтраторы** — markdown-картинки и ссылки, в query-строке которых едут токены или ключи: классический канал утечки «отрисуй эту картинку».
 

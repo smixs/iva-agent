@@ -58,6 +58,7 @@ body:
         - OpenCode Go
         - Ollama Cloud
         - OpenRouter
+        - Requesty
         - OpenAI (ChatGPT subscription)
         - Other / self-hosted
   - type: input

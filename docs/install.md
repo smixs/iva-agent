@@ -46,7 +46,7 @@ The first question is your language — English or Russian — before anything t
 
 Five steps. Each key comes with a direct link to where it lives, and each is validated live — a bad key is rejected on the spot, not discovered at runtime. Enter keeps the current value, so re-running the wizard (`iva config`) changes only what you want.
 
-1. **Provider and model.** Ollama Cloud, OpenCode Go, an OpenAI (ChatGPT) subscription, OpenRouter or your own OpenAI-compatible endpoint ([comparison](providers.md)); the key (or the subscription sign-in) is checked, then you pick a model.
+1. **Provider and model.** Ollama Cloud, OpenCode Go, an OpenAI (ChatGPT) subscription, OpenRouter, Requesty or your own OpenAI-compatible endpoint ([comparison](providers.md)); the key (or the subscription sign-in) is checked, then you pick a model.
 2. **Voice, search, hybrid memory.** Deepgram key (free starter credit) — Enter skips it, voice notes stay untranscribed until you add the key in `/menu` → 🎤 Voice; recognition language `multi` auto-detects ru/uz/en. The same step picks a web-search provider — Tavily, Exa, Parallel or Brave; Enter skips and search stays off — and offers optional hybrid memory with an embedding key.
 3. **Telegram bot.** Paste the token from @BotFather; the wizard validates it via `getMe` and detects the bot's username itself.
 4. **Access.** Send your new bot any message — "hi" works. The wizard reads `getUpdates`, shows who wrote, and you pick yourself. Iva answers only these IDs; an empty list means it answers nobody.

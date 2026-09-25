@@ -40,7 +40,7 @@ The boundary in one line: the gate covers the two web tools, on every node of th
 
 Everything that leaves for Telegram through the Outbox is scanned first — the model's reply, the channel's own notices that carry runtime content, the bridge, the updater and the nightly reports:
 
-- 🔑 **Secrets** — the key shapes every provider this install can talk to actually issues (OpenAI, OpenRouter, Anthropic, Groq, Jina, Google, GitHub, Slack, Telegram bot tokens, AWS, Stripe, SendGrid, Vercel, Supabase, fal, JWTs, `Bearer …`), plus the catch-alls for a key that travels with no telltale prefix: a name beside it (`*_API_KEY=…`, `"api key": …`, `password=` / `secret=`) and credentials in a URL's userinfo.
+- 🔑 **Secrets** — the key shapes every provider this install can talk to actually issues (OpenAI, OpenRouter, Requesty, Anthropic, Groq, Jina, Google, GitHub, Slack, Telegram bot tokens, AWS, Stripe, SendGrid, Vercel, Supabase, fal, JWTs, `Bearer …`), plus the catch-alls for a key that travels with no telltale prefix: a name beside it (`*_API_KEY=…`, `"api key": …`, `password=` / `secret=`) and credentials in a URL's userinfo.
 - 📁 **Sensitive paths** — `~/.ssh`, `/etc/shadow`, `/proc/*/environ`, and `KEY=value` lines that look like `.env` content.
 - 🕳️ **Exfil URLs** — markdown images and links whose query strings carry tokens or keys: the classic "render this image" data channel.
 
