@@ -556,6 +556,10 @@ export function attachImagesMiddleware(
 // Remove when eve forwards ai SDK `timeout.firstChunkMs` to ToolLoopAgent (vercel/ai#17315 added the option; no eve issue yet).
 export const MODEL_FIRST_CHUNK_TIMEOUT_MS = 90_000;
 
+export const MODEL_PRESTREAM_RETRY_DELAYS_MS = [
+  5_000, 15_000, 30_000, 60_000, 90_000,
+] as const;
+
 const CONTENT_BEARING_STREAM_PART_TYPES = new Set([
   "text-delta",
   "reasoning-delta",
@@ -579,6 +583,155 @@ function makeModelFirstChunkTimeoutError(): ModelFirstChunkTimeoutError {
     ),
     { code: "MODEL_FIRST_CHUNK_TIMEOUT" as const },
   );
+}
+
+type RetryableProviderError = Error & {
+  statusCode?: number;
+  isRetryable?: boolean;
+  responseHeaders?: Record<string, string>;
+  code?: string;
+  cause?: unknown;
+};
+
+function errorChain(error: unknown): RetryableProviderError[] {
+  const errors: RetryableProviderError[] = [];
+  const seen = new Set<unknown>();
+  let current = error;
+  while (current && typeof current === "object" && !seen.has(current)) {
+    seen.add(current);
+    errors.push(current as RetryableProviderError);
+    current = (current as { cause?: unknown }).cause;
+  }
+  return errors;
+}
+
+function isAbortError(error: unknown): boolean {
+  return errorChain(error).some(
+    (candidate) =>
+      candidate.name === "AbortError" ||
+      candidate.code === "ABORT_ERR" ||
+      candidate.code === "ERR_CANCELED",
+  );
+}
+
+function abortError(reason: unknown): Error {
+  return reason instanceof Error
+    ? reason
+    : new DOMException("Aborted", "AbortError");
+}
+
+function retryAfterMs(error: RetryableProviderError): number | undefined {
+  const raw = Object.entries(error.responseHeaders ?? {}).find(
+    ([name]) => name.toLowerCase() === "retry-after",
+  )?.[1];
+  if (!raw) return undefined;
+  const seconds = Number(raw);
+  const ms = Number.isFinite(seconds)
+    ? Math.max(0, seconds * 1_000)
+    : Math.max(0, Date.parse(raw) - Date.now());
+  return ms <= 120_000 ? ms : undefined;
+}
+
+function isQuotaMessage(error: RetryableProviderError): boolean {
+  return /quota|balance|insufficient|billing/iu.test(error.message);
+}
+
+function isTransientPreStreamError(error: unknown): boolean {
+  if (isAbortError(error)) return false;
+  const chain = errorChain(error);
+  const statusError = chain.find(
+    (candidate) => typeof candidate.statusCode === "number",
+  );
+  if (statusError?.statusCode !== undefined) {
+    if (statusError.statusCode === 429) {
+      if (isQuotaMessage(statusError)) return false;
+      return (
+        retryAfterMs(statusError) !== undefined ||
+        statusError.isRetryable === true
+      );
+    }
+    return (
+      statusError.isRetryable === true &&
+      [408, 425, 500, 502, 503, 504].includes(statusError.statusCode)
+    );
+  }
+  return chain.some(
+    (candidate) =>
+      ["ECONNRESET", "ETIMEDOUT", "ECONNREFUSED"].includes(
+        candidate.code ?? "",
+      ) || /fetch failed/iu.test(candidate.message),
+  );
+}
+
+function terminalPreStreamError(error: unknown): unknown {
+  if (!error || typeof error !== "object") return error;
+  // The outer AI SDK retry must not restart this completed retry budget.
+  Object.defineProperty(error, "isRetryable", {
+    configurable: true,
+    enumerable: true,
+    value: false,
+    writable: true,
+  });
+  return error;
+}
+
+function sleepUntilAbort(ms: number, abortSignal?: AbortSignal): Promise<void> {
+  if (abortSignal?.aborted)
+    return Promise.reject(abortError(abortSignal.reason));
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(done, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      abortSignal?.removeEventListener("abort", onAbort);
+      reject(abortError(abortSignal?.reason));
+    };
+    function done() {
+      abortSignal?.removeEventListener("abort", onAbort);
+      resolve();
+    }
+    abortSignal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+export function transientPreStreamRetryMiddleware({
+  retryDelaysMs = MODEL_PRESTREAM_RETRY_DELAYS_MS,
+  sleep = sleepUntilAbort,
+}: {
+  retryDelaysMs?: readonly number[];
+  sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
+} = {}): LanguageModelMiddleware {
+  return {
+    async wrapStream({ doStream, params }) {
+      for (let retry = 0; ; retry += 1) {
+        if (params.abortSignal?.aborted)
+          throw (
+            params.abortSignal.reason ??
+            new DOMException("Aborted", "AbortError")
+          );
+        try {
+          return await doStream();
+        } catch (error) {
+          if (params.abortSignal?.aborted || !isTransientPreStreamError(error))
+            throw error;
+          if (retry >= retryDelaysMs.length)
+            throw terminalPreStreamError(error);
+          const providerError =
+            errorChain(error).find(
+              (candidate) => typeof candidate.statusCode === "number",
+            ) ?? errorChain(error)[0];
+          const delay =
+            (providerError === undefined
+              ? undefined
+              : retryAfterMs(providerError)) ?? retryDelaysMs[retry];
+          const status = providerError?.statusCode ?? "network";
+          console.warn(
+            `[provider] transient ${status}, retry ${retry + 1}/${retryDelaysMs.length} in ${delay / 1_000}s`,
+          );
+          await sleep(delay, params.abortSignal);
+        }
+      }
+    },
+  };
 }
 
 export const modelFirstChunkDeadlineMiddleware: LanguageModelMiddleware = {
@@ -800,6 +953,7 @@ export function makeTextModel(options: {
       repeatGuardMiddleware,
       attachImagesMiddleware(options.chatModelSeesImages),
       toolSchemaRetryMiddleware,
+      transientPreStreamRetryMiddleware(),
       modelFirstChunkDeadlineMiddleware,
       adjacentUserMessagesMiddleware,
       // Порядок свободен: кодирование идемпотентно, других читателей toolName в цепочке нет.
