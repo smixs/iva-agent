@@ -279,7 +279,6 @@ const telegram = telegramChannel({
         () =>
           notifyContextFill(
             ctx.session.id,
-            data.turnId,
             providerConfig.contextWindow,
             noticeSender((text) => sendQuietLine(channel.telegram, text)),
           ),
@@ -362,7 +361,7 @@ const telegram = telegramChannel({
       );
       if (!result.ok) return;
       recordDelivery(true);
-      markReplyDelivered(ctx.session.id, data.turnId);
+      markReplyDelivered(ctx.session.id);
     },
     // Ход упал: статус прибираем по CAS, но сообщение об ошибке от него не гейтим —
     // позднее terminal-событие всё равно должно объяснить пользователю, что произошло.
