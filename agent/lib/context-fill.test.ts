@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-floating-promises, @typescript-eslint/require-await -- Node's test runner owns registrations; the send double keeps the async Bot API boundary. */
 // Подсказка «нажмите /new»: процент — вход последнего шага к бюджету (доля окна, на которой
 // eve сжимает историю); уровень 50, 75 или 90. Строка уходит, когда уровень выше показанного,
-// и фиксируется только после успешной отправки; ниже 50 % показанный уровень снова 0.
+// и фиксируется только после успешной отправки; сжатие истории освобождает уровни.
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -11,6 +11,7 @@ import fc from "fast-check";
 import { COMPACTION_THRESHOLD_PERCENT } from "./compaction.ts";
 import * as fill from "./context-fill.ts";
 import { noticeSender } from "./outbox.ts";
+import { stepInputTokens } from "./usage.ts";
 
 // Хук расхода пишет data/usage.jsonl — во временный каталог, не в данные checkout.
 const dataDir = mkdtempSync(join(tmpdir(), "iva-context-fill-unit-"));
@@ -21,6 +22,12 @@ await import("../../scripts/lib/ts-esm-hooks.ts");
 const usageHook = (await import("../hooks/usage.ts")).default as unknown as {
   events: Record<string, (event: unknown, ctx: unknown) => void>;
 };
+/** Шаг через настоящий хук расхода: так в карту попадает только то, что хук пропустил. */
+const hookStep = (id: string, usage: unknown) =>
+  usageHook.events["step.completed"](
+    { data: { stepIndex: 0, turnId: "turn_1", usage } },
+    { session: { id }, channel: { kind: "channel:telegram" } },
+  );
 
 const SEED = 20260926;
 const WINDOW = 100_000;
@@ -72,7 +79,7 @@ test("бюджет — доля окна, на которой eve сжимает
   assert.equal(fill.contextFillPercent(45_875, 131_072), 50);
 });
 
-test("80 % сразу после 40 % отмечает 50 и 75 одним разом, 90 ещё впереди", async () => {
+test("скачок через порог сразу после 40 % показывает старший уровень один раз, промежуточный пропускается", async () => {
   assert.deepEqual(
     [40, 80, 85, 95].map((pct) => fill.contextFillLevel(pct)),
     [0, 75, 75, 90],
@@ -88,19 +95,22 @@ test("80 % сразу после 40 % отмечает 50 и 75 одним ра�
   ]);
 });
 
-test("падение ниже 50 % бюджета взводит пороги заново", async () => {
+test("падение ниже 50 % бюджета пороги не взводит: взводит только сжатие истории", async () => {
   const id = sessionId();
   assert.equal((await turn(id, tokensAt(90))).length, 1);
   assert.deepEqual(await turn(id, tokensAt(40)), []);
+  assert.deepEqual(await turn(id, tokensAt(55)), [], "после спада без сжатия");
+  fill.rearmContextFill(id);
   assert.deepEqual(await turn(id, tokensAt(55)), [
     fill.contextFillHintText(55),
   ]);
-  assert.deepEqual(await turn(id, null), [], "неизвестно — не спад");
+  assert.deepEqual(await turn(id, null), [], "неизвестно — ничего");
 });
 
 test("в карте только сессии, открытые каналом: шаги чужой сессии не создают запись", async () => {
   const id = sessionId();
   assert.deepEqual(await turn(id, tokensAt(85), sender(), false), []);
+  fill.rearmContextFill(id);
   assert.deepEqual(await turn(id, tokensAt(85), sender(), false), [], "снова");
   fill.openContextFill(id);
   assert.equal((await turn(id, tokensAt(85))).length, 1);
@@ -114,94 +124,53 @@ test("шаг без расхода сбрасывает контекст в «н
   assert.equal((await turn(id, tokensAt(85))).length, 1);
 });
 
-test("после сжатия истории ниже 50 % подъём снова напоминает", async () => {
+test("после сжатия истории (compaction.completed) подъём снова напоминает", async () => {
   const id = sessionId();
   assert.equal((await turn(id, tokensAt(94))).length, 1);
   assert.equal((await turn(id, tokensAt(28))).length, 0);
-  assert.deepEqual(await turn(id, tokensAt(51)), [
-    fill.contextFillHintText(51),
+  usageHook.events["compaction.completed"]({ data: {} }, { session: { id } });
+  assert.deepEqual(await turn(id, tokensAt(62)), [
+    fill.contextFillHintText(62),
   ]);
+  assert.equal((await turn(id, tokensAt(62))).length, 0, "50 снова показан");
 });
 
-test("карта не ограничена 256 сессий: самая давняя сессия остаётся", async () => {
-  const first = sessionId();
-  fill.openContextFill(first);
-  for (let i = 0; i < 300; i++) fill.openContextFill(sessionId());
-  assert.equal((await turn(first, tokensAt(60), sender(), false)).length, 1);
+test("карта не ограничена мусором: в неё идёт только вход шага больше нуля", () => {
+  for (const inputTokens of [0, undefined, null, Number.NaN, -1, 1.5, "90"])
+    assert.equal(stepInputTokens({ inputTokens }), null, String(inputTokens));
+  assert.equal(stepInputTokens(undefined), null);
+  assert.equal(stepInputTokens({ inputTokens: 56_000 }), 56_000);
 });
 
-test(`пороги: каждый не больше раза за цикл заполнения, отмечены ровно достигнутые (seed ${SEED})`, async () => {
-  await fc.assert(
-    fc.asyncProperty(
-      fc.array(
-        fc.record({
-          pct: fc.oneof(fc.integer({ min: 0, max: 100 }), fc.constant(null)),
-          fail: fc.boolean(),
-        }),
-        { maxLength: 40 },
-      ),
-      async (steps) => {
-        const id = sessionId();
-        let shown = 0;
-        // Цикл заполнения — от спада ниже 50 % до следующего: уровни, ушедшие в чат, и пик.
-        let cycle = { fired: [] as number[], peak: 0 };
-        const check = () => {
-          assert.equal(new Set(cycle.fired).size, cycle.fired.length, "дважды");
-          assert.ok(
-            cycle.fired.every((l, i) => i === 0 || l > cycle.fired[i - 1]),
-            "уровень в цикле откатился",
-          );
-          // Последним ушёл ровно уровень пика цикла.
-          assert.equal(
-            Math.max(0, ...cycle.fired),
-            fill.contextFillLevel(cycle.peak),
-            "отмечен ровно достигнутый уровень",
-          );
-        };
-        for (const { pct, fail } of steps) {
-          const send = sender(fail);
-          await turn(id, pct === null ? null : tokensAt(pct), send);
-          if (pct === null) {
-            assert.deepEqual(send.lines, [], "неизвестно — ничего");
-            continue;
-          }
-          if (pct < 50) {
-            check();
-            cycle = { fired: [], peak: 0 };
-            shown = 0;
-          }
-          cycle.peak = Math.max(cycle.peak, pct);
-          const level = fill.contextFillLevel(pct);
-          const expected = level > shown && !fail;
-          assert.deepEqual(
-            send.lines,
-            expected ? [fill.contextFillHintText(pct)] : [],
-            `pct ${pct}, показан ${shown}`,
-          );
-          assert.ok(send.lines.length <= 1, "за ход не больше строки");
-          assert.equal(fill.contextFillPercent(tokensAt(pct), WINDOW), pct);
-          // Доставка хода забрана: повтор того же хода молчит.
-          await fill.notifyContextFill(id, WINDOW, send.send);
-          assert.equal(send.lines.length, expected ? 1 : 0, "повтор хода");
-          if (level > shown && fail) {
-            // Отказ уровень не тратит: следующий ход с тем же входом его показывает.
-            const retry = sender();
-            await turn(id, tokensAt(pct), retry);
-            assert.deepEqual(retry.lines, [fill.contextFillHintText(pct)]);
-          }
-          if (level > shown) cycle.fired.push((shown = level));
-        }
-        check();
-        const last = sender();
-        await turn(id, tokensAt(100), last);
-        assert.equal(
-          last.lines.length,
-          shown < 90 ? 1 : 0,
-          "100 % после цикла",
-        );
-      },
-    ),
-    { seed: SEED, numRuns: 300 },
+test("пороги: нулевой шаг между ходами на 80 % их не взводит, подсказка не больше одной", async () => {
+  const id = sessionId();
+  assert.equal((await turn(id, tokensAt(80))).length, 1);
+  assert.equal((await turn(id, tokensAt(80))).length, 0);
+  fill.openContextFill(id);
+  fill.markReplyDelivered(id);
+  hookStep(id, { inputTokens: 0, outputTokens: 0 });
+  const { lines, send } = sender();
+  await fill.notifyContextFill(id, WINDOW, send);
+  assert.deepEqual(lines, [], "нулевой шаг — неизвестно");
+  assert.equal((await turn(id, tokensAt(80))).length, 0, "80 % не повторился");
+  fill.rearmContextFill(id);
+  assert.equal(
+    (await turn(id, tokensAt(80))).length,
+    1,
+    "только сжатие взводит",
+  );
+});
+
+test("границы уровня: 49 и 50, 74 и 75, 89 и 90, выше бюджета — 90", () => {
+  assert.equal(fill.contextFillLevel(49), 0);
+  assert.equal(fill.contextFillLevel(50), 50);
+  assert.equal(fill.contextFillLevel(74), 50);
+  assert.equal(fill.contextFillLevel(75), 75);
+  assert.equal(fill.contextFillLevel(89), 75);
+  assert.equal(fill.contextFillLevel(90), 90);
+  assert.equal(
+    fill.contextFillLevel(fill.contextFillPercent(99_000, WINDOW) ?? 0),
+    90,
   );
 });
 
@@ -227,6 +196,7 @@ test(`уровень монотонен по проценту и меняетс�
 // Валидация одна — на границе хука: мусор провайдера не становится контекстом.
 test(`мусор в расходе шага подсказки не даёт и порог не тратит (seed ${SEED})`, async () => {
   const junk = fc.constantFrom(
+    0,
     Number.NaN,
     -1,
     -0.5,
@@ -243,20 +213,11 @@ test(`мусор в расходе шага подсказки не даёт и 
       assert.equal((await turn(id, 36_400)).length, 1, "50 отмечен");
       fill.openContextFill(id);
       fill.markReplyDelivered(id);
-      usageHook.events["step.completed"](
-        {
-          data: {
-            stepIndex: 0,
-            turnId: "turn_1",
-            usage: { inputTokens, outputTokens: 5 },
-          },
-        },
-        { session: { id }, channel: { kind: "channel:telegram" } },
-      );
+      hookStep(id, { inputTokens, outputTokens: 5 });
       const { lines, send } = sender();
       await fill.notifyContextFill(id, WINDOW, send);
       assert.deepEqual(lines, [], `мусор ${String(inputTokens)} дал подсказку`);
-      // Мусор — «неизвестно», а не ноль: пороги не взведены, 50 не звучит снова.
+      // Мусор — «неизвестно», а не ноль: 50 не звучит снова.
       assert.equal((await turn(id, 36_400)).length, 0);
     }),
     { seed: SEED, numRuns: 40 },

@@ -4,11 +4,12 @@ import {
   appendUsage,
   parentFields,
   readUsageTokens,
+  stepInputTokens,
   subagentTurnId,
   usageRecord,
   type ParentLike,
 } from "../lib/usage.js";
-import { recordStepContext } from "../lib/context-fill.js";
+import { rearmContextFill, recordStepContext } from "../lib/context-fill.js";
 
 // Учёт фактического расхода токенов. ОДИН хук ловит весь расход одного eve-агента без
 // двойного счёта: основной Telegram Channel и фоновые джобы через eve/client —
@@ -44,11 +45,10 @@ interface StepOwner {
   readonly parent?: ParentLike;
 }
 
-/** Пишет строку расхода; отдаёт проверенный вход шага или null, если расхода нет. */
-function record(data: StepData, owner: StepOwner): number | null {
+function record(data: StepData, owner: StepOwner): void {
   const { sessionId, source, subagent, parent } = owner;
   const u = data.usage;
-  if (!u) return null;
+  if (!u) return;
   const tokens = readUsageTokens({
     in: u.inputTokens,
     out: u.outputTokens,
@@ -60,7 +60,7 @@ function record(data: StepData, owner: StepOwner): number | null {
     console.error(
       `[usage] расход шага пропущен: turn=${data.turnId ?? "?"} step=${data.stepIndex ?? 0} in=${String(u.inputTokens)} out=${String(u.outputTokens)} cacheRead=${String(u.cacheReadTokens)} cacheWrite=${String(u.cacheWriteTokens)}`,
     );
-    return null;
+    return;
   }
   const row = usageRecord(
     {
@@ -76,8 +76,6 @@ function record(data: StepData, owner: StepOwner): number | null {
     tokens,
   );
   if (row) appendUsage(row); // нет usage — не пишем нулевую строку
-  // Провайдер не назвал вход числом (нет поля, null): контекст неизвестен, а не ноль.
-  return typeof u.inputTokens === "number" ? tokens.in : null;
 }
 
 export default defineHook({
@@ -85,15 +83,17 @@ export default defineHook({
     "step.completed": (event, ctx) => {
       // Ребёнок встроенного `agent` пишет свои шаги сам (channel.kind = subagent) под своей
       // сессией; связь с ходом родителя eve отдаёт в ctx.session.parent.
-      const inputTokens = record(event.data, {
+      record(event.data, {
         sessionId: ctx.session.id,
         source: ctx.channel.kind ?? "unknown",
         parent: ctx.session.parent,
       });
       // Размер контекста для подсказки «нажмите /new»: хранилище обновляет только сессию,
       // открытую Telegram-каналом; ребёнок встроенного agent идёт под своей сессией.
-      recordStepContext(ctx.session.id, inputTokens);
+      recordStepContext(ctx.session.id, stepInputTokens(event.data.usage));
     },
+    // eve сжал историю сессии: подсказка может прозвучать снова с первого уровня.
+    "compaction.completed": (_event, ctx) => rearmContextFill(ctx.session.id),
     // Шаги инлайн-субагента (planner) — иначе его токены потерялись бы.
     //
     // turnId субагента брать НЕЛЬЗЯ: eve нумерует ходы как turn_<sequence> внутри каждой

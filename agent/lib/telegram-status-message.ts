@@ -89,21 +89,6 @@ function statusBody(tg: TelegramStatusHandle): Record<string, unknown> {
   };
 }
 
-/**
- * Одна тихая служебная строка в чат и тему хода (подсказка «нажмите /new»). Отказ Bot API —
- * исключение: вызывающий по нему решает, считать ли строку отправленной.
- */
-export async function sendQuietLine(
-  tg: TelegramStatusHandle,
-  text: string,
-): Promise<void> {
-  const res = await tg.request("sendMessage", { ...statusBody(tg), text });
-  if (!res.ok)
-    throw new Error(
-      `sendMessage refused: ${JSON.stringify(res.body).slice(0, 300)}`,
-    );
-}
-
 export async function sendWorkingStatus(
   tg: TelegramStatusHandle,
   { canStop = true } = {},

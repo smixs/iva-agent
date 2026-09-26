@@ -166,6 +166,17 @@ function usageTokens(value: unknown): number | null {
 }
 
 /**
+ * Вход шага для подсказки «нажмите /new»: то же правило, что у строки расхода, но только это
+ * поле. Нет поля, 0 или мусор — null: контекст неизвестен, а не пуст.
+ */
+export function stepInputTokens(
+  usage: { readonly inputTokens?: unknown } | undefined,
+): number | null {
+  const tokens = usageTokens(usage?.inputTokens);
+  return tokens !== null && tokens > 0 ? tokens : null;
+}
+
+/**
  * Расход как его прислал провайдер → числа лога, либо `null`, если хоть одно число мусор.
  * Одно правило на всех, кто пишет в лог: шаг хода, компактация, зрение.
  */

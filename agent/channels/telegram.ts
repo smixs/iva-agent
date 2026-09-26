@@ -26,6 +26,7 @@ import { runTelegramInbound } from "../lib/telegram-inbound.js";
 import { traceOutbox, traceWithScope } from "../lib/trace.js";
 import { chatModelSeesImages, describeImage } from "../vision.js";
 import { providerConfig } from "../provider.js";
+import { isPrivateTelegramChatHandle } from "../lib/telegram-private-chat.js";
 // Подсказка «нажмите /new» (agent/lib/context-fill.ts): сессию чата открывает канал,
 // строка идёт тихо и через гейт — в неё подставлен процент.
 import {
@@ -40,7 +41,6 @@ import { transcribe } from "../transcribe.js";
 import {
   enableWorkingStatusStop,
   finishTelegramStatus,
-  sendQuietLine,
   sendWorkingStatus,
   TELEGRAM_STOP_CALLBACK,
 } from "../lib/telegram-status-message.js";
@@ -271,19 +271,27 @@ const telegram = telegramChannel({
       });
     },
     // Подсказка «нажмите /new» — до уборки статуса: после неё чат свободен, и строка легла
-    // бы под «Работаю…» следующего хода.
+    // бы под «Работаю…» следующего хода. Только в личном чате: в группе /new не резолвится.
+    // Уборка статуса от подсказки не зависит.
     async "turn.completed"(data, channel, ctx) {
-      // Область хода — чтобы вердикт гейта на этой строке попал в журнал с ключом хода.
-      await traceWithScope(
-        { turn: data.turnId, session: ctx.session.id, source: "telegram" },
-        () =>
-          notifyContextFill(
-            ctx.session.id,
-            providerConfig.contextWindow,
-            noticeSender((text) => sendQuietLine(channel.telegram, text)),
-          ),
-      );
-      await finishTelegramStatus(channel, ctx.session.id, "completed");
+      const tg = channel.telegram;
+      try {
+        // Область хода — чтобы вердикт гейта на этой строке попал в журнал с ключом хода.
+        if (isPrivateTelegramChatHandle(tg))
+          await traceWithScope(
+            { turn: data.turnId, session: ctx.session.id, source: "telegram" },
+            () =>
+              notifyContextFill(
+                ctx.session.id,
+                providerConfig.contextWindow,
+                noticeSender((text) =>
+                  tg.post({ text, disable_notification: true }),
+                ),
+              ),
+          );
+      } finally {
+        await finishTelegramStatus(channel, ctx.session.id, "completed");
+      }
     },
     async "turn.cancelled"(_data, channel, ctx) {
       await finishTelegramStatus(channel, ctx.session.id, "cancelled");

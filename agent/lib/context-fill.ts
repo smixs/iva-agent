@@ -1,10 +1,7 @@
-// Подсказка «нажмите /new»: каждое сообщение чата отправляет модели всю переписку сессии.
-// Заполнение считается от бюджета — доли окна, на которой eve сжимает историю
-// (agent/lib/compaction.ts). После доставленного ответа, когда вход последнего шага прошёл
-// 50, 75 или 90 % бюджета, канал шлёт одну тихую строку; уровень запоминается только после
-// успешной отправки. Ниже 50 % (история сжата) уровни свободны снова. Запись открывает канал
-// на turn.started, поэтому фоновые сессии и субагенты сюда не попадают. Состояние в памяти
-// процесса: после рестарта подсказка может прозвучать ещё раз.
+// Подсказка «нажмите /new»: после доставленного ответа, когда вход последнего шага прошёл 50,
+// 75 или 90 % бюджета (доля окна, на которой eve сжимает историю), канал шлёт одну тихую
+// строку. Уровень запоминается после успешной отправки и освобождается сжатием истории.
+// Запись открывает канал на turn.started; состояние в памяти процесса.
 import { COMPACTION_THRESHOLD_PERCENT } from "./compaction.ts";
 import { tr } from "./i18n.ts";
 import type { NoticeSend } from "./outbox.ts";
@@ -21,22 +18,24 @@ export function contextFillPercent(tokens: number, windowTokens: number) {
 export const contextFillLevel = (pct: number) =>
   pct >= 90 ? 90 : pct >= 75 ? 75 : pct >= 50 ? 50 : 0;
 
-export function openContextFill(sessionId: string): void {
+const patch = (sessionId: string, change: Partial<Fill>) => {
   const fill = sessions.get(sessionId);
-  if (fill) Object.assign(fill, { tokens: null, delivered: false });
+  if (fill) Object.assign(fill, change);
+};
+
+export function openContextFill(sessionId: string): void {
+  if (sessions.has(sessionId))
+    patch(sessionId, { tokens: null, delivered: false });
   else sessions.set(sessionId, { tokens: null, shown: 0, delivered: false });
 }
 
 /** Вход последнего шага открытой сессии; null — провайдер вход не назвал. */
-export function recordStepContext(id: string, tokens: number | null): void {
-  const fill = sessions.get(id);
-  if (fill) fill.tokens = tokens;
-}
-
-export function markReplyDelivered(sessionId: string): void {
-  const fill = sessions.get(sessionId);
-  if (fill) fill.delivered = true;
-}
+export const recordStepContext = (id: string, tokens: number | null) =>
+  patch(id, { tokens });
+/** eve сжал историю сессии (compaction.completed): уровни свободны снова. */
+export const rearmContextFill = (id: string) => patch(id, { shown: 0 });
+export const markReplyDelivered = (id: string) =>
+  patch(id, { delivered: true });
 
 export const contextFillHintText = (pct: number) =>
   tr(
@@ -52,10 +51,8 @@ export async function notifyContextFill(
   const fill = sessions.get(sessionId);
   if (!fill?.delivered || fill.tokens === null) return;
   const pct = contextFillPercent(fill.tokens, windowTokens);
-  if (pct === null) return;
-  if (pct < 50) fill.shown = 0;
-  const level = contextFillLevel(pct);
-  if (level <= fill.shown) return;
+  const level = pct === null ? 0 : contextFillLevel(pct);
+  if (pct === null || level <= fill.shown) return;
   // Отказ отправки уровень не фиксирует: следующий ход попробует снова.
   const sent = await send(contextFillHintText(pct)).then(
     () => true,
