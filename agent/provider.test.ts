@@ -536,6 +536,30 @@ await test("pre-stream 401 and quota 429 errors do not retry", async () => {
   }
 });
 
+await test("pre-stream quota 429 with Retry-After does not retry", async () => {
+  const error = providerError(429, "billing quota exceeded", {
+    "retry-after": "1",
+  });
+  let calls = 0;
+  const model = wrapLanguageModel({
+    model: new MockLanguageModelV4({
+      doStream: () => {
+        calls += 1;
+        return Promise.reject(error);
+      },
+    }),
+    middleware: transientPreStreamRetryMiddleware({
+      retryDelaysMs: [0, 0, 0, 0, 0],
+      sleep: noDelay,
+    }),
+  });
+  await assert.rejects(
+    Promise.resolve(model.doStream({ prompt: [] })),
+    (received: unknown) => received === error,
+  );
+  assert.equal(calls, 1);
+});
+
 await test("exhausted pre-stream 503 errors become non-retryable", async () => {
   const error = providerError(503, "Service Unavailable");
   let calls = 0;
@@ -576,9 +600,16 @@ await test("aborting a pre-stream backoff does not open another request", async 
       retryDelaysMs: [0, 0, 0, 0, 0],
       sleep: (_ms, signal) =>
         new Promise<void>((_resolve, reject) => {
-          signal?.addEventListener("abort", () => reject(signal.reason), {
-            once: true,
-          });
+          signal?.addEventListener(
+            "abort",
+            () =>
+              reject(
+                signal.reason instanceof Error
+                  ? signal.reason
+                  : new DOMException("Aborted", "AbortError"),
+              ),
+            { once: true },
+          );
         }),
     }),
   });

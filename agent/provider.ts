@@ -614,6 +614,12 @@ function isAbortError(error: unknown): boolean {
   );
 }
 
+function abortError(reason: unknown): Error {
+  return reason instanceof Error
+    ? reason
+    : new DOMException("Aborted", "AbortError");
+}
+
 function retryAfterMs(error: RetryableProviderError): number | undefined {
   const raw = Object.entries(error.responseHeaders ?? {}).find(
     ([name]) => name.toLowerCase() === "retry-after",
@@ -626,6 +632,10 @@ function retryAfterMs(error: RetryableProviderError): number | undefined {
   return ms <= 120_000 ? ms : undefined;
 }
 
+function isQuotaMessage(error: RetryableProviderError): boolean {
+  return /quota|balance|insufficient|billing/iu.test(error.message);
+}
+
 function isTransientPreStreamError(error: unknown): boolean {
   if (isAbortError(error)) return false;
   const chain = errorChain(error);
@@ -633,12 +643,13 @@ function isTransientPreStreamError(error: unknown): boolean {
     (candidate) => typeof candidate.statusCode === "number",
   );
   if (statusError?.statusCode !== undefined) {
-    if (statusError.statusCode === 429)
+    if (statusError.statusCode === 429) {
+      if (isQuotaMessage(statusError)) return false;
       return (
         retryAfterMs(statusError) !== undefined ||
-        (statusError.isRetryable === true &&
-          !/quota|balance|insufficient/iu.test(statusError.message))
+        statusError.isRetryable === true
       );
+    }
     return (
       statusError.isRetryable === true &&
       [408, 425, 500, 502, 503, 504].includes(statusError.statusCode)
@@ -666,15 +677,13 @@ function terminalPreStreamError(error: unknown): unknown {
 
 function sleepUntilAbort(ms: number, abortSignal?: AbortSignal): Promise<void> {
   if (abortSignal?.aborted)
-    return Promise.reject(
-      abortSignal.reason ?? new DOMException("Aborted", "AbortError"),
-    );
+    return Promise.reject(abortError(abortSignal.reason));
   return new Promise((resolve, reject) => {
     const timer = setTimeout(done, ms);
     const onAbort = () => {
       clearTimeout(timer);
       abortSignal?.removeEventListener("abort", onAbort);
-      reject(abortSignal?.reason ?? new DOMException("Aborted", "AbortError"));
+      reject(abortError(abortSignal?.reason));
     };
     function done() {
       abortSignal?.removeEventListener("abort", onAbort);
