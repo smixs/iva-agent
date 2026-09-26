@@ -43,6 +43,7 @@ const {
   MODEL_FIRST_CHUNK_TIMEOUT_MS,
   modelFirstChunkDeadlineMiddleware,
   reasoningReplayMiddleware,
+  transientPreStreamRetryMiddleware,
   withReplayableReasoning,
 } = await import("./provider.ts");
 const { MAX_ATTACHED_IMAGES, MAX_IMAGE_BYTES } =
@@ -61,6 +62,20 @@ const readImage = () => BYTES;
 const REF = "attachments/2026-08-27/photo-082621.jpg";
 const CODEX_RESPONSES_URL = "https://chatgpt.com/backend-api/codex/responses";
 const CODEX_FETCH_TEST_EPOCH_MS = Date.now();
+
+function providerError(
+  statusCode: number,
+  message = `HTTP ${statusCode}`,
+  responseHeaders?: Record<string, string>,
+) {
+  return Object.assign(new Error(message), {
+    isRetryable: true,
+    responseHeaders,
+    statusCode,
+  });
+}
+
+const noDelay = () => Promise.resolve();
 
 function codexAccessToken(nowMs: number, label: string): string {
   const b64url = (value: object): string =>
@@ -472,6 +487,140 @@ await test("предикат решает, дойдёт ли ссылка до �
   );
   await run(true);
   assert.ok(readVault(), "зрячий предикат доводит промпт до чтения Vault");
+});
+
+await test("transient pre-stream 500 errors retry before opening a stream", async () => {
+  let calls = 0;
+  const model = wrapLanguageModel({
+    model: new MockLanguageModelV4({
+      doStream: () => {
+        calls += 1;
+        if (calls < 3) return Promise.reject(providerError(500));
+        return Promise.resolve({
+          stream: new ReadableStream<LanguageModelV4StreamPart>(),
+        } satisfies LanguageModelV4StreamResult);
+      },
+    }),
+    middleware: transientPreStreamRetryMiddleware({
+      retryDelaysMs: [0, 0, 0, 0, 0],
+      sleep: noDelay,
+    }),
+  });
+  await model.doStream({ prompt: [] });
+  assert.equal(calls, 3);
+});
+
+await test("pre-stream 401 and quota 429 errors do not retry", async () => {
+  for (const error of [
+    providerError(401),
+    providerError(429, "quota exceeded"),
+  ]) {
+    let calls = 0;
+    const model = wrapLanguageModel({
+      model: new MockLanguageModelV4({
+        doStream: () => {
+          calls += 1;
+          return Promise.reject(error);
+        },
+      }),
+      middleware: transientPreStreamRetryMiddleware({
+        retryDelaysMs: [0, 0, 0, 0, 0],
+        sleep: noDelay,
+      }),
+    });
+    await assert.rejects(
+      Promise.resolve(model.doStream({ prompt: [] })),
+      (received: unknown) => received === error,
+    );
+    assert.equal(calls, 1);
+  }
+});
+
+await test("exhausted pre-stream 503 errors become non-retryable", async () => {
+  const error = providerError(503, "Service Unavailable");
+  let calls = 0;
+  const model = wrapLanguageModel({
+    model: new MockLanguageModelV4({
+      doStream: () => {
+        calls += 1;
+        return Promise.reject(error);
+      },
+    }),
+    middleware: transientPreStreamRetryMiddleware({
+      retryDelaysMs: [0, 0, 0, 0, 0],
+      sleep: noDelay,
+    }),
+  });
+  await assert.rejects(
+    Promise.resolve(model.doStream({ prompt: [] })),
+    (received: unknown) => {
+      assert.equal(received, error);
+      assert.equal((received as { isRetryable?: boolean }).isRetryable, false);
+      return true;
+    },
+  );
+  assert.equal(calls, 6);
+});
+
+await test("aborting a pre-stream backoff does not open another request", async () => {
+  const controller = new AbortController();
+  let calls = 0;
+  const model = wrapLanguageModel({
+    model: new MockLanguageModelV4({
+      doStream: () => {
+        calls += 1;
+        return Promise.reject(providerError(503));
+      },
+    }),
+    middleware: transientPreStreamRetryMiddleware({
+      retryDelaysMs: [0, 0, 0, 0, 0],
+      sleep: (_ms, signal) =>
+        new Promise<void>((_resolve, reject) => {
+          signal?.addEventListener("abort", () => reject(signal.reason), {
+            once: true,
+          });
+        }),
+    }),
+  });
+  const pending = Promise.resolve(
+    model.doStream({
+      prompt: [],
+      abortSignal: controller.signal,
+    }),
+  );
+  await waitForImmediate();
+  controller.abort(new DOMException("Stopped", "AbortError"));
+  await assert.rejects(pending, /Stopped/u);
+  assert.equal(calls, 1);
+});
+
+await test("an error from an opened stream does not retry", async () => {
+  const error = new Error("stream broke after headers");
+  let calls = 0;
+  const model = wrapLanguageModel({
+    model: new MockLanguageModelV4({
+      doStream: () => {
+        calls += 1;
+        return Promise.resolve({
+          stream: new ReadableStream<LanguageModelV4StreamPart>({
+            start(controller) {
+              controller.error(error);
+            },
+          }),
+        } satisfies LanguageModelV4StreamResult);
+      },
+    }),
+    middleware: transientPreStreamRetryMiddleware({
+      retryDelaysMs: [0, 0, 0, 0, 0],
+      sleep: noDelay,
+    }),
+  });
+  const { stream } = await model.doStream({ prompt: [] });
+  await assert.rejects(
+    stream.getReader().read(),
+    (received: unknown) => received === error,
+  );
+  assert.equal(calls, 1);
 });
 
 await test("метаданные без контента обрываются по deadline и не отравляют сессию", async (t) => {
