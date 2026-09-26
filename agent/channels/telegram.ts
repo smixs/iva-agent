@@ -25,6 +25,13 @@ import {
 import { runTelegramInbound } from "../lib/telegram-inbound.js";
 import { traceOutbox } from "../lib/trace.js";
 import { chatModelSeesImages, describeImage } from "../vision.js";
+import { providerConfig } from "../provider.js";
+import {
+  contextFillHintText,
+  markReplyDelivered,
+  returnContextFillHint,
+  takeContextFillHint,
+} from "../lib/context-fill.js";
 import { transcribe } from "../transcribe.js";
 // Статус-сообщение хода («Работаю…», кнопка Стоп, уборка в терминале) и служебное
 // объяснение сбоя — UI канала, обе реплики идут мимо Outbox. Мимо Outbox — не мимо
@@ -69,6 +76,40 @@ import {
 
 // Токен (TELEGRAM_BOT_TOKEN) и секрет вебхука (TELEGRAM_WEBHOOK_SECRET_TOKEN)
 // читаются из окружения автоматически.
+
+// Подсказка «нажмите /new» (agent/lib/context-fill.ts): одна строка после хода, ответ
+// которого дошёл, когда вход последнего шага перешёл порог окна. Строка статическая, с
+// одним процентом, поэтому гейт не проходит — как «Работаю…». Тихая: ответ уже прозвенел.
+async function sendContextFillHint(
+  tg: Pick<TelegramHandle, "chatId" | "messageThreadId" | "request">,
+  sessionId: string,
+  turnId: string,
+): Promise<void> {
+  const hint = takeContextFillHint(
+    sessionId,
+    turnId,
+    providerConfig.contextWindow,
+  );
+  if (hint === null) return;
+  let failure: unknown = null;
+  try {
+    const res = await tg.request("sendMessage", {
+      chat_id: tg.chatId,
+      text: contextFillHintText(hint.percent),
+      disable_notification: true,
+      ...(tg.messageThreadId !== undefined
+        ? { message_thread_id: tg.messageThreadId }
+        : {}),
+    });
+    if (!res.ok) failure = JSON.stringify(res.body).slice(0, 300);
+  } catch (error) {
+    failure = error;
+  }
+  if (failure === null) return;
+  // Строка не дошла — порог не считается отмеченным, следующий ход скажет снова.
+  returnContextFillHint(sessionId, hint.previous);
+  console.error("[telegram] подсказка про /new не отправилась:", failure);
+}
 
 // --- ESC-остановка хода (аналог ESC в Claude Code) ---
 //
@@ -260,8 +301,9 @@ const telegram = telegramChannel({
           console.error("[telegram] статус-сообщение не отправилось:", error),
       });
     },
-    async "turn.completed"(_data, channel, ctx) {
+    async "turn.completed"(data, channel, ctx) {
       await finishTelegramStatus(channel, ctx.session.id, "completed");
+      await sendContextFillHint(channel.telegram, ctx.session.id, data.turnId);
     },
     async "turn.cancelled"(_data, channel, ctx) {
       await finishTelegramStatus(channel, ctx.session.id, "cancelled");
@@ -337,7 +379,9 @@ const telegram = telegramChannel({
             outboxTransport(channel.telegram, TELEGRAM_RICH_REPLIES, silent),
           ),
       );
-      if (result.ok) recordDelivery(true);
+      if (!result.ok) return;
+      recordDelivery(true);
+      markReplyDelivered(ctx.session.id, data.turnId);
     },
     // Ход упал: статус прибираем по CAS, но сообщение об ошибке от него не гейтим —
     // позднее terminal-событие всё равно должно объяснить пользователю, что произошло.

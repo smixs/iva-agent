@@ -8,6 +8,7 @@ import {
   usageRecord,
   type ParentLike,
 } from "../lib/usage.js";
+import { recordStepContext } from "../lib/context-fill.js";
 
 // Учёт фактического расхода токенов. ОДИН хук ловит весь расход одного eve-агента без
 // двойного счёта: основной Telegram Channel и фоновые джобы через eve/client —
@@ -86,6 +87,9 @@ export default defineHook({
         source: ctx.channel.kind ?? "unknown",
         parent: ctx.session.parent,
       });
+      // Размер контекста для подсказки «нажмите /new» — только у шага основной сессии.
+      if (ctx.channel.kind !== "subagent" && !ctx.session.parent)
+        recordStepContext(ctx.session.id, event.data.usage?.inputTokens);
     },
     // Шаги инлайн-субагента (planner) — иначе его токены потерялись бы.
     //
