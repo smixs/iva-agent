@@ -44,10 +44,11 @@ interface StepOwner {
   readonly parent?: ParentLike;
 }
 
-function record(data: StepData, owner: StepOwner): void {
+/** Пишет строку расхода; отдаёт проверенный вход шага или null, если расхода нет. */
+function record(data: StepData, owner: StepOwner): number | null {
   const { sessionId, source, subagent, parent } = owner;
   const u = data.usage;
-  if (!u) return;
+  if (!u) return null;
   const tokens = readUsageTokens({
     in: u.inputTokens,
     out: u.outputTokens,
@@ -59,7 +60,7 @@ function record(data: StepData, owner: StepOwner): void {
     console.error(
       `[usage] расход шага пропущен: turn=${data.turnId ?? "?"} step=${data.stepIndex ?? 0} in=${String(u.inputTokens)} out=${String(u.outputTokens)} cacheRead=${String(u.cacheReadTokens)} cacheWrite=${String(u.cacheWriteTokens)}`,
     );
-    return;
+    return null;
   }
   const row = usageRecord(
     {
@@ -75,6 +76,8 @@ function record(data: StepData, owner: StepOwner): void {
     tokens,
   );
   if (row) appendUsage(row); // нет usage — не пишем нулевую строку
+  // Провайдер не назвал вход числом (нет поля, null): контекст неизвестен, а не ноль.
+  return typeof u.inputTokens === "number" ? tokens.in : null;
 }
 
 export default defineHook({
@@ -82,14 +85,14 @@ export default defineHook({
     "step.completed": (event, ctx) => {
       // Ребёнок встроенного `agent` пишет свои шаги сам (channel.kind = subagent) под своей
       // сессией; связь с ходом родителя eve отдаёт в ctx.session.parent.
-      record(event.data, {
+      const inputTokens = record(event.data, {
         sessionId: ctx.session.id,
         source: ctx.channel.kind ?? "unknown",
         parent: ctx.session.parent,
       });
-      // Размер контекста для подсказки «нажмите /new» — только у шага основной сессии.
-      if (ctx.channel.kind !== "subagent" && !ctx.session.parent)
-        recordStepContext(ctx.session.id, event.data.usage?.inputTokens);
+      // Размер контекста для подсказки «нажмите /new»: хранилище обновляет только сессию,
+      // открытую Telegram-каналом; ребёнок встроенного agent идёт под своей сессией.
+      recordStepContext(ctx.session.id, inputTokens);
     },
     // Шаги инлайн-субагента (planner) — иначе его токены потерялись бы.
     //

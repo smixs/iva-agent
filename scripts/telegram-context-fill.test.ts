@@ -1,9 +1,11 @@
 /* eslint-disable @typescript-eslint/no-floating-promises, @typescript-eslint/require-await -- Node's test runner owns registrations; the Bot API double keeps the async fetch boundary. */
-// Подсказка «нажмите /new» на живом шве: хук шага пишет вход основной сессии, канал после
-// доставленного ответа и конца хода шлёт одну служебную строку в тот же чат и тему.
+// Подсказка «нажмите /new» на живом шве: канал открывает сессию на turn.started, хук шага
+// пишет её вход, канал после доставленного ответа и конца хода шлёт одну тихую строку в тот
+// же чат и тему. События идут в порядке eve: message.completed уходит в конце стрима шага,
+// step.completed того же шага — после него, затем turn.completed.
 import "./lib/ts-esm-hooks.ts";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { after, beforeEach } from "node:test";
@@ -48,6 +50,7 @@ type Adapter = {
     session: unknown;
     state: Record<string, unknown>;
   }) => unknown;
+  "turn.started": Handler;
   "message.completed": Handler;
   "turn.completed": Handler;
 };
@@ -56,8 +59,8 @@ const channelModule = "../agent/channels/telegram.ts?context-fill-test";
 const [
   { default: channel },
   { default: usageHook },
-  fill,
   { providerConfig },
+  trace,
   { ContextContainer, contextStorage },
   { SessionKey },
 ] = await Promise.all([
@@ -65,37 +68,48 @@ const [
     typeof import("../agent/channels/telegram.ts")
   >,
   import("../agent/hooks/usage.ts"),
-  import("../agent/lib/context-fill.ts"),
   import("../agent/provider.ts"),
+  import("../agent/lib/trace.ts"),
   import("../node_modules/eve/dist/src/context/container.js"),
   import("../node_modules/eve/dist/src/context/keys.js"),
 ]);
 const adapter = (channel as unknown as { adapter: Adapter }).adapter;
-const WINDOW = providerConfig.contextWindow;
-const stepCompleted = (
+// Бюджет — доля окна, на которой eve сжимает историю (compaction.thresholdPercent).
+const BUDGET = Math.floor(providerConfig.contextWindow * 0.7);
+const at = (share: number) => Math.ceil(BUDGET * share);
+const hookEvents = (
   usageHook as unknown as {
     events: Record<string, (event: unknown, ctx: unknown) => void>;
   }
-).events["step.completed"];
+).events;
 
+let seq = 0;
 beforeEach(() => {
-  fill.resetContextFillForTests();
   apiCalls.length = 0;
   refuseSends = false;
   refuseHint = false;
 });
 
-function step(
-  sessionId: string,
-  inputTokens: number,
-  owner: { kind?: string; parent?: unknown } = {},
-) {
-  stepCompleted(
+type StepOwner = { kind?: string; parent?: unknown };
+// null — шаг без расхода; "no-input" — расход без inputTokens (провайдер не назвал вход).
+type StepTokens = number | null | "no-input";
+function step(sessionId: string, tokens: StepTokens, owner: StepOwner = {}) {
+  hookEvents["step.completed"](
     {
       data: {
         stepIndex: 0,
-        turnId: "turn_1",
-        usage: { inputTokens, outputTokens: 10, cacheReadTokens: 0 },
+        turnId: "turn_x",
+        ...(tokens === null
+          ? {}
+          : tokens === "no-input"
+            ? { usage: { outputTokens: 10 } }
+            : {
+                usage: {
+                  inputTokens: tokens,
+                  outputTokens: 10,
+                  cacheReadTokens: 0,
+                },
+              }),
       },
     },
     {
@@ -105,19 +119,32 @@ function step(
   );
 }
 
+type TurnOptions = {
+  message?: string | null;
+  thread?: number;
+  started?: boolean;
+  earlier?: number;
+  owner?: StepOwner;
+};
+
+/** Один ход в порядке eve; возвращает число подсказок до turn.completed. */
 async function turn(
   sessionId: string,
-  turnId: string,
+  tokens: StepTokens,
   {
     message = "ответ",
     thread,
-  }: { message?: string | null; thread?: number } = {},
-) {
+    started = true,
+    earlier,
+    owner,
+  }: TurnOptions = {},
+): Promise<number> {
+  const turnId = `turn_${++seq}`;
   const ctx = new ContextContainer();
   ctx.set(SessionKey, {
     auth: { current: null, initiator: null },
     sessionId,
-    turn: { id: turnId, sequence: 1 },
+    turn: { id: turnId, sequence: seq },
   });
   const context = adapter.createAdapterContext({
     ctx,
@@ -133,24 +160,35 @@ async function turn(
       messageThreadId: thread ?? null,
     },
   });
+  let beforeTurnEnd = 0;
   await contextStorage.run(ctx, async () => {
+    if (started)
+      await adapter["turn.started"]({ sequence: seq, turnId }, context);
+    if (earlier !== undefined) step(sessionId, earlier);
     await adapter["message.completed"](
-      { finishReason: "stop", message, sequence: 1, stepIndex: 0, turnId },
+      { finishReason: "stop", message, sequence: seq, stepIndex: 1, turnId },
       context,
     );
-    await adapter["turn.completed"]({ sequence: 1, turnId }, context);
+    step(sessionId, tokens, owner);
+    beforeTurnEnd = hints().length;
+    await adapter["turn.completed"]({ sequence: seq, turnId }, context);
   });
+  return beforeTurnEnd;
 }
 
 const hints = () =>
   apiCalls.filter(
     (call) =>
-      call.method === "sendMessage" && String(call.body?.text).includes("/new"),
+      call.method === "sendMessage" &&
+      typeof call.body?.text === "string" &&
+      call.body.text.includes("/new"),
   );
 
-test("ход за порогом 50 % заканчивается одной тихой подсказкой с процентом", async () => {
-  step("s-50", Math.ceil(WINDOW * 0.6));
-  await turn("s-50", "turn_1", { thread: 7 });
+test("ход за порогом 50 % заканчивается одной тихой подсказкой с процентом: одношаговый 45 % → 55 %, не раньше turn.completed", async () => {
+  await turn("s-one-step", at(0.45));
+  assert.equal(hints().length, 0);
+  const beforeTurnEnd = await turn("s-one-step", at(0.55), { thread: 7 });
+  assert.equal(beforeTurnEnd, 0, "message.completed подсказку не шлёт");
   const [hint, ...rest] = hints();
   assert.equal(rest.length, 0);
   assert.equal(hint?.body?.chat_id, "42");
@@ -158,53 +196,127 @@ test("ход за порогом 50 % заканчивается одной ти
   assert.equal(hint?.body?.disable_notification, true);
   assert.equal(
     hint?.body?.text,
-    "The context window is 60% full. Tap /new to start a new conversation.",
+    "The context window is 55% full. Tap /new to start a new conversation.",
   );
 });
 
-test("тот же порог второй раз молчит, следующий срабатывает", async () => {
-  step("s-next", Math.ceil(WINDOW * 0.55));
-  await turn("s-next", "turn_1");
-  step("s-next", Math.ceil(WINDOW * 0.7));
-  await turn("s-next", "turn_2");
+test("подсказка уходит до уборки статуса хода", async () => {
+  await turn("s-order", at(0.6));
+  const hintAt = apiCalls.findIndex(
+    (call) => call.method === "sendMessage" && call === hints()[0],
+  );
+  const cleanupAt = apiCalls.findIndex(
+    (call) => call.method === "deleteMessage",
+  );
+  assert.ok(hintAt >= 0 && cleanupAt >= 0, JSON.stringify(apiCalls));
+  assert.ok(hintAt < cleanupAt, "подсказка раньше, чем чат снова свободен");
+});
+
+test("тот же порог второй раз молчит, следующий срабатывает, спад ниже 50 % взводит заново", async () => {
+  await turn("s-next", at(0.55));
+  await turn("s-next", at(0.7));
   assert.equal(hints().length, 1);
-  step("s-next", Math.ceil(WINDOW * 0.76));
-  await turn("s-next", "turn_3");
+  await turn("s-next", at(0.76));
   assert.equal(hints().length, 2);
-  assert.match(String(hints()[1]?.body?.text), /76%/);
+  await turn("s-next", at(0.3));
+  await turn("s-next", at(0.52));
+  assert.equal(hints().length, 3);
 });
 
 test("ниже порога, без ответа и при недоставленном ответе подсказки нет", async () => {
-  step("s-low", Math.floor(WINDOW * 0.49));
-  await turn("s-low", "turn_1");
-  step("s-silent", Math.ceil(WINDOW * 0.8));
-  await turn("s-silent", "turn_1", { message: null });
-  step("s-refused", Math.ceil(WINDOW * 0.8));
+  await turn("s-low", Math.floor(BUDGET * 0.49));
+  await turn("s-silent", at(0.8), { message: null });
   refuseSends = true;
-  await turn("s-refused", "turn_1");
+  await turn("s-refused", at(0.8));
   refuseSends = false;
   assert.equal(hints().length, 0);
 });
 
-test("шаги субагента контекст основной сессии не двигают", async () => {
-  step("s-sub", Math.ceil(WINDOW * 0.8), { kind: "subagent" });
-  step("s-sub", Math.ceil(WINDOW * 0.8), {
-    parent: { sessionId: "root", turn: { id: "turn_1", sequence: 1 } },
-  });
-  await turn("s-sub", "turn_1");
+test("отказ Telegram на подсказку не фиксирует порог: следующий ход скажет снова", async () => {
+  refuseHint = true;
+  await turn("s-retry", at(0.6));
+  refuseHint = false;
+  await turn("s-retry", at(0.6));
+  await turn("s-retry", at(0.6));
+  assert.equal(
+    hints().length,
+    2,
+    "первая отвергнута, вторая ушла, третьей нет",
+  );
+});
+
+test("последний шаг без расхода: контекст неизвестен, подсказки нет", async () => {
+  await turn("s-unknown", null, { earlier: at(0.8) });
   assert.equal(hints().length, 0);
-  step("s-sub", Math.ceil(WINDOW * 0.8));
-  await turn("s-sub", "turn_2");
+  // «Неизвестно» — не ноль: пороги не взводятся заново, 50 после него не повторяется.
+  await turn("s-unknown", at(0.6));
+  await turn("s-unknown", null);
+  await turn("s-unknown", "no-input");
+  await turn("s-unknown", at(0.6));
   assert.equal(hints().length, 1);
 });
 
-test("отвергнутая подсказка повторяется после следующего хода", async () => {
-  step("s-retry", Math.ceil(WINDOW * 0.6));
-  refuseHint = true;
-  await turn("s-retry", "turn_1");
-  refuseHint = false;
-  await turn("s-retry", "turn_2");
-  assert.equal(hints().length, 2, "первая отвергнута, вторая ушла");
-  await turn("s-retry", "turn_3");
-  assert.equal(hints().length, 2, "дошедшая больше не повторяется");
+test("сессия без turn.started (фон, дайджест) в карту не попадает", async () => {
+  await turn("s-background", at(0.9), { started: false });
+  assert.equal(hints().length, 0);
+});
+
+test("шаг ребёнка встроенного agent идёт под своей сессией и родителя не двигает", async () => {
+  await turn("s-parent", at(0.3));
+  step("s-child", at(0.95), {
+    kind: "subagent",
+    parent: { sessionId: "s-parent", turn: { id: "turn_1", sequence: 1 } },
+  });
+  hookEvents["subagent.event"](
+    {
+      data: {
+        subagentName: "planner",
+        event: {
+          type: "step.completed",
+          data: {
+            stepIndex: 0,
+            turnId: "turn_0",
+            usage: { inputTokens: at(0.95), outputTokens: 1 },
+          },
+        },
+      },
+    },
+    {
+      session: { id: "s-parent", turn: { id: "turn_9", sequence: 9 } },
+      channel: { kind: "channel:telegram" },
+    },
+  );
+  await turn("s-parent", at(0.3));
+  assert.equal(hints().length, 0);
+});
+
+function gateEvents(): Record<string, unknown>[] {
+  try {
+    return readFileSync(trace.traceFilePath(trace.traceDay(), dataDir), "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+      .filter((event) => event.kind === "gate");
+  } catch {
+    return []; // журнала ещё нет — событий тоже
+  }
+}
+
+test("подсказка проходит outbound-гейт, вердикт в журнале с ключом хода", async () => {
+  await turn("s-gate", at(0.6));
+  const hintGate = gateEvents().find(
+    (event) =>
+      event.session === "s-gate" &&
+      String((event.data as { text?: unknown } | undefined)?.text).includes(
+        "/new",
+      ),
+  );
+  assert.ok(hintGate, "у подсказки нет вердикта гейта в журнале");
+  assert.equal(hintGate.turn, `turn_${seq}`);
+});
+
+test("фоновая сессия и после двух ходов без turn.started подсказку не получает", async () => {
+  await turn("s-background-2", at(0.9), { started: false });
+  await turn("s-background-2", at(0.9), { started: false });
+  assert.equal(hints().length, 0);
 });

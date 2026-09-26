@@ -9,6 +9,7 @@ import {
   makeTextModel,
 } from "./provider.js";
 import { stepUsageLabel } from "./lib/usage-tap.js";
+import { COMPACTION_THRESHOLD_PERCENT } from "./lib/compaction.js";
 import { chatModelSeesImages } from "./vision.js";
 
 export default defineAgent({
@@ -44,7 +45,7 @@ export default defineAgent({
   // переполнит окно до компактации.
   // Защита от overflow: компактуем заранее (0.7 вместо дефолтных 0.9), оставляя запас на
   // summary-вызов и следующий ход. eve сам саммаризирует старые ходы, сохраняя todo и read-tracking.
-  compaction: { thresholdPercent: 0.7 },
+  compaction: { thresholdPercent: COMPACTION_THRESHOLD_PERCENT },
   // Сессия eve — durable workflow: каждый ход проигрывает весь журнал событий заново, и на
   // сутках активного чата реплей переваливает за потолок 240 с (vercel/workflow), ход
   // не стартует. Сутки от создания — штатный потолок eve: ход завершается, следующее

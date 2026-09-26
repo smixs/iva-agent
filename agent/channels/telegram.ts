@@ -23,14 +23,15 @@ import {
 // запись в Vault, медиа со зрением и транскрипцией, inbound-Gate и контекст хода.
 // Канал приносит ему эффекты и сам про разбор входящего ничего не знает.
 import { runTelegramInbound } from "../lib/telegram-inbound.js";
-import { traceOutbox } from "../lib/trace.js";
+import { traceOutbox, traceWithScope } from "../lib/trace.js";
 import { chatModelSeesImages, describeImage } from "../vision.js";
 import { providerConfig } from "../provider.js";
+// Подсказка «нажмите /new» (agent/lib/context-fill.ts): сессию чата открывает канал,
+// строка идёт тихо и через гейт — в неё подставлен процент.
 import {
-  contextFillHintText,
   markReplyDelivered,
-  returnContextFillHint,
-  takeContextFillHint,
+  notifyContextFill,
+  openContextFill,
 } from "../lib/context-fill.js";
 import { transcribe } from "../transcribe.js";
 // Статус-сообщение хода («Работаю…», кнопка Стоп, уборка в терминале) и служебное
@@ -39,6 +40,7 @@ import { transcribe } from "../transcribe.js";
 import {
   enableWorkingStatusStop,
   finishTelegramStatus,
+  sendQuietLine,
   sendWorkingStatus,
   TELEGRAM_STOP_CALLBACK,
 } from "../lib/telegram-status-message.js";
@@ -76,40 +78,6 @@ import {
 
 // Токен (TELEGRAM_BOT_TOKEN) и секрет вебхука (TELEGRAM_WEBHOOK_SECRET_TOKEN)
 // читаются из окружения автоматически.
-
-// Подсказка «нажмите /new» (agent/lib/context-fill.ts): одна строка после хода, ответ
-// которого дошёл, когда вход последнего шага перешёл порог окна. Строка статическая, с
-// одним процентом, поэтому гейт не проходит — как «Работаю…». Тихая: ответ уже прозвенел.
-async function sendContextFillHint(
-  tg: Pick<TelegramHandle, "chatId" | "messageThreadId" | "request">,
-  sessionId: string,
-  turnId: string,
-): Promise<void> {
-  const hint = takeContextFillHint(
-    sessionId,
-    turnId,
-    providerConfig.contextWindow,
-  );
-  if (hint === null) return;
-  let failure: unknown = null;
-  try {
-    const res = await tg.request("sendMessage", {
-      chat_id: tg.chatId,
-      text: contextFillHintText(hint.percent),
-      disable_notification: true,
-      ...(tg.messageThreadId !== undefined
-        ? { message_thread_id: tg.messageThreadId }
-        : {}),
-    });
-    if (!res.ok) failure = JSON.stringify(res.body).slice(0, 300);
-  } catch (error) {
-    failure = error;
-  }
-  if (failure === null) return;
-  // Строка не дошла — порог не считается отмеченным, следующий ход скажет снова.
-  returnContextFillHint(sessionId, hint.previous);
-  console.error("[telegram] подсказка про /new не отправилась:", failure);
-}
 
 // --- ESC-остановка хода (аналог ESC в Claude Code) ---
 //
@@ -283,6 +251,7 @@ const telegram = telegramChannel({
     // FIFO-мост не должен успеть принять следующую голову, пока Bot API отвечает.
     async "turn.started"(data, channel, ctx) {
       const tg = channel.telegram;
+      openContextFill(ctx.session.id);
       await publishTelegramTurnStarted({
         chatKey: chatKeyOf(tg.chatId, tg.messageThreadId),
         sessionId: ctx.session.id,
@@ -301,9 +270,21 @@ const telegram = telegramChannel({
           console.error("[telegram] статус-сообщение не отправилось:", error),
       });
     },
+    // Подсказка «нажмите /new» — до уборки статуса: после неё чат свободен, и строка легла
+    // бы под «Работаю…» следующего хода.
     async "turn.completed"(data, channel, ctx) {
+      // Область хода — чтобы вердикт гейта на этой строке попал в журнал с ключом хода.
+      await traceWithScope(
+        { turn: data.turnId, session: ctx.session.id, source: "telegram" },
+        () =>
+          notifyContextFill(
+            ctx.session.id,
+            data.turnId,
+            providerConfig.contextWindow,
+            noticeSender((text) => sendQuietLine(channel.telegram, text)),
+          ),
+      );
       await finishTelegramStatus(channel, ctx.session.id, "completed");
-      await sendContextFillHint(channel.telegram, ctx.session.id, data.turnId);
     },
     async "turn.cancelled"(_data, channel, ctx) {
       await finishTelegramStatus(channel, ctx.session.id, "cancelled");
