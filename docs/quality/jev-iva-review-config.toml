@@ -1,0 +1,31 @@
+# Блок [review] для .quality.toml Ивы: пакет Jev для агентов (плагин code-quality ≥ 1.2.0)
+# плюс три вопроса, специфичных для Ивы, как пользовательские. Источник: docs/quality/jev-questions-iva.md.
+[review]
+jev = true
+jev_provider = "openrouter"
+agent_globs = ["agent/**/*.ts", "scripts/**/*.ts"]
+agent_prompt_globs = ["agent/**/*.md", "scripts/memory/instructions/**"]
+
+[[review.jev_questions]]
+id = "vault_path_by_hand"
+files = ["agent/tools/**/*.ts", "agent/lib/**/*.ts", "scripts/memory/**/*.ts", "scripts/lib/**/*.ts"]
+trigger = '''vault|["'`/]data/|versions/|["'`]\.\./|\bpath\.(?:join|resolve)\('''
+instructions = "Does the code added in `source_hunk` build a path into the vault, the data directory or the versioned install layout by string concatenation, `path.join` from a hard-coded base, or a relative path, instead of the project's shared resolver for that location?"
+criteria = { true = "An added path to the vault, data or versions directory is assembled in place from a literal base, a relative segment or concatenation.", false = "The path comes from the shared resolver, or it does not point into the vault, data or install layout." }
+note = "a vault or data path is built in place; use the shared resolver"
+
+[[review.jev_questions]]
+id = "identity_literal"
+files = ["agent/**/*.ts", "scripts/**/*.ts"]
+trigger = '''(?=.*(?:[!=]==\s*["'`]|startsWith\(\s*["'`]))(?=.*(?:kind|provider|model|channel|version))'''
+instructions = "Does the code added in `source_hunk` compare a channel kind, provider id, model name, session or version identity against a string literal written in place, instead of a constant or resolver that the rest of the project already uses for that identity?"
+criteria = { true = "An added comparison or startsWith checks a kind, provider, model, channel, session or version against an inline string literal.", false = "The identity is compared through a shared constant, enum or resolver, or the literal is not an identity." }
+note = "an identity is compared with an inline literal"
+
+[[review.jev_questions]]
+id = "state_file_for_a_counter"
+files = ["agent/**/*.ts", "scripts/**/*.ts"]
+trigger = '''(?:writeFile|appendFile)(?:Sync)?\(|acquireFileLock|\bbudget\b|stop[ _-]?file|\.jsonl?["'`]'''
+instructions = "Does the code added in `source_hunk` introduce a new persisted file, lock, queue or budget record under the data directory to guarantee something that an in-memory value at the place where the events already arrive would guarantee just as well?"
+criteria = { true = "A new state file, lock, queue or budget record holds something that does not need to survive a restart.", false = "The persisted state must survive a restart, or the hunk adds no new state file." }
+note = "a new state file replaces a counter"
