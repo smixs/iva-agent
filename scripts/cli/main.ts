@@ -14,7 +14,7 @@ import { createServiceCommands } from "./services.ts";
 import { createCliSystemd } from "./systemd.ts";
 import { createTraceCommands } from "./trace.ts";
 import { createTreeRenderer } from "./tree.ts";
-import { createUserbotCommands } from "./userbot.ts";
+import { createUserbotCommands, reinstallUserbot } from "./userbot.ts";
 import { createVersionUpdateCommand } from "./version-update-command.ts";
 import { setBeta } from "../lib/update-channel.ts";
 
@@ -136,7 +136,10 @@ export function createCliMain(root: string) {
   const tree = createTreeRenderer(root);
   const userbot = createUserbotCommands(runtime, systemdLifecycle);
   const account = createAccountCommands(runtime, systemdLifecycle);
-  const services = createServiceCommands(runtime, systemdLifecycle);
+  const services = createServiceCommands(runtime, systemdLifecycle, {
+    recoverUserbot: () =>
+      reinstallUserbot(runtime, systemdLifecycle, runtime.warn),
+  });
   const cmdConfig = createConfigCommand(runtime, systemdLifecycle);
   const cmdDoctor = createDoctorCommand(runtime, systemdLifecycle);
   const cmdDiagnose = createDiagnoseCommand(runtime, systemdLifecycle);

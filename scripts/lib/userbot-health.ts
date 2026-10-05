@@ -5,6 +5,59 @@ import { resolveDataDir } from "./data-dir.ts";
 
 export const USERBOT_HEALTH_TIMEOUT_MS = 1500;
 export const USERBOT_SERVICE = "iva-telegram-userbot.service";
+export const USERBOT_READINESS_TIMEOUT_MS = 15_000;
+
+/** A reachable unauthorized proxy is ready for QR login; it is not a ready Telegram session. */
+export function userbotProxyReady(health: UserbotHealth): boolean {
+  return health.state === "ready" || health.state === "unauthorized";
+}
+
+export async function awaitUserbotHealth(
+  probe: (signal: AbortSignal) => Promise<UserbotHealth>,
+  timeoutMs = USERBOT_READINESS_TIMEOUT_MS,
+): Promise<UserbotHealth> {
+  const controller = new AbortController();
+  let expired = false;
+  let last: UserbotHealth = { state: "starting", reason: "service_starting" };
+  let timer: NodeJS.Timeout | undefined;
+  let pause: NodeJS.Timeout | undefined;
+  const deadline = new Promise<UserbotHealth>((resolve) => {
+    timer = setTimeout(() => {
+      expired = true;
+      controller.abort();
+      resolve({
+        state: "unreachable",
+        reason: "readiness_timeout:" + last.reason,
+      });
+    }, timeoutMs);
+  });
+  try {
+    while (!expired) {
+      const health = await Promise.race([
+        Promise.resolve()
+          .then(() => probe(controller.signal))
+          .catch(
+            () =>
+              ({ state: "unreachable", reason: "proxy_unreachable" }) as const,
+          ),
+        deadline,
+      ]);
+      if (expired || userbotProxyReady(health)) return health;
+      last = health;
+      const waiting = new Promise<null>((resolve) => {
+        pause = setTimeout(() => resolve(null), 200);
+      });
+      const timedOut = await Promise.race([waiting, deadline]);
+      clearTimeout(pause);
+      if (timedOut) return timedOut;
+    }
+    return await deadline;
+  } finally {
+    controller.abort();
+    clearTimeout(timer);
+    clearTimeout(pause);
+  }
+}
 
 export type UserbotHealthState =
   "off" | "starting" | "unreachable" | "unauthorized" | "ready";
@@ -49,6 +102,7 @@ interface ProbeOptions {
   readonly runSystemctl?: RunSystemctl;
   readonly readToken?: ReadToken;
   readonly fetchImpl?: FetchImpl;
+  readonly signal?: AbortSignal;
 }
 
 function fixed(state: UserbotHealthState, reason: string): UserbotHealth {
@@ -150,8 +204,12 @@ export async function probeUserbotHealth({
   runSystemctl = defaultRunSystemctl,
   readToken = defaultReadToken,
   fetchImpl = globalThis.fetch,
+  signal,
 }: ProbeOptions = {}): Promise<UserbotHealth> {
   const controller = new AbortController();
+  const abort = () => controller.abort();
+  if (signal?.aborted) controller.abort();
+  else signal?.addEventListener("abort", abort, { once: true });
   let timer: NodeJS.Timeout | undefined;
   const timeout = new Promise<UserbotHealth>((resolve) => {
     timer = setTimeout(() => {
@@ -175,6 +233,7 @@ export async function probeUserbotHealth({
   try {
     return await Promise.race([probe, timeout]);
   } finally {
+    signal?.removeEventListener("abort", abort);
     clearTimeout(timer);
   }
 }

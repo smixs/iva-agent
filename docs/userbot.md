@@ -56,7 +56,11 @@ The health state is one of `off`, `starting`, `unreachable`, `unauthorized` or
 `ready`. CLI and Telegram use the same 1.5-second probe. It checks the existing
 proxy's `/healthz` route, which reads authorization from the proxy's one live
 Telethon client and never opens another session. Diagnostics expose only fixed
-state/reason values; bearer tokens and transport errors are not returned.
+state/reason values; bearer tokens and transport errors are not returned. CLI status and diagnostics also check that the version's Python interpreter can import the proxy dependencies; this import check never opens a Telegram session.
+
+Updates and `iva restart` prepare a previously running userbot before bringing it back: the same executable `uv` is used to create the version's venv and sync `requirements.lock` with hashes. A non-login PATH is supported through the installer's standard `~/.local/bin/uv` location. The proxy is stopped before dependencies change, imports are checked, and the existing authenticated health route must answer within 15 seconds. `unauthorized` means the proxy is available for QR login, not that Telegram is logged in.
+
+If preparation or readiness fails, Iva's main update remains usable and reports the reason. The userbot is stopped and disabled so a reboot cannot start the broken environment again; after resolving the reported cause, run `iva userbot setup` to retry. A previously inactive or absent userbot stays inactive or absent during update. Existing owner tokens, Telegram session and configuration are retained.
 
 For tool parameter errors, Iva's [userbot skill](../agent/skills/telegram-userbot/SKILL.md)
 instructs it to omit unused optional fields, use actual account labels from `list_accounts`

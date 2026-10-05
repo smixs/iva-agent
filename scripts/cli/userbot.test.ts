@@ -3,6 +3,7 @@ import test from "node:test";
 import { createSystemdControl } from "../lib/systemd-control.ts";
 import {
   createUserbotCommands,
+  reinstallUserbot,
   type UserbotDependencies,
   type UserbotRuntime,
 } from "./userbot.ts";
@@ -42,6 +43,7 @@ function captureResult(
 
 interface RuntimeFixtureOptions {
   readonly active?: boolean;
+  readonly uv?: string | null;
   readonly env?: Readonly<Record<string, string>>;
   readonly run?: UserbotRuntime["run"];
   readonly cap?: UserbotRuntime["cap"];
@@ -50,6 +52,7 @@ interface RuntimeFixtureOptions {
 
 function runtimeFixture({
   active = false,
+  uv = "/usr/bin/uv",
   env = {},
   run,
   cap,
@@ -66,6 +69,7 @@ function runtimeFixture({
         serviceActive = true;
       }
       if (args[0] === "restart") serviceActive = true;
+      if (args[0] === "stop") serviceActive = false;
       if (args[0] === "disable") {
         serviceEnabled = false;
         serviceActive = false;
@@ -85,6 +89,7 @@ function runtimeFixture({
   });
   const runtime: UserbotRuntime = {
     ROOT,
+    uvExecutable: () => uv,
     SVC_USERBOT: SERVICE,
     USERBOT_DIR,
     VENV_PY,
@@ -208,21 +213,21 @@ void test("ensureUserbotVenv creates, syncs, and import-checks in legacy order",
   commands.ensureUserbotVenv();
 
   assert.deepEqual(events, [
-    "cap:sh:-c command -v uv:undefined",
-    `run:uv:venv --python 3.12 .venv:${USERBOT_DIR}`,
-    `run:uv:pip sync --python ${VENV_PY} --require-hashes --strict ${REQUIREMENTS}:${USERBOT_DIR}`,
+    `run:/usr/bin/uv:venv --python 3.12 .venv:${USERBOT_DIR}`,
+    `run:/usr/bin/uv:pip sync --python ${VENV_PY} --require-hashes --strict ${REQUIREMENTS}:${USERBOT_DIR}`,
     `cap:${VENV_PY}:-c import telethon, telegram_mcp, qrcode, mcp:${USERBOT_DIR}`,
   ]);
   assert.deepEqual(files.events, [
-    `exists:${VENV_PY}`,
-    `exists:${VENV_PY}`,
     `read:${REQUIREMENTS}`,
+    `exists:${VENV_PY}`,
+    `exists:${VENV_PY}`,
   ]);
 });
 
 void test("ensureUserbotVenv preserves exact failure diagnostics", async (t) => {
   await t.test("uv missing", () => {
     const { runtime } = runtimeFixture({
+      uv: null,
       cap: () => captureResult(1),
     });
     const commands = createUserbotCommands(runtime, { writeUnits: () => [] });
@@ -373,7 +378,7 @@ void test("ensureUserbotToken is one-shot and tolerates chmod failure", () => {
   ]);
 });
 
-void test("restartUserbotIfActive is inert when inactive and preserves rollback options", () => {
+void test("restartUserbotIfActive is inert when inactive and preserves rollback options", async () => {
   const inactiveFiles = memoryFileSystem();
   const inactive = runtimeFixture({ active: false });
   const inactiveCommands = createUserbotCommands(
@@ -381,7 +386,7 @@ void test("restartUserbotIfActive is inert when inactive and preserves rollback 
     { writeUnits: () => [] },
     { fileSystem: inactiveFiles.fileSystem },
   );
-  inactiveCommands.restartUserbotIfActive();
+  await inactiveCommands.restartUserbotIfActive();
   assert.deepEqual(inactive.events, [`systemd:is-active ${SERVICE}`]);
   assert.deepEqual(inactiveFiles.events, []);
 
@@ -408,9 +413,12 @@ void test("restartUserbotIfActive is inert when inactive and preserves rollback 
   const rollbackCommands = createUserbotCommands(
     rollback.runtime,
     { writeUnits: () => [] },
-    { fileSystem: rollbackFiles.fileSystem },
+    {
+      fileSystem: rollbackFiles.fileSystem,
+      probeHealth: () => Promise.resolve({ state: "ready", reason: "ok" }),
+    },
   );
-  rollbackCommands.restartUserbotIfActive({
+  await rollbackCommands.restartUserbotIfActive({
     quiet: true,
     knownActive: true,
     requirementsPath: rollbackPath,
@@ -418,7 +426,7 @@ void test("restartUserbotIfActive is inert when inactive and preserves rollback 
   });
 
   assert.deepEqual(rollbackRuns, [
-    `uv:pip sync --python ${VENV_PY} ${rollbackPath}`,
+    `/usr/bin/uv:pip sync --python ${VENV_PY} ${rollbackPath}`,
   ]);
   assert.ok(
     rollback.events.includes(`systemd:restart ${SERVICE}`),
@@ -452,6 +460,11 @@ void test("cmdUserbot setup keeps token, venv, units, activation, and restart or
     {
       fileSystem: files.fileSystem,
       randomHex: () => "cd".repeat(24),
+      probeHealth: () =>
+        Promise.resolve({
+          state: "unauthorized",
+          reason: "telegram_login_required",
+        }),
     },
   );
 
@@ -461,10 +474,10 @@ void test("cmdUserbot setup keeps token, venv, units, activation, and restart or
     `write:${TOKEN_FILE}:${"cd".repeat(24)}`,
   );
   const dependencySync = events.findIndex((event) =>
-    event.startsWith("run:uv:pip sync"),
+    event.startsWith("run:/usr/bin/uv:pip sync"),
   );
   const units = events.indexOf("units:write");
-  const activate = events.indexOf(`systemd:enable --now ${SERVICE}`);
+  const activate = events.indexOf(`systemd:enable ${SERVICE}`);
   const restart = events.indexOf(`systemd:restart ${SERVICE}`);
   assert.ok(tokenWrite >= 0, files.events.join("\n"));
   assert.ok(dependencySync >= 0, events.join("\n"));
@@ -559,4 +572,22 @@ void test("cmdUserbot preserves credentials, health, off, and unknown-command be
     code: 1,
   });
   assert.ok(events.includes("bad:Неизвестная команда userbot: surprise"));
+});
+
+void test("recovery preserves the preparation error when keeping the userbot off also fails", async () => {
+  const { runtime } = runtimeFixture({ uv: null });
+  runtime.systemd.disableNow = () => {
+    throw new Error("disable refused");
+  };
+  const reports: string[] = [];
+  const result = await reinstallUserbot(
+    runtime,
+    { writeUnits: () => [] },
+    (message) => reports.push(message),
+    { knownActive: true },
+    { fileSystem: memoryFileSystem({ token: true }).fileSystem },
+  );
+  assert.equal(result.status, "failed");
+  assert.match(reports.join("\n"), /uv не найден/);
+  assert.match(reports.join("\n"), /disable refused/);
 });
