@@ -777,6 +777,38 @@ test("reapStaleRuns flips one stale run, resets Eve, notifies, and removes worki
   ]);
 });
 
+test("reapStaleRuns closes an abandoned compaction like a stale turn, but silently", async () => {
+  const compaction = {
+    status: "running",
+    generation: 3,
+    sessionId: "session-1",
+    compacting: true,
+  };
+  const calls: Call[] = [];
+  const deps = (updatedAt: number) =>
+    reaperDeps([{ chatKey: "1:", status: { ...compaction, updatedAt } }], {
+      setStatusIfImpl: (key, expected, patch) => {
+        calls.push(["cas", key, expected, patch]);
+        return { status: "idle" };
+      },
+      resetImpl: async (key, target) => calls.push(["reset", key, target]),
+      sendImpl: async (key, text) => calls.push(["send", key, text]),
+    });
+
+  // Срок тот же, что у хода: живую запись не трогаем.
+  assert.equal(await reapStaleRuns(deps(reaperNow - 30_000)), 0);
+  assert.equal(calls.length, 0);
+  assert.equal(await reapStaleRuns(deps(reaperNow - 31_000)), 1);
+  const patch = calls[0]?.[3] as StatusRecord;
+  assert.equal(patch.status, "idle");
+  assert.equal(patch.compacting, null);
+  // Запроса человека в пересказе не было: сессию сбрасываем, «повтори запрос» не шлём.
+  assert.deepEqual(
+    calls.map((call) => call[0]),
+    ["cas", "reset"],
+  );
+});
+
 test("reapStaleRuns leaves a fresh running record untouched", async () => {
   let sideEffects = 0;
   const reaped = await reapStaleRuns(

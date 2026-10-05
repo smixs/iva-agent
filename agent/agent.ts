@@ -9,7 +9,7 @@ import {
   makeTextModel,
 } from "./provider.js";
 import { stepUsageLabel } from "./lib/usage-tap.js";
-import { COMPACTION_THRESHOLD_PERCENT } from "./lib/compaction.js";
+import { compactionThresholdPercent } from "./lib/compaction.js";
 import { chatModelSeesImages } from "./vision.js";
 
 export default defineAgent({
@@ -43,9 +43,12 @@ export default defineAgent({
   // Окно контекста едет вместе с выбором модели выше (у динамической модели место ему
   // только там). ВАЖНО: значение ОБЯЗАНО быть ≤ реального окна модели, иначе запрос
   // переполнит окно до компактации.
-  // Защита от overflow: компактуем заранее (0.6 вместо дефолтных 0.9), оставляя запас на
-  // summary-вызов и следующий ход. eve сам саммаризирует старые ходы, сохраняя todo и read-tracking.
-  compaction: { thresholdPercent: COMPACTION_THRESHOLD_PERCENT },
+  // Страховка от overflow внутри хода: eve сам пересказывает старые ходы перед шагом модели,
+  // сохраняя todo и read-tracking. Обычный путь — свёртка между ходами на меньшем пороге
+  // (agent/lib/compaction.ts, agent/lib/idle-compaction.ts).
+  compaction: {
+    thresholdPercent: compactionThresholdPercent(cfg.contextWindow),
+  },
   // Сессия eve — durable workflow: каждый ход проигрывает весь журнал событий заново, и на
   // сутках активного чата реплей переваливает за потолок 240 с (vercel/workflow), ход
   // не стартует. Сутки от создания — штатный потолок eve: ход завершается, следующее

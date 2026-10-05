@@ -162,6 +162,7 @@ export async function finishTelegramStatus(
       status: "idle",
       sessionId: null,
       turnId: null,
+      compacting: null,
       statusMessageId: null,
       ingressId: null,
       ingressAt: null,

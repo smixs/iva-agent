@@ -143,19 +143,43 @@ function writeRunStatusAtomicSync(path: string, value: unknown): void {
   }
 }
 
-/** Make only interrupted runs immediately reapable after an update clears sessions. */
-export function rewriteRunStatusesForUpdate(dataDir: string): number {
+function nextGeneration(value: unknown): number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+    ? value + 1
+    : 1;
+}
+
+/**
+ * Make only interrupted runs immediately reapable after an update clears sessions.
+ * `retired` — the workflow store is gone for good (startup recovery): an interrupted
+ * compaction is then simply free. An update keeps the mark instead: a rollback restores
+ * the store, and the restarted writers must still see the interrupted session.
+ */
+export function rewriteRunStatusesForUpdate(
+  dataDir: string,
+  retired = false,
+): number {
   let rewritten = 0;
   for (const file of interruptedRunStatusFiles(dataDir)) {
     try {
       const parsed: unknown = JSON.parse(readFileSync(file, "utf8"));
       // A turn Bridge finished since the scan must not be re-armed.
       if (!isInterruptedRun(parsed)) continue;
-      writeRunStatusAtomicSync(file, {
-        ...parsed,
-        status: "running",
-        updatedAt: 0,
-      });
+      // An interrupted compaction between turns carried no request from the owner: once
+      // its session is retired the record is simply free again, with a reset tombstone.
+      // Bridge has nothing to close and nothing to tell.
+      const stamp = Date.now();
+      writeRunStatusAtomicSync(
+        file,
+        retired && parsed.compacting === true
+          ? {
+              status: "idle",
+              generation: nextGeneration(parsed.generation),
+              updatedAt: stamp,
+              resetAt: stamp,
+            }
+          : { ...parsed, status: "running", updatedAt: 0 },
+      );
       rewritten++;
     } catch (error) {
       // One damaged chat record must not block the update or its healthy neighbors;
@@ -195,7 +219,7 @@ export function recoverInterruptedSessionState(
     }
     throw error;
   }
-  rewriteRunStatusesForUpdate(dataDir);
+  rewriteRunStatusesForUpdate(dataDir, true);
   return { interrupted, quarantined: moved.map(({ trash }) => trash) };
 }
 

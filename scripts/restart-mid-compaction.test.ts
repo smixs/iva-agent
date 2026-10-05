@@ -1,7 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
-import { existsSync } from "node:fs";
 import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -25,13 +24,16 @@ import {
 } from "./fixtures/restart-app.ts";
 
 void test(
-  "startup retires a killed mid-turn session and drains its queued message",
+  "startup retires a session killed mid-compaction, stays silent, and drains its queued message",
   {
     timeout: 180_000,
   },
   async (t) => {
-    const sandbox = await mkdtemp(join(tmpdir(), "iva-restart-mid-turn-"));
-    const provider = await startProvider();
+    const sandbox = await mkdtemp(
+      join(tmpdir(), "iva-restart-mid-compaction-"),
+    );
+    // Ход отвечает сразу, а пересказ между ходами замирает в провайдере до перезапуска.
+    const provider = await startProvider("CONTEXT CHECKPOINT COMPACTION");
     let eve: EveProcess | null = null;
     t.after(async () => {
       await stopEve(eve);
@@ -67,23 +69,47 @@ void test(
       env,
       () => {},
     );
+    const replyFile = join(app, "data/restart-hang-replies.jsonl");
+    const replies = async (count: number, what: string) => {
+      const deadline = Date.now() + 30_000;
+      for (;;) {
+        const lines = (await readFile(replyFile, "utf8").catch(() => ""))
+          .split("\n")
+          .filter(Boolean);
+        if (lines.length >= count) return;
+        if (Date.now() >= deadline) assert.fail(what);
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+    };
 
     eve = startEve(app, env, port, () => {});
     await waitForHealth(port, eve);
-    // The owner's next message goes to the interrupted session itself: without
-    // recovery its inbox lock survives the kill and the next turn never starts.
+    // Канал на парковке сессии занимает чат и ждёт ответа роута свёртки внутри обработчика
+    // (scripts/fixtures/restart-hang-channel.ts делает это теми же модулями, что канал Telegram).
+    await writeFile(join(app, "data/compact-on-waiting"), "");
     const started = await post(port, bearer, "/restart-hang/send", {
       address: "1::",
-      message: "BLOCK_UNTIL_RESTART",
+      message: "remember the word aubergine",
     });
     assert.equal(started.status, 200);
     const { sessionId } = (await started.json()) as { sessionId: string };
+    await replies(1, "the first turn did not complete");
+
+    // Запрос пересказа дошёл до провайдера: eve приняла просьбу, пока обработчик её ждал, и
+    // ручной compact нашёл модель шага (хунк patches/eve).
     await provider.blocked;
-    status.setChatStatus("1:", {
-      status: "running",
-      sessionId,
-      turnId: "turn-before-restart",
-    });
+    const asked = JSON.parse(
+      (await readFile(join(app, "data/restart-hang-compact.jsonl"), "utf8"))
+        .trim()
+        .split("\n")[0] ?? "{}",
+    ) as { outcome?: string; ms?: number };
+    assert.equal(asked.outcome, "true", "eve приняла просьбу");
+    assert.ok(
+      typeof asked.ms === "number" && asked.ms < 3_000,
+      `ожидание ответа внутри обработчика парковки не виснет: ${String(asked.ms)} мс`,
+    );
+    assert.equal(status.getChatStatus("1:")?.sessionId, sessionId);
+    assert.equal(status.getChatStatus("1:")?.compacting, true);
     await queue.enqueueTelegramQueueUpdate("1:", {
       update_id: 2,
       message: {
@@ -96,13 +122,19 @@ void test(
     });
 
     await killEve(eve);
-    const recovery = join(app, "scripts/recover-interrupted-turns.ts");
-    if (existsSync(recovery)) {
-      await runNode([recovery], app, env, () => {});
-    }
+    await runNode(
+      [join(app, "scripts/recover-interrupted-turns.ts")],
+      app,
+      env,
+      () => {},
+    );
     eve = startEve(app, env, port, () => {});
     await waitForHealth(port, eve);
 
+    // Восстановление само освободило запись пересказа: мосту нечего закрывать и не о чем
+    // сообщать — запроса человека в пересказе не было.
+    assert.equal(status.getChatStatus("1:")?.status, "idle");
+    assert.equal(status.getChatStatus("1:")?.compacting, undefined);
     const notices: string[] = [];
     assert.equal(
       await queue.reapStaleRuns({
@@ -113,13 +145,9 @@ void test(
         deleteMessageImpl: () => Promise.resolve(),
         logImpl: () => {},
       }),
-      1,
+      0,
     );
-    assert.equal(notices.length, 1);
-    assert.match(
-      notices[0],
-      /Предыдущий ход оборвался|previous turn was interrupted/iu,
-    );
+    assert.deepEqual(notices, []);
     assert.equal(
       (await queue.loadQueue({ strict: true })).queues["1:"]?.length,
       1,
@@ -137,14 +165,7 @@ void test(
       inFlight: new Map(),
     });
     assert.equal(remaining, 0);
-    const replyFile = join(app, "data/restart-hang-replies.jsonl");
-    const deadline = Date.now() + 30_000;
-    for (;;) {
-      const lines = await readFile(replyFile, "utf8").catch(() => "");
-      if (lines.includes("RECOVERED")) break;
-      if (Date.now() >= deadline) assert.fail("next message did not complete");
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
+    await replies(2, "the queued message did not complete after restart");
 
     const reset = await post(port, bearer, "/eve/v1/telegram/reset", {
       address: { chatId: "1" },

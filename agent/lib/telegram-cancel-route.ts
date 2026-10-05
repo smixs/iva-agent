@@ -11,10 +11,18 @@ export const TELEGRAM_CANCEL_ROUTE = "/eve/v1/telegram/cancel";
  * (`scripts/poller/config.test.ts`), как и остальные общие константы шва.
  */
 export function localCancelUrl(env: NodeJS.ProcessEnv = process.env): string {
+  return localChannelUrl(TELEGRAM_CANCEL_ROUTE, env);
+}
+
+/** Адрес собственного роута канала по тому же правилу хоста (cancel, compact). */
+export function localChannelUrl(
+  route: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
   const host = (
     env.ASSISTANT_HOST ?? `http://127.0.0.1:${env.IVA_PORT ?? "8723"}`
   ).replace(/\/$/, "");
-  return `${host}${TELEGRAM_CANCEL_ROUTE}`;
+  return `${host}${route}`;
 }
 
 /**

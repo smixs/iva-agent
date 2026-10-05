@@ -53,6 +53,20 @@ import {
   TELEGRAM_CANCEL_ROUTE,
 } from "../lib/telegram-cancel-route.js";
 import { handleTelegramStopCallback } from "../lib/telegram-stop.js";
+// Свёртка между ходами: история пересказывается, пока человек ничего не ждёт, а чат на
+// это время занят записью running + compacting (agent/lib/idle-compaction.ts).
+import {
+  localSessionCompactUrl,
+  requestSessionCompact,
+} from "../lib/eve-compact.js";
+import {
+  closeIdleCompactionTurn,
+  dropIdleCompactionTurn,
+  endIdleCompaction,
+  openIdleCompactionTurn,
+  startIdleCompaction,
+} from "../lib/idle-compaction.js";
+import { providerConfig } from "../provider.js";
 import {
   handleAcceptedTelegramWebhook,
   TELEGRAM_ACCEPTANCE_ROUTE,
@@ -60,11 +74,13 @@ import {
 } from "../lib/telegram-acceptance.js";
 import {
   abandonTelegramEarlyStatus,
+  chatTakeOverPatch,
   emitTelegramTurnLatency,
   markTelegramFirstOutput,
   markTelegramTurnAlive,
   publishTelegramEarlyStatus,
   publishTelegramTurnStarted,
+  takeOverTelegramChat,
 } from "../lib/telegram-turn-start.js";
 
 // Токен (TELEGRAM_BOT_TOKEN) и секрет вебхука (TELEGRAM_WEBHOOK_SECRET_TOKEN)
@@ -190,6 +206,45 @@ function keepTurnAlive(
   });
 }
 
+let bearerMissingLogged = false;
+
+// Занять свободный чат под пересказ между ходами — тем же захватом, что ход и напоминание.
+// Живой чужой ход (успело прийти сообщение) и сброшенную сессию (/new оставляет resetAt) не
+// трогаем: пересказа не будет. Без общего токена eve откажет: чат не занимаем, а причину
+// один раз пишем в журнал.
+async function claimChatForCompaction(
+  chatKey: string,
+  sessionId: string,
+  bearer: string | undefined,
+): Promise<boolean> {
+  if (!bearer) {
+    if (!bearerMissingLogged)
+      console.error(
+        "[telegram] свёртка между ходами выключена: нет ASSISTANT_BEARER — run: iva doctor",
+      );
+    bearerMissingLogged = true;
+    return false;
+  }
+  return takeOverTelegramChat({
+    chatKey,
+    patch: chatTakeOverPatch({ sessionId, compacting: true }),
+    staleMs: RUN_STALE_MS,
+    getStatusImpl: getChatStatus,
+    setStatusIfImpl: setChatStatusIf,
+    refuseImpl: (status) => status?.resetAt !== undefined,
+    onWorkingStatusError: (error) =>
+      console.error("[telegram] чат под свёртку между ходами не занят:", error),
+  });
+}
+
+// Освободить чат после отказа eve: только свою запись пересказа, не запись начавшегося хода.
+const releaseCompactionClaim = (chatKey: string, sessionId: string) =>
+  setChatStatusIf(
+    chatKey,
+    { sessionId, compacting: true },
+    { status: "idle", sessionId: null, compacting: null },
+  );
+
 const telegram = telegramChannel({
   botUsername: process.env.TELEGRAM_BOT_USERNAME ?? "my_bot",
   // Картинку/файл НЕ суём в запрос к модели (это и ломалось: octet-stream → reject, потом
@@ -242,6 +297,7 @@ const telegram = telegramChannel({
     // FIFO-мост не должен успеть принять следующую голову, пока Bot API отвечает.
     async "turn.started"(data, channel, ctx) {
       const tg = channel.telegram;
+      openIdleCompactionTurn(ctx.session.id);
       await publishTelegramTurnStarted({
         chatKey: chatKeyOf(tg.chatId, tg.messageThreadId),
         sessionId: ctx.session.id,
@@ -260,17 +316,64 @@ const telegram = telegramChannel({
           console.error("[telegram] статус-сообщение не отправилось:", error),
       });
     },
+    // Решение о свёртке от уборки статуса не зависит: её сбой не отменяет пересказ.
     async "turn.completed"(_data, channel, ctx) {
-      await finishTelegramStatus(channel, ctx.session.id, "completed");
+      try {
+        await finishTelegramStatus(channel, ctx.session.id, "completed");
+      } finally {
+        closeIdleCompactionTurn(ctx.session.id, providerConfig.contextWindow);
+      }
     },
+    // Отмена во время пересказа между ходами (/stop) — не отмена хода: чат просто свободен,
+    // отметки «ход отменён» следующему сообщению не оставляем.
     async "turn.cancelled"(_data, channel, ctx) {
-      await finishTelegramStatus(channel, ctx.session.id, "cancelled");
+      const tg = channel.telegram;
+      const status = getChatStatus(chatKeyOf(tg.chatId, tg.messageThreadId));
+      const compacting =
+        status?.status === "running" && status.compacting === true;
+      try {
+        await finishTelegramStatus(
+          channel,
+          ctx.session.id,
+          compacting ? "completed" : "cancelled",
+        );
+      } finally {
+        dropIdleCompactionTurn(ctx.session.id);
+      }
     },
-    // Страховка: если терминальное turn-событие потерялось (краш), парковка сессии
-    // снимает busy-флаг И удаляет осиротевший «Работаю…» — та же уборка, что у
-    // turn.completed. После обычного финала CAS по sessionId не совпадает — no-op.
+    // Парковка сессии. После хода: если он дошёл до порога, занять чат и попросить eve
+    // пересказать историю (agent/lib/idle-compaction.ts). После пересказа — успеха, сбоя или
+    // обрыва — eve паркует сессию снова, и та же уборка освобождает чат.
+    // Она же страховка: если терминальное turn-событие потерялось (краш), парковка снимает
+    // busy-флаг и удаляет осиротевший «Работаю…». После обычного финала CAS по sessionId
+    // не совпадает — no-op.
     async "session.waiting"(_data, channel, ctx) {
-      await finishTelegramStatus(channel, ctx.session.id, "completed");
+      const sessionId = ctx.session.id;
+      const chatKey = chatKeyOf(
+        channel.telegram.chatId,
+        channel.telegram.messageThreadId,
+      );
+      const bearer = process.env.ASSISTANT_BEARER?.trim();
+      try {
+        const parked = getChatStatus(chatKey);
+        // Парковка застала запись пересказа этой сессии: он кончился.
+        if (parked?.sessionId === sessionId && parked.compacting === true)
+          endIdleCompaction(sessionId);
+        await finishTelegramStatus(channel, sessionId, "completed");
+      } finally {
+        // Ждём ответа eve: она ждёт этот обработчик, поэтому просьба встаёт в её очередь
+        // раньше, чем она возьмёт следующее сообщение, и пересказ идёт под записью.
+        await startIdleCompaction({
+          sessionId,
+          claimImpl: () => claimChatForCompaction(chatKey, sessionId, bearer),
+          requestImpl: (id) =>
+            requestSessionCompact({
+              url: localSessionCompactUrl(id),
+              bearer: bearer ?? "",
+            }),
+          releaseImpl: () => releaseCompactionClaim(chatKey, sessionId),
+        });
+      }
     },
     "message.appended"(_data, channel, ctx) {
       markTelegramFirstOutput({
@@ -343,6 +446,7 @@ const telegram = telegramChannel({
     // Ход упал: статус прибираем по CAS, но сообщение об ошибке от него не гейтим —
     // позднее terminal-событие всё равно должно объяснить пользователю, что произошло.
     async "turn.failed"(data, channel, ctx) {
+      dropIdleCompactionTurn(ctx.session.id);
       try {
         await finishTelegramStatus(channel, ctx.session.id, "failed");
       } catch {

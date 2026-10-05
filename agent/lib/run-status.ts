@@ -270,12 +270,18 @@ export function updateTelegramPendingInputRequests(
   return false;
 }
 
-// true, когда по chatKey реально идёт ход (running и не протух).
+// true, когда по chatKey реально идёт ход или свёртка между ходами (running и не протух).
 export function isRunning(chatKey: string, now = Date.now()): boolean {
   const st = getChatStatus(chatKey);
   return Boolean(
     st && st.status === "running" && now - (st.updatedAt ?? 0) < RUN_STALE_MS,
   );
+}
+
+// true, когда чат занят свёрткой между ходами (agent/lib/idle-compaction.ts): запись
+// running несёт compacting: true. Срок у неё тот же, что у хода.
+export function isCompacting(chatKey: string, now = Date.now()): boolean {
+  return isRunning(chatKey, now) && getChatStatus(chatKey)?.compacting === true;
 }
 
 function updateChatStatus(

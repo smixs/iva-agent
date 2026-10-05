@@ -1,9 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fc from "fast-check";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { appendUsage, subagentTurnId } from "#lib/usage.ts";
+import { appendUsage, stepInputTokens, subagentTurnId } from "#lib/usage.ts";
 import {
   formatUsageReport,
   parseWindow,
@@ -454,4 +455,24 @@ void test("a fallback key still groups into the parent turn and keeps context cl
   assert.equal(last.in, 105_537);
   assert.equal(last.steps, 2);
   assert.equal(last.contextFromSubagent, false);
+});
+
+void test("the step input that decides compaction between turns ignores garbage: only a positive safe integer counts", () => {
+  fc.assert(
+    fc.property(fc.anything(), (inputTokens) => {
+      const counted =
+        typeof inputTokens === "number" &&
+        Number.isSafeInteger(inputTokens) &&
+        inputTokens > 0;
+      assert.equal(
+        stepInputTokens({ inputTokens }),
+        counted ? inputTokens : null,
+      );
+    }),
+  );
+  for (const inputTokens of [0, -1, 1.5, "300000", 1e308, Number.NaN])
+    assert.equal(stepInputTokens({ inputTokens }), null);
+  assert.equal(stepInputTokens(undefined), null);
+  assert.equal(stepInputTokens({}), null);
+  assert.equal(stepInputTokens({ inputTokens: 56_000 }), 56_000);
 });

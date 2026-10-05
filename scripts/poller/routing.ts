@@ -14,6 +14,7 @@ import type {
 } from "../lib/telegram-queue.ts";
 import {
   getChatStatus,
+  isCompacting,
   isRunning,
   RUN_STALE_MS,
   setChatStatusIf,
@@ -235,6 +236,7 @@ export async function routeMessageUpdate(
     botUsername = BOT_USERNAME,
     logImpl = log,
     resetPendingImpl = hasPrivateResetIntent,
+    compactingImpl = isCompacting,
   }: {
     chatKeyImpl?: (update: TelegramQueueUpdate) => string | null;
     loadQueueImpl?: () => MaybePromise<TelegramQueueDocument>;
@@ -275,16 +277,19 @@ export async function routeMessageUpdate(
     botUsername?: unknown;
     logImpl?: (...parts: unknown[]) => void;
     resetPendingImpl?: (chatKey: string) => boolean;
+    compactingImpl?: (chatKey: string) => boolean;
   } = {},
 ): Promise<RouteMessageResult> {
   const key = chatKeyImpl(update);
   const turnPolicy = turnPolicyImpl();
   // Remove this fence when vercel/eve#2876 is fixed in the installed eve.
   const resetPending = key !== null && resetPendingImpl(key);
+  // Ответ на сообщение бота идёт мимо очереди. Пока чат занят свёрткой между ходами, и он
+  // встаёт в очередь: вход сессии eve не переживает перезапуск посреди свёртки.
   if (
     update.message &&
     key !== null &&
-    (resetPending || !replyToBotImpl(update.message))
+    (resetPending || !replyToBotImpl(update.message) || compactingImpl(key))
   ) {
     const queue = await loadQueueImpl();
     const mustQueue =
