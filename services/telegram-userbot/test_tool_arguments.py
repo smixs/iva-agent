@@ -1,5 +1,7 @@
 import asyncio
 import json
+import os
+import random
 import unittest
 
 import httpx
@@ -7,6 +9,12 @@ from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 
 from serve import NormalizeToolArgumentsMiddleware, _normalize_tool_arguments
+
+
+def _call_arguments(arguments):
+    """Normalize a tools/call request and return the arguments that reach the tool."""
+    body = json.dumps({"method": "tools/call", "params": {"name": "t", "arguments": arguments}})
+    return json.loads(_normalize_tool_arguments(body.encode()))["params"]["arguments"]
 
 
 class NormalizeToolArgumentsTest(unittest.TestCase):
@@ -44,6 +52,42 @@ class NormalizeToolArgumentsTest(unittest.TestCase):
 
         self.assertEqual(_normalize_tool_arguments(initialize), initialize)
         self.assertEqual(_normalize_tool_arguments(b"not json"), b"not json")
+
+    def test_drops_account_and_literal_null_strings(self):
+        """One session owns this proxy: an invented account or a "null" string never reaches it."""
+        normalized = _call_arguments(
+            {"chat_id": "@example", "account": "main", "search_query": "null", "to_date": '"null"'}
+        )
+
+        self.assertEqual(normalized, {"chat_id": "@example"})
+
+    def test_rewrites_public_tme_links_to_usernames(self):
+        """Upstream accepts ids and usernames only; a pasted channel link becomes @name."""
+        cases = {
+            "https://t.me/soldat_udachi": "@soldat_udachi",
+            "t.me/dyadyaslava/123": "@dyadyaslava",
+            "http://telegram.me/example_channel/?single": "@example_channel",
+            "https://t.me/+AbCdEf123": "https://t.me/+AbCdEf123",
+            "https://t.me/c/1234567/89": "https://t.me/c/1234567/89",
+        }
+        for link, expected in cases.items():
+            with self.subTest(link=link):
+                self.assertEqual(_call_arguments({"chat_id": link}), {"chat_id": expected})
+
+    def test_random_arguments_keep_every_real_value(self):
+        """Property: only nulls and account vanish; non-link values pass through unchanged."""
+        seed = int(os.environ.get("SEED", random.randrange(2**32)))
+        rng = random.Random(seed)
+        pool = [None, "null", '"null"', "", "main", "@user_name", 0, -1001234567890, True, [1, 2], {"a": None}]
+        for _ in range(500):
+            keys = rng.sample(["chat_id", "limit", "search_query", "from_date", "account", "x"], rng.randint(0, 6))
+            arguments = {key: rng.choice(pool) for key in keys}
+            expected = {
+                key: value
+                for key, value in arguments.items()
+                if key != "account" and value not in (None, "null", '"null"')
+            }
+            self.assertEqual(_call_arguments(arguments), expected, f"SEED={seed} {arguments!r}")
 
     def test_asgi_middleware_reaches_a_real_fastmcp_tool(self):
         """Deliver a null optional argument to FastMCP as an omitted argument."""

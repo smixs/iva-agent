@@ -29,6 +29,7 @@ Env:
 """
 import json
 import os
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -60,11 +61,31 @@ def _normalize_tool_arguments(body: bytes) -> bytes:
     if not isinstance(params, dict) or not isinstance(params.get("arguments"), dict):
         return body
     arguments = params["arguments"]
-    normalized = {key: value for key, value in arguments.items() if value is not None}
-    if len(normalized) == len(arguments):
+    # This proxy owns exactly one session, so an `account` the model invents
+    # ("main", "\"null\"") only makes upstream fail with "Unknown account". A literal
+    # "null" string is a model working around null rejection, not a real value.
+    normalized = {
+        key: _tme_to_username(value)
+        for key, value in arguments.items()
+        if value not in _NULLS and key != "account"
+    }
+    if normalized == arguments:
         return body
     request = {**request, "params": {**params, "arguments": normalized}}
     return json.dumps(request, separators=(",", ":")).encode()
+
+
+_NULLS = (None, "null", '"null"')
+_TME_LINK = re.compile(r"^(?:https?://)?(?:t|telegram)\.me/@?([A-Za-z0-9_]{5,})/?(?:\d+/?)?(?:\?.*)?$")
+
+
+def _tme_to_username(value):
+    """Turn a public t.me/<name> link into @name; upstream only accepts ids/usernames."""
+    if isinstance(value, str):
+        match = _TME_LINK.match(value.strip())
+        if match:
+            return "@" + match.group(1)
+    return value
 
 
 class NormalizeToolArgumentsMiddleware:
