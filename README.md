@@ -171,7 +171,19 @@ Default model is deepseek-v4-pro, 131k context. On Go it runs about $14–15/mo 
 ## What's New
 
 <details>
-<summary><b>v0.4.11 · 03.10.2026 — expand the latest releases</b></summary>
+<summary><b>v0.4.12 · 05.10.2026 — expand the latest releases</b></summary>
+
+### 05.10.2026
+
+#### v0.4.12
+
+- 👀 **Iva tells you what you missed**: once an hour code checks unread private chats, mentions in Telegram and Gmail without newsletters; the model wakes only for something new and sends one message per item with buttons «To tasks», «Remind later», «Mute this one». Quiet hours at night, at most 5 messages a day, one toggle «Writes on her own» in `/menu` → Notices.
+- ☀️ **The Brief replaces the morning digest**: at 08:30 and 14:00 Iva sends an overview of tasks, calendar, mail, Telegram, connections and plugins. Change the time with a phrase («brief at 9»); `/digest` returns the same overview.
+- 🚨 **Failed jobs reach you with the cause and a Fix button**: user timers and plugin services are checked hourly; Iva's own failed jobs are explained instead of silently self-fixed and come first in the morning Brief. `iva signal <source> <text>` lets any local script hand Iva a message.
+- 🧩 **Iva writes her own plugins**: say «make a plugin that…». A plugin of skills and scripts she installs herself; one with code or MCP she only proposes, and it is installed after you tap Install in a private chat.
+- 🗜 **A long conversation is compacted between turns, not in the middle of an answer**: after a turn that reached 60% of the model window or 275k tokens, Iva compacts the conversation while nobody waits. A message sent meanwhile gets «Compacting the conversation, I'll answer in a moment.» and its answer right after.
+- 🧹 **Iva no longer asks you to press /new**: the «context window is N% full» line is gone; `/new` works as before.
+- 🎬 **Video, audio and files are handled by Iva herself, and she sees an image on disk**: the model gets facts about an attachment instead of orders not to touch it, and `read_file` on an image returns its description from the vision model.
 
 ### 03.10.2026
 
@@ -197,20 +209,6 @@ Default model is deepseek-v4-pro, 131k context. On Go it runs about $14–15/mo 
 - ♻️ **A restart mid-reply no longer blocks the next messages**: on the next start Iva moves the interrupted workflow state to quarantine, Bridge closes the broken turn with one line and drains the saved queue, and `/new` answers without `iva reset`. A second start in a row leaves the workflow state alone, and a failed recovery is one journal line that does not keep Iva down.
 - 🔎 **File search no longer hangs the turn**: one `grep` or `glob` call stops after 20 seconds, 20 000 files or when the turn is stopped, and returns what it found with a hint to narrow the path. `node_modules`, `.git` and `*.trash-*` quarantines are skipped.
 - 🧠 **Sonnet 5.5 takes the place of Sonnet 5 on Claude**: the model screen and setup offer Fable 5.1, Opus 5.5 and Sonnet 5.5 and write `claude-sonnet-5-5` to `.env`. A Claude Code that does not know Sonnet 5.5 yet keeps Sonnet 5 on the same button, and `claude-sonnet-5` in `.env` still works. The OpenRouter list offers `anthropic/claude-sonnet-5.5`.
-
-### 28.09.2026
-
-#### v0.4.9
-
-- 🌙 **Nightly memory now runs as four code-driven steps**: short structured requests turn the day into Cards, links, CORE and summaries, while code writes the files. The format reaches every supported provider, facts require exact quotes from the owner, and a concurrent human edit is preserved.
-- 💾 **Claude conversations use the prompt cache again**: each request pins the cache breakpoint to a stable conversation prefix instead of the changing tail, so later requests reuse the context already sent.
-- 🧪 **Releases live in main and beta updates follow the beta branch**: `iva beta` opts in, `iva stable` returns to releases, and updates never move an installation backwards.
-- 🃏 **Cards stay writable after the day, night and merge**: a new Compiled Truth cannot replace Card structure with headings or an open code fence, successful nightly writes clear `truth_pending`, and repeated facts and multiline Card content survive merge.
-- 🧹 **Iva suggests `/new` when a conversation fills its context**: a quiet hint appears once at 50, 75 and 90 percent in a private Telegram chat, resets after compaction and stays out of groups and background turns.
-- 🚑 **Tool schemas work on every provider again**: `write_card` sends one flat object schema for all operations, validates the selected operation itself and tells the model what to correct. A guard checks every tool exactly as eve serializes it.
-- 🔒 **A long Card edit keeps its file lock**: a live holder refreshes the lock while it works, the lock of a crashed holder can still be taken after it becomes stale, and a separate ten-minute fuse prevents a stuck section from holding the lock forever.
-- 🧠 **Nightly Brain reaches the private vault backup again**: the derived link graph is no longer committed, and a missing remote is created or attached only after GitHub confirms that the repository is private.
-- 🔁 **Three observed failures pause that day for the owner**: the catch-up stops retrying it, reports the last cause once and waits for `iva jobs skip memory-daily <date>` before moving on.
 
 </details>
 
