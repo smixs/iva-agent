@@ -25,7 +25,8 @@ async def main():
     calls = []
 
     def account_lookup(account):
-        if account.lower() != "default":
+        # Upstream get_client with one session: None is that session.
+        if account is not None and account.lower() != "default":
             raise ValueError(f"Unknown account '{account}'. Available accounts: default")
 
     @mcp.tool()

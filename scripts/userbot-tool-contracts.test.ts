@@ -59,7 +59,7 @@ async function server(t: TestContext, json = false) {
   const client = new Client({ name: "iva-contract-test", version: "1" });
   await client.connect(new StreamableHTTPClientTransport(new URL(url)));
   t.after(() => client.close());
-  return client;
+  return { client, url };
 }
 
 function value(result: Awaited<ReturnType<Client["callTool"]>>): unknown {
@@ -76,7 +76,7 @@ for (const json of [false, true]) {
     `userbot optional None defaults cross Eve/AI and ${json ? "JSON" : "SSE"} MCP without type relaxation (seed 271)`,
     { skip: !existsSync(python) },
     async (t) => {
-      const client = await server(t, json);
+      const { client, url } = await server(t, json);
       const definitions = (await client.listTools()).tools;
       const list = definitions.find((tool) => tool.name === "list_messages");
       const probe = definitions.find((tool) => tool.name === "probe");
@@ -170,29 +170,61 @@ for (const json of [false, true]) {
         value(await client.callTool({ name: "inspect_calls", arguments: {} })),
         before,
       );
-      const badAccount = await schema.validate!({
-        chat_id: "@example",
-        account: "main",
+      // A body that is not JSON never reaches a tool: FastMCP answers it, the server keeps serving.
+      const garbage = await fetch(url, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          accept: "application/json, text/event-stream",
+        },
+        body: "not json",
       });
-      assert.equal(badAccount.success, true);
-      const rejected = await client.callTool({
-        name: "list_messages",
-        arguments: badAccount.value as Record<string, unknown>,
-      });
-      assert.equal(rejected.isError, true);
-      assert.ok("content" in rejected);
-      assert.match(
-        JSON.stringify(rejected.content),
-        /Unknown account 'main'. Available accounts: default/u,
-      );
-      assert.doesNotMatch(
-        JSON.stringify(rejected.content),
-        /Traceback|api_hash|GEN-ERR/u,
-      );
+      assert.equal(garbage.status, 400);
+      assert.match(await garbage.text(), /Parse error/u);
       assert.equal(
         value(await client.callTool({ name: "inspect_calls", arguments: {} })),
         before,
       );
+      // One session (issues 248, 281): an invented account and "null" text arrive as
+      // omitted, a public t.me link in chat_id as @name; other text keeps its link.
+      for (const [raw, expected] of [
+        [
+          { chat_id: "@example", account: "main" },
+          { chat_id: "@example", search_query: null, account: null },
+        ],
+        [
+          {
+            chat_id: "https://t.me/example_news/42",
+            search_query: "null",
+            account: '"null"',
+          },
+          { chat_id: "@example_news", search_query: null, account: null },
+        ],
+        [
+          {
+            chat_id: "t.me/x/123",
+            search_query: "https://t.me/example_news",
+          },
+          {
+            chat_id: "t.me/x/123",
+            search_query: "https://t.me/example_news",
+            account: null,
+          },
+        ],
+      ] as const) {
+        const validation = await schema.validate!(raw);
+        assert.equal(validation.success, true);
+        const response = await client.callTool({
+          name: "list_messages",
+          arguments: validation.value as Record<string, unknown>,
+        });
+        assert.notEqual(response.isError, true, JSON.stringify(response));
+        const { chat_id, search_query, account } = value(response) as Record<
+          string,
+          unknown
+        >;
+        assert.deepEqual({ chat_id, search_query, account }, expected);
+      }
       const valid = await client.callTool({
         name: "list_messages",
         arguments: { chat_id: "@example", account: "DEFAULT" },

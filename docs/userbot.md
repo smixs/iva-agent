@@ -71,8 +71,13 @@ after upgrading, restart the proxy (`iva userbot setup`) and Iva (`iva restart`)
 
 For parameter errors, Iva's [userbot skill](../agent/skills/telegram-userbot/SKILL.md)
 instructs it to use the tool's schema, omit unused optional fields, and pass JSON
-booleans rather than strings. An explicit unknown account now returns a tool error
-with the available account labels before Telegram MCP masks it as `GEN-ERR`.
+booleans rather than strings. The proxy also forgives three known slips: the text
+`"null"` in an optional field counts as an omitted field, an account label the model
+made up (`"main"`) goes to the one connected account, and a public `t.me/<name>` link
+in a chat or user id field becomes `@name`. Message text and search queries keep their
+links; invite and `t.me/c/` links are passed on unchanged.
+With several accounts, an unknown account returns a tool error with the available
+labels before Telegram MCP masks it as `GEN-ERR`.
 Use `list_accounts` for actual labels. Omitted accounts keep the upstream single-account
 selection and read-only multi-account fanout. Other generic upstream `GEN-ERR` replies
 can still hide their cause; account discovery and health diagnostics help narrow it down.
