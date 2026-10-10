@@ -57,6 +57,8 @@ import type { PluginFailure } from "./lib/plugin-build.ts";
 import { tryLoadPluginCore } from "./lib/plugin-core.ts";
 import { pluginUnitNames, runningPluginUnits } from "./lib/plugin-units.ts";
 import type { createCliRuntime } from "./cli/runtime.ts";
+import type { createCliSystemd } from "./cli/systemd.ts";
+import type { reinstallUserbot } from "./cli/userbot.ts";
 
 type Say = (message: string) => void;
 type CliRuntime = ReturnType<typeof createCliRuntime>;
@@ -860,6 +862,73 @@ export async function restartPluginUnits(
 }
 
 /**
+ * The flip's restart: the version `current` now names starts its services, and every
+ * optional writer quiesce stopped is handed back as it was found - except a userbot that
+ * was running. That one comes back only when its environment was rebuilt and its proxy
+ * answered; a failed recovery, or a restart that threw before recovery ran, leaves it
+ * stopped and disabled, so systemd cannot loop it on a broken environment (#273).
+ */
+export async function startCandidateServices(
+  runtime: CliRuntime,
+  services: Pick<
+    ReturnType<typeof createCliSystemd>,
+    "restartServices" | "retireDeferredBrainUnits" | "writeUnits"
+  >,
+  {
+    states,
+    dataDir,
+    log,
+    notify,
+    migration,
+    reinstall,
+  }: {
+    readonly states: readonly OptionalWriterState[] | undefined;
+    readonly dataDir: string;
+    readonly log: Say;
+    readonly notify: Say;
+    /** Shared with the rollback: it must know whether units were rewritten. */
+    readonly migration: { started: boolean };
+    readonly reinstall: typeof reinstallUserbot;
+  },
+): Promise<void> {
+  const capturedUserbot = states?.find(
+    (state) => state.unit === runtime.SVC_USERBOT,
+  );
+  let userbotReady = capturedUserbot?.active !== true;
+  try {
+    services.restartServices({
+      afterUnitWrite: () => {
+        migration.started = true;
+      },
+      ...(capturedUserbot?.loadState === "not-found"
+        ? { skipUnits: [runtime.SVC_USERBOT] }
+        : {}),
+      deferBrainMigration: true,
+      deferMemoryMigration: true,
+    });
+    runtime.systemd.activate([runtime.UPDATE_TIMER]);
+    // The code of every plugin proxy is in the version this flip just made
+    // current; nothing else brings them onto it.
+    await restartPluginUnits(runtime, dataDir, log);
+    if (capturedUserbot?.active === true) {
+      const recovery = await reinstall(runtime, services, notify, {
+        knownActive: true,
+      });
+      userbotReady = recovery.status === "ready";
+    }
+  } finally {
+    if (states) {
+      restoreWriterOwnership(runtime, states, {
+        unitMigrationStarted: migration.started,
+        legacyMemoryOwnerProven: false,
+        userbotReady,
+      });
+      if (migration.started) services.retireDeferredBrainUnits();
+    }
+  }
+}
+
+/**
  * The second half of an update, run by the version being installed: install,
  * build, probe, flip, migrate, restart and retire the old checkout all belong to
  * the new code, so a fix to any of them ships in the release carrying it.
@@ -899,7 +968,7 @@ export async function main(argv: readonly string[]): Promise<number> {
   const log: Say = (message) => console.log(`  ${message}`);
   const notify: Say = (message) => console.log(`! ${message}`);
   let optionalWriterState: OptionalWriterState[] | undefined;
-  let unitMigrationStarted = false;
+  const migration = { started: false };
   let quarantinedState: UpdateQuarantine[] = [];
   let outcome: UpdateOutcome;
   try {
@@ -953,7 +1022,7 @@ export async function main(argv: readonly string[]): Promise<number> {
         } finally {
           if (stateReady && optionalWriterState)
             restoreWriterOwnership(runtime, optionalWriterState, {
-              unitMigrationStarted,
+              unitMigrationStarted: migration.started,
               legacyMemoryOwnerProven: false,
               userbotReady: true,
             });
@@ -966,43 +1035,14 @@ export async function main(argv: readonly string[]): Promise<number> {
         const { reinstallUserbot } = await import("./cli/userbot.ts");
         // Units name `current`: they survive every later flip unrewritten.
         const runtime = createCliRuntime(root);
-        const services = createCliSystemd(runtime);
-        const capturedUserbot = optionalWriterState?.find(
-          (state) => state.unit === runtime.SVC_USERBOT,
-        );
-        let userbotReady = capturedUserbot?.active !== true;
-        try {
-          services.restartServices({
-            afterUnitWrite: () => {
-              unitMigrationStarted = true;
-            },
-            ...(capturedUserbot?.loadState === "not-found"
-              ? { skipUnits: [runtime.SVC_USERBOT] }
-              : {}),
-            deferBrainMigration: true,
-            deferMemoryMigration: true,
-          });
-          runtime.systemd.activate([runtime.UPDATE_TIMER]);
-          // The code of every plugin proxy is in the version this flip just made
-          // current; nothing else brings them onto it.
-          await restartPluginUnits(runtime, layout.data, log);
-          if (capturedUserbot?.active === true) {
-            const recovery = await reinstallUserbot(runtime, services, notify, {
-              knownActive: true,
-            });
-            userbotReady = recovery.status === "ready";
-          }
-        } finally {
-          if (optionalWriterState) {
-            restoreWriterOwnership(runtime, optionalWriterState, {
-              unitMigrationStarted,
-              legacyMemoryOwnerProven: false,
-              userbotReady,
-            });
-            if (unitMigrationStarted) services.retireDeferredBrainUnits();
-          }
-        }
-        await Promise.resolve();
+        await startCandidateServices(runtime, createCliSystemd(runtime), {
+          states: optionalWriterState,
+          dataDir: layout.data,
+          log,
+          notify,
+          migration,
+          reinstall: reinstallUserbot,
+        });
       },
       retireCommittedWriters: async (root) => {
         const { createCliRuntime } = await import("./cli/runtime.ts");

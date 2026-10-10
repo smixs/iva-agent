@@ -16,7 +16,7 @@ import { dirname, join } from "node:path";
 import fc from "fast-check";
 import { createCliRuntime } from "./cli/runtime.ts";
 import { createUserbotCommands, reinstallUserbot } from "./cli/userbot.ts";
-import { restoreWriterOwnership } from "./update-finish.ts";
+import { startCandidateServices } from "./update-finish.ts";
 
 const UNIT = "iva-telegram-userbot.service";
 const SEED = 20261005;
@@ -86,8 +86,9 @@ async function installation(
       "const [action, unit] = args;",
       "if (unit !== " + JSON.stringify(UNIT) + ") {",
       'if (action === "show") console.log("loaded");',
-      'if (action === "is-active") console.log(unit === "iva.service" || unit === "iva-telegram-poll.service" ? "active" : "inactive");',
-      'if (action === "is-enabled") console.log("disabled");',
+      'const running = ["iva.service", "iva-telegram-poll.service", "iva-update-check.timer"];',
+      'if (action === "is-active") console.log(running.includes(unit) ? "active" : "inactive");',
+      'if (action === "is-enabled") console.log(unit === "iva-update-check.timer" ? "enabled" : "disabled");',
       "process.exit(0);",
       "}",
       'if (action === "show") { console.log(state.present ? "loaded" : "not-found"); process.exit(0); }',
@@ -152,6 +153,7 @@ async function installation(
   const runtime = createCliRuntime(root);
   return {
     runtime,
+    data,
     userbot,
     state: () =>
       JSON.parse(readFileSync(state, "utf8")) as {
@@ -169,6 +171,52 @@ async function installation(
       assert.deepEqual(readFileSync(join(root, ".env")), originalEnv);
     },
   };
+}
+
+/**
+ * The updater's own flip step on the fake installation: the core restart is a stub
+ * (it writes no units), everything after it - plugin restart, userbot recovery and the
+ * writer-state restoration - is the code `update-finish` runs.
+ */
+async function flip(
+  box: Awaited<ReturnType<typeof installation>>,
+  state: { loadState: string; active: boolean; enabled: boolean },
+  {
+    reports = [],
+    readinessTimeoutMs,
+  }: {
+    reports?: string[];
+    readinessTimeoutMs?: number;
+  } = {},
+) {
+  const recoveries: Array<Awaited<ReturnType<typeof reinstallUserbot>>> = [];
+  await startCandidateServices(
+    box.runtime,
+    {
+      restartServices: (options) => options?.afterUnitWrite?.(),
+      retireDeferredBrainUnits: () => [],
+      writeUnits: () => [],
+    },
+    {
+      states: [{ unit: UNIT, ...state }],
+      dataDir: box.data,
+      log: () => {},
+      notify: (message) => reports.push(message),
+      migration: { started: false },
+      reinstall: async (runtime, services, report, options) => {
+        const recovery = await reinstallUserbot(
+          runtime,
+          services,
+          report,
+          options,
+          { readinessTimeoutMs },
+        );
+        recoveries.push(recovery);
+        return recovery;
+      },
+    },
+  );
+  return recoveries;
 }
 
 test("a new version prepares with the installed home uv outside non-login PATH", async (t) => {
@@ -190,21 +238,10 @@ test("recovery failures remain stopped through updater writer-state restoration"
     await t.test(failure, async (sub) => {
       const box = await installation(sub, failure);
       const reports: string[] = [];
-      const result = await reinstallUserbot(
-        box.runtime,
-        { writeUnits: () => [] },
-        (message) => reports.push(message),
-        { knownActive: true },
-        { readinessTimeoutMs: 120 },
-      );
-      restoreWriterOwnership(
-        box.runtime,
-        [{ unit: UNIT, loadState: "loaded", active: true, enabled: true }],
-        {
-          unitMigrationStarted: true,
-          legacyMemoryOwnerProven: false,
-          userbotReady: result?.status === "ready",
-        },
+      const [result] = await flip(
+        box,
+        { loadState: "loaded", active: true, enabled: true },
+        { reports, readinessTimeoutMs: 120 },
       );
       assert.equal(
         box.state().active,
@@ -216,7 +253,7 @@ test("recovery failures remain stopped through updater writer-state restoration"
         false,
         "failed preparation must not restart on boot",
       );
-      assert.equal(result.status, "failed");
+      assert.equal(result?.status, "failed");
       assert.equal(
         box.runtime.systemd.query("is-active", "iva.service").out,
         "active",
@@ -247,38 +284,24 @@ test("recovery preserves owner files and inactive/absent flags (seed 20261005)",
           present,
         );
         try {
-          const result = await reinstallUserbot(
-            box.runtime,
-            { writeUnits: () => [] },
-            () => {},
-            { knownActive: present && active },
-          );
-          restoreWriterOwnership(
-            box.runtime,
-            [
-              {
-                unit: UNIT,
-                loadState: present ? "loaded" : "not-found",
-                active: present && active,
-                enabled: present && enabled,
-              },
-            ],
-            {
-              unitMigrationStarted: true,
-              legacyMemoryOwnerProven: false,
-              userbotReady: result.status === "ready",
-            },
-          );
+          const recoveries = await flip(box, {
+            loadState: present ? "loaded" : "not-found",
+            active: present && active,
+            enabled: present && enabled,
+          });
           assert.deepEqual(box.state(), {
             active: present && active,
             enabled: present && enabled,
             present,
           });
-          assert.equal(result.status, present && active ? "ready" : "skipped");
+          assert.deepEqual(
+            recoveries.map((recovery) => recovery.status),
+            present && active ? ["ready"] : [],
+          );
           if (!present || !active)
             assert.doesNotMatch(
               box.calls(),
-              /uv |systemctl (start|restart|enable|disable|stop)/,
+              /uv |systemctl (start|restart|enable|disable|stop) iva-telegram-userbot/,
             );
           box.intact();
         } finally {
