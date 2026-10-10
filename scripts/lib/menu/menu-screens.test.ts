@@ -430,6 +430,127 @@ test("voice: в группе ключ не принимается, а мусор
   assert.equal(priv.awaitText, null);
 });
 
+test("voice: имена и термины пишутся в .env одной строкой, «-» и пустой список очищают", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "iva-env-voice-terms-"));
+  const envPath = join(dir, ".env");
+  writeFileSync(envPath, "DEEPGRAM_LANGUAGE=ru\n");
+  const h = makeCtx({
+    lang: "ru",
+    deps: { envPath, sc: () => Promise.resolve(true) },
+    screens: { voice: voiceScreen },
+  });
+  const st = newState({ screen: "voice", chatId: 555 });
+  h.st = st;
+
+  const view = await voiceScreen.render(st, h.ctx);
+  assert.match(view.text, /Имена и термины: нет\./);
+  assert.ok(dataOf(view.text).includes("iva_menu:voice:terms"));
+
+  // Кнопка ставит ожидание текста; список не секрет — движок его не удаляет.
+  await voiceScreen.on("terms", [], st, h.ctx);
+  assert.equal(st.awaitText?.kind, "deepgramkeyterms");
+  assert.equal(st.awaitText?.secret, false);
+  assert.match(st._last?.text ?? "", /Сейчас: нет\./);
+
+  // Пробелы по краям, лишние запятые, повтор и перевод строки — в .env чистый список.
+  await voiceScreen.texts?.deepgramkeyterms(
+    " OJ, Sonnet,,OJ ,\nTodoist ,",
+    null,
+    st,
+    h.ctx,
+  );
+  assert.equal(st.awaitText, null);
+  assert.equal(
+    readFileSync(envPath, "utf8"),
+    "DEEPGRAM_LANGUAGE=ru\nDEEPGRAM_KEYTERMS=OJ,Sonnet,Todoist\n",
+  );
+  assert.match(st._last?.text ?? "", /Имена и термины: OJ, Sonnet, Todoist\./);
+  assert.ok(dataOf(st._last?.text ?? "").includes("iva_menu:voice:rs:now"));
+  assert.match(
+    (await voiceScreen.render(st, h.ctx)).text,
+    /Имена и термины: OJ, Sonnet, Todoist\./,
+  );
+  await voiceScreen.on("terms", [], st, h.ctx);
+  assert.match(st._last?.text ?? "", /Сейчас: OJ, Sonnet, Todoist\./);
+
+  // «-» убирает строку целиком, соседние настройки не тронуты.
+  await voiceScreen.texts?.deepgramkeyterms("-", null, st, h.ctx);
+  assert.equal(st.awaitText, null);
+  assert.equal(readFileSync(envPath, "utf8"), "DEEPGRAM_LANGUAGE=ru\n");
+  assert.match(st._last?.text ?? "", /Список очищен/);
+
+  // Пустой ввод и одни запятые — тоже очистка.
+  for (const empty of ["", " , ,, "]) {
+    await voiceScreen.texts?.deepgramkeyterms("Iva", null, st, h.ctx);
+    assert.match(readFileSync(envPath, "utf8"), /DEEPGRAM_KEYTERMS=Iva/);
+    await voiceScreen.on("terms", [], st, h.ctx);
+    await voiceScreen.texts?.deepgramkeyterms(empty, null, st, h.ctx);
+    assert.equal(
+      readFileSync(envPath, "utf8"),
+      "DEEPGRAM_LANGUAGE=ru\n",
+      JSON.stringify(empty),
+    );
+  }
+});
+
+test("voice: кириллицу и знаки, которых .env не хранит, список не пишет; 60 слов — первые 50", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "iva-env-voice-terms-bad-"));
+  const envPath = join(dir, ".env");
+  writeFileSync(envPath, "DEEPGRAM_KEYTERMS=OJ\n");
+  const h = makeCtx({
+    lang: "ru",
+    deps: { envPath, sc: () => Promise.resolve(true) },
+    screens: { voice: voiceScreen },
+  });
+  const st = newState({ screen: "voice", chatId: 555 });
+  h.st = st;
+
+  for (const [input, reason] of [
+    ["OJ, Оджей", /кириллица/],
+    ["C#, Sonnet", /знак, которого файл настроек не хранит/],
+    ['say "hi"', /знак, которого файл настроек не хранит/],
+  ] as const) {
+    await voiceScreen.on("terms", [], st, h.ctx);
+    await voiceScreen.texts?.deepgramkeyterms(input, null, st, h.ctx);
+    assert.equal(st.awaitText, null, input);
+    assert.match(st._last?.text ?? "", reason);
+    assert.ok(!(st._last?.text ?? "").includes(input), "ввод не эхом");
+    assert.ok(dataOf(st._last?.text ?? "").includes("iva_menu:voice:terms"));
+    assert.equal(readFileSync(envPath, "utf8"), "DEEPGRAM_KEYTERMS=OJ\n");
+  }
+
+  const words = Array.from({ length: 60 }, (_, i) => `Term${i}`);
+  await voiceScreen.on("terms", [], st, h.ctx);
+  await voiceScreen.texts?.deepgramkeyterms(words.join(", "), null, st, h.ctx);
+  assert.equal(
+    readFileSync(envPath, "utf8"),
+    `DEEPGRAM_KEYTERMS=${words.slice(0, 50).join(",")}\n`,
+  );
+  assert.match(st._last?.text ?? "", /Оставил первые 50 из 60/);
+});
+
+test("voice: список из .env на экране экранирован и обрезан по длине", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "iva-env-voice-terms-long-"));
+  const envPath = join(dir, ".env");
+  const long = Array.from({ length: 80 }, (_, i) => `LongName${i}`);
+  writeFileSync(envPath, `DEEPGRAM_KEYTERMS=a<b>*c*,${long.join(",")}\n`);
+  const h = makeCtx({
+    lang: "en",
+    deps: { envPath, sc: () => Promise.resolve(true) },
+    screens: { voice: voiceScreen },
+  });
+  const st = newState({ screen: "voice", chatId: 555 });
+  const { text } = await voiceScreen.render(st, h.ctx);
+  const line = text
+    .split("\n")
+    .find((row) => row.startsWith("Names and terms:"));
+  assert.ok(line, text);
+  // Разметка из значения не исполняется: escapeRichText ставит перед ней обратный слэш.
+  assert.ok(line.includes("a\\<b>\\*c\\*"), line);
+  assert.ok(line.length < 400, `${line.length}`);
+  assert.match(line, /… \(81\)\.$/);
+});
+
 // ── 3. gws: валидация shape client_secret.json (bad JSON / неверная форма / успех 0600) ──
 test("gws.gwsjson: bad JSON и неверная форма отвергаются, валидный секрет пишется 0600", async () => {
   const home = mkdtempSync(join(tmpdir(), "iva-home-"));

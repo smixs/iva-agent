@@ -1,22 +1,35 @@
-// Экран «Голос» (/menu → 🎤): ключ Deepgram и язык распознавания голосовых.
+// Экран «Голос» (/menu → 🎤): ключ Deepgram, язык распознавания голосовых и имена с терминами,
+// которые Deepgram должен писать одинаково (DEEPGRAM_KEYTERMS).
 //
 // Инварианты ключа те же, что у экрана поиска (scripts/lib/menu/search.ts): значение никогда
 // не попадает в лог/eve/текст ошибки, сообщение с ключом удаляет САМ движок (index.ts onText,
 // secret:true) ДО вызова texts.deepgramkey, приём разрешён только в личке (проверка при установке
-// awaitText — обязанность экрана). DEEPGRAM_API_KEY и DEEPGRAM_LANGUAGE читает agent/transcribe.ts
-// из окружения процесса, поэтому после записи предлагаем перезапуск iva.service.
+// awaitText — обязанность экрана). Все три настройки читает agent/transcribe.ts из окружения
+// процесса, поэтому после записи предлагаем перезапуск iva.service.
+//
+// Имена и термины — не секрет: их ввод не удаляется из чата. Разбор списка один на оба конца:
+// parseKeyterms и потолок KEYTERMS_LIMIT из agent/transcribe.ts (мост грузит авторское дерево).
 //
 // Живой проверки ключа, как checkSearchKey у поиска, здесь нет намеренно: у Deepgram в
 // репозитории нет проверяющего хелпера, а плодить второй сетевой путь ради меню нечем —
 // о неверном ключе скажет первый же голосовой по своему коду ошибки. Проверяется только
 // форма: ключ и значение, которое .env сохранит целиком.
-import { envValueRejection, readEnvValues, upsertEnv } from "../env-file.ts";
+import {
+  envValueRejection,
+  readEnvValues,
+  upsertEnv,
+  type EnvValueRejection,
+} from "../env-file.ts";
+import { KEYTERMS_LIMIT, parseKeyterms } from "#transcribe.ts";
 import { button, buttonRow, escapeRichText } from "./buttons.ts";
 
 const SID = "voice";
 const PARENT = "r";
 const KEY_VAR = "DEEPGRAM_API_KEY";
 const LANG_VAR = "DEEPGRAM_LANGUAGE";
+const TERMS_VAR = "DEEPGRAM_KEYTERMS";
+// Длинный список, вписанный в .env руками, не должен раздувать экран за предел сообщения.
+const TERMS_SHOWN_CHARS = 300;
 // Ровно те значения, что предлагает экран; всё прочее (напр. ru-RU) трансляция отдаёт как есть.
 const LANGS = ["multi", "ru", "en", "uz"] as const;
 type Language = (typeof LANGS)[number];
@@ -64,23 +77,36 @@ const backLine = (ctx: MenuContext) =>
 
 const cancelLine = (ctx: MenuContext) =>
   `${button(ctx.tr("Cancel", "Отмена"), `iva_menu:${SID}:o`, "danger")} — ${ctx.tr(
-    "leave the prompt without entering a key.",
+    "leave the prompt without changing anything.",
     "выйти из ввода, ничего не меняя.",
   )}`;
+
+// Текущий список для экрана: через запятую, с обрезкой по длине; пусто — «нет».
+function termsLabel(terms: string[], ctx: MenuContext): string {
+  if (terms.length === 0) return ctx.tr("none", "нет");
+  const joined = terms.join(", ");
+  return escapeRichText(
+    joined.length > TERMS_SHOWN_CHARS
+      ? `${joined.slice(0, TERMS_SHOWN_CHARS)}… (${terms.length})`
+      : joined,
+  );
+}
 
 // Telegram: id личных чатов положительны, групп/супергрупп — отрицательны. Секреты
 // принимаем только в личке (в группе бот может не иметь прав на удаление, и ключ увидят
 // посторонние). st не хранит chat.type, поэтому опираемся на знак chatId — надёжно.
 const isPrivate = (st: MenuState) => Number(st.chatId) > 0;
 
-// Экран «режим записан — применить перезапуском?». Обе настройки экрана читает процесс агента
-// при старте, поэтому путь один: запись в .env → этот экран.
-async function restartOffer(st: MenuState, ctx: MenuContext) {
+// Экран «настройка записана — применить перезапуском?». Все настройки экрана читает процесс
+// агента при старте, поэтому путь один: запись в .env → этот экран. note — строка о том, что
+// именно записано, когда это не очевидно из нажатой кнопки.
+async function restartOffer(st: MenuState, ctx: MenuContext, note?: string) {
   const text = [
     `# ${ctx.tr("🎤 Voice", "🎤 Голос")}`,
+    ...(note ? [note] : []),
     ctx.tr(
-      "Saved. The transcriber reads the key and the language as the agent starts, so it applies after a restart.",
-      "Сохранил. Ключ и язык трансляция читает при старте агента, поэтому применится после перезапуска.",
+      "Saved. The agent reads voice settings as it starts, so this applies after a restart.",
+      "Сохранил. Настройки голоса агент читает при старте, поэтому применится после перезапуска.",
     ),
     buttonRow([
       button(
@@ -119,14 +145,45 @@ async function promptKey(st: MenuState, ctx: MenuContext) {
   return ctx.flows.screen(st, text);
 }
 
+// Приглашение прислать список имён и терминов. Ввод не секрет, поэтому secret:false; /menu
+// открывается только в личке, а движок берёт текст только оттуда.
+async function promptTerms(st: MenuState, ctx: MenuContext) {
+  const env = await readEnvValues(ctx.deps.envPath);
+  st.awaitText = { kind: "deepgramkeyterms", secret: false };
+  const text = [
+    `# ${ctx.tr("🎤 Names and terms", "🎤 Имена и термины")}`,
+    ctx.tr(
+      "Send the names and words Deepgram should spell your way, separated by commas, for example: OJ, Sonnet, Todoist. Only Latin letters fit in the settings. Deepgram charges a small per-minute extra for this. A single «-» clears the list.",
+      "Пришли через запятую имена и слова, которые Deepgram должен писать как у тебя, например: OJ, Sonnet, Todoist. В настройках помещается только латиница. Deepgram берёт за это небольшую поминутную доплату. Один знак «-» очищает список.",
+    ),
+    `${ctx.tr("Now", "Сейчас")}: ${termsLabel(parseKeyterms(env[TERMS_VAR]), ctx)}.`,
+    cancelLine(ctx),
+  ].join("\n\n");
+  return ctx.flows.screen(st, text);
+}
+
+// Почему список не помещается в .env — словами владельца. Значение в текст не попадает.
+function termsRejection(problem: EnvValueRejection, ctx: MenuContext): string {
+  return problem === "non-ascii"
+    ? ctx.tr(
+        "I can't save that list: the settings file holds only Latin letters, digits, spaces and plain punctuation, and the list has Cyrillic or another script.",
+        "Такой список не сохраню: в файл настроек помещаются только латиница, цифры, пробел и обычные знаки, а в списке есть кириллица или другая письменность.",
+      )
+    : ctx.tr(
+        "I can't save that list: it has a character the settings file can't keep (# \" ' ` \\ or an invisible one).",
+        "Такой список не сохраню: в нём знак, которого файл настроек не хранит (# \" ' ` \\ или невидимый символ).",
+      );
+}
+
 export default {
   parent: PARENT,
 
   async render(st: MenuState, ctx: MenuContext) {
-    st.awaitText = null; // возврат на экран снимает возможный ждущий ввод ключа
+    st.awaitText = null; // возврат на экран снимает ждущий ввод ключа или списка
     const env = await readEnvValues(ctx.deps.envPath);
     const hasKey = Boolean(env[KEY_VAR]);
     const language = configuredLanguage(env);
+    const terms = parseKeyterms(env[TERMS_VAR]);
     const text = [
       `# ${ctx.tr("🎤 Voice", "🎤 Голос")}`,
       `${ctx.tr("Deepgram key", "Ключ Deepgram")}: ${hasKey ? ctx.tr("set", "есть") : ctx.tr("not set", "нет")}.`,
@@ -151,6 +208,11 @@ export default {
           ),
         ),
       ),
+      `${ctx.tr("Names and terms", "Имена и термины")}: ${termsLabel(terms, ctx)}.`,
+      `${button(ctx.tr("✏️ Names and terms", "✏️ Имена и термины"), `iva_menu:${SID}:terms`)} — ${ctx.tr(
+        "names and words Deepgram should spell your way.",
+        "имена и слова, которые Deepgram должен писать как у тебя.",
+      )}`,
       backLine(ctx),
     ].join("\n\n");
     return { text };
@@ -158,6 +220,7 @@ export default {
 
   async on(verb: string, args: string[], st: MenuState, ctx: MenuContext) {
     if (verb === "key") return promptKey(st, ctx);
+    if (verb === "terms") return promptTerms(st, ctx);
     if (verb === "lang") {
       const value = args[0];
       if (!isLanguage(value)) return ctx.show(st, SID);
@@ -222,6 +285,58 @@ export default {
       st.awaitText = null;
       await upsertEnv(ctx.deps.envPath, { [KEY_VAR]: value });
       return restartOffer(st, ctx);
+    },
+
+    // Приём списка имён и терминов. «-» или пустой список (одни запятые) убирают строку из .env.
+    // Больше KEYTERMS_LIMIT слов не пишем: в запрос всё равно уйдут только первые, а владелец
+    // узнаёт об обрезке здесь, а не из журнала.
+    async deepgramkeyterms(
+      text: unknown,
+      _msg: unknown,
+      st: MenuState,
+      ctx: MenuContext,
+    ) {
+      st.awaitText = null;
+      const raw = String(text).trim();
+      const terms = /^[-–—]$/u.test(raw) ? [] : parseKeyterms(raw);
+      if (terms.length === 0) {
+        await upsertEnv(ctx.deps.envPath, { [TERMS_VAR]: null });
+        return restartOffer(
+          st,
+          ctx,
+          ctx.tr("The list is cleared.", "Список очищен."),
+        );
+      }
+      const kept = terms.slice(0, KEYTERMS_LIMIT);
+      const value = kept.join(",");
+      const problem = envValueRejection(value);
+      if (problem) {
+        return ctx.flows.screen(
+          st,
+          [
+            `# ${ctx.tr("🎤 Names and terms", "🎤 Имена и термины")}`,
+            termsRejection(problem, ctx),
+            `${button(ctx.tr("✏️ Try again", "✏️ Ввести заново"), `iva_menu:${SID}:terms`)} — ${ctx.tr(
+              "send the list once more.",
+              "прислать список ещё раз.",
+            )}`,
+            `${button(ctx.tr("‹ Voice", "‹ Голос"), `iva_menu:${SID}:o`)} — ${ctx.tr(
+              "back to the voice settings, nothing changed.",
+              "вернуться к настройкам голоса, ничего не меняя.",
+            )}`,
+          ].join("\n\n"),
+        );
+      }
+      await upsertEnv(ctx.deps.envPath, { [TERMS_VAR]: value });
+      const saved = `${ctx.tr("Names and terms", "Имена и термины")}: ${termsLabel(kept, ctx)}.`;
+      const note =
+        terms.length > kept.length
+          ? `${saved} ${ctx.tr(
+              `Kept the first ${kept.length} of ${terms.length}: a request carries no more.`,
+              `Оставил первые ${kept.length} из ${terms.length}: больше в один запрос не уходит.`,
+            )}`
+          : saved;
+      return restartOffer(st, ctx, note);
     },
   },
 };

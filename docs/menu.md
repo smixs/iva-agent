@@ -88,7 +88,7 @@ The **💬 Rich replies** screen is the switch for `TELEGRAM_RICH_REPLIES`. On *
 
 ## Voice
 
-The **🎤 Voice** screen holds the Deepgram key that transcribes voice notes, video circles and audio files, plus the recognition language. It says whether `DEEPGRAM_API_KEY` is set (and that voice notes are not transcribed without it), and shows the current `DEEPGRAM_LANGUAGE`: **Auto** detects the language per message, while **Русский**, **English** and **Oʻzbek** pin a single one if auto-detection trips on your mix. **🔑 Set the key** takes the key in the next message and deletes it from the chat, exactly like the search key. Both values come from the environment, so the screen offers a restart. Free tier: [providers.md](providers.md).
+The **🎤 Voice** screen holds the Deepgram key that transcribes voice notes, video circles and audio files, plus the recognition language. It says whether `DEEPGRAM_API_KEY` is set (and that voice notes are not transcribed without it), and shows the current `DEEPGRAM_LANGUAGE`: **Auto** detects the language per message, while **Русский**, **English** and **Oʻzbek** pin a single one if auto-detection trips on your mix. **🔑 Set the key** takes the key in the next message and deletes it from the chat, exactly like the search key. **✏️ Names and terms** takes a comma-separated list of names and words Deepgram should spell your way (`DEEPGRAM_KEYTERMS`, Latin letters only, up to 50); a single `-` clears it. All three values come from the environment, so the screen offers a restart. Free tier: [providers.md](providers.md).
 
 ## Userbot
 

@@ -45,10 +45,6 @@ const BLIND_SPOT: ReadonlyArray<{
     why: "прицеп канала; приватный чат в тестах канала",
   },
   {
-    path: "agent/transcribe.ts",
-    why: "прицеп медиа; транскрипция замокана в тестах медиа",
-  },
-  {
     path: "scripts/lib/cli-translate.ts",
     why: "прицеп plugin/trace CLI; перевод в их тестах",
   },
