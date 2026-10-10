@@ -253,3 +253,26 @@ void test("readiness reports a thrown probe and clears its retry pause on expiry
   await new Promise((resolve) => setTimeout(resolve, 220));
   assert.equal(calls, 1);
 });
+
+void test("readiness waits out Telethon's own connect budget before giving up", async (t) => {
+  // serve.py connects to Telegram before it listens; Telethon's defaults allow five
+  // attempts of 10 s each. A slow network is not a broken environment.
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let elapsed = 0;
+  let settled = false;
+  const pending = awaitUserbotHealth(() =>
+    Promise.resolve(
+      elapsed >= 50_000
+        ? { state: "ready" as const, reason: "ok" }
+        : { state: "starting" as const, reason: "service_starting" },
+    ),
+  ).finally(() => {
+    settled = true;
+  });
+  while (!settled && elapsed <= 120_000) {
+    await new Promise((resolve) => setImmediate(resolve));
+    t.mock.timers.tick(200);
+    elapsed += 200;
+  }
+  assert.deepEqual(await pending, { state: "ready", reason: "ok" });
+});

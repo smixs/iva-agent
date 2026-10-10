@@ -5,7 +5,12 @@ import { resolveDataDir } from "./data-dir.ts";
 
 export const USERBOT_HEALTH_TIMEOUT_MS = 1500;
 export const USERBOT_SERVICE = "iva-telegram-userbot.service";
-export const USERBOT_READINESS_TIMEOUT_MS = 15_000;
+/**
+ * The proxy listens only after it has connected to Telegram, and Telethon's defaults
+ * allow five connect attempts of 10 s each: a slow network must not read as a broken
+ * environment and switch the userbot off.
+ */
+export const USERBOT_READINESS_TIMEOUT_MS = 60_000;
 
 /** A reachable unauthorized proxy is ready for QR login; it is not a ready Telegram session. */
 export function userbotProxyReady(health: UserbotHealth): boolean {
