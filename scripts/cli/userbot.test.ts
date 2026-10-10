@@ -591,3 +591,32 @@ void test("recovery preserves the preparation error when keeping the userbot off
   assert.match(reports.join("\n"), /uv не найден/);
   assert.match(reports.join("\n"), /disable refused/);
 });
+
+void test("a restart still prepares a userbot that is active but does not answer", async () => {
+  const { events, runtime } = runtimeFixture({ active: true });
+  const probes: string[] = [];
+  const result = await reinstallUserbot(
+    runtime,
+    { writeUnits: () => [] },
+    (message) => events.push(`report:${message}`),
+    { keepHealthy: true },
+    {
+      fileSystem: memoryFileSystem({ token: true }).fileSystem,
+      probeHealth: () => {
+        // The first probe sees the loop of #273; after the restart the proxy answers.
+        const state = probes.length === 0 ? "starting" : "ready";
+        probes.push(state);
+        return Promise.resolve({ state, reason: state });
+      },
+    },
+  );
+
+  assert.equal(result.status, "ready");
+  assert.deepEqual(probes, ["starting", "ready"]);
+  const stop = events.indexOf(`systemd:stop ${SERVICE}`);
+  const sync = events.findIndex((event) =>
+    event.startsWith("run:/usr/bin/uv:pip sync"),
+  );
+  const restart = events.indexOf(`systemd:restart ${SERVICE}`);
+  assert.ok(stop >= 0 && sync > stop && restart > sync, events.join("\n"));
+});

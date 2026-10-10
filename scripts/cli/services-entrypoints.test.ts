@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import {
   chmod,
@@ -9,6 +9,7 @@ import {
   rm,
   writeFile,
 } from "node:fs/promises";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test, { type TestContext } from "node:test";
@@ -52,6 +53,18 @@ async function fixture(t: TestContext): Promise<CliFixture> {
       "fi",
       'if [ "$action" = "status" ]; then',
       '  exit "${IVA_SERVICE_STATUS_EXIT:-0}"',
+      "fi",
+      "for unit; do :; done",
+      'if [ -n "${IVA_SERVICE_USERBOT_STATE:-}" ] && [ "$unit" = "iva-telegram-userbot.service" ]; then',
+      '  case "$action" in',
+      '    is-active) state=$(cat "$IVA_SERVICE_USERBOT_STATE"); printf "%s\\n" "$state"; [ "$state" = active ] || exit 3 ;;',
+      '    is-enabled) if [ -e "$IVA_SERVICE_USERBOT_STATE.enabled" ]; then printf "enabled\\n"; else printf "disabled\\n"; exit 1; fi ;;',
+      '    stop) printf inactive > "$IVA_SERVICE_USERBOT_STATE" ;;',
+      '    disable) printf inactive > "$IVA_SERVICE_USERBOT_STATE"; rm -f "$IVA_SERVICE_USERBOT_STATE.enabled" ;;',
+      '    start|restart) printf active > "$IVA_SERVICE_USERBOT_STATE" ;;',
+      '    enable) : > "$IVA_SERVICE_USERBOT_STATE.enabled" ;;',
+      "  esac",
+      "  exit 0",
       "fi",
       'if [ "$action" = "is-enabled" ]; then printf "enabled\\n"; fi',
       'if [ "$action" = "is-active" ] && [ "$1" = "iva-telegram-userbot.service" ]; then printf "inactive\\n"; exit 3; fi',
@@ -99,6 +112,44 @@ function runCli(
   });
 }
 
+/** Like runCli, but the test's own process keeps serving while `iva` runs. */
+function runCliAsync(
+  { fakeBin, home, journalctlLog, project, systemctlLog }: CliFixture,
+  args: readonly string[],
+  env: Readonly<Record<string, string>> = {},
+): Promise<{ status: number | null; stdout: string; stderr: string }> {
+  const child = spawn(
+    process.execPath,
+    [join(project, "bin/iva.mjs"), ...args],
+    {
+      cwd: project,
+      env: {
+        ...process.env,
+        AGENT_LANGUAGE: "en",
+        HOME: home,
+        IVA_SERVICE_JOURNALCTL_LOG: journalctlLog,
+        IVA_SERVICE_SYSTEMCTL_LOG: systemctlLog,
+        NO_COLOR: "1",
+        PATH: `${fakeBin}:/usr/bin:/bin`,
+        TERM: "dumb",
+        ...env,
+      },
+    },
+  );
+  let stdout = "";
+  let stderr = "";
+  child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
+    stdout += chunk;
+  });
+  child.stderr.setEncoding("utf8").on("data", (chunk: string) => {
+    stderr += chunk;
+  });
+  return new Promise((resolve, reject) => {
+    child.on("error", reject);
+    child.on("close", (status) => resolve({ status, stdout, stderr }));
+  });
+}
+
 async function calls(path: string): Promise<string[]> {
   return (await readFile(path, "utf8")).trim().split("\n");
 }
@@ -133,6 +184,66 @@ void test("restart regenerates units before checked service restarts and reports
     "--user is-active iva.service",
     "--user is-active iva-telegram-userbot.service",
   ]);
+});
+
+void test("restart leaves a healthy userbot running and never re-syncs it, so no network is needed", async (t) => {
+  const context = await fixture(t);
+  const data = join(context.project, "data");
+  await mkdir(data, { recursive: true });
+  await writeFile(join(data, "telegram-userbot.token"), "synthetic-token\n");
+  const server = createServer((request, response) => {
+    const authorized =
+      request.headers.authorization === "Bearer synthetic-token";
+    response.writeHead(authorized ? 200 : 401, {
+      "content-type": "application/json",
+    });
+    response.end(JSON.stringify({ state: authorized ? "ready" : "denied" }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  await writeFile(
+    join(context.project, ".env"),
+    `TELEGRAM_MCP_PORT=${address.port}\n`,
+  );
+  const userbotState = join(context.home, "userbot.state");
+  await writeFile(userbotState, "active");
+  await writeFile(`${userbotState}.enabled`, "");
+  const userbot = join(context.project, "services/telegram-userbot");
+  await mkdir(join(userbot, ".venv/bin"), { recursive: true });
+  await writeFile(
+    join(userbot, "requirements.lock"),
+    "telethon==1 --hash=sha256:synthetic\n",
+  );
+  await writeFile(join(userbot, ".venv/bin/python"), "#!/bin/sh\nexit 0\n");
+  await chmod(join(userbot, ".venv/bin/python"), 0o755);
+  // A re-sync of a ready venv still fetches telegram-mcp's GitHub archive: offline it fails.
+  const uvLog = join(context.home, "uv.log");
+  const uv = join(context.fakeBin, "uv");
+  await writeFile(
+    uv,
+    `#!/bin/sh\nprintf "%s\\n" "$*" >> "${uvLog}"\necho "error: Failed to fetch" >&2\nexit 2\n`,
+  );
+  await chmod(uv, 0o755);
+
+  const result = await runCliAsync(context, ["restart"], {
+    IVA_SERVICE_USERBOT_STATE: userbotState,
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.equal(result.stdout, "✓ Restarted: iva + telegram-poll\n");
+  assert.equal(existsSync(uvLog), false, "uv must not run");
+  assert.equal(await readFile(userbotState, "utf8"), "active");
+  assert.ok(existsSync(`${userbotState}.enabled`), "the userbot stays enabled");
+  assert.deepEqual(
+    (await calls(context.systemctlLog)).filter(
+      (call) =>
+        call.includes("iva-telegram-userbot.service") &&
+        !/ is-(active|enabled) /u.test(call),
+    ),
+    [],
+  );
 });
 
 void test("reset stops services, quarantines every state target with one stamp, then restarts", async (t) => {

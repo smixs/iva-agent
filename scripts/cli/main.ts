@@ -138,7 +138,9 @@ export function createCliMain(root: string) {
   const account = createAccountCommands(runtime, systemdLifecycle);
   const services = createServiceCommands(runtime, systemdLifecycle, {
     recoverUserbot: () =>
-      reinstallUserbot(runtime, systemdLifecycle, runtime.warn),
+      reinstallUserbot(runtime, systemdLifecycle, runtime.warn, {
+        keepHealthy: true,
+      }),
   });
   const cmdConfig = createConfigCommand(runtime, systemdLifecycle);
   const cmdDoctor = createDoctorCommand(runtime, systemdLifecycle);

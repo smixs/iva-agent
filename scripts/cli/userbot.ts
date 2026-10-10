@@ -50,6 +50,12 @@ export interface EnsureUserbotVenvOptions {
 
 export interface RestartUserbotOptions extends EnsureUserbotVenvOptions {
   readonly knownActive?: boolean;
+  /**
+   * `iva restart`: a proxy that answers is left running. Its version is the same, and a
+   * re-sync of a ready venv still fetches from the network, so offline it would only
+   * switch a working userbot off.
+   */
+  readonly keepHealthy?: boolean;
 }
 
 interface UserbotFileSystem {
@@ -182,6 +188,7 @@ export function createUserbotCommands(
   async function restartUserbotIfActive({
     quiet = false,
     knownActive = false,
+    keepHealthy = false,
     requirementsPath = join(USERBOT_DIR, "requirements.lock"),
     requireHashes = true,
   }: RestartUserbotOptions = {}): Promise<UserbotHealth | null> {
@@ -192,6 +199,10 @@ export function createUserbotCommands(
       )
     )
       return null;
+    if (keepHealthy) {
+      const health = await currentHealth();
+      if (userbotProxyReady(health)) return health;
+    }
     if (!quiet) step("Обновляю userbot-прокси…");
     try {
       systemd.stop([SVC_USERBOT]);
@@ -240,13 +251,17 @@ export function createUserbotCommands(
     throw original;
   }
 
-  async function diagnosticHealth(): Promise<UserbotHealth> {
+  function currentHealth(): Promise<UserbotHealth> {
     const env = readEnv();
-    const health = await probeHealth({
+    return probeHealth({
       root: ROOT,
       dataDir: dataDirAbs(env),
       port: env.TELEGRAM_MCP_PORT || "8724",
     });
+  }
+
+  async function diagnosticHealth(): Promise<UserbotHealth> {
+    const health = await currentHealth();
     if (!userbotProxyReady(health)) return health;
     if (!fileSystem.exists(VENV_PY))
       return { state: "unreachable", reason: "venv_interpreter_missing" };
@@ -403,7 +418,10 @@ export async function reinstallUserbot(
   runtime: UserbotRuntime,
   systemdLifecycle: Pick<CliSystemd, "writeUnits">,
   report: (message: string) => void,
-  { knownActive = false }: Pick<RestartUserbotOptions, "knownActive"> = {},
+  {
+    knownActive = false,
+    keepHealthy = false,
+  }: Pick<RestartUserbotOptions, "knownActive" | "keepHealthy"> = {},
   dependencies: UserbotDependencies = {},
 ): Promise<UserbotRecovery> {
   try {
@@ -414,6 +432,7 @@ export async function reinstallUserbot(
     ).restartUserbotIfActive({
       quiet: true,
       knownActive,
+      keepHealthy,
     });
     return health ? { status: "ready", health } : { status: "skipped" };
   } catch (error) {
