@@ -228,7 +228,7 @@ partial guarantee at the cost of a second delivery path around the inbound pipel
 the shape ADR-0005 exists to avoid. `docs/security.md` states the limit instead, in the
 section "Telegram text: an annotation, not a filter".
 
-The fix is upstream, and the feature request to file against `vercel/eve` is small: let the
+The fix is upstream; the feature request is filed as vercel/eve#4605 (10.10.2026) and is small: let the
 inbound hook return the text the model will see, as one optional field beside `context` —
 
 ```ts
