@@ -32,6 +32,9 @@ import {
   rollupRanBefore,
   settleReportsOffNotice,
   updateAlertState,
+  USERBOT_ALERT_KEY,
+  userbotOffAlert,
+  userbotOffReason,
   type ReportsOffNotice,
   type Translate,
 } from "./notice-policy.ts";
@@ -131,6 +134,62 @@ test("the stock-build Alert says what broke, that the files are safe and what to
       /билд|кастомизаци|digest|retry|warning|override|лимит/iu,
     );
   assert.equal(CUSTOM_ALERT_KEY, "custom-build");
+});
+
+// Обновление выключило юзербот (#273): кто обновлялся кнопкой в боте, вывода апдейта не видит.
+test("the userbot Alert says it is off, what that costs and where to turn it back on", () => {
+  const reason =
+    "userbot: зависимости не импортируются — ModuleNotFoundError: telegram_mcp.";
+  assert.equal(
+    userbotOffAlert(RU, reason),
+    "⚠️ Ива выключила юзербот: после обновления он не запустился — зависимости не импортируются — ModuleNotFoundError: telegram_mcp. Пока он выключен, Ива не читает и не ищет ваши чаты от вашего аккаунта; остальное работает как раньше. Включить обратно: /menu → 📡 Userbot → «Включить».",
+  );
+  assert.equal(
+    userbotOffAlert(EN, "userbot: restart failed (exit 1)"),
+    "⚠️ Iva switched the userbot off: it did not come up after the update — restart failed (exit 1). While it is off, Iva cannot read or search your chats as your account; everything else works as before. Turn it back on: /menu → 📡 Userbot → «Turn on».",
+  );
+  // Причины без слов: нет ни висячего тире, ни двойной точки.
+  for (const empty of ["", "userbot: ", "  .  ", "\n"]) {
+    assert.match(
+      userbotOffAlert(EN, empty),
+      /^⚠️ Iva switched the userbot off: it did not come up after the update\. While/u,
+    );
+    assert.match(
+      userbotOffAlert(RU, empty),
+      /^⚠️ Ива выключила юзербот: после обновления он не запустился\. Пока/u,
+    );
+  }
+  // Причина в несколько строк — одна строка сообщения.
+  assert.equal(userbotOffReason("userbot: a\n  b.\n"), "a b");
+  assert.equal(userbotOffReason(reason), userbotOffReason(`${reason}\n`));
+  // Слова Avoid из CONTEXT.md не идут владельцу. Проверяется текст Ивы, а не причина:
+  // её слова — вывод чужой программы.
+  for (const tr of [EN, RU])
+    for (const why of ["", "X"])
+      assert.doesNotMatch(
+        userbotOffAlert(tr, why),
+        /билд|кастомизаци|digest|retry|warning|override|лимит|ошибк|bridge|gateway|демон|воркер|sidecar|notification|пуш/iu,
+      );
+  assert.equal(USERBOT_ALERT_KEY, "userbot-off");
+});
+
+test("the userbot Alert keeps any reason on one line and names the screen (seed 20261010)", () => {
+  fc.assert(
+    fc.property(fc.string({ maxLength: 80 }), (raw) => {
+      const why = userbotOffReason(raw);
+      assert.doesNotMatch(why, /\s{2}|^\s|\s$|\n/u);
+      assert.doesNotMatch(why, /^userbot:|\.$/u);
+      for (const tr of [EN, RU]) {
+        const text = userbotOffAlert(tr, raw);
+        assert.ok(text.startsWith("⚠️ "), text);
+        assert.ok(text.includes("/menu → 📡 Userbot → «"), text);
+        // Причина стоит после тире и кончается одной точкой текста; без причины нет и тире.
+        if (why) assert.ok(text.includes(`— ${why}. `), text);
+        else assert.doesNotMatch(text, /—/u);
+      }
+    }),
+    { seed: 20261010, numRuns: 200 },
+  );
 });
 
 test("notice language comes from the tree, and falls back to the env without it", async () => {

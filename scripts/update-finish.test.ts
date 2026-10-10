@@ -4,6 +4,8 @@ import assert from "node:assert/strict";
 import {
   alertOwnerAboutCustom,
   alertOwnerAboutPlugins,
+  alertOwnerAboutUserbot,
+  alertOwnerWhenServed,
   retireCheckout,
   captureOptionalWriterState,
   restartPluginUnits,
@@ -972,6 +974,268 @@ test("a stock-build Alert that could not be sent says so and is not remembered",
     /could not tell you in Telegram about the stock build/u,
   );
   assert.equal(existsSync(join(layout.data, "alert-state.json")), false);
+});
+
+// ── Alert о выключенном юзерботе (#273, ADR-0007) ─────────────────────────────────────────
+// Кто обновлялся кнопкой в боте, вывода `iva update` не видит: без этого Alert юзербот у него
+// просто молча перестаёт работать.
+
+const IMPORT_FAILED =
+  "userbot: зависимости не импортируются — ModuleNotFoundError: telegram_mcp";
+
+test("the owner hears that the update switched the userbot off, once a week per reason", async (t) => {
+  const layout = installationWithChat(
+    t,
+    "TELEGRAM_BOT_TOKEN=token\nTELEGRAM_DIGEST_CHAT_ID=42\nAGENT_LANGUAGE=ru\n",
+  );
+  const sent: string[] = [];
+  const said: string[] = [];
+  const send = (text: string): Promise<boolean> => {
+    sent.push(text);
+    return Promise.resolve(true);
+  };
+
+  await alertOwnerAboutUserbot(
+    layout,
+    IMPORT_FAILED,
+    (m) => said.push(m),
+    send,
+  );
+  await alertOwnerAboutUserbot(
+    layout,
+    IMPORT_FAILED,
+    (m) => said.push(m),
+    send,
+  );
+
+  assert.equal(sent.length, 1, sent.join("\n---\n"));
+  assert.match(
+    sent[0],
+    /^⚠️ Ива выключила юзербот: после обновления он не запустился — /u,
+  );
+  assert.match(
+    sent[0],
+    /— зависимости не импортируются — ModuleNotFoundError: telegram_mcp\. /u,
+  );
+  assert.doesNotMatch(sent[0], /userbot: /u);
+  assert.match(sent[0], /\/menu → 📡 Userbot → «Включить»\.$/u);
+  // Причину и `iva userbot setup` вывод апдейта уже несёт (reinstallUserbot): второй раз её
+  // туда не пишут, а удачная отправка строк не добавляет.
+  assert.deepEqual(said, []);
+
+  // Другая причина — другая проблема, и говорить надо сразу.
+  await alertOwnerAboutUserbot(
+    layout,
+    "userbot: restart failed (exit 1)",
+    () => {},
+    send,
+  );
+  assert.equal(sent.length, 2);
+  assert.match(sent[1], /— restart failed \(exit 1\)\. /u);
+});
+
+test("a userbot Alert that could not be sent says so in the output and is not remembered", async (t) => {
+  const layout = installationWithChat(t);
+  const said: string[] = [];
+
+  await alertOwnerAboutUserbot(
+    layout,
+    IMPORT_FAILED,
+    (m) => said.push(m),
+    () => Promise.resolve(false),
+  );
+
+  assert.deepEqual(said, ["could not tell you in Telegram about the userbot"]);
+  assert.equal(existsSync(join(layout.data, "alert-state.json")), false);
+});
+
+test("the userbot Alert goes out even when its throttle cannot be written", async (t) => {
+  t.mock.method(console, "error", () => undefined);
+  const layout = installationWithChat(t);
+  // Место файла дросселя занято каталогом: запись не пройдёт, отправка — пройдёт.
+  mkdirSync(join(layout.data, "alert-state.json"));
+  const sent: string[] = [];
+  const said: string[] = [];
+  const send = (text: string): Promise<boolean> => {
+    sent.push(text);
+    return Promise.resolve(true);
+  };
+
+  await alertOwnerAboutUserbot(
+    layout,
+    IMPORT_FAILED,
+    (m) => said.push(m),
+    send,
+  );
+  await alertOwnerAboutUserbot(
+    layout,
+    IMPORT_FAILED,
+    (m) => said.push(m),
+    send,
+  );
+
+  // Fail-open: незаписанный дроссель значит «сказать ещё раз», а не «молчать».
+  assert.equal(sent.length, 2);
+  assert.deepEqual(said, []);
+});
+
+test("the userbot Alert passes the outbound Gate: a key in the reason is redacted", async (t) => {
+  t.mock.method(console, "error", () => undefined);
+  const layout = installationWithChat(t);
+  const planted = `api_key=${"q".repeat(24)}`;
+  const sent: string[] = [];
+
+  await alertOwnerAboutUserbot(
+    layout,
+    `userbot: зависимости не импортируются — ValueError: ${planted}`,
+    () => {},
+    (text) => {
+      sent.push(text);
+      return Promise.resolve(true);
+    },
+  );
+
+  assert.equal(sent.length, 1);
+  assert.doesNotMatch(sent[0], /q{24}/u);
+  assert.match(sent[0], /\[REDACTED\]/u);
+});
+
+test("the userbot Alert reaches the Bot API as one plain sendMessage to the notification chat", async (t) => {
+  t.mock.method(console, "error", () => undefined);
+  const layout = installationWithChat(
+    t,
+    "TELEGRAM_BOT_TOKEN=123:abc\nTELEGRAM_ALLOWED_USER_IDS=777, 888\nAGENT_LANGUAGE=en\n",
+  );
+  const calls: Array<{ url: string; init: RequestInit }> = [];
+  let answer: () => Promise<Response> = () =>
+    Promise.resolve(new Response("{}", { status: 200 }));
+  t.mock.method(globalThis, "fetch", (url: string, init: RequestInit) => {
+    calls.push({ url, init });
+    return answer();
+  });
+  const said: string[] = [];
+
+  await alertOwnerAboutUserbot(layout, IMPORT_FAILED, (m) => said.push(m));
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, "https://api.telegram.org/bot123:abc/sendMessage");
+  assert.equal(calls[0].init.method, "POST");
+  assert.equal(typeof calls[0].init.body, "string");
+  const body = JSON.parse(calls[0].init.body as string) as Record<
+    string,
+    unknown
+  >;
+  // Без TELEGRAM_DIGEST_CHAT_ID — личный чат владельца, первый id Allowlist; без разметки.
+  assert.deepEqual(Object.keys(body).sort(), ["chat_id", "text"]);
+  assert.equal(body.chat_id, "777");
+  assert.match(String(body.text), /Userbot/u);
+  assert.deepEqual(said, []);
+
+  // Telegram отказал (4xx) или сети нет: одна строка в выводе, дроссель не отмечен.
+  for (const refuse of [
+    () => Promise.resolve(new Response("{}", { status: 400 })),
+    () => Promise.reject(new TypeError("fetch failed")),
+  ]) {
+    rmSync(join(layout.data, "alert-state.json"), { force: true });
+    answer = refuse;
+    const lines: string[] = [];
+    await alertOwnerAboutUserbot(layout, "userbot: other", (m) =>
+      lines.push(m),
+    );
+    assert.deepEqual(lines, [
+      "could not tell you in Telegram about the userbot",
+    ]);
+    assert.equal(existsSync(join(layout.data, "alert-state.json")), false);
+  }
+});
+
+test("without a token or a chat the userbot Alert is silent and nothing is throttled", async (t) => {
+  const fetched = t.mock.method(globalThis, "fetch", () =>
+    Promise.resolve(new Response("{}", { status: 200 })),
+  );
+  for (const env of [
+    "AGENT_LANGUAGE=en\n",
+    "TELEGRAM_BOT_TOKEN=token\nAGENT_LANGUAGE=en\n",
+    "TELEGRAM_DIGEST_CHAT_ID=42\nAGENT_LANGUAGE=en\n",
+  ]) {
+    const layout = installationWithChat(t, env);
+    const said: string[] = [];
+    await alertOwnerAboutUserbot(layout, IMPORT_FAILED, (m) => said.push(m));
+    assert.deepEqual(said, [], env);
+    assert.equal(existsSync(join(layout.data, "alert-state.json")), false);
+  }
+  assert.equal(fetched.mock.callCount(), 0);
+});
+
+// Откат после флипа (сервис не ответил, шаг упал) поднимает юзербот на прежней версии:
+// сообщение «выключен» было бы ложью и на неделю заглушило бы правдивое.
+test("the userbot Alert waits for a served version and says nothing on a rollback", async (t) => {
+  const layout = installationWithChat(t);
+  const sent: string[] = [];
+  const alert = (reason: string) =>
+    alertOwnerAboutUserbot(
+      layout,
+      reason,
+      () => {},
+      (text) => {
+        sent.push(text);
+        return Promise.resolve(true);
+      },
+    );
+  const served = {
+    status: "updated",
+    version: "0.4.15-123456789abc",
+    previous: "0.4.14-123456789abc",
+    custom: "none",
+    migrations: [],
+    removed: [],
+  } as const satisfies Parameters<typeof alertOwnerWhenServed>[0];
+  for (const outcome of [
+    { status: "unhealthy", version: "0.4.15-123456789abc", log: "no answer" },
+    { status: "failed", message: "restart threw" },
+    { status: "current", version: "0.4.15-123456789abc" },
+    { status: "busy" },
+    { status: "too-old", own: "0.4.14", minUpdater: "0.4.15" },
+  ] as const satisfies ReadonlyArray<
+    Parameters<typeof alertOwnerWhenServed>[0]
+  >)
+    await alertOwnerWhenServed(outcome, IMPORT_FAILED, alert, () => {});
+  // Обновление прошло, а юзербот поднялся: говорить не о чем.
+  await alertOwnerWhenServed(served, undefined, alert, () => {});
+  assert.deepEqual(sent, []);
+  assert.equal(existsSync(join(layout.data, "alert-state.json")), false);
+
+  await alertOwnerWhenServed(served, IMPORT_FAILED, alert, () => {});
+  assert.equal(sent.length, 1);
+  assert.match(sent[0], /Userbot/u);
+});
+
+test("a userbot Alert that throws is one output line and the update goes on", async (t) => {
+  t.mock.method(console, "error", () => undefined);
+  const layout = installationWithChat(t);
+  const said: string[] = [];
+
+  await alertOwnerWhenServed(
+    {
+      status: "updated",
+      version: "0.4.15-123456789abc",
+      previous: null,
+      custom: "none",
+      migrations: [],
+      removed: [],
+    },
+    IMPORT_FAILED,
+    (reason) =>
+      alertOwnerAboutUserbot(
+        layout,
+        reason,
+        (m) => said.push(m),
+        () => Promise.reject(new Error("socket hang up")),
+      ),
+    (m) => said.push(m),
+  );
+
+  assert.deepEqual(said, ["could not tell you in Telegram about the userbot"]);
 });
 
 test("the flip restarts the plugin units that were running, and only those", async (t) => {

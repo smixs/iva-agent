@@ -21,6 +21,9 @@ import {
   PLUGIN_ALERT_KEY,
   pluginsSwitchedOffAlert,
   type Translate,
+  USERBOT_ALERT_KEY,
+  userbotOffAlert,
+  userbotOffReason,
 } from "./lib/notice-policy.ts";
 import {
   isEntrypoint,
@@ -786,6 +789,72 @@ export async function alertOwnerAboutCustom(
   );
 }
 
+/** What the update output names when an Alert about the userbot did not reach the chat. */
+const USERBOT = "the userbot";
+
+/** The one output line for an Alert the chat did not get. */
+function untold(about: string): string {
+  return `could not tell you in Telegram about ${about}`;
+}
+
+/**
+ * Tell the owner the userbot is off, if it is and there is someone to tell. Telling never
+ * fails the update it reports on: a throw is one output line.
+ */
+async function tellAboutUserbot(
+  alert: ((reason: string) => Promise<void>) | undefined,
+  reason: string | undefined,
+  notify: Say,
+): Promise<void> {
+  if (alert === undefined || reason === undefined) return;
+  try {
+    await alert(reason);
+  } catch (error) {
+    console.error("[alert] could not tell about the userbot:", error);
+    notify(untold(USERBOT));
+  }
+}
+
+/**
+ * The update switched the userbot off: its environment did not prepare or its proxy did
+ * not answer (#273). The update output already carries the reason and `iva userbot setup`
+ * (reinstallUserbot); this is the half that reaches an owner who pressed «Update» in
+ * Telegram. ADR-0007: once a week for the same reason, at once for another one.
+ */
+export async function alertOwnerAboutUserbot(
+  layout: ReturnType<typeof layoutFor>,
+  reason: string,
+  notify: Say,
+  send?: (text: string) => Promise<boolean>,
+): Promise<void> {
+  await alertOwnerOnce(
+    layout,
+    {
+      key: USERBOT_ALERT_KEY,
+      essence: userbotOffReason(reason),
+      text: (tr) => userbotOffAlert(tr, reason),
+      about: USERBOT,
+    },
+    notify,
+    send,
+  );
+}
+
+/**
+ * The userbot Alert of a whole update: `reason` is the flip's, and it is told only once the
+ * version is served. A rollback brings the userbot back on the version it ran on, and a
+ * message that it is off would be false - and would hush the true one for a week.
+ */
+export async function alertOwnerWhenServed(
+  outcome: UpdateOutcome,
+  reason: string | undefined,
+  alert: (reason: string) => Promise<void>,
+  notify: Say,
+): Promise<void> {
+  if (outcome.status !== "updated") return;
+  await tellAboutUserbot(alert, reason, notify);
+}
+
 /** What the owner's files contain; an Alert must not fail the update it reports on. */
 function customEssence(dataDir: string): string {
   try {
@@ -819,8 +888,7 @@ async function alertOwnerOnce(
   const outcome = await alertOnce(layout.data, alert.key, alert.essence, () =>
     deliver(text),
   );
-  if (outcome === "failed")
-    notify(`could not tell you in Telegram about ${alert.about}`);
+  if (outcome === "failed") notify(untold(alert.about));
 }
 
 /**
@@ -867,6 +935,10 @@ export async function restartPluginUnits(
  * was running. That one comes back only when its environment was rebuilt and its proxy
  * answered; a failed recovery, or a restart that threw before recovery ran, leaves it
  * stopped and disabled, so systemd cannot loop it on a broken environment (#273).
+ *
+ * A userbot this step switched off is handed to `alertUserbot` with its reason, once the
+ * writers are restored. Telling the owner is never a reason for the step to fail: a throw
+ * there is one line in the output.
  */
 export async function startCandidateServices(
   runtime: CliRuntime,
@@ -881,6 +953,7 @@ export async function startCandidateServices(
     notify,
     migration,
     reinstall,
+    alertUserbot,
   }: {
     readonly states: readonly OptionalWriterState[] | undefined;
     readonly dataDir: string;
@@ -889,12 +962,15 @@ export async function startCandidateServices(
     /** Shared with the rollback: it must know whether units were rewritten. */
     readonly migration: { started: boolean };
     readonly reinstall: typeof reinstallUserbot;
+    /** The userbot was running and is off now; `reason` is the recovery's. */
+    readonly alertUserbot?: (reason: string) => Promise<void>;
   },
 ): Promise<void> {
   const capturedUserbot = states?.find(
     (state) => state.unit === runtime.SVC_USERBOT,
   );
   let userbotReady = capturedUserbot?.active !== true;
+  let userbotOff: string | undefined;
   try {
     services.restartServices({
       afterUnitWrite: () => {
@@ -915,6 +991,7 @@ export async function startCandidateServices(
         knownActive: true,
       });
       userbotReady = recovery.status === "ready";
+      if (recovery.status === "failed") userbotOff = recovery.reason;
     }
   } finally {
     if (states) {
@@ -926,6 +1003,7 @@ export async function startCandidateServices(
       if (migration.started) services.retireDeferredBrainUnits();
     }
   }
+  await tellAboutUserbot(alertUserbot, userbotOff, notify);
 }
 
 /**
@@ -968,6 +1046,8 @@ export async function main(argv: readonly string[]): Promise<number> {
   const log: Say = (message) => console.log(`  ${message}`);
   const notify: Say = (message) => console.log(`! ${message}`);
   let optionalWriterState: OptionalWriterState[] | undefined;
+  // The flip's reason for switching the userbot off; told once the version is served.
+  let userbotOff: string | undefined;
   const migration = { started: false };
   let quarantinedState: UpdateQuarantine[] = [];
   let outcome: UpdateOutcome;
@@ -1042,6 +1122,10 @@ export async function main(argv: readonly string[]): Promise<number> {
           notify,
           migration,
           reinstall: reinstallUserbot,
+          alertUserbot: (reason) => {
+            userbotOff = reason;
+            return Promise.resolve();
+          },
         });
       },
       retireCommittedWriters: async (root) => {
@@ -1079,6 +1163,12 @@ export async function main(argv: readonly string[]): Promise<number> {
   } finally {
     lock.release();
   }
+  await alertOwnerWhenServed(
+    outcome,
+    userbotOff,
+    (reason) => alertOwnerAboutUserbot(layout, reason, notify),
+    notify,
+  );
   const report = process.env.IVA_UPDATE_OUTCOME;
   if (report) writeFileSync(report, JSON.stringify(outcome));
   else console.log(JSON.stringify(outcome));

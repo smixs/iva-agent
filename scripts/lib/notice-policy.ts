@@ -254,6 +254,37 @@ export function pluginsSwitchedOffAlert(
   );
 }
 
+/** Ключ дросселя для «обновление выключило юзербот»: суть — причина (userbotOffReason). */
+export const USERBOT_ALERT_KEY = "userbot-off";
+
+/**
+ * Причина из reinstallUserbot одной строкой: без префикса `userbot: ` и без точки в конце.
+ * Она же — суть Alert для дросселя, поэтому одна причина в другой обёртке не говорит дважды.
+ */
+export function userbotOffReason(reason: string): string {
+  return reason
+    .replace(/\s+/gu, " ")
+    .trim()
+    .replace(/^(?:userbot:\s*)+/u, "")
+    .replace(/[\s.]+$/u, "");
+}
+
+/**
+ * Обновление выключило юзербот: его окружение не подготовилось или прокси не ответил (#273).
+ * Вывод апдейта уже несёт причину и `iva userbot setup`, но кто обновлялся кнопкой в боте,
+ * его не видит. Правило Alert (ADR-0007): что сломалось, чем грозит, что сделать — кнопкой
+ * экрана /menu, а не командой терминала.
+ */
+export function userbotOffAlert(tr: Translate, reason: string): string {
+  const why = userbotOffReason(reason);
+  // Причины без слов нет — нет и тире перед ней.
+  const tail = why ? ` — ${why}` : "";
+  return tr(
+    `⚠️ Iva switched the userbot off: it did not come up after the update${tail}. While it is off, Iva cannot read or search your chats as your account; everything else works as before. Turn it back on: /menu → 📡 Userbot → «Turn on».`,
+    `⚠️ Ива выключила юзербот: после обновления он не запустился${tail}. Пока он выключен, Ива не читает и не ищет ваши чаты от вашего аккаунта; остальное работает как раньше. Включить обратно: /menu → 📡 Userbot → «Включить».`,
+  );
+}
+
 function errorCode(error: unknown): string | undefined {
   return error !== null && typeof error === "object" && "code" in error
     ? typeof error.code === "string"

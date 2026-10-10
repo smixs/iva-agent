@@ -184,9 +184,16 @@ async function flip(
   {
     reports = [],
     readinessTimeoutMs,
+    alerts = [],
+    alertUserbot = (reason: string) => {
+      alerts.push(reason);
+      return Promise.resolve();
+    },
   }: {
     reports?: string[];
     readinessTimeoutMs?: number;
+    alerts?: string[];
+    alertUserbot?: (reason: string) => Promise<void>;
   } = {},
 ) {
   const recoveries: Array<Awaited<ReturnType<typeof reinstallUserbot>>> = [];
@@ -203,6 +210,7 @@ async function flip(
       log: () => {},
       notify: (message) => reports.push(message),
       migration: { started: false },
+      alertUserbot,
       reinstall: async (runtime, services, report, options) => {
         const recovery = await reinstallUserbot(
           runtime,
@@ -238,10 +246,11 @@ test("recovery failures remain stopped through updater writer-state restoration"
     await t.test(failure, async (sub) => {
       const box = await installation(sub, failure);
       const reports: string[] = [];
+      const alerts: string[] = [];
       const [result] = await flip(
         box,
         { loadState: "loaded", active: true, enabled: true },
-        { reports, readinessTimeoutMs: 120 },
+        { reports, readinessTimeoutMs: 120, alerts },
       );
       assert.equal(
         box.state().active,
@@ -259,6 +268,51 @@ test("recovery failures remain stopped through updater writer-state restoration"
         "active",
       );
       assert.match(reports.join("\n"), /iva userbot setup/);
+      // Кто обновлялся кнопкой в боте, вывода не видит: владельцу уходит одно Alert
+      // с той же причиной, что в выводе.
+      assert.ok(result?.status === "failed");
+      assert.deepEqual(alerts, [result.reason]);
+      box.intact();
+    });
+  }
+});
+
+test("an Alert that throws does not fail the flip and the userbot stays off", async (t) => {
+  for (const thrown of ["rejects", "throws"] as const) {
+    await t.test(thrown, async (sub) => {
+      sub.mock.method(console, "error", () => undefined);
+      const box = await installation(sub, "import");
+      const reports: string[] = [];
+      let asked = 0;
+      const recoveries = await flip(
+        box,
+        { loadState: "loaded", active: true, enabled: true },
+        {
+          reports,
+          readinessTimeoutMs: 120,
+          alertUserbot: (): Promise<void> => {
+            asked += 1;
+            if (thrown === "throws") throw new Error("chat unreachable");
+            return Promise.reject(new Error("chat unreachable"));
+          },
+        },
+      );
+      assert.equal(asked, 1);
+      assert.deepEqual(
+        recoveries.map((recovery) => recovery.status),
+        ["failed"],
+      );
+      assert.deepEqual(box.state(), {
+        active: false,
+        enabled: false,
+        present: true,
+      });
+      assert.equal(
+        reports.filter(
+          (line) => line === "could not tell you in Telegram about the userbot",
+        ).length,
+        1,
+      );
       box.intact();
     });
   }
@@ -284,11 +338,18 @@ test("recovery preserves owner files and inactive/absent flags (seed 20261005)",
           present,
         );
         try {
-          const recoveries = await flip(box, {
-            loadState: present ? "loaded" : "not-found",
-            active: present && active,
-            enabled: present && enabled,
-          });
+          const alerts: string[] = [];
+          const recoveries = await flip(
+            box,
+            {
+              loadState: present ? "loaded" : "not-found",
+              active: present && active,
+              enabled: present && enabled,
+            },
+            { alerts },
+          );
+          // Юзербот поднялся или его и не было: говорить владельцу не о чем.
+          assert.deepEqual(alerts, []);
           assert.deepEqual(box.state(), {
             active: present && active,
             enabled: present && enabled,
