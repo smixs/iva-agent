@@ -16,7 +16,11 @@ import { dirname, join } from "node:path";
 import fc from "fast-check";
 import { createCliRuntime } from "./cli/runtime.ts";
 import { createUserbotCommands, reinstallUserbot } from "./cli/userbot.ts";
-import { startCandidateServices } from "./update-finish.ts";
+import { layoutFor } from "./lib/version-store.ts";
+import {
+  alertOwnerAboutUserbot,
+  startCandidateServices,
+} from "./update-finish.ts";
 
 const UNIT = "iva-telegram-userbot.service";
 const SEED = 20261005;
@@ -40,6 +44,9 @@ async function installation(
   const calls = join(dir, "calls.log");
   const state = join(dir, "state.json");
   writeFileSync(state, JSON.stringify({ active, enabled, present }));
+  // Read by the fake uv on every run: a box can break and heal between two updates.
+  const broken = join(dir, "failure");
+  writeFileSync(broken, failure);
   const token = join(data, "telegram-userbot.token");
   const session = join(data, "telegram-userbot.session");
   writeFileSync(token, "synthetic-owner-token\n", { mode: 0o600 });
@@ -132,9 +139,9 @@ async function installation(
           ");",
         "chmodSync(file, 0o755);",
         "}",
-        'if (args[0] === "pip" && ' +
-          String(failure === "sync") +
-          ") process.exit(17);",
+        'if (args[0] === "pip" && readFileSync(' +
+          JSON.stringify(broken) +
+          ', "utf8") === "sync") process.exit(17);',
       ].join("\n"),
     );
   }
@@ -153,14 +160,20 @@ async function installation(
   const runtime = createCliRuntime(root);
   return {
     runtime,
+    root,
     data,
     userbot,
+    /** The dependency sync fails ("sync") or passes ("none") from the next run on. */
+    sync: (mode: "sync" | "none") => writeFileSync(broken, mode),
     state: () =>
       JSON.parse(readFileSync(state, "utf8")) as {
         active: boolean;
         enabled: boolean;
         present: boolean;
       },
+    /** The owner acts on the unit outside Iva, as `systemctl --user` would. */
+    unit: (next: { active: boolean; enabled: boolean; present: boolean }) =>
+      writeFileSync(state, JSON.stringify(next)),
     calls: () => (existsSync(calls) ? readFileSync(calls, "utf8") : ""),
     intact: () => {
       assert.equal(readFileSync(token, "utf8"), "synthetic-owner-token\n");
@@ -313,6 +326,80 @@ test("an Alert that throws does not fail the flip and the userbot stays off", as
         ).length,
         1,
       );
+      box.intact();
+    });
+  }
+});
+
+// ADR-0007: a relapse after the fix speaks at once. Day 1 update A cannot prepare the
+// userbot and the owner hears it; the owner turns it back on; day 3 update B fails the same
+// way. Without forgetting the first Alert, B would be throttled for a week and the userbot
+// would go off in silence - the very complaint the Alert answers.
+test("a userbot turned back on forgets its Alert: the same failure on the next update speaks at once", async (t) => {
+  for (const back of ["setup", "update"] as const) {
+    await t.test(back, async (sub) => {
+      sub.mock.method(console, "log", () => undefined);
+      const box = await installation(sub, "sync");
+      // The box's .env names its data directory: the throttle is the real one.
+      const layout = layoutFor(box.root);
+      assert.equal(layout.data, box.data);
+      const sent: string[] = [];
+      const alertUserbot = (reason: string) =>
+        alertOwnerAboutUserbot(
+          layout,
+          reason,
+          () => {},
+          (text) => {
+            sent.push(text);
+            return Promise.resolve(true);
+          },
+        );
+      const on = { loadState: "loaded", active: true, enabled: true };
+
+      const [first] = await flip(box, on, {
+        readinessTimeoutMs: 120,
+        alertUserbot,
+      });
+      assert.equal(first?.status, "failed");
+      assert.equal(sent.length, 1);
+      assert.deepEqual(box.state(), {
+        active: false,
+        enabled: false,
+        present: true,
+      });
+
+      box.sync("none");
+      if (back === "setup") {
+        // /menu → 📡 Userbot → «Включить» runs exactly this command.
+        await createUserbotCommands(
+          box.runtime,
+          { writeUnits: () => [] },
+          { readinessTimeoutMs: 1_000 },
+        ).cmdUserbot(["setup"]);
+      } else {
+        // Turned on by hand; the next update finds it running and it comes up.
+        box.unit({ active: true, enabled: true, present: true });
+        const [middle] = await flip(box, on, {
+          readinessTimeoutMs: 1_000,
+          alertUserbot,
+        });
+        assert.equal(middle?.status, "ready");
+      }
+      assert.deepEqual(box.state(), {
+        active: true,
+        enabled: true,
+        present: true,
+      });
+      assert.equal(sent.length, 1);
+
+      box.sync("sync");
+      const [relapse] = await flip(box, on, {
+        readinessTimeoutMs: 120,
+        alertUserbot,
+      });
+      assert.ok(relapse?.status === "failed" && first?.status === "failed");
+      assert.equal(relapse.reason, first.reason);
+      assert.equal(sent.length, 2, "a relapse after the fix is not a repeat");
       box.intact();
     });
   }

@@ -7,6 +7,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
+import { alertResolved, USERBOT_ALERT_KEY } from "../lib/notice-policy.ts";
 import {
   userbotSyncArgs,
   USERBOT_IMPORT_TIMEOUT_MS,
@@ -289,6 +290,10 @@ export function createUserbotCommands(
     );
     if (!userbotProxyReady(health))
       throw new Error("userbot: " + health.reason);
+    // It answers, whichever way it came back (/menu «Включить», `iva restart`, an update):
+    // an update that switched it off is over, and a relapse tomorrow speaks at once instead
+    // of waiting out the week of its Alert (ADR-0007).
+    alertResolved(dataDirAbs(env), USERBOT_ALERT_KEY);
     return health;
   }
 
