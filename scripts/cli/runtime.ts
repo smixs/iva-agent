@@ -9,6 +9,7 @@ import { resolveDataDir } from "../lib/data-dir.ts";
 import { createSystemdControl } from "../lib/systemd-control.ts";
 import { real } from "../lib/version-layout.ts";
 import { parseVersionName } from "../lib/version-store.ts";
+import { resolveUv } from "../lib/userbot-deps.ts";
 
 type CaptureOptions = Omit<SpawnSyncOptions, "encoding"> & {
   readonly encoding?: BufferEncoding;
@@ -225,6 +226,7 @@ export function createCliRuntime(root: string) {
     NODE_BIN_DIR,
     NPM,
     childEnv,
+    uvExecutable: () => resolveUv(childEnv.PATH, homedir()),
     SERVICES,
     BRAIN_SERVICE,
     BRAIN_TIMER,

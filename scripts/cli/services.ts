@@ -26,6 +26,7 @@ type ServiceCommandDependencies = {
   readonly resetStateTargets?: typeof defaultResetStateTargets;
   readonly exit?: (code: number) => never;
   readonly awaitHealthy?: typeof defaultAwaitHealthy;
+  readonly recoverUserbot?: () => Promise<unknown>;
 };
 
 /** Create the service commands without touching the filesystem, processes, or systemd. */
@@ -93,12 +94,14 @@ export function createServiceCommands(
 
   // Not `async`: `requireSystemd` and the restart itself must throw synchronously,
   // the way every other service command does (scripts/cli/main.ts, dispatchCli).
-  // Only what comes after the restart - reading the version's plugins - awaits.
+  // After the restart, userbot readiness and reading the version's plugins await.
   function cmdRestart(): Promise<void> {
     requireSystemd();
     restartServices(); // regenerate the unit before restart → PORT stays in sync with IVA_PORT in .env
     ok("Restarted: iva + telegram-poll");
-    return warnUnbuiltCustom();
+    return (dependencies.recoverUserbot?.() ?? Promise.resolve()).then(
+      warnUnbuiltCustom,
+    );
   }
 
   /**

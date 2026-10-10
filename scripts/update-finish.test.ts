@@ -452,6 +452,7 @@ test("a userbot stop fault restores its captured active and enabled state", () =
   restoreWriterOwnership(fake.runtime, before, {
     unitMigrationStarted: true,
     legacyMemoryOwnerProven: false,
+    userbotReady: true,
   });
 
   assert.equal(fake.activeUnits.has(USERBOT), true);
@@ -482,6 +483,7 @@ test("a disabled userbot stays disabled and stopped after unit migration", () =>
   restoreWriterOwnership(fake.runtime, before, {
     unitMigrationStarted: true,
     legacyMemoryOwnerProven: false,
+    userbotReady: true,
   });
 
   assert.equal(fake.activeUnits.has(USERBOT), false);
@@ -513,6 +515,7 @@ test("a previously missing userbot is never started during restoration", () => {
   restoreWriterOwnership(fake.runtime, before, {
     unitMigrationStarted: true,
     legacyMemoryOwnerProven: false,
+    userbotReady: true,
   });
 
   assert.equal(
@@ -770,6 +773,7 @@ test("a unit-write fault restores the captured legacy Brain owner", () => {
   restoreWriterOwnership(fake.runtime, before, {
     unitMigrationStarted: false,
     legacyMemoryOwnerProven: false,
+    userbotReady: true,
   });
 
   assert.equal(fake.activeUnits.has(legacyTimer), true);

@@ -60,6 +60,7 @@ test("runtime exposes the CLI primitives and shared unit constants", async (t) =
     "scQ",
     "step",
     "systemd",
+    "uvExecutable",
     "warn",
     "writeEnvVars",
   ]);
@@ -94,6 +95,25 @@ test("runtime exposes the CLI primitives and shared unit constants", async (t) =
   assert.equal(runtime.TOKEN_FILE, join(root, "data/telegram-userbot.token"));
   assert.equal(runtime.DEFAULT_PORT, "8723");
   assert.equal(runtime.OLD_DEFAULT_HOST, "http://127.0.0.1:3000");
+});
+
+test("runtime resolves executable uv from its captured child PATH", async (t) => {
+  const root = await sandbox(t);
+  const bin = join(root, "commands with spaces");
+  mkdirSync(bin);
+  const uv = join(bin, "uv");
+  writeFileSync(uv, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  const previousPath = process.env.PATH;
+  t.after(() => {
+    if (previousPath === undefined) delete process.env.PATH;
+    else process.env.PATH = previousPath;
+  });
+  process.env.PATH = `${bin}:${dirname(process.execPath)}`;
+  const runtime = createCliRuntime(root);
+  process.env.PATH = dirname(process.execPath);
+
+  assert.equal(runtime.uvExecutable(), uv);
+  assert.equal(runtime.cap(runtime.uvExecutable()!, []).code, 0);
 });
 
 test("import is side-effect free and factory evaluation snapshots env and color", async (t) => {

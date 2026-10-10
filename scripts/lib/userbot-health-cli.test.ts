@@ -56,6 +56,14 @@ void test("iva userbot diagnose --json returns the shared ready state without se
   await plantCliTree(ROOT, project, { copy: ["scripts/cli"] });
   await writeFile(join(project, "data/telegram-userbot.token"), token);
 
+  const interpreter = join(
+    project,
+    "services/telegram-userbot/.venv/bin/python",
+  );
+  await mkdir(dirname(interpreter), { recursive: true });
+  await writeFile(interpreter, "#!/bin/sh\nexit 0\n");
+  await chmod(interpreter, 0o755);
+
   const systemctl = join(fakeBin, "systemctl");
   await writeFile(
     systemctl,
@@ -103,5 +111,11 @@ void test("iva userbot diagnose --json returns the shared ready state without se
 
   assert.equal(result.code, 0, result.stderr || result.stdout);
   assert.deepEqual(JSON.parse(result.stdout), { state: "ready", reason: "ok" });
+  await writeFile(interpreter, "#!/bin/sh\nexit 1\n");
+  const damaged = await diagnose();
+  assert.deepEqual(JSON.parse(damaged.stdout), {
+    state: "unreachable",
+    reason: "python_dependencies_unavailable",
+  });
   assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, new RegExp(token));
 });

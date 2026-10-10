@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createServer } from "node:http";
 
 import {
   probeUserbotHealth,
+  awaitUserbotHealth,
   USERBOT_HEALTH_TIMEOUT_MS,
 } from "./userbot-health.ts";
 
@@ -164,4 +166,90 @@ void test("userbot health reads the token from the canonical data directory", as
 
   assert.equal(readFrom, "/synthetic/iva/runtime");
   assert.deepEqual(health, { state: "ready", reason: "ok" });
+});
+
+void test("readiness waits through a cold proxy and preserves unauthorized QR-login state", async () => {
+  let calls = 0;
+  const result = await awaitUserbotHealth(
+    () =>
+      Promise.resolve(
+        ++calls === 1
+          ? { state: "unreachable", reason: "proxy_unreachable" }
+          : { state: "unauthorized", reason: "telegram_login_required" },
+      ),
+    500,
+  );
+  assert.equal(result.state, "unauthorized");
+  assert.equal(calls, 2);
+});
+
+void test("readiness retries an authenticated HTTP 503 before the cold proxy accepts QR login", async (t) => {
+  let calls = 0;
+  const server = createServer((request, reply) => {
+    assert.equal(request.headers.authorization, "Bearer readiness-token");
+    reply.writeHead(++calls === 1 ? 503 : 200, {
+      "content-type": "application/json",
+    });
+    reply.end('{"state":"unauthorized"}');
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(
+    () =>
+      new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      ),
+  );
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const health = await awaitUserbotHealth(
+    (signal) =>
+      probeUserbotHealth({
+        port: address.port,
+        signal,
+        runSystemctl: activeSystemd,
+        readToken: () => Promise.resolve("readiness-token"),
+      }),
+    1000,
+  );
+  assert.deepEqual(health, {
+    state: "unauthorized",
+    reason: "telegram_login_required",
+  });
+  assert.equal(calls, 2);
+});
+
+void test("readiness aborts a hung probe and does not probe again after returning", async () => {
+  let calls = 0,
+    aborted = false;
+  const result = await awaitUserbotHealth((signal) => {
+    calls++;
+    return new Promise((_resolve, reject) =>
+      signal.addEventListener(
+        "abort",
+        () => {
+          aborted = true;
+          reject(new Error("cancelled"));
+        },
+        { once: true },
+      ),
+    );
+  }, 20);
+  assert.match(result.reason, /^readiness_timeout:/);
+  assert.equal(aborted, true);
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(calls, 1);
+});
+
+void test("readiness reports a thrown probe and clears its retry pause on expiry", async () => {
+  let calls = 0;
+  const result = await awaitUserbotHealth(() => {
+    calls++;
+    return Promise.reject(new Error("network failed"));
+  }, 20);
+  assert.deepEqual(result, {
+    state: "unreachable",
+    reason: "readiness_timeout:proxy_unreachable",
+  });
+  await new Promise((resolve) => setTimeout(resolve, 220));
+  assert.equal(calls, 1);
 });

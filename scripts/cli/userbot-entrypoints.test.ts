@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
-import { spawnSync, type SpawnSyncReturns } from "node:child_process";
+import { spawn, type SpawnSyncReturns } from "node:child_process";
 import test, { type TestContext } from "node:test";
+import { createServer } from "node:http";
 import {
   chmod,
   copyFile,
@@ -56,6 +57,24 @@ async function fixture(
     join(ROOT, "services/telegram-userbot/requirements.lock"),
     join(userbotDir, "requirements.lock"),
   );
+  if (env.includes("TELEGRAM_API_ID=") && env.includes("TELEGRAM_API_HASH=")) {
+    const server = createServer((_request, response) => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end('{"state":"unauthorized"}');
+    });
+    await new Promise<void>((resolve) =>
+      server.listen(0, "127.0.0.1", resolve),
+    );
+    t.after(
+      () =>
+        new Promise<void>((resolve, reject) =>
+          server.close((error) => (error ? reject(error) : resolve())),
+        ),
+    );
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+    env += "TELEGRAM_MCP_PORT=" + address.port + "\n";
+  }
   if (env) await writeFile(envPath, env, { mode: 0o600 });
   if (existingToken !== undefined) {
     await mkdir(dirname(tokenPath), { recursive: true });
@@ -129,25 +148,45 @@ async function fixture(
   const run = (
     args: readonly string[],
     { input }: RunOptions = {},
-  ): SpawnSyncReturns<string> =>
-    spawnSync(
-      process.execPath,
-      [join(project, "bin/iva.mjs"), "userbot", ...args],
-      {
-        cwd: project,
-        encoding: "utf8",
-        input,
-        env: {
-          ...process.env,
-          HOME: home,
-          NO_COLOR: "1",
-          PATH: `${fakeBin}:/usr/bin:/bin`,
-          IVA_USERBOT_CALLS: callsPath,
-          IVA_USERBOT_DIR: userbotDir,
-          IVA_USERBOT_STATE: stateDir,
+  ): Promise<SpawnSyncReturns<string>> =>
+    new Promise((resolve, reject) => {
+      const child = spawn(
+        process.execPath,
+        [join(project, "bin/iva.mjs"), "userbot", ...args],
+        {
+          cwd: project,
+          env: {
+            ...process.env,
+            HOME: home,
+            NO_COLOR: "1",
+            PATH: fakeBin + ":/usr/bin:/bin",
+            IVA_USERBOT_CALLS: callsPath,
+            IVA_USERBOT_DIR: userbotDir,
+            IVA_USERBOT_STATE: stateDir,
+          },
         },
-      },
-    );
+      );
+      let stdout = "",
+        stderr = "";
+      child.stdout.on("data", (chunk) => {
+        stdout += String(chunk);
+      });
+      child.stderr.on("data", (chunk) => {
+        stderr += String(chunk);
+      });
+      child.once("error", reject);
+      child.once("close", (status, signal) =>
+        resolve({
+          status,
+          signal,
+          stdout,
+          stderr,
+          pid: child.pid ?? 0,
+          output: [null, stdout, stderr],
+        }),
+      );
+      child.stdin.end(input);
+    });
 
   return {
     calls: async (): Promise<string[]> => {
@@ -179,7 +218,7 @@ async function fixture(
 
 void test("userbot creds trims two stdin lines, persists them, and never echoes the hash", async (t) => {
   const { envPath, run } = await fixture(t, { env: "KEEP=value\n" });
-  const result = run(["creds"], {
+  const result = await run(["creds"], {
     input: `\n  123456  \n\n  ${SECRET}  \nignored\n`,
   });
 
@@ -199,7 +238,7 @@ void test("userbot creds rejects missing or nonnumeric input without changing en
   const initial = "KEEP=unchanged\n";
   const { envPath, run } = await fixture(t, { env: initial });
 
-  const missing = run(["creds"], { input: "123456\n" });
+  const missing = await run(["creds"], { input: "123456\n" });
   assert.equal(missing.status, 1);
   assert.equal(
     missing.stdout,
@@ -207,7 +246,9 @@ void test("userbot creds rejects missing or nonnumeric input without changing en
   );
   assert.equal(await readFile(envPath, "utf8"), initial);
 
-  const nonnumeric = run(["creds"], { input: `not-a-number\n${SECRET}\n` });
+  const nonnumeric = await run(["creds"], {
+    input: `not-a-number\n${SECRET}\n`,
+  });
   assert.equal(nonnumeric.status, 1);
   assert.equal(nonnumeric.stdout, "✗ api_id должен быть числом\n");
   assert.doesNotMatch(
@@ -219,7 +260,7 @@ void test("userbot creds rejects missing or nonnumeric input without changing en
 
 void test("userbot setup fails before token, uv, units, or systemd when credentials are absent", async (t) => {
   const { calls, home, run, tokenPath } = await fixture(t);
-  const result = run(["setup"]);
+  const result = await run(["setup"]);
 
   assert.equal(result.status, 1);
   assert.equal(
@@ -241,7 +282,7 @@ void test("userbot setup creates a 0600 token and preserves venv, unit, activati
   const { calls, home, run, tokenPath, venvPython } = await fixture(t, {
     env: `TELEGRAM_API_ID=123456\nTELEGRAM_API_HASH=${SECRET}\n`,
   });
-  const result = run(["setup"]);
+  const result = await run(["setup"]);
 
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.match(await readFile(tokenPath, "utf8"), /^[a-f0-9]{48}$/);
@@ -256,18 +297,19 @@ void test("userbot setup creates a 0600 token and preserves venv, unit, activati
   );
 
   const events = await calls();
-  assert.equal(events[0], "uv:venv --python 3.12 .venv");
+  assert.equal(events[0], "systemctl:is-active iva-telegram-userbot.service");
+  assert.equal(events[1], "uv:venv --python 3.12 .venv");
   assert.equal(
-    events[1]?.replaceAll("/private/var/", "/var/"),
+    events[2]?.replaceAll("/private/var/", "/var/"),
     `uv:pip sync --python ${venvPython} --require-hashes --strict ${join(dirname(dirname(dirname(venvPython))), "requirements.lock")}`,
   );
   assert.equal(
-    events[2],
+    events[3],
     "python:-c import telethon, telegram_mcp, qrcode, mcp",
   );
   const reload = events.indexOf("systemctl:daemon-reload");
   const enable = events.indexOf(
-    "systemctl:enable --now iva-telegram-userbot.service",
+    "systemctl:enable iva-telegram-userbot.service",
   );
   const restart = events.indexOf(
     "systemctl:restart iva-telegram-userbot.service",
@@ -288,7 +330,7 @@ void test("userbot setup gives the proxy one canonical custom data directory", a
     ].join("\n"),
   });
 
-  const result = run(["setup"]);
+  const result = await run(["setup"]);
 
   assert.equal(result.status, 0, result.stderr || result.stdout);
   const canonical = join(project, "runtime");
@@ -322,7 +364,7 @@ void test("userbot setup gives the proxy one canonical custom data directory", a
   }
 });
 
-void test("userbot setup never rewrites an existing token", async (t) => {
+void test("userbot setup keeps existing token bytes while unit reconciliation makes its permissions private", async (t) => {
   const token = "existing-token-must-stay-byte-identical";
   const { run, tokenPath } = await fixture(t, {
     env: `TELEGRAM_API_ID=123456\nTELEGRAM_API_HASH=${SECRET}\n`,
@@ -330,20 +372,20 @@ void test("userbot setup never rewrites an existing token", async (t) => {
     existingVenv: true,
   });
   const before = await stat(tokenPath);
-  const result = run(["setup"]);
+  const result = await run(["setup"]);
   const after = await stat(tokenPath);
 
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.equal(await readFile(tokenPath, "utf8"), token);
-  assert.equal(after.mode & 0o777, 0o640);
+  assert.equal(after.mode & 0o777, 0o600);
   assert.equal(after.mtimeMs, before.mtimeMs);
 });
 
 void test("userbot status is the default and reports service, venv, and token on three lines", async (t) => {
   const { run, seedActive } = await fixture(t);
   await seedActive();
-  const explicit = run(["status"]);
-  const implicit = run([]);
+  const explicit = await run(["status"]);
+  const implicit = await run([]);
   const expected = [
     "iva-telegram-userbot.service: unreachable",
     "venv: нет — будет собран при setup",
@@ -359,7 +401,7 @@ void test("userbot status is the default and reports service, venv, and token on
 
 void test("userbot diagnose requires --json before probing", async (t) => {
   const { calls, run } = await fixture(t);
-  const result = run(["diagnose"]);
+  const result = await run(["diagnose"]);
 
   assert.equal(result.status, 1);
   assert.equal(result.stdout, "✗ Использование: iva userbot diagnose --json\n");
@@ -369,7 +411,7 @@ void test("userbot diagnose requires --json before probing", async (t) => {
 void test("userbot off disables the active proxy and unknown subcommands fail without mutation", async (t) => {
   const { calls, run, seedActive, stateDir } = await fixture(t);
   await seedActive();
-  const off = run(["off"]);
+  const off = await run(["off"]);
 
   assert.equal(off.status, 0, off.stderr || off.stdout);
   assert.equal(off.stdout, "✓ Userbot-прокси остановлен и выключен.\n");
@@ -382,7 +424,7 @@ void test("userbot off disables the active proxy and unknown subcommands fail wi
   ]);
 
   const before = await calls();
-  const unknown = run(["surprise"]);
+  const unknown = await run(["surprise"]);
   assert.equal(unknown.status, 1);
   assert.equal(unknown.stdout, "✗ Неизвестная команда userbot: surprise\n");
   assert.deepEqual(await calls(), before);

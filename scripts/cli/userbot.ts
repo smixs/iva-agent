@@ -7,9 +7,14 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
-import { userbotSyncArgs } from "../lib/userbot-deps.ts";
+import {
+  userbotSyncArgs,
+  USERBOT_IMPORT_TIMEOUT_MS,
+} from "../lib/userbot-deps.ts";
 import {
   probeUserbotHealth,
+  awaitUserbotHealth,
+  userbotProxyReady,
   type UserbotHealth,
 } from "../lib/userbot-health.ts";
 import type { createCliRuntime } from "./runtime.ts";
@@ -34,6 +39,7 @@ export type UserbotRuntime = Pick<
   | "readEnv"
   | "dataDirAbs"
   | "writeEnvVars"
+  | "uvExecutable"
 >;
 
 export interface EnsureUserbotVenvOptions {
@@ -55,12 +61,14 @@ interface UserbotFileSystem {
 }
 
 export interface UserbotDependencies {
+  readonly readinessTimeoutMs?: number;
   readonly fileSystem?: Partial<UserbotFileSystem>;
   readonly randomHex?: (bytes: number) => string;
   readonly probeHealth?: (options: {
     readonly root: string;
     readonly dataDir: string;
     readonly port: string;
+    readonly signal?: AbortSignal;
   }) => Promise<UserbotHealth>;
   readonly log?: (message: string) => void;
   readonly exit?: (code: number) => never;
@@ -112,8 +120,8 @@ export function createUserbotCommands(
     requirementsPath = join(USERBOT_DIR, "requirements.lock"),
     requireHashes = true,
   }: EnsureUserbotVenvOptions = {}): void {
-    const hasUv = !!cap("sh", ["-c", "command -v uv"]).out;
-    if (!hasUv)
+    const uv = runtime.uvExecutable();
+    if (!uv)
       throw new Error("userbot: uv не найден — повторно запусти install.sh");
     const options = {
       cwd: USERBOT_DIR,
@@ -124,36 +132,32 @@ export function createUserbotCommands(
       operation: string,
     ): void => {
       if ((result?.status ?? 1) !== 0)
-        throw new Error(`userbot: ${operation} не удалось`);
+        throw new Error(
+          `userbot: ${operation} не удалось (exit ${result?.status ?? 1})`,
+        );
     };
+    const requirements = fileSystem.readUtf8(requirementsPath as string);
+    const syncArgs = userbotSyncArgs({
+      pythonPath: VENV_PY,
+      requirementsFile: requirementsPath as string,
+      requirementsText: requirements,
+      requireHashes,
+    });
     if (!fileSystem.exists(VENV_PY)) {
       if (!quiet) step("Создаю venv для userbot-прокси…");
       must(
-        run("uv", ["venv", "--python", "3.12", ".venv"], options),
+        run(uv, ["venv", "--python", "3.12", ".venv"], options),
         "создание venv",
       );
       if (!fileSystem.exists(VENV_PY))
         throw new Error("userbot: venv не создан — проверь python3/uv");
     }
     if (!quiet) step("Синхронизирую зависимости userbot-прокси…");
-    const requirements = fileSystem.readUtf8(requirementsPath as string);
-    must(
-      run(
-        "uv",
-        userbotSyncArgs({
-          pythonPath: VENV_PY,
-          requirementsFile: requirementsPath as string,
-          requirementsText: requirements,
-          requireHashes,
-        }),
-        options,
-      ),
-      "установка зависимостей",
-    );
+    must(run(uv, syncArgs, options), "установка зависимостей");
     const check = cap(
       VENV_PY,
       ["-c", "import telethon, telegram_mcp, qrcode, mcp"],
-      options,
+      { ...options, timeout: USERBOT_IMPORT_TIMEOUT_MS },
     );
     if (check.code !== 0)
       throw new Error(
@@ -175,18 +179,102 @@ export function createUserbotCommands(
     if (!quiet) ok("Сгенерировал токен прокси (data/telegram-userbot.token).");
   }
 
-  function restartUserbotIfActive({
+  async function restartUserbotIfActive({
     quiet = false,
     knownActive = false,
     requirementsPath = join(USERBOT_DIR, "requirements.lock"),
     requireHashes = true,
-  }: RestartUserbotOptions = {}): void {
-    if (!knownActive && !systemd.isActive(SVC_USERBOT)) return;
+  }: RestartUserbotOptions = {}): Promise<UserbotHealth | null> {
+    if (
+      !knownActive &&
+      !["active", "activating", "deactivating", "reloading"].includes(
+        systemd.query("is-active", SVC_USERBOT).out,
+      )
+    )
+      return null;
     if (!quiet) step("Обновляю userbot-прокси…");
-    ensureUserbotToken({ quiet });
-    ensureUserbotVenv({ quiet, requirementsPath, requireHashes });
-    systemd.restart([SVC_USERBOT]);
-    if (!quiet) ok("userbot-прокси перезапущен на новом коде");
+    try {
+      systemd.stop([SVC_USERBOT]);
+      const stopped = systemd.query("is-active", SVC_USERBOT).out;
+      if (!["inactive", "failed", "unknown"].includes(stopped))
+        throw new Error(
+          "userbot: service did not stop before dependency preparation",
+        );
+      ensureUserbotToken({ quiet });
+      ensureUserbotVenv({ quiet, requirementsPath, requireHashes });
+      const started = systemd.query("restart", SVC_USERBOT);
+      if (started.code !== 0)
+        throw new Error("userbot: restart failed (exit " + started.code + ")");
+      const health = await awaitProxy();
+      if (!quiet) ok("userbot-прокси перезапущен на новом коде");
+      return health;
+    } catch (error) {
+      keepOff(error);
+    }
+  }
+
+  function keepOff(original: unknown): never {
+    try {
+      systemd.disableNow([SVC_USERBOT]);
+      const stopped = systemd.query("is-active", SVC_USERBOT).out;
+      if (
+        !["inactive", "failed", "unknown"].includes(stopped) ||
+        systemd.isEnabled(SVC_USERBOT)
+      )
+        throw new Error(
+          "userbot service remained active/enabled after disable",
+        );
+    } catch (cleanupError) {
+      const message =
+        original instanceof Error ? original.message : String(original);
+      const cleanup =
+        cleanupError instanceof Error
+          ? cleanupError.message
+          : String(cleanupError);
+      throw new AggregateError(
+        [original, cleanupError],
+        message + "; could not keep userbot off: " + cleanup,
+        { cause: cleanupError },
+      );
+    }
+    throw original;
+  }
+
+  async function diagnosticHealth(): Promise<UserbotHealth> {
+    const env = readEnv();
+    const health = await probeHealth({
+      root: ROOT,
+      dataDir: dataDirAbs(env),
+      port: env.TELEGRAM_MCP_PORT || "8724",
+    });
+    if (!userbotProxyReady(health)) return health;
+    if (!fileSystem.exists(VENV_PY))
+      return { state: "unreachable", reason: "venv_interpreter_missing" };
+    const imports = cap(
+      VENV_PY,
+      ["-c", "import telethon, telegram_mcp, qrcode, mcp"],
+      { cwd: USERBOT_DIR, timeout: USERBOT_IMPORT_TIMEOUT_MS },
+    );
+    return imports.code === 0
+      ? health
+      : { state: "unreachable", reason: "python_dependencies_unavailable" };
+  }
+
+  async function awaitProxy(): Promise<UserbotHealth> {
+    const env = readEnv();
+    const health = await awaitUserbotHealth(
+      (signal) =>
+        probeHealth({
+          root: ROOT,
+          dataDir: dataDirAbs(env),
+          port: env.TELEGRAM_MCP_PORT || "8724",
+          signal,
+        }),
+      dependencies.readinessTimeoutMs,
+    );
+    if (!userbotProxyReady(health))
+      throw new Error("userbot: " + health.reason);
+    return health;
   }
 
   async function cmdUserbot(args: readonly string[]): Promise<void> {
@@ -225,11 +313,39 @@ export function createUserbotCommands(
         bad("впиши оба ключа в .env и запусти снова: iva userbot setup");
         exit(1);
       }
-      ensureUserbotToken();
-      ensureUserbotVenv();
-      systemdLifecycle.writeUnits();
-      systemd.activate([SVC_USERBOT]);
-      systemd.restart([SVC_USERBOT]);
+      const wasActive = [
+        "active",
+        "activating",
+        "deactivating",
+        "reloading",
+      ].includes(systemd.query("is-active", SVC_USERBOT).out);
+      let unitWritten = false;
+      try {
+        if (wasActive) {
+          systemd.stop([SVC_USERBOT]);
+          const stopped = systemd.query("is-active", SVC_USERBOT).out;
+          if (!["inactive", "failed", "unknown"].includes(stopped))
+            throw new Error(
+              "userbot: service did not stop before dependency preparation",
+            );
+        }
+        ensureUserbotToken();
+        ensureUserbotVenv();
+        systemdLifecycle.writeUnits();
+        unitWritten = true;
+        for (const action of ["enable", "restart"]) {
+          const result = systemd.query(action, SVC_USERBOT);
+          if (result.code !== 0)
+            throw new Error(
+              "userbot: " + action + " failed (exit " + result.code + ")",
+            );
+        }
+        await awaitProxy();
+      } catch (error) {
+        if (unitWritten || wasActive || systemd.isEnabled(SVC_USERBOT))
+          keepOff(error);
+        throw error;
+      }
       ok(
         "Userbot-прокси включён. Подключи аккаунт по QR через бота: напиши боту «подключи мой телеграм».",
       );
@@ -246,12 +362,7 @@ export function createUserbotCommands(
         bad("Использование: iva userbot diagnose --json");
         exit(1);
       }
-      const env = readEnv();
-      const health = await probeHealth({
-        root: ROOT,
-        dataDir: dataDirAbs(env),
-        port: env.TELEGRAM_MCP_PORT || "8724",
-      });
+      const health = await diagnosticHealth();
       log(JSON.stringify(health));
       return;
     }
@@ -259,12 +370,7 @@ export function createUserbotCommands(
       bad(`Неизвестная команда userbot: ${sub}`);
       exit(1);
     }
-    const env = readEnv();
-    const health = await probeHealth({
-      root: ROOT,
-      dataDir: dataDirAbs(env),
-      port: env.TELEGRAM_MCP_PORT || "8724",
-    });
+    const health = await diagnosticHealth();
     log(`${SVC_USERBOT}: ${health.state}`);
     log(
       `venv: ${fileSystem.exists(VENV_PY) ? "собран" : "нет — будет собран при setup"}`,
@@ -288,20 +394,33 @@ export function createUserbotCommands(
  * that is not there. Never fatal: an integration that cannot be rebuilt is a
  * broken integration, not a failed update.
  */
-export function reinstallUserbot(
+export type UserbotRecovery =
+  | { readonly status: "skipped" }
+  | { readonly status: "ready"; readonly health: UserbotHealth }
+  | { readonly status: "failed"; readonly reason: string };
+
+export async function reinstallUserbot(
   runtime: UserbotRuntime,
   systemdLifecycle: Pick<CliSystemd, "writeUnits">,
   report: (message: string) => void,
   { knownActive = false }: Pick<RestartUserbotOptions, "knownActive"> = {},
-): void {
+  dependencies: UserbotDependencies = {},
+): Promise<UserbotRecovery> {
   try {
-    createUserbotCommands(runtime, systemdLifecycle).restartUserbotIfActive({
+    const health = await createUserbotCommands(
+      runtime,
+      systemdLifecycle,
+      dependencies,
+    ).restartUserbotIfActive({
       quiet: true,
       knownActive,
     });
+    return health ? { status: "ready", health } : { status: "skipped" };
   } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
     report(
-      `the telegram userbot proxy did not come up: ${(error as Error).message}`,
+      `the telegram userbot proxy did not come up: ${reason}; recovery failed, retry: iva userbot setup`,
     );
+    return { status: "failed", reason };
   }
 }

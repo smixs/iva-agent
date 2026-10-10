@@ -54,6 +54,7 @@ async function fixture(t: TestContext): Promise<CliFixture> {
       '  exit "${IVA_SERVICE_STATUS_EXIT:-0}"',
       "fi",
       'if [ "$action" = "is-enabled" ]; then printf "enabled\\n"; fi',
+      'if [ "$action" = "is-active" ] && [ "$1" = "iva-telegram-userbot.service" ]; then printf "inactive\\n"; exit 3; fi',
       'if [ "$action" = "is-active" ]; then printf "active\\n"; fi',
       "exit 0",
       "",
@@ -130,6 +131,7 @@ void test("restart regenerates units before checked service restarts and reports
     "--user restart iva-telegram-poll.service",
     "--user is-active iva-telegram-poll.service",
     "--user is-active iva.service",
+    "--user is-active iva-telegram-userbot.service",
   ]);
 });
 

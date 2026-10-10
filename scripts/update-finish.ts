@@ -359,8 +359,15 @@ export function restoreWriterOwnership(
   phase: {
     readonly unitMigrationStarted: boolean;
     readonly legacyMemoryOwnerProven: boolean;
+    readonly userbotReady: boolean;
   },
 ): void {
+  if (phase.userbotReady !== true)
+    states = states.map((state) =>
+      state.unit === runtime.SVC_USERBOT && state.active
+        ? { ...state, active: false, enabled: false }
+        : state,
+    );
   if (!phase.unitMigrationStarted) {
     restoreOptionalWriterState(runtime, states);
     return;
@@ -948,6 +955,7 @@ export async function main(argv: readonly string[]): Promise<number> {
             restoreWriterOwnership(runtime, optionalWriterState, {
               unitMigrationStarted,
               legacyMemoryOwnerProven: false,
+              userbotReady: true,
             });
         }
         await Promise.resolve();
@@ -962,6 +970,7 @@ export async function main(argv: readonly string[]): Promise<number> {
         const capturedUserbot = optionalWriterState?.find(
           (state) => state.unit === runtime.SVC_USERBOT,
         );
+        let userbotReady = capturedUserbot?.active !== true;
         try {
           services.restartServices({
             afterUnitWrite: () => {
@@ -977,15 +986,18 @@ export async function main(argv: readonly string[]): Promise<number> {
           // The code of every plugin proxy is in the version this flip just made
           // current; nothing else brings them onto it.
           await restartPluginUnits(runtime, layout.data, log);
-          if (capturedUserbot?.active === true)
-            reinstallUserbot(runtime, services, notify, {
+          if (capturedUserbot?.active === true) {
+            const recovery = await reinstallUserbot(runtime, services, notify, {
               knownActive: true,
             });
+            userbotReady = recovery.status === "ready";
+          }
         } finally {
           if (optionalWriterState) {
             restoreWriterOwnership(runtime, optionalWriterState, {
               unitMigrationStarted,
               legacyMemoryOwnerProven: false,
+              userbotReady,
             });
             if (unitMigrationStarted) services.retireDeferredBrainUnits();
           }

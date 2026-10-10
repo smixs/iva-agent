@@ -1,6 +1,7 @@
 import { strict as assert } from "node:assert";
 import test, { type TestContext } from "node:test";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { createServer } from "node:http";
 import { existsSync } from "node:fs";
 import {
   chmod,
@@ -641,6 +642,7 @@ function updaterBrainTransferScript(project: string): string {
     restoreWriterOwnership(runtime, before, {
       unitMigrationStarted,
       legacyMemoryOwnerProven: true,
+      userbotReady: true,
     });
     services.retireDeferredBrainUnits();
   `;
@@ -1068,19 +1070,63 @@ void test("doctor does not ask for the enforce report nobody writes any more", a
 });
 
 void test("userbot setup restarts an already enabled and active unit for new desired config", async (t) => {
-  const { calls, envPath, runCommand, seedUnit } = await fixture(t);
+  const { calls, envPath, home, project, state, seedUnit } = await fixture(t);
   await seedUnit("iva-telegram-userbot.service");
+  const server = createServer((_request, response) => {
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end('{"state":"unauthorized"}');
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(
+    () =>
+      new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      ),
+  );
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
   await writeFile(
     envPath,
-    `MODEL_PROVIDER=codex\nOPENAI_API_KEY=${SECRET}\nTELEGRAM_API_ID=12345\nTELEGRAM_API_HASH=new-desired-hash\n`,
+    `MODEL_PROVIDER=codex\nOPENAI_API_KEY=${SECRET}\nTELEGRAM_API_ID=12345\nTELEGRAM_API_HASH=new-desired-hash\nTELEGRAM_MCP_PORT=${address.port}\n`,
     { mode: 0o600 },
   );
 
-  const result = runCommand("userbot", { args: ["setup"] });
+  const result = await new Promise<{
+    status: number | null;
+    stdout: string;
+    stderr: string;
+  }>((resolve, reject) => {
+    const child = spawn(
+      process.execPath,
+      [join(project, "bin/iva.mjs"), "userbot", "setup"],
+      {
+        env: {
+          ...process.env,
+          HOME: home,
+          NO_COLOR: "1",
+          PATH: `${join(dirname(home), "bin")}:/usr/bin:/bin`,
+          IVA_FAKE_SYSTEMCTL_CALLS: calls,
+          IVA_FAKE_SYSTEMCTL_EXIT: "0",
+          IVA_FAKE_SYSTEMD_STATE: state,
+        },
+      },
+    );
+    let stdout = "",
+      stderr = "";
+    child.stdout.on("data", (chunk) => {
+      stdout += String(chunk);
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += String(chunk);
+    });
+    child.once("error", reject);
+    child.once("close", (status) => resolve({ status, stdout, stderr }));
+    child.stdin.end();
+  });
   assert.equal(result.status, 0, result.stderr || result.stdout);
   const systemctlCalls = (await readFile(calls, "utf8")).trim().split("\n");
   const enableAt = systemctlCalls.indexOf(
-    "--user enable --now iva-telegram-userbot.service",
+    "--user enable iva-telegram-userbot.service",
   );
   const restartAt = systemctlCalls.indexOf(
     "--user restart iva-telegram-userbot.service",
