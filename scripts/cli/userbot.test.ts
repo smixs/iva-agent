@@ -640,3 +640,26 @@ void test("the import check after a sync gives a cold interpreter a minute", () 
   assert.equal(timeouts.length, 1);
   assert.ok((timeouts[0] ?? 0) >= 60_000, `timeout ${String(timeouts[0])}`);
 });
+
+void test("a failed recovery names its cause and the one command that turns the userbot back on", async () => {
+  const { runtime } = runtimeFixture({ active: true, uv: null });
+  const reports: string[] = [];
+  await reinstallUserbot(
+    runtime,
+    { writeUnits: () => [] },
+    (message) => reports.push(message),
+    { knownActive: true },
+    { fileSystem: memoryFileSystem({ token: true }).fileSystem },
+  );
+
+  assert.equal(reports.length, 1);
+  const [report = ""] = reports;
+  // The cause first, with its own fix; then the one command that turns the userbot on.
+  assert.match(
+    report,
+    /did not come up: userbot: uv не найден — повторно запусти install\.sh\./,
+  );
+  assert.match(report, /turn it back on: iva userbot setup$/);
+  assert.equal(report.split("iva userbot setup").length, 2);
+  assert.doesNotMatch(report, /retry|recovery failed/i);
+});

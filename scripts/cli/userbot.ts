@@ -438,7 +438,7 @@ export async function reinstallUserbot(
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     report(
-      `the telegram userbot proxy did not come up: ${reason}; recovery failed, retry: iva userbot setup`,
+      `the telegram userbot proxy did not come up: ${reason.replace(/\.$/u, "")}. Once that is fixed, turn it back on: iva userbot setup`,
     );
     return { status: "failed", reason };
   }
