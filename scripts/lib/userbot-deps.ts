@@ -1,3 +1,7 @@
+import { accessSync, constants, statSync } from "node:fs";
+import { homedir } from "node:os";
+import { delimiter, join, resolve } from "node:path";
+
 /**
  * uv writes no bytecode, so the first import after a sync compiles every module: 4.5 s
  * on a fast core and up to 15.6 s on a slow one. The bound is there for a hung
@@ -33,9 +37,6 @@ export function userbotSyncArgs({
     requirementsFile,
   ];
 }
-import { accessSync, constants, statSync } from "node:fs";
-import { homedir } from "node:os";
-import { delimiter, join, resolve } from "node:path";
 
 /** Same fallback as install.sh: a non-login PATH need not contain ~/.local/bin. */
 export function resolveUv(
