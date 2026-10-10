@@ -620,3 +620,23 @@ void test("a restart still prepares a userbot that is active but does not answer
   const restart = events.indexOf(`systemd:restart ${SERVICE}`);
   assert.ok(stop >= 0 && sync > stop && restart > sync, events.join("\n"));
 });
+
+void test("the import check after a sync gives a cold interpreter a minute", () => {
+  // uv writes no bytecode, so the first import after a sync compiles every module:
+  // 4.5 s on a fast core, up to 15.6 s on a slow one (measured, release 0.4.15).
+  const timeouts: Array<number | undefined> = [];
+  const { runtime } = runtimeFixture({
+    cap: (command, _args, options) => {
+      if (command === VENV_PY) timeouts.push(options?.timeout);
+      return captureResult(0);
+    },
+  });
+  createUserbotCommands(
+    runtime,
+    { writeUnits: () => [] },
+    { fileSystem: memoryFileSystem().fileSystem },
+  ).ensureUserbotVenv({ quiet: true });
+
+  assert.equal(timeouts.length, 1);
+  assert.ok((timeouts[0] ?? 0) >= 60_000, `timeout ${String(timeouts[0])}`);
+});

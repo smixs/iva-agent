@@ -1,4 +1,9 @@
-export const USERBOT_IMPORT_TIMEOUT_MS = 10_000;
+/**
+ * uv writes no bytecode, so the first import after a sync compiles every module: 4.5 s
+ * on a fast core and up to 15.6 s on a slow one. The bound is there for a hung
+ * interpreter only; a slow first import must not switch the userbot off.
+ */
+export const USERBOT_IMPORT_TIMEOUT_MS = 60_000;
 
 interface UserbotSyncOptions {
   readonly pythonPath: string;
