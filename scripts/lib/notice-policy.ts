@@ -258,8 +258,9 @@ export function pluginsSwitchedOffAlert(
 export const USERBOT_ALERT_KEY = "userbot-off";
 
 /**
- * Причина из reinstallUserbot одной строкой: без префикса `userbot: ` и без точки в конце.
- * Она же — суть Alert для дросселя, поэтому одна причина в другой обёртке не говорит дважды.
+ * Суть Alert для дросселя: причина из reinstallUserbot одной строкой, без префикса
+ * `userbot: ` и без точки в конце, поэтому одна причина в другой обёртке не говорит дважды.
+ * В текст Alert причина не идёт (userbotOffAlert).
  */
 export function userbotOffReason(reason: string): string {
   return reason
@@ -273,15 +274,13 @@ export function userbotOffReason(reason: string): string {
  * Обновление выключило юзербот: его окружение не подготовилось или прокси не ответил (#273).
  * Вывод апдейта уже несёт причину и `iva userbot setup`, но кто обновлялся кнопкой в боте,
  * его не видит. Правило Alert (ADR-0007): что сломалось, чем грозит, что сделать — кнопкой
- * экрана /menu, а не командой терминала.
+ * экрана /menu, а не командой терминала. Причина остаётся в выводе: в чат идут простые
+ * слова, без её кодов и чужих фраз.
  */
-export function userbotOffAlert(tr: Translate, reason: string): string {
-  const why = userbotOffReason(reason);
-  // Причины без слов нет — нет и тире перед ней.
-  const tail = why ? ` — ${why}` : "";
+export function userbotOffAlert(tr: Translate): string {
   return tr(
-    `⚠️ Iva switched the userbot off: it did not come up after the update${tail}. While it is off, Iva cannot read or search your chats as your account; everything else works as before. Turn it back on: /menu → 📡 Userbot → «Turn on».`,
-    `⚠️ Ива выключила юзербот: после обновления он не запустился${tail}. Пока он выключен, Ива не читает и не ищет ваши чаты от вашего аккаунта; остальное работает как раньше. Включить обратно: /menu → 📡 Userbot → «Включить».`,
+    "⚠️ Iva switched the userbot off: it did not come up after the update. While it is off, Iva cannot read or search your chats as your account; everything else works as before. Turn it back on: /menu → 📡 Userbot → «Turn on».",
+    "⚠️ Ива выключила юзербот: после обновления он не запустился. Пока он выключен, Ива не читает и не ищет ваши чаты от вашего аккаунта; остальное работает как раньше. Включить обратно: /menu → 📡 Userbot → «Включить».",
   );
 }
 

@@ -824,8 +824,9 @@ async function tellAboutUserbot(
  * The update switched the userbot off: its environment did not prepare or its proxy did
  * not answer (#273). The update output already carries the reason and `iva userbot setup`
  * (reinstallUserbot); this is the half that reaches an owner who pressed «Update» in
- * Telegram. ADR-0007: once a week for the same reason, at once for another one - and at
- * once after the fix: a userbot that answers again forgets this Alert (scripts/cli/userbot.ts).
+ * Telegram, in plain words: the reason is only the throttle's essence. ADR-0007: once a
+ * week for the same reason, at once for another one - and at once after the fix: a userbot
+ * that answers again forgets this Alert (scripts/cli/userbot.ts).
  */
 export async function alertOwnerAboutUserbot(
   layout: ReturnType<typeof layoutFor>,
@@ -838,7 +839,7 @@ export async function alertOwnerAboutUserbot(
     {
       key: USERBOT_ALERT_KEY,
       essence: userbotOffReason(reason),
-      text: (tr) => userbotOffAlert(tr, reason),
+      text: userbotOffAlert,
       about: USERBOT,
     },
     notify,

@@ -37,6 +37,7 @@ import {
   LEGACY_MEMORY_UNITS,
 } from "./lib/legacy-memory-units.ts";
 import { noticeTranslator, userbotOffAlert } from "./lib/notice-policy.ts";
+import fc from "fast-check";
 import { layoutFor } from "./lib/version-store.ts";
 import { rewriteRunStatusesForUpdate } from "./lib/wf-store.ts";
 
@@ -1014,15 +1015,10 @@ test("the owner hears that the update switched the userbot off, once a week per 
   // its own: the text is checked against the one it resolves to. The exact RU and EN lines
   // are pinned in scripts/lib/notice-policy.test.ts.
   const tr = await noticeTranslator(layout.values);
-  assert.equal(sent[0], userbotOffAlert(tr, IMPORT_FAILED));
-  assert.match(
-    sent[0],
-    /— зависимости не импортируются — ModuleNotFoundError: telegram_mcp\. /u,
-  );
-  assert.doesNotMatch(sent[0], /userbot: /u);
+  assert.equal(sent[0], userbotOffAlert(tr));
   assert.match(sent[0], /\/menu → 📡 Userbot → «(Включить|Turn on)»\.$/u);
-  // Причину и `iva userbot setup` вывод апдейта уже несёт (reinstallUserbot): второй раз её
-  // туда не пишут, а удачная отправка строк не добавляет.
+  // Причину и `iva userbot setup` несёт вывод апдейта (reinstallUserbot): в чат она не идёт,
+  // а удачная отправка строк в вывод не добавляет.
   assert.deepEqual(said, []);
 
   // Другая причина — другая проблема, и говорить надо сразу.
@@ -1033,7 +1029,7 @@ test("the owner hears that the update switched the userbot off, once a week per 
     send,
   );
   assert.equal(sent.length, 2);
-  assert.match(sent[1], /— restart failed \(exit 1\)\. /u);
+  assert.equal(sent[1], sent[0]);
 });
 
 test("a userbot Alert that could not be sent says so in the output and is not remembered", async (t) => {
@@ -1081,25 +1077,50 @@ test("the userbot Alert goes out even when its throttle cannot be written", asyn
   assert.deepEqual(said, []);
 });
 
-test("the userbot Alert passes the outbound Gate: a key in the reason is redacted", async (t) => {
-  t.mock.method(console, "error", () => undefined);
-  const layout = installationWithChat(t);
-  const planted = `api_key=${"q".repeat(24)}`;
-  const sent: string[] = [];
-
-  await alertOwnerAboutUserbot(
-    layout,
-    `userbot: зависимости не импортируются — ValueError: ${planted}`,
-    () => {},
-    (text) => {
-      sent.push(text);
-      return Promise.resolve(true);
-    },
-  );
-
-  assert.equal(sent.length, 1);
-  assert.doesNotMatch(sent[0], /q{24}/u);
-  assert.match(sent[0], /\[REDACTED\]/u);
+// Причина — вывод чужой программы: коды вроде proxy_unreachable, английские фразы, пути, ключи.
+// Её несёт вывод `iva update`; в чат уходит один и тот же текст простыми словами.
+test("no reason the userbot went off reaches Telegram, whatever it carries (seed 20261010)", async (t) => {
+  const planted = [
+    "proxy_unreachable",
+    "probe_timeout",
+    `ValueError: api_key=${"q".repeat(24)}`,
+    "/home/alice/iva/data/userbot/.venv/bin/python",
+    "зависимости не импортируются — ModuleNotFoundError: telegram_mcp",
+  ];
+  for (const language of ["ru", "en"]) {
+    const layout = installationWithChat(
+      t,
+      `TELEGRAM_BOT_TOKEN=token\nTELEGRAM_DIGEST_CHAT_ID=42\nAGENT_LANGUAGE=${language}\n`,
+    );
+    const plain = userbotOffAlert(await noticeTranslator(layout.values));
+    await fc.assert(
+      fc.asyncProperty(
+        fc.string({ maxLength: 40 }),
+        fc.constantFrom(...planted),
+        fc.string({ maxLength: 40 }),
+        async (before, inside, after) => {
+          // Каждая причина говорит сразу: дроссель прошлого прогона этот не глушит.
+          rmSync(join(layout.data, "alert-state.json"), { force: true });
+          const sent: string[] = [];
+          await alertOwnerAboutUserbot(
+            layout,
+            `userbot: ${before}${inside}${after}`,
+            () => {},
+            (text) => {
+              sent.push(text);
+              return Promise.resolve(true);
+            },
+          );
+          assert.deepEqual(sent, [plain]);
+          assert.doesNotMatch(
+            plain,
+            /proxy_unreachable|probe_timeout|q{24}|\/home\/|ModuleNotFoundError|userbot: /u,
+          );
+        },
+      ),
+      { seed: 20261010, numRuns: 100 },
+    );
+  }
 });
 
 test("the userbot Alert reaches the Bot API as one plain sendMessage to the owner's chat", async (t) => {
