@@ -171,7 +171,16 @@ Default model is deepseek-v4-pro, 131k context. On Go it runs about $14–15/mo 
 ## What's New
 
 <details>
-<summary><b>v0.4.14 · 08.10.2026 — expand the latest releases</b></summary>
+<summary><b>v0.4.15 · 10.10.2026 — expand the latest releases</b></summary>
+
+### 10.10.2026
+
+#### v0.4.15
+
+- 🔧 **The userbot comes back after an update**: after `iva update` the userbot could keep restarting in a loop and never work. Now Iva prepares it before it starts and waits until it answers. If it cannot be prepared, the userbot is switched off, and Iva tells you in Telegram what stops working and where to turn it back on (`/menu`, 📡 Userbot screen, «Turn on»). `iva restart` leaves a working userbot as it is.
+- 🛠 **Telegram search through the userbot no longer trips up**: sometimes Iva named an account that does not exist or wrote «null» where nothing had to be given, and the request to the userbot failed. Now such a request goes to your connected account, and a chat can be given as a `t.me/name` link. Thanks to @Entset for the fix.
+- 🎙 **Iva spells names in voice notes the way you set them**: in `/menu`, on the «🎤 Voice» screen, tap «Names and terms» and list names and words separated by commas, for example OJ, Sonnet, Todoist. Voice transcripts will spell them the same way in every message. For now only words in Latin letters work; Iva shortens a list that is too long to what Deepgram accepts at once and tells you so. Deepgram charges a small extra per minute for this feature; without a list everything works as before.
+- ⏳ **When the model stays silent, Iva suggests /new**: if the model again and again does not start answering in the same conversation, Iva suggests sending `/new`. A long conversation may have become too heavy for the model, and `/new` starts a fresh one.
 
 ### 08.10.2026
 
@@ -203,21 +212,6 @@ Default model is deepseek-v4-pro, 131k context. On Go it runs about $14–15/mo 
 - 🗜 **A long conversation is compacted between turns, not in the middle of an answer**: after a turn that reached 60% of the model window or 275k tokens, Iva compacts the conversation while nobody waits. A message sent meanwhile gets «Compacting the conversation, I'll answer in a moment.» and its answer right after.
 - 🧹 **Iva no longer asks you to press /new**: the «context window is N% full» line is gone; `/new` works as before.
 - 🎬 **Video, audio and files are handled by Iva herself, and she sees an image on disk**: the model gets facts about an attachment instead of orders not to touch it, and `read_file` on an image returns its description from the vision model.
-
-### 03.10.2026
-
-#### v0.4.11
-
-- 🌙 **Nightly memory works on a ChatGPT subscription again**: the night call now streams on every provider. Since 0.4.9 the subscription backend answered 400 on the first call of every night. The night's own low reasoning effort is no longer overridden by the chat default.
-- 🗂️ **A vault `.gitignore` no longer stops the night**: files the owner excludes are skipped and named in the log, the rest is committed and the day closes. Ignored files stay on disk, outside the backup.
-- 🔁 **A short provider failure no longer fails the turn**: before the answer starts, Iva makes up to three attempts with 5 and 15 second waits and honours `Retry-After`. An opened stream or an executed tool is never replayed.
-- 🤖 **`gpt-6.1-sol` in the ChatGPT subscription list**: Iva identifies as Codex client 0.159.2, so `/model` and `iva config` show the new model.
-- 📅 **Task deadlines are stored as dates**: "tomorrow" becomes `YYYY-MM-DD` in the owner's timezone before it is saved, and a deadline can be corrected with `update`. Old deadlines written as words stay as they are.
-- 🔧 **Google CLI updates without root**: `iva update` installs and refreshes `gws` under the service user's `~/.local`. Google sign-in and settings stay as they are.
-- ⏰ **The nightly memory time is configurable**: `MEMORY_NIGHT_TIME=HH:mm` in `.env`, 04:00 by default. It takes effect after `iva update --force`.
-- 🔀 **OpenCode Go models over Responses**: `OPENCODE_PROTOCOL=responses` in `.env` switches the Go text wire, with the same key and model settings. chat/completions stays the default.
-- 📝 **The nightly Report reads like a note**: 2–5 plain lines in the owner's language, built by code from the night's results. The Report is still off by default.
-- 🃏 **A Card status on the owner's word**: "the project is closed" sets the Card status at once through `write_card`, and the night of that day keeps it.
 
 </details>
 
