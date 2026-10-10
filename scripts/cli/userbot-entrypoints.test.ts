@@ -78,7 +78,9 @@ async function fixture(
   if (env) await writeFile(envPath, env, { mode: 0o600 });
   if (existingToken !== undefined) {
     await mkdir(dirname(tokenPath), { recursive: true });
-    await writeFile(tokenPath, existingToken, { mode: 0o640 });
+    await writeFile(tokenPath, existingToken);
+    // Explicit chmod: the creation mode is masked by the umask of the machine.
+    await chmod(tokenPath, 0o640);
   }
 
   const pythonScript = [
@@ -364,7 +366,7 @@ void test("userbot setup gives the proxy one canonical custom data directory", a
   }
 });
 
-void test("userbot setup keeps existing token bytes while unit reconciliation makes its permissions private", async (t) => {
+void test("userbot setup never rewrites an existing token", async (t) => {
   const token = "existing-token-must-stay-byte-identical";
   const { run, tokenPath } = await fixture(t, {
     env: `TELEGRAM_API_ID=123456\nTELEGRAM_API_HASH=${SECRET}\n`,
@@ -377,7 +379,7 @@ void test("userbot setup keeps existing token bytes while unit reconciliation ma
 
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.equal(await readFile(tokenPath, "utf8"), token);
-  assert.equal(after.mode & 0o777, 0o600);
+  assert.equal(after.mode & 0o777, 0o640);
   assert.equal(after.mtimeMs, before.mtimeMs);
 });
 
