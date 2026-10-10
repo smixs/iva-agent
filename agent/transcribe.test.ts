@@ -2,6 +2,7 @@
 // Сеть подменена: fetch записывает адрес и заголовки и отвечает готовой расшифровкой.
 import test, { type TestContext } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import fc from "fast-check";
 
 import { KEYTERMS_LIMIT, parseKeyterms, transcribe } from "./transcribe.ts";
@@ -196,4 +197,13 @@ await test("parseKeyterms: запятая и перевод строки раз�
     "Sonnet",
     "Todoist",
   ]);
+});
+
+// Канон CONTEXT.md: у верхней границы расхода имя Ceiling (предел), у провайдера — лимит;
+// «потолок», «бюджет» и «quota» стоят в её _Avoid_ и не идут ни в код, ни в комментарии.
+await test("код имён и терминов не берёт слов из _Avoid_ записи Ceiling", () => {
+  for (const file of ["./transcribe.ts", "../scripts/lib/menu/voice.ts"]) {
+    const source = readFileSync(new URL(file, import.meta.url), "utf8");
+    assert.doesNotMatch(source, /потол|бюджет|quota/iu, file);
+  }
 });
