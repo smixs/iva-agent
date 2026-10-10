@@ -313,6 +313,9 @@ export default {
       // «-», тире и одни запятые разбираются в пустой список: в них нет ни буквы, ни цифры.
       const terms = parseKeyterms(String(text));
       if (terms.length === 0) {
+        // Строки в .env нет — очищать нечего: назад на экран, без записи и без перезапуска.
+        const env = await readEnvValues(ctx.deps.envPath);
+        if (env[TERMS_VAR] === undefined) return ctx.show(st, SID);
         await upsertEnv(ctx.deps.envPath, { [TERMS_VAR]: null });
         return restartOffer(
           st,

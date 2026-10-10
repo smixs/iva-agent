@@ -493,7 +493,7 @@ test("voice: имена и термины пишутся в .env одной ст
   }
 });
 
-test("voice: «-» среди имён не сохраняется keyterm-ом", async () => {
+test("voice: «-» без списка в .env возвращает на экран без перезапуска; «-» среди имён не сохраняется", async () => {
   const dir = mkdtempSync(join(tmpdir(), "iva-env-voice-terms-dash-"));
   const envPath = join(dir, ".env");
   writeFileSync(envPath, "");
@@ -504,6 +504,16 @@ test("voice: «-» среди имён не сохраняется keyterm-ом"
   });
   const st = newState({ screen: "voice", chatId: 555 });
   h.st = st;
+
+  // Очищать нечего: .env не трогаем и перезапуск не предлагаем — экран «Голос» как есть.
+  await voiceScreen.on("terms", [], st, h.ctx);
+  await voiceScreen.texts?.deepgramkeyterms("-", null, st, h.ctx);
+  assert.equal(st.awaitText, null);
+  assert.equal(readFileSync(envPath, "utf8"), "");
+  assert.doesNotMatch(st._last?.text ?? "", /Список очищен/);
+  assert.match(st._last?.text ?? "", /Имена и термины: нет\./);
+  assert.ok(!dataOf(st._last?.text ?? "").includes("iva_menu:voice:rs:now"));
+
   await voiceScreen.on("terms", [], st, h.ctx);
   await voiceScreen.texts?.deepgramkeyterms(
     "-, OJ, --, Sonnet",
