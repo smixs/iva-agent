@@ -8,7 +8,7 @@
 // процесса, поэтому после записи предлагаем перезапуск iva.service.
 //
 // Имена и термины — не секрет: их ввод не удаляется из чата. Разбор списка один на оба конца:
-// parseKeyterms и KEYTERMS_LIMIT из agent/transcribe.ts (мост грузит авторское дерево).
+// parseKeyterms и keytermsForRequest из agent/transcribe.ts (мост грузит авторское дерево).
 //
 // Живой проверки ключа, как checkSearchKey у поиска, здесь нет намеренно: у Deepgram в
 // репозитории нет проверяющего хелпера, а плодить второй сетевой путь ради меню нечем —
@@ -20,7 +20,11 @@ import {
   upsertEnv,
   type EnvValueRejection,
 } from "../env-file.ts";
-import { KEYTERMS_LIMIT, parseKeyterms } from "#transcribe.ts";
+import {
+  KEYTERMS_BYTES,
+  keytermsForRequest,
+  parseKeyterms,
+} from "#transcribe.ts";
 import { button, buttonRow, escapeRichText } from "./buttons.ts";
 
 const SID = "voice";
@@ -162,8 +166,17 @@ async function promptTerms(st: MenuState, ctx: MenuContext) {
   return ctx.flows.screen(st, text);
 }
 
-// Почему список не помещается в .env — словами владельца. Значение в текст не попадает.
-function termsRejection(problem: EnvValueRejection, ctx: MenuContext): string {
+// Почему список не сохраняется — словами владельца. Значение в текст не попадает. too-long —
+// первое же слово длиннее того, что Deepgram берёт в один запрос: сохранять было бы нечего.
+function termsRejection(
+  problem: EnvValueRejection | "too-long",
+  ctx: MenuContext,
+): string {
+  if (problem === "too-long")
+    return ctx.tr(
+      `I can't save that list: one request to Deepgram takes up to ${KEYTERMS_BYTES} characters of names in all, and the first one alone is longer. Separate the names with commas.`,
+      `Такой список не сохраню: в один запрос к Deepgram помещается до ${KEYTERMS_BYTES} знаков имён вместе, а первое уже длиннее. Раздели имена запятыми.`,
+    );
   return problem === "non-ascii"
     ? ctx.tr(
         "I can't save that list: the settings file holds only Latin letters, digits, spaces and plain punctuation, and the list has Cyrillic or another script.",
@@ -288,7 +301,7 @@ export default {
     },
 
     // Приём списка имён и терминов. «-» или пустой список (одни запятые) убирают строку из .env.
-    // Больше KEYTERMS_LIMIT слов не пишем: в запрос всё равно уйдут только первые, а владелец
+    // Пишем только то, что уйдёт в запрос (keytermsForRequest: число слов и байты), и владелец
     // узнаёт об обрезке здесь, а не из журнала.
     async deepgramkeyterms(
       text: unknown,
@@ -307,9 +320,9 @@ export default {
           ctx.tr("The list is cleared.", "Список очищен."),
         );
       }
-      const kept = terms.slice(0, KEYTERMS_LIMIT);
+      const kept = keytermsForRequest(terms);
       const value = kept.join(",");
-      const problem = envValueRejection(value);
+      const problem = kept.length === 0 ? "too-long" : envValueRejection(value);
       if (problem) {
         return ctx.flows.screen(
           st,

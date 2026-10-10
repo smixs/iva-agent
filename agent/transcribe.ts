@@ -4,9 +4,14 @@
 
 // Имена и термины владельца (DEEPGRAM_KEYTERMS, через запятую) уходят в запрос параметром
 // keyterm, по одному на слово: так nova-3 пишет их одинаково, а не «OJ» в одном голосовом и
-// «О, Джей» в другом (Keyterm Prompting). Лимит у Deepgram — 500 токенов на запрос,
-// сверх него весь запрос получает 400; поэтому в запрос идут только первые 50 слов.
+// «О, Джей» в другом (Keyterm Prompting). Лимит у Deepgram — 500 токенов на все keyterm
+// запроса вместе, сверх него отказ «Keyterm limit exceeded» получает весь запрос, и голосовое
+// остаётся без расшифровки. Как Deepgram считает токены, документация не пишет; при любом
+// разбиении, где токен занимает хотя бы байт, 500 байт UTF-8 — не больше 500 токенов, поэтому
+// слова идут в запрос, пока их вместе не больше 500 байт. Число слов отдельно: Deepgram
+// советует держать 20–50 самых важных.
 export const KEYTERMS_LIMIT = 50;
+export const KEYTERMS_BYTES = 500;
 
 /**
  * Слова из значения DEEPGRAM_KEYTERMS: разделитель — запятая (и перевод строки, если список
@@ -22,18 +27,33 @@ export function parseKeyterms(raw: string | undefined): string[] {
   return [...terms];
 }
 
+/**
+ * Слова, которые уходят в запрос: первые по порядку владельца, пока их не больше
+ * KEYTERMS_LIMIT и вместе не больше KEYTERMS_BYTES байт UTF-8. Первое не поместившееся слово
+ * обрывает список: короткие после него не подбираются, порядок остаётся порядком важности.
+ */
+export function keytermsForRequest(terms: string[]): string[] {
+  const kept: string[] = [];
+  let bytes = 0;
+  for (const term of terms) {
+    bytes += Buffer.byteLength(term, "utf8");
+    if (kept.length === KEYTERMS_LIMIT || bytes > KEYTERMS_BYTES) break;
+    kept.push(term);
+  }
+  return kept;
+}
+
 // Хвост запроса с keyterm; без настройки — пустая строка, и запрос совпадает с прежним байт в байт.
 function keytermQuery(raw: string | undefined): string {
   const terms = parseKeyterms(raw);
-  if (terms.length > KEYTERMS_LIMIT)
+  const kept = keytermsForRequest(terms);
+  if (kept.length < terms.length)
     // Только счёт: сами слова — имена людей владельца, им в журнале не место.
     console.warn(
-      `[transcribe] DEEPGRAM_KEYTERMS: ${terms.length} слов, в запрос идут первые ${KEYTERMS_LIMIT}`,
+      `[transcribe] DEEPGRAM_KEYTERMS: в запрос идут ${kept.length} из ${terms.length} ` +
+        `(не больше ${KEYTERMS_LIMIT} слов и ${KEYTERMS_BYTES} байт)`,
     );
-  return terms
-    .slice(0, KEYTERMS_LIMIT)
-    .map((term) => `&keyterm=${encodeURIComponent(term)}`)
-    .join("");
+  return kept.map((term) => `&keyterm=${encodeURIComponent(term)}`).join("");
 }
 
 export async function transcribe(audio: ArrayBuffer): Promise<string> {

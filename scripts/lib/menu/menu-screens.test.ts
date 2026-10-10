@@ -529,6 +529,48 @@ test("voice: кириллицу и знаки, которых .env не хран
   assert.match(st._last?.text ?? "", /Оставил первые 50 из 60/);
 });
 
+// Лимит Deepgram — 500 токенов на все keyterm запроса, сверх него отказ получает весь запрос и
+// каждое голосовое остаётся без расшифровки. Абзац без запятых — одно слово, и счёт слов его
+// не останавливает; меню сохраняет только то, что войдёт в запрос.
+test("voice: абзац без запятых не сохраняется, длинный список обрезан по 500 байт", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "iva-env-voice-terms-bytes-"));
+  const envPath = join(dir, ".env");
+  writeFileSync(envPath, "DEEPGRAM_KEYTERMS=OJ\n");
+  const h = makeCtx({
+    lang: "ru",
+    deps: { envPath, sc: () => Promise.resolve(true) },
+    screens: { voice: voiceScreen },
+  });
+  const st = newState({ screen: "voice", chatId: 555 });
+  h.st = st;
+
+  const paragraph = Array.from({ length: 600 }, () => "word").join(" ");
+  await voiceScreen.on("terms", [], st, h.ctx);
+  await voiceScreen.texts?.deepgramkeyterms(paragraph, null, st, h.ctx);
+  assert.equal(st.awaitText, null);
+  assert.equal(readFileSync(envPath, "utf8"), "DEEPGRAM_KEYTERMS=OJ\n");
+  const refused = st._last?.text ?? "";
+  assert.match(refused, /до 500 знаков имён вместе/);
+  assert.ok(!refused.includes("word word"), "ввод не эхом");
+  assert.ok(dataOf(refused).includes("iva_menu:voice:terms"));
+  assert.ok(!dataOf(refused).includes("iva_menu:voice:rs:now"));
+
+  // Пять слов по 100 знаков — ровно 500; дальше не пишем и говорим об этом.
+  const hundred = Array.from({ length: 8 }, (_, i) => `${"x".repeat(99)}${i}`);
+  await voiceScreen.on("terms", [], st, h.ctx);
+  await voiceScreen.texts?.deepgramkeyterms(
+    hundred.join(", "),
+    null,
+    st,
+    h.ctx,
+  );
+  assert.equal(
+    readFileSync(envPath, "utf8"),
+    `DEEPGRAM_KEYTERMS=${hundred.slice(0, 5).join(",")}\n`,
+  );
+  assert.match(st._last?.text ?? "", /Оставил первые 5 из 8/);
+});
+
 test("voice: список из .env на экране экранирован и обрезан по длине", async () => {
   const dir = mkdtempSync(join(tmpdir(), "iva-env-voice-terms-long-"));
   const envPath = join(dir, ".env");
