@@ -36,6 +36,7 @@ import {
   LEGACY_BRAIN_UNITS,
   LEGACY_MEMORY_UNITS,
 } from "./lib/legacy-memory-units.ts";
+import { noticeTranslator, userbotOffAlert } from "./lib/notice-policy.ts";
 import { layoutFor } from "./lib/version-store.ts";
 import { rewriteRunStatusesForUpdate } from "./lib/wf-store.ts";
 
@@ -1009,16 +1010,17 @@ test("the owner hears that the update switched the userbot off, once a week per 
   );
 
   assert.equal(sent.length, 1, sent.join("\n---\n"));
-  assert.match(
-    sent[0],
-    /^⚠️ Ива выключила юзербот: после обновления он не запустился — /u,
-  );
+  // The language is the installation's (settings, then AGENT_LANGUAGE), and this machine has
+  // its own: the text is checked against the one it resolves to. The exact RU and EN lines
+  // are pinned in scripts/lib/notice-policy.test.ts.
+  const tr = await noticeTranslator(layout.values);
+  assert.equal(sent[0], userbotOffAlert(tr, IMPORT_FAILED));
   assert.match(
     sent[0],
     /— зависимости не импортируются — ModuleNotFoundError: telegram_mcp\. /u,
   );
   assert.doesNotMatch(sent[0], /userbot: /u);
-  assert.match(sent[0], /\/menu → 📡 Userbot → «Включить»\.$/u);
+  assert.match(sent[0], /\/menu → 📡 Userbot → «(Включить|Turn on)»\.$/u);
   // Причину и `iva userbot setup` вывод апдейта уже несёт (reinstallUserbot): второй раз её
   // туда не пишут, а удачная отправка строк не добавляет.
   assert.deepEqual(said, []);
@@ -1100,7 +1102,7 @@ test("the userbot Alert passes the outbound Gate: a key in the reason is redacte
   assert.match(sent[0], /\[REDACTED\]/u);
 });
 
-test("the userbot Alert reaches the Bot API as one plain sendMessage to the notification chat", async (t) => {
+test("the userbot Alert reaches the Bot API as one plain sendMessage to the owner's chat", async (t) => {
   t.mock.method(console, "error", () => undefined);
   const layout = installationWithChat(
     t,
