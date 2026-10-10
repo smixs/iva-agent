@@ -697,6 +697,9 @@ export function tombstoned(
     .sort();
 }
 
+/** How long an Alert may hold the update: as long as the bridge waits for a Bot API call. */
+const ALERT_SEND_TIMEOUT_MS = 30_000;
+
 /**
  * One plain message to the owner's chat. A direct Bot API call, like the update offer
  * this Alert stands beside (scripts/check-update.ts): the marked-up sender lives in the
@@ -717,6 +720,8 @@ function sendToChat(
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ chat_id: chat, text }),
+          // The update waits for this; a Telegram that does not answer is a failed send.
+          signal: AbortSignal.timeout(ALERT_SEND_TIMEOUT_MS),
         },
       );
       return response.ok;

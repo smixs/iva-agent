@@ -1130,6 +1130,10 @@ test("the userbot Alert reaches the Bot API as one plain sendMessage to the noti
   assert.equal(body.chat_id, "777");
   assert.match(String(body.text), /Userbot/u);
   assert.deepEqual(said, []);
+  // The update waits for its Alert: a Telegram that never answers must not hold the outcome
+  // for the five minutes of fetch's own default.
+  assert.ok(calls[0].init.signal instanceof AbortSignal);
+  assert.equal(calls[0].init.signal.aborted, false);
 
   // Telegram отказал (4xx) или сети нет: одна строка в выводе, дроссель не отмечен.
   for (const refuse of [
