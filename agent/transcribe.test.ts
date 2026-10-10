@@ -110,6 +110,22 @@ await test("кириллица и пробел внутри фразы коди�
   ]);
 });
 
+// Кусок без единой буквы и цифры — не имя: Deepgram нечего писать, а «-» в меню — знак очистки.
+await test("кусок без букв и цифр не уходит: «-», «--», «...», тире", async (t) => {
+  const send = wire(t);
+  for (const raw of ["-", "–", "—", "--", "...", " - , -- "]) {
+    const { url, warnings } = await send(raw);
+    assert.equal(url, BASE, JSON.stringify(raw));
+    assert.deepEqual(warnings, []);
+  }
+  const { url } = await send("-, OJ, --, ..., C++, —, 42");
+  assert.deepEqual(new URL(url).searchParams.getAll("keyterm"), [
+    "OJ",
+    "C++",
+    "42",
+  ]);
+});
+
 await test("повторы и лишние запятые выброшены", async (t) => {
   const { url } = await urlFor(t, ",OJ,, OJ ,Sonnet,,OJ,");
   assert.equal(url, `${BASE}&keyterm=OJ&keyterm=Sonnet`);
@@ -227,13 +243,14 @@ const pieces = fc
   )
   .map((drawn) => drawn.flat());
 
-// Ожидание пересказано независимо от кода: первые различные слова, пока их не больше 50 и
-// вместе не больше 500 байт UTF-8.
+// Ожидание пересказано независимо от кода: первые различные слова хотя бы с одной буквой или
+// цифрой, пока их не больше 50 и вместе не больше 500 байт UTF-8.
 function firstThatFit(terms: string[]): string[] {
   const encoder = new TextEncoder();
   const kept: string[] = [];
   let bytes = 0;
   for (const term of new Set(terms)) {
+    if (!/[\p{L}\p{N}]/u.test(term)) continue;
     bytes += encoder.encode(term).length;
     if (kept.length === 50 || bytes > 500) break;
     kept.push(term);

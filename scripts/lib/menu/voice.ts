@@ -310,8 +310,8 @@ export default {
       ctx: MenuContext,
     ) {
       st.awaitText = null;
-      const raw = String(text).trim();
-      const terms = /^[-–—]$/u.test(raw) ? [] : parseKeyterms(raw);
+      // «-», тире и одни запятые разбираются в пустой список: в них нет ни буквы, ни цифры.
+      const terms = parseKeyterms(String(text));
       if (terms.length === 0) {
         await upsertEnv(ctx.deps.envPath, { [TERMS_VAR]: null });
         return restartOffer(

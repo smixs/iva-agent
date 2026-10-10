@@ -479,8 +479,8 @@ test("voice: имена и термины пишутся в .env одной ст
   assert.equal(readFileSync(envPath, "utf8"), "DEEPGRAM_LANGUAGE=ru\n");
   assert.match(st._last?.text ?? "", /Список очищен/);
 
-  // Пустой ввод и одни запятые — тоже очистка.
-  for (const empty of ["", " , ,, "]) {
+  // Пустой ввод, одни запятые, тире и куски без букв — тоже очистка.
+  for (const empty of ["", " , ,, ", "–", "—", "--", "-, ..."]) {
     await voiceScreen.texts?.deepgramkeyterms("Iva", null, st, h.ctx);
     assert.match(readFileSync(envPath, "utf8"), /DEEPGRAM_KEYTERMS=Iva/);
     await voiceScreen.on("terms", [], st, h.ctx);
@@ -491,6 +491,28 @@ test("voice: имена и термины пишутся в .env одной ст
       JSON.stringify(empty),
     );
   }
+});
+
+test("voice: «-» среди имён не сохраняется keyterm-ом", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "iva-env-voice-terms-dash-"));
+  const envPath = join(dir, ".env");
+  writeFileSync(envPath, "");
+  const h = makeCtx({
+    lang: "ru",
+    deps: { envPath, sc: () => Promise.resolve(true) },
+    screens: { voice: voiceScreen },
+  });
+  const st = newState({ screen: "voice", chatId: 555 });
+  h.st = st;
+  await voiceScreen.on("terms", [], st, h.ctx);
+  await voiceScreen.texts?.deepgramkeyterms(
+    "-, OJ, --, Sonnet",
+    null,
+    st,
+    h.ctx,
+  );
+  assert.equal(readFileSync(envPath, "utf8"), "DEEPGRAM_KEYTERMS=OJ,Sonnet\n");
+  assert.match(st._last?.text ?? "", /Имена и термины: OJ, Sonnet\./);
 });
 
 test("voice: кириллицу и знаки, которых .env не хранит, список не пишет; 60 слов — первые 50", async () => {
