@@ -441,10 +441,16 @@ export async function reinstallUserbot(
     });
     return health ? { status: "ready", health } : { status: "skipped" };
   } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
+    const message = (failure: unknown) =>
+      failure instanceof Error ? failure.message : String(failure);
+    const reason = message(error);
     report(
       `the telegram userbot proxy did not come up: ${reason.replace(/\.$/u, "")}. Once that is fixed, turn it back on: iva userbot setup`,
     );
-    return { status: "failed", reason };
+    // keepOff could not switch it off: the output says so now, but the flip switches it off
+    // again and checks before its Alert goes out. The recovery's reason is only the cause.
+    const cause: unknown =
+      error instanceof AggregateError ? error.errors[0] : error;
+    return { status: "failed", reason: message(cause) };
   }
 }

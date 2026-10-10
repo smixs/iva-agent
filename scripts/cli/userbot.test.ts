@@ -590,6 +590,13 @@ void test("recovery preserves the preparation error when keeping the userbot off
   assert.equal(result.status, "failed");
   assert.match(reports.join("\n"), /uv не найден/);
   assert.match(reports.join("\n"), /disable refused/);
+  // The flip switches the userbot off again and checks it before any Alert goes out, so by
+  // then the cleanup failure is history: the Alert's reason is only why it did not come up.
+  assert.ok(result.status === "failed");
+  assert.equal(
+    result.reason,
+    "userbot: uv не найден — повторно запусти install.sh",
+  );
 });
 
 void test("a restart still prepares a userbot that is active but does not answer", async () => {
