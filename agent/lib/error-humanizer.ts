@@ -281,11 +281,13 @@ function midAnswerText(situation: Situation): ProviderErrorText {
   };
 }
 
+// Молчание, которое повторяется из хода в ход одного разговора, лечит только /new (#284:
+// OpenCode Go в длинной сессии). Счётчика нет: владелец сам помнит, было ли так уже.
 function silentText({ name, details }: Situation): ProviderErrorText {
   const again = repeated(repeatsOf(details));
   return {
-    en: `${capital(name.en)} takes too long to answer.${again.en} Write again in a couple of minutes or switch models: /model.`,
-    ru: `${capital(name.nom)} долго не отвечает${again.ru}. Напиши ещё раз через пару минут или смени модель: /model.`,
+    en: `${capital(name.en)} takes too long to answer.${again.en} Write again in a couple of minutes or switch models: /model. If this already happened in this conversation, /new starts over: a long conversation may have become too much for the model.`,
+    ru: `${capital(name.nom)} долго не отвечает${again.ru}. Напиши ещё раз через пару минут или смени модель: /model. Если в этом разговоре так уже было, /new начнёт заново: длинный разговор мог стать модели не по силам.`,
   };
 }
 

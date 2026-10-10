@@ -134,6 +134,30 @@ await test("обрыв посреди ответа: в чат идёт вопр�
   assert.doesNotMatch(text, /err-78|Error id/u);
 });
 
+// #284: молчание модели повторяется в длинном разговоре — в чат доезжает подсказка про /new,
+// и Gate её не режет. Ошибка дословно из provider.ts.
+await test("молчание модели: в чат доезжает подсказка про /new без кнопки", async () => {
+  const { sent, send } = collector();
+
+  await notifyTelegramFailure(
+    "s-silent",
+    "turn_14",
+    {
+      message: "Model produced no output for 90s",
+      details: { code: "MODEL_FIRST_CHUNK_TIMEOUT", attempts: 3 },
+    },
+    send,
+    { now: 1_000 },
+  );
+
+  assert.equal(sent.length, 1);
+  assert.match(
+    sent[0],
+    /(Если в этом разговоре так уже было, \/new начнёт заново: длинный разговор мог стать модели не по силам\.|If this already happened in this conversation, \/new starts over: a long conversation may have become too much for the model\.)$/u,
+  );
+  assert.doesNotMatch(sent[0], /tg-button/u);
+});
+
 // Служебная реплика канала не идёт через Outbox, но текст провайдера в ней —
 // такой же runtime-контент: Gate обязан вычистить его до транспорта.
 function muteErrors(t: { after: (fn: () => void) => void }): void {
