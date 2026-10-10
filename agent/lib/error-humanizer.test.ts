@@ -391,3 +391,23 @@ test("after three mid-answer breaks the notice says how many times Iva tried", (
     "The connection to Anthropic broke off in the middle of the answer to «Какая погода?». I tried again 2 times, it did not work. Try again?",
   );
 });
+
+// MODEL_PROVIDER с именем метода Object доставал метод вместо имени, и сообщение о сбое
+// падало на capital(): владелец не узнавал о сбое вовсе.
+test("a provider named like an Object method is told as «провайдер», the notice does not throw", () => {
+  for (const provider of [
+    "valueOf",
+    "__proto__",
+    "constructor",
+    "toString",
+    "hasOwnProperty",
+  ]) {
+    assert.deepEqual(
+      humanizeProviderError({ message: "Unauthorized", provider }),
+      {
+        en: "The provider did not accept the key or login. Check it in /menu and write again.",
+        ru: "Провайдер не принял ключ или вход. Проверь его в /menu и напиши ещё раз.",
+      },
+    );
+  }
+});

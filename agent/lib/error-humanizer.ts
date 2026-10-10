@@ -46,8 +46,13 @@ const NAMED: Readonly<Record<string, string>> = {
   openrouter: "OpenRouter",
 };
 
+// Только свои ключи: MODEL_PROVIDER «valueOf» или «__proto__» достал бы метод Object, и
+// сообщение о сбое упало бы, не дойдя до владельца.
 function providerName(provider: string | undefined): ProviderName {
-  const name = provider === undefined ? undefined : NAMED[provider];
+  const name =
+    provider !== undefined && Object.hasOwn(NAMED, provider)
+      ? NAMED[provider]
+      : undefined;
   return name === undefined
     ? {
         en: "the provider",
