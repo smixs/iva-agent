@@ -1,6 +1,6 @@
 ---
 name: brief
-description: "Brief — the owner's day in review: tasks, calendar, mail, Telegram, every Connection and plugin, goals from CORE, weather. Load in a scheduled Brief turn (08:30 and 14:00 by default), on /digest, and when the owner asks for a day plan, a review of the day or their open tasks."
+description: "Brief — the owner's day in review: tasks, calendar, mail, Telegram, birthdays of the owner's people, every Connection and plugin, goals from CORE, weather. Load in a scheduled Brief turn (08:30 and 14:00 by default), on /digest, and when the owner asks for a day plan, a review of the day or their open tasks."
 ---
 
 # Brief — the owner's day in review
@@ -31,8 +31,29 @@ Walk everything the owner has connected, with your own tools, read only:
    Call `goal list`; if any goal is proposed, paused or has an untold Outcome, add one line "goal: N идут, K ждут ответа", counting current statuses yourself.
 5. Weather for the owner's city (from memory, `memory_search`). No city known — ask
    once and save the answer with `write_card`.
-6. Habits — only the ones the owner named; never invent a routine.
-7. Mail, calendar or Telegram not connected — offer to connect it once and save the
+6. Birthdays of the owner's people, today and tomorrow — the owner should not learn
+   about them late. Look in this order and stop at what is connected:
+   - Cards: `memory_search` with «день рождения ДР birthday» and the month in
+     words and digits; contact Cards keep dates as «ДР 1993-06-17», «Род. 19.02».
+   - Google Contacts (`google-workspace`): `gws people people connections list`
+     with `personFields: names,birthdays`; the calendar «Birthdays», if the owner
+     has it.
+   - Telegram (`telegram-userbot`, read only): `get_full_user` gives `birthday`
+     for a person. Ask only the people the owner talks to: Card contacts with a
+     Telegram handle and the private chats with messages in the last month, not the
+     whole address book.
+
+   Today's birthday goes into the overview: who, how the owner knows them (from the
+   Card), the age when the year is known. Tomorrow's birthday of a close person (family,
+   a partner, a friend from the Cards) — one line in the overview to plan a present. A
+   person with a Card and a Telegram chat gets their own message with a short
+   congratulation draft in the owner's voice, a button that opens the chat (see `watch`)
+   and one question line («Поздравить Павла?»). You never send it. A date you found in
+   Contacts or Telegram for someone who has a Card: append it with `write_card`
+   (`fact`), so next time memory already knows it. No birthday today — no line about it.
+
+7. Habits — only the ones the owner named; never invent a routine.
+8. Mail, calendar or Telegram not connected — offer to connect it once and save the
    fact that you offered with `write_card`; next time check memory and do not repeat.
 
 ## Write
@@ -92,6 +113,7 @@ Good (the overview, then the failure as its own message):
     • Ночная копия рабочей папки не сделалась: на диске кончилось место. Как починить — ниже.
     • 09:00 — ответить Максиму Функу по смете для Арбуза.
     • 14:00 — созвон с Анной, ссылка в календаре.
+    • Сегодня день рождения Павла, бывшего коллеги, ему 41. Поздравить можно в Telegram.
     • Ещё три напоминания на вечер, срочного среди них нет.
     • Погода: +18, без дождя.
     Главное сегодня — ответ Максиму.
