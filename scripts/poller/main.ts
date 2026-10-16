@@ -7,6 +7,8 @@ import {
   invalidTelegramUpdatesDiagnostic,
   migrateQueueFile,
   parseTelegramUpdates,
+  type TelegramQueueUpdate,
+  type TelegramUpdateBatchItem,
 } from "../lib/telegram-queue.ts";
 import { alertOnce, alertResolved } from "../lib/notice-policy.ts";
 import { notificationChat } from "../lib/notification-chat.ts";
@@ -215,6 +217,48 @@ export async function processTelegramUpdate(
   return { offset: nextOffset, ingressBlocked: false };
 }
 
+// Пачка getUpdates по порядку. Апдейт, не прошедший проверку, подтверждается сдвигом offset
+// и одной строкой журнала: повтор не сделает его понятным, а задержанный offset держит весь
+// вход (16.10.2026, c1: стоп черновика крутил пачку три минуты). Без update_id сдвигать
+// нечего — offset сдвинут следующие апдейты пачки.
+export async function processTelegramBatch(
+  items: readonly TelegramUpdateBatchItem[],
+  offset: number,
+  delivered: number | null,
+  {
+    processImpl = processTelegramUpdate,
+    saveOffsetImpl = saveOffset,
+    logImpl = log,
+  }: {
+    processImpl?: (
+      update: TelegramQueueUpdate,
+      offset: number,
+      delivered: number | null,
+    ) => Promise<{ offset: number; ingressBlocked: boolean }>;
+    saveOffsetImpl?: (
+      offset: number,
+      delivered: number | null,
+    ) => Promise<void>;
+    logImpl?: (...args: unknown[]) => void;
+  } = {},
+): Promise<{ offset: number; ingressBlocked: boolean }> {
+  let current = offset;
+  for (const item of items) {
+    if ("update" in item) {
+      const processed = await processImpl(item.update, current, delivered);
+      current = processed.offset;
+      if (processed.ingressBlocked)
+        return { offset: current, ingressBlocked: true };
+      continue;
+    }
+    logImpl("getUpdates: skipped invalid update", JSON.stringify(item.skipped));
+    if (item.updateId === null || item.updateId < current) continue;
+    current = item.updateId + 1;
+    await saveOffsetImpl(current, delivered);
+  }
+  return { offset: current, ingressBlocked: false };
+}
+
 async function reconcileResetIntentsSafely(): Promise<number> {
   try {
     return await reconcileScopedResetIntents();
@@ -421,8 +465,8 @@ export async function main({
       consecutiveConflicts = 0;
       alertResolved(DATA_DIR, "getupdates-conflict");
     }
-    const updates = parseTelegramUpdates(data.result);
-    if (updates === null) {
+    const items = parseTelegramUpdates(data.result);
+    if (items === null) {
       log(
         "getUpdates: invalid result",
         JSON.stringify(invalidTelegramUpdatesDiagnostic(data.result)),
@@ -430,15 +474,9 @@ export async function main({
       await sleep(3000);
       continue;
     }
-    let ingressBlocked = false;
-    for (const update of updates) {
-      const processed = await processTelegramUpdate(update, offset, delivered);
-      offset = processed.offset;
-      if (!processed.ingressBlocked) continue;
-      ingressBlocked = true;
-      break;
-    }
-    if (ingressBlocked) await sleep(3000);
+    const batch = await processTelegramBatch(items, offset, delivered);
+    offset = batch.offset;
+    if (batch.ingressBlocked) await sleep(3000);
   }
 }
 

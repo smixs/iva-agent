@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- 🔧 **Нажатый стоп больше не останавливает приём сообщений**: если Telegram присылал апдейт, который Ива не могла разобрать (так случилось с кнопкой ■ на черновике ответа), приём вставал целиком, и сообщения после него не доходили. Теперь такой апдейт пропускается с записью в журнал, остальные идут дальше; стоп с неожиданными полями сверяет обработчик стопа. One Telegram update that fails validation no longer stalls the whole getUpdates batch: it is acknowledged and logged with its field shape, and the updates after it are processed.
+
 ## [0.5.2] - 2026-10-15
 
 - 🔧 **Вход юзербота по QR с облачным паролем**: если скан приходился на момент обновления QR-кода, Telegram сообщал «нужен пароль» на обновлении, Ива считала это сбоем входа и принять пароль не могла. Теперь ответ «нужен пароль» ловится на всём входе, и Ива сразу просит пароль. QR login asks for the two-factor password even when Telegram reports it during a QR refresh rather than the scan wait.

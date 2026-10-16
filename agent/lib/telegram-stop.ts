@@ -201,6 +201,16 @@ export type TelegramDraftStop = {
   readonly draft_id: number;
 };
 
+// Поля стопа для журнала: какой стоп пришёл и почему не сработал. Текста сообщений тут нет.
+function stopFacts(event: Partial<TelegramDraftStop> | undefined): string {
+  return JSON.stringify({
+    chatId: event?.chat?.id ?? null,
+    chatType: event?.chat?.type ?? null,
+    draftId: event?.draft_id ?? null,
+    threadId: event?.message_thread_id ?? null,
+  });
+}
+
 export async function handleTelegramDraftStop(
   event: TelegramDraftStop,
   {
@@ -225,7 +235,10 @@ export async function handleTelegramDraftStop(
     !isPrivateTelegramChat(event?.chat) ||
     !allowedImpl().has(String(event.chat.id))
   ) {
-    logImpl("draft stop ignored: not an allowed private chat", event?.chat?.id);
+    logImpl(
+      "draft stop ignored: not an allowed private chat",
+      stopFacts(event),
+    );
     return "ignored";
   }
   const key = chatKeyOf(event.chat.id, event.message_thread_id);
@@ -234,8 +247,13 @@ export async function handleTelegramDraftStop(
     snapshot?.draftId !== event.draft_id ||
     typeof snapshot.turnId !== "string" ||
     !snapshot.turnId
-  )
+  ) {
+    logImpl(
+      "draft stop ignored: no running turn with this draft",
+      stopFacts(event),
+    );
     return "ignored";
+  }
   return requestTurnCancel(key, {
     url: urlImpl(),
     secret,

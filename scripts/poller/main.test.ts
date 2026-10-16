@@ -4,11 +4,13 @@ import test from "node:test";
 const {
   conflictBackoff,
   handleControlSafely,
+  processTelegramBatch,
   processTelegramUpdate,
   scheduleResetIntentReconciliation,
 } = await import("./main.ts");
 const { clearChatQueue, enqueueTelegramQueueUpdate } =
   await import("./queue.ts");
+const { parseTelegramUpdates } = await import("../lib/telegram-queue.ts");
 
 void test("conflictBackoff alerts starting at 10 consecutive conflicts", () => {
   assert.equal(conflictBackoff(9).shouldAlert, false);
@@ -172,4 +174,67 @@ void test("reset cleanup and post-intent enqueue cannot overwrite each other", a
   releaseClear();
   await Promise.all([clearing, enqueuing]);
   assert.deepEqual(events, ["clear-start", "clear-end", "enqueue"]);
+});
+
+// 16.10.2026, c1: один апдейт, не прошедший проверку, держал всю пачку — offset не двигался,
+// сообщения после него стояли, пока апдейт не подтвердили руками.
+void test("an invalid update in a batch is skipped and the message after it is processed", async () => {
+  const message = {
+    update_id: 924152901,
+    message: { message_id: 7, chat: { id: 7, type: "private" }, text: "hi" },
+  };
+  const items = parseTelegramUpdates([
+    { update_id: 924152900, stopped_message_generation: "unexpected" },
+    message,
+  ]);
+  assert.ok(items);
+  const processed: number[] = [];
+  const saved: number[] = [];
+  const lines: unknown[][] = [];
+  const result = await processTelegramBatch(items, 924152900, null, {
+    processImpl: (update, offset, delivered) =>
+      processTelegramUpdate(update, offset, delivered, {
+        handleControlImpl: () => Promise.resolve(false),
+        admitImpl: (admitted) => {
+          processed.push(admitted.update_id);
+          return Promise.resolve("owned" as const);
+        },
+        saveOffsetImpl: (offset: number) => {
+          saved.push(offset);
+          return Promise.resolve();
+        },
+        logImpl: () => {},
+      }),
+    saveOffsetImpl: (offset: number) => {
+      saved.push(offset);
+      return Promise.resolve();
+    },
+    logImpl: (...args: unknown[]) => lines.push(args),
+  });
+
+  assert.deepEqual(result, { offset: 924152902, ingressBlocked: false });
+  assert.deepEqual(processed, [924152901]);
+  assert.deepEqual(saved, [924152901, 924152902]);
+  assert.equal(lines.length, 1);
+  assert.match(String(lines[0]?.[1]), /"updateId":924152900/);
+  assert.match(String(lines[0]?.[1]), /stopped_message_generation/);
+});
+
+void test("a skipped update without update_id never moves the offset back or stalls the batch", async () => {
+  const items = parseTelegramUpdates([
+    { stopped_message_generation: {} },
+    { update_id: 3, message: { text: 1 } },
+  ]);
+  assert.ok(items);
+  const saved: number[] = [];
+  const result = await processTelegramBatch(items, 10, null, {
+    processImpl: () => assert.fail("nothing here is a valid update"),
+    saveOffsetImpl: (offset: number) => {
+      saved.push(offset);
+      return Promise.resolve();
+    },
+    logImpl: () => {},
+  });
+  assert.deepEqual(result, { offset: 10, ingressBlocked: false });
+  assert.deepEqual(saved, []);
 });

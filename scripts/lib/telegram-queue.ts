@@ -155,27 +155,31 @@ export function isTelegramQueueUpdate(
     Number.isSafeInteger(value.update_id) &&
     optionalField(value, "message", isTelegramQueueMessage) &&
     optionalField(value, "callback_query", isTelegramCallbackQuery) &&
-    optionalField(
-      value,
-      "stopped_message_generation",
-      (event) =>
-        isRecord(event) &&
-        isRecord(event.chat) &&
-        (typeof event.chat.id === "number" ||
-          typeof event.chat.id === "string") &&
-        Number.isSafeInteger(event.draft_id) &&
-        Number(event.draft_id) > 0 &&
-        optionalField(event, "message_thread_id", Number.isSafeInteger),
-    )
+    // Поля «стопа» сверяет handleTelegramDraftStop и непонятный стоп игнорирует. Здесь —
+    // только объект: 16.10.2026 живой стоп не прошёл строгую проверку по документации
+    // Bot API, и вход стоял, пока апдейт не подтвердили руками.
+    optionalField(value, "stopped_message_generation", isRecord)
   );
 }
 
+export type TelegramUpdateBatchItem =
+  | { update: TelegramQueueUpdate }
+  | { skipped: InvalidTelegramUpdatesDiagnostic; updateId: number | null };
+
+// Пачка разбирается по элементу: апдейт, который не прошёл проверку, пропускается со
+// сдвигом offset, остальные идут дальше. null — только когда result не массив.
 export function parseTelegramUpdates(
   value: unknown,
-): TelegramQueueUpdate[] | null {
-  return Array.isArray(value) && value.every(isTelegramQueueUpdate)
-    ? value
-    : null;
+): TelegramUpdateBatchItem[] | null {
+  if (!Array.isArray(value)) return null;
+  return value.map((item: unknown, index) => {
+    if (isTelegramQueueUpdate(item)) return { update: item };
+    const updateId = isRecord(item) ? item.update_id : null;
+    return {
+      skipped: invalidItemDiagnostic(item, index),
+      updateId: Number.isSafeInteger(updateId) ? (updateId as number) : null,
+    };
+  });
 }
 
 export type InvalidTelegramUpdatesDiagnostic = {
@@ -184,51 +188,48 @@ export type InvalidTelegramUpdatesDiagnostic = {
   item: {
     type: string;
     keys?: string[];
-    messageKeys?: string[];
-    callbackQueryKeys?: string[];
+    // Вложенные объекты: имя поля и тип каждого ключа, без значений.
+    fields?: Record<string, string[]>;
   };
 };
 
-export function invalidTelegramUpdatesDiagnostic(
-  value: unknown,
-): InvalidTelegramUpdatesDiagnostic | null {
-  if (!Array.isArray(value))
-    return {
-      index: null,
-      updateId: null,
-      item: { type: value === null ? "null" : typeof value },
-    };
-  const index = value.findIndex((item) => !isTelegramQueueUpdate(item));
-  if (index < 0) return null;
-  const item: unknown = value[index];
+function typeLabel(value: unknown): string {
+  if (value === null) return "null";
+  return Array.isArray(value) ? "array" : typeof value;
+}
+
+function invalidItemDiagnostic(
+  item: unknown,
+  index: number,
+): InvalidTelegramUpdatesDiagnostic {
   if (!isRecord(item))
-    return {
-      index,
-      updateId: null,
-      item: {
-        type:
-          item === null ? "null" : Array.isArray(item) ? "array" : typeof item,
-      },
-    };
+    return { index, updateId: null, item: { type: typeLabel(item) } };
   const rawUpdateId = item.update_id;
   const updateId =
     typeof rawUpdateId === "string" || typeof rawUpdateId === "number"
       ? rawUpdateId
       : null;
+  const fields: Record<string, string[]> = {};
+  for (const [key, nested] of Object.entries(item)) {
+    if (!isRecord(nested)) continue;
+    fields[key] = Object.entries(nested)
+      .map(([name, field]) => `${name}:${typeLabel(field)}`)
+      .sort();
+  }
   return {
     index,
     updateId,
-    item: {
-      type: "object",
-      keys: Object.keys(item).sort(),
-      ...(isRecord(item.message)
-        ? { messageKeys: Object.keys(item.message).sort() }
-        : {}),
-      ...(isRecord(item.callback_query)
-        ? { callbackQueryKeys: Object.keys(item.callback_query).sort() }
-        : {}),
-    },
+    item: { type: "object", keys: Object.keys(item).sort(), fields },
   };
+}
+
+export function invalidTelegramUpdatesDiagnostic(
+  value: unknown,
+): InvalidTelegramUpdatesDiagnostic | null {
+  if (!Array.isArray(value))
+    return { index: null, updateId: null, item: { type: typeLabel(value) } };
+  const index = value.findIndex((item) => !isTelegramQueueUpdate(item));
+  return index < 0 ? null : invalidItemDiagnostic(value[index], index);
 }
 
 export type TelegramQueueItem = {

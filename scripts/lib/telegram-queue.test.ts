@@ -166,7 +166,7 @@ void test("atomic queue writes invoke a fresh nonce factory per write", async (t
   assert.equal(calls, 2);
 });
 
-void test("Telegram update parsing rejects malformed external payloads", () => {
+void test("Telegram update parsing skips malformed items, not the whole batch", () => {
   const valid = privateUpdate(1, "valid");
   const callbackOnly = {
     update_id: 2,
@@ -186,26 +186,55 @@ void test("Telegram update parsing rejects malformed external payloads", () => {
     extra_bot_api_field: { preserved: true },
   };
 
-  assert.deepEqual(parseTelegramUpdates([]), []);
-  assert.deepEqual(parseTelegramUpdates([valid]), [valid]);
-  assert.deepEqual(parseTelegramUpdates([callbackOnly]), [callbackOnly]);
+  const updatesOf = (value: unknown) =>
+    parseTelegramUpdates(value)?.map((item) =>
+      "update" in item ? item.update : { skipped: item.updateId },
+    );
+  assert.deepEqual(updatesOf([]), []);
+  assert.deepEqual(updatesOf([valid]), [valid]);
+  assert.deepEqual(updatesOf([callbackOnly]), [callbackOnly]);
   assert.equal(parseTelegramUpdates({ result: [valid] }), null);
-  assert.equal(parseTelegramUpdates([{ ...valid, update_id: "1" }]), null);
-  assert.equal(parseTelegramUpdates([{ ...valid, update_id: 1.5 }]), null);
-  assert.equal(
-    parseTelegramUpdates([
+  assert.deepEqual(updatesOf([{ ...valid, update_id: "1" }]), [
+    { skipped: null },
+  ]);
+  assert.deepEqual(updatesOf([{ ...valid, update_id: 1.5 }]), [
+    { skipped: null },
+  ]);
+  assert.deepEqual(
+    updatesOf([
       { ...valid, message: { ...valid.message, text: 42 } },
+      callbackOnly,
     ]),
-    null,
+    [{ skipped: valid.update_id }, callbackOnly],
   );
-  assert.equal(
-    parseTelegramUpdates([
+  assert.deepEqual(
+    updatesOf([
       {
         ...valid,
         callback_query: { id: 42, data: "iva_menu:r:o" },
       },
     ]),
-    null,
+    [{ skipped: valid.update_id }],
+  );
+});
+
+// 16.10.2026, c1: живой стоп не прошёл проверку по документации, и вход стоял. Поля стопа
+// сверяет обработчик; пачка принимает любой объект и не пропускает его.
+void test("a native stop with an unexpected shape stays an update, not a stalled batch", () => {
+  for (const stop of [
+    { chat: { id: 7, type: "private" }, draft_id: 41 },
+    { chat: { id: 7 }, draft_id: "41" },
+    { chat_id: 7, draft_id: 0 },
+    {},
+  ]) {
+    const update = { update_id: 924152900, stopped_message_generation: stop };
+    assert.deepEqual(parseTelegramUpdates([update]), [{ update }]);
+  }
+  assert.deepEqual(
+    parseTelegramUpdates([
+      { update_id: 5, stopped_message_generation: 1 },
+    ])?.map((item) => ("skipped" in item ? item.updateId : "update")),
+    [5],
   );
 });
 
@@ -228,7 +257,15 @@ void test("invalid Telegram update diagnostics identify the item without logging
     item: {
       type: "object",
       keys: ["message", "update_id"],
-      messageKeys: ["chat", "date", "from", "message_id", "text"],
+      fields: {
+        message: [
+          "chat:object",
+          "date:number",
+          "from:object",
+          "message_id:number",
+          "text:string",
+        ],
+      },
     },
   });
   assert.equal(
