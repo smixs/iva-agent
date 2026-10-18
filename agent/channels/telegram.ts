@@ -642,9 +642,10 @@ const telegram = telegramChannel({
           });
         },
         consumeCancelledMark: () => {
-          if (!getChatStatus(chatKey)?.wasCancelled) return false;
+          const cause = getChatStatus(chatKey)?.wasCancelled;
+          if (!cause) return false;
           setChatStatus(chatKey, { wasCancelled: null });
-          return true;
+          return cause === "steer" ? "steer" : "stop";
         },
       }),
     );

@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- 💬 **Ива продолжает обе просьбы после дополнения**: если вы дописали сообщение, пока Ива отвечала, она больше не говорит „вы нажали Стоп“ и доводит обе просьбы. When your new message interrupts a reply, Iva continues both requests and checks prior sends before repeating them.
+
 ## [0.5.4] - 2026-10-18
 
 - ✨ **Ива работает на Mac**: установщик сам определяет Mac и настраивает Иву. Бот работает сразу после установки и запускается после перезагрузки и входа в систему. Обновлять можно кнопкой в Telegram или командой `iva update`. Mac должен быть включён и не спать. The installer detects your Mac and sets up Iva. The bot works right after installation and starts again after you restart your Mac and log in. Update from Telegram or with `iva update`. Keep your Mac on and awake.

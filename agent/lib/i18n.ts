@@ -63,6 +63,12 @@ export function getLang(): Language {
 export const tr = (en: string, ru: string): string =>
   getLang() === "ru" ? ru : en;
 
+export const steerTurnContext = () =>
+  tr(
+    "[Your new message interrupted the previous turn — the owner did not cancel that request. Finish both: the previous request and the new one. Repeat reading and searches yourself; first check whether messages, emails or files from the interrupted turn have already been sent, and do not send them again without certainty.]",
+    "[Прошлый ход прервало твоё новое сообщение — владелец не отменял ту просьбу. Доведи обе: прошлую и новую. Чтение и поиск повторяй сама; отправку (сообщения, письма, файлы) из прерванного хода сначала проверь — могла уже уйти — и не повторяй без уверенности.]",
+  );
+
 // ЕДИНЫЙ список команд для helpText() и setMyCommands. Порядок = порядок в /help и
 // в синем меню. args (опц.) — подсказка аргументов: попадает только в /help, не в
 // описание команды Telegram (там аргументов быть не должно). Никаких /clear и /compact —

@@ -10,6 +10,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { after, beforeEach } from "node:test";
+import fc from "fast-check";
 import type { ChannelSource, Session } from "eve/channels";
 import type { TelegramChannelState } from "eve/channels/telegram";
 
@@ -167,6 +168,7 @@ function step(sessionId: string, tokens: number) {
 
 /** События одной сессии в одном чате, в порядке eve. */
 function session(sessionId: string, chatId: number) {
+  let currentTurnId = `turn_${seq}`;
   const emit = async (
     name:
       | "turn.started"
@@ -177,6 +179,7 @@ function session(sessionId: string, chatId: number) {
     turnId: string,
     settled = true,
   ) => {
+    if (name === "turn.started") currentTurnId = turnId;
     const ctx = new ContextContainer();
     ctx.set(SessionKey, {
       auth: { current: null, initiator: null },
@@ -222,7 +225,7 @@ function session(sessionId: string, chatId: number) {
     waiting: () => emit("session.waiting", `turn_${seq}`),
     /** Парковка без паузы после обработчика: видно, что он сам дождался ответа eve. */
     waitingOnly: () => emit("session.waiting", `turn_${seq}`, false),
-    cancelled: () => emit("turn.cancelled", `turn_${seq}`),
+    cancelled: () => emit("turn.cancelled", currentTurnId),
     failed: () => emit("turn.failed", `turn_${seq}`),
     compacted: () =>
       hookEvents["compaction.completed"](
@@ -241,12 +244,21 @@ function session(sessionId: string, chatId: number) {
 }
 
 /** Сообщение владельца через настоящий вебхук канала; возвращает число доставок в eve. */
-async function incoming(chatId: number, sessionId: string): Promise<number> {
+async function incoming(
+  chatId: number,
+  sessionId: string,
+  onSend?: (options: { context?: readonly string[] }) => Promise<void>,
+  accepted = false,
+): Promise<number> {
   let sends = 0;
   const pending: Promise<unknown>[] = [];
   const target = { id: sessionId } as Session;
   const source = {
-    send: async () => {
+    send: async (
+      _message: unknown,
+      options: { context?: readonly string[] },
+    ) => {
+      await onSend?.(options);
       sends += 1;
       return target;
     },
@@ -256,7 +268,9 @@ async function incoming(chatId: number, sessionId: string): Promise<number> {
     clear: unused,
     reset: unused,
   } as unknown as ChannelSource<TelegramChannelState>;
-  const response = await webhook.handler(
+  const response = await (
+    accepted ? route("/eve/v1/telegram/accepted") : webhook
+  ).handler(
     new Request("http://local/eve/v1/telegram", {
       method: "POST",
       headers: {
@@ -285,13 +299,111 @@ async function incoming(chatId: number, sessionId: string): Promise<number> {
       requestIp: "127.0.0.1",
     },
   );
-  assert.equal(response.status, 200);
+  assert.equal(response.status, accepted ? 204 : 200);
   await Promise.all(pending);
   return sends;
 }
 
 const sentStatuses = () =>
   apiCalls.filter((call) => call.method === "sendRichMessage").length;
+
+test("interrupt cause is attached to the steering message before Eve cancels the old turn", async () => {
+  const old = session("cause-old", 81);
+  await old.started();
+  writeFileSync(settings, JSON.stringify({ turnPolicy: "steer" }));
+  let observed = false;
+  await incoming(
+    81,
+    "cause-next",
+    async (options) => {
+      observed = true;
+      assert.equal(statusOf(81)?.wasCancelled, "steer");
+      assert.ok(
+        options.context?.some((text) => text.includes("Your new message")),
+      );
+      await old.cancelled();
+    },
+    true,
+  );
+  assert.equal(observed, true);
+  assert.equal(statusOf(81)?.wasCancelled, undefined);
+  await incoming(
+    81,
+    "cause-later",
+    async (options) => {
+      assert.ok(
+        options.context?.every((text) => !text.includes("Your new message")),
+      );
+    },
+    true,
+  );
+});
+
+test("interrupt cause stop and legacy true are consumed once through the mounted channel", async () => {
+  const old = session("cause-stop", 82);
+  await old.started();
+  const response = await route("/eve/v1/telegram/cancel").handler(
+    new Request("http://local/eve/v1/telegram/cancel", {
+      method: "POST",
+      headers: {
+        "x-telegram-bot-api-secret-token": "idle-compaction-test-secret",
+      },
+      body: JSON.stringify({ sessionId: "cause-stop" }),
+    }),
+    {
+      attachSession: () => ({
+        cancel: async () => {
+          await old.cancelled();
+          return { status: "accepted", sessionId: "cause-stop" };
+        },
+      }),
+    } as never,
+  );
+  assert.equal(response.status, 200);
+  assert.equal(statusOf(82)?.wasCancelled, "stop");
+  for (const cause of ["stop", true]) {
+    runStatus.setChatStatus("82:", { wasCancelled: cause });
+    await incoming(82, "cause-after-stop", async (options) => {
+      assert.ok(
+        options.context?.some((text) => text.includes("«Stop» button")),
+      );
+    });
+    assert.equal(statusOf(82)?.wasCancelled, undefined);
+  }
+});
+
+test("interrupt cause survives storage and is consumed once (seed 20261018)", async () => {
+  await fc.assert(
+    fc.asyncProperty(
+      fc.array(fc.constantFrom(true, false, "stop", "steer"), {
+        minLength: 1,
+        maxLength: 8,
+      }),
+      async (causes) => {
+        for (const cause of causes) {
+          runStatus.setChatStatus("83:", {
+            status: "idle",
+            wasCancelled: cause,
+          });
+          await incoming(83, "cause-pbt", async (options) => {
+            const notes =
+              options.context?.filter((text) =>
+                text.includes("previous turn"),
+              ) ?? [];
+            assert.equal(notes.length, cause ? 1 : 0);
+            if (cause)
+              assert.equal(
+                notes[0].includes("Your new message"),
+                cause === "steer",
+              );
+          });
+          assert.ok(!statusOf(83)?.wasCancelled);
+        }
+      },
+    ),
+    { seed: 20261018, numRuns: 30 },
+  );
+});
 
 test("ход под порогом чат не занимает; ход на пороге на парковке занимает чат и просит пересказ у своей сессии с общим токеном", async () => {
   const low = session("s-low", 41);
@@ -657,7 +769,7 @@ test("отмена пересказа (turn.cancelled, как после /stop):
   const real = session("s-stop-turn", 52);
   await real.started();
   await real.cancelled();
-  assert.equal(statusOf(52)?.wasCancelled, true);
+  assert.equal(statusOf(52)?.wasCancelled, "stop");
 });
 
 test("законченный пересказ, который не помог, больше не повторяется", async () => {

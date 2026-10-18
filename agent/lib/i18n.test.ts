@@ -19,6 +19,7 @@ type ProbeOptions = {
 type ProbeResult = {
   lang: string;
   word: string;
+  steer: string;
   help: string;
   start: string;
   commands: string[];
@@ -31,6 +32,7 @@ const m = await import(process.env.__I18N_URL);
 process.stdout.write(JSON.stringify({
   lang: m.getLang(),
   word: m.tr("EN", "RU"),
+  steer: m.steerTurnContext(),
   help: m.helpText(),
   start: m.startText(),
   commands: m.COMMANDS.map((c) => c.command),
@@ -87,6 +89,16 @@ test("AGENT_LANGUAGE=en selects English when settings are absent", () => {
   const r = probe({ agentLanguage: "en" });
   assert.equal(r.lang, "en");
   assert.equal(r.word, "EN");
+});
+
+test("steer context follows the selected language and preserves the send check", () => {
+  assert.equal(
+    probe({ language: "ru" }).steer,
+    "[Прошлый ход прервало твоё новое сообщение — владелец не отменял ту просьбу. Доведи обе: прошлую и новую. Чтение и поиск повторяй сама; отправку (сообщения, письма, файлы) из прерванного хода сначала проверь — могла уже уйти — и не повторяй без уверенности.]",
+  );
+  const en = probe({ language: "en" }).steer;
+  assert.match(en, /Your new message.*Finish both/u);
+  assert.match(en, /check.*already been sent/u);
 });
 
 test("settings.language overrides the environment both ways", () => {

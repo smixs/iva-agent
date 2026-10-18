@@ -495,9 +495,12 @@ export async function finishTelegramStatus(
     mode === "cancelled" ? 2_000 : DRAFT_TIMEOUT_MS,
     true,
   );
+  const { chatId, messageThreadId } = channel.telegram;
+  const key = chatKeyOf(chatId, messageThreadId);
+  const cause = getChatStatus(key)?.wasCancelled;
   return Boolean(
     setChatStatusIf(
-      chatKeyOf(channel.telegram.chatId, channel.telegram.messageThreadId),
+      key,
       { sessionId, ...(turnId === undefined ? {} : { turnId }) },
       {
         status: "idle",
@@ -510,7 +513,7 @@ export async function finishTelegramStatus(
         turnAt: null,
         firstOutputAt: null,
         latencyLogged: null,
-        ...(mode === "cancelled" ? { wasCancelled: true } : {}),
+        wasCancelled: mode === "cancelled" && cause !== "steer" ? "stop" : null,
       },
     ),
   );

@@ -479,6 +479,29 @@ await test("прерванный ход, буфер занятости и цит
   );
 });
 
+for (const cause of ["steer", "stop", true] as const)
+  await test(`interrupt cause ${String(cause)} reaches inbound context`, async () => {
+    const { effects } = harness({
+      consumeCancelledMark: () => cause,
+    });
+    const result = await inbound.runTelegramInbound(
+      privateText("дополнил просьбу"),
+      effects,
+    );
+    assert.ok(result?.context);
+    if (cause === "steer") {
+      assert.match(result.context[0], /Your new message/u);
+      assert.match(result.context[0], /Finish both/u);
+      assert.match(result.context[0], /check.*already.*sent/u);
+      assert.doesNotMatch(result.context[0], /Stop.*button/u);
+    } else {
+      assert.equal(
+        result.context[0],
+        "[The previous turn was interrupted by the user with the «Stop» button — some of the work may be unfinished. Don't redo it without an explicit request.]",
+      );
+    }
+  });
+
 await test("помеченный гейтом буфер занятости едет с предупреждением и в лог", async (t) => {
   const lines = muteErrors(t);
   const { effects } = harness();

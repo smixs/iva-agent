@@ -90,7 +90,7 @@ await test("отмена переписывает статус и оставля
     await status.finishTelegramStatus({ telegram: tg }, "s-2", "cancelled"),
     true,
   );
-  assert.equal(runStatus.getChatStatus(key)?.wasCancelled, true);
+  assert.equal(runStatus.getChatStatus(key)?.wasCancelled, "stop");
 });
 
 await test("освобождение записи после сбоя хода обходится без Bot API", async () => {

@@ -17,7 +17,13 @@ import {
 } from "./json-store.ts";
 import { dataDir } from "./data-dir.ts";
 import { quarantineDamagedRecord } from "./damaged-record.ts";
-import { chatKeyOf, hasTelegramPendingInputRequests } from "./run-status.ts";
+import {
+  chatKeyOf,
+  getChatStatus,
+  hasTelegramPendingInputRequests,
+  setChatStatusIf,
+} from "./run-status.ts";
+import { steerTurnContext } from "./i18n.ts";
 import { traceInboundOutcome } from "./trace.ts";
 import { TELEGRAM_QUEUE_RECEIPT_FIELD } from "./telegram-parts.ts";
 import { readSettings } from "./settings.ts";
@@ -344,9 +350,26 @@ export async function handleAcceptedTelegramWebhook<TState>(
           message,
           options,
         ) => {
+          const turnPolicy = telegramTurnPolicy();
+          const state = (
+            "state" in options ? options.state : {}
+          ) as TelegramChannelState;
+          const key = chatKeyOf(state.chatId ?? "", state.messageThreadId);
+          const running = getChatStatus(key);
+          const expected = { generation: running?.generation };
+          const context = [...(options.context ?? [])];
+          if (
+            turnPolicy === "steer" &&
+            running?.status === "running" &&
+            typeof running.turnId === "string" &&
+            !running.compacting &&
+            setChatStatusIf(key, expected, { wasCancelled: "steer" })
+          )
+            context.push(steerTurnContext());
           const active = await source.send(message, {
             ...options,
-            turnPolicy: telegramTurnPolicy(),
+            turnPolicy,
+            context,
           });
           accepted = true;
           return active;

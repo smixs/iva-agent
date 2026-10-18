@@ -5,7 +5,7 @@
 //
 // Модуль намеренно не знает про eve: канал (agent/channels/telegram.ts) остаётся
 // адаптером и приносит сюда только эффекты, поэтому пайплайн проверяется голым node.
-import { tr } from "./i18n.ts";
+import { tr, steerTurnContext } from "./i18n.ts";
 import { hasInboundAttackSignal, sanitizeInbound } from "./security-gate.ts";
 import { allowedTelegramUsers } from "./telegram-allowlist.ts";
 import {
@@ -80,8 +80,8 @@ export type TelegramInboundEffects = TelegramMediaEffects & {
   readonly onAccepted: () => Promise<void>;
   // Работа закончилась ничем: показанный статус надо снять.
   readonly onAbandoned: () => Promise<void>;
-  // Прошлый ход прервали кнопкой «Стоп»: читает пометку и гасит её.
-  readonly consumeCancelledMark: () => boolean;
+  // Причина обрыва; true — старая пометка кнопки «Стоп».
+  readonly consumeCancelledMark: () => boolean | "stop" | "steer";
 };
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -616,7 +616,9 @@ export async function runTelegramInbound(
   // хранит исходные апдейты в durable FIFO и доставляет их самостоятельно; этот путь
   // нужен только для безопасного rolling upgrade уже подготовленного carrier-апдейта.
   const operationalPreContext: string[] = [];
-  if (effects.consumeCancelledMark()) {
+  const cause = effects.consumeCancelledMark();
+  if (cause === "steer") operationalPreContext.push(steerTurnContext());
+  else if (cause) {
     operationalPreContext.push(
       tr(
         "[The previous turn was interrupted by the user with the «Stop» button — some of the work may be unfinished. Don't redo it without an explicit request.]",
