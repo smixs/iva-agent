@@ -63,6 +63,12 @@ export function getLang(): Language {
 export const tr = (en: string, ru: string): string =>
   getLang() === "ru" ? ru : en;
 
+export const stopTurnContext = () =>
+  tr(
+    "[The previous turn was interrupted by the user with the «Stop» button — some of the work may be unfinished. Don't redo it without an explicit request.]",
+    "[Предыдущий ход был прерван пользователем кнопкой «Стоп» — часть работы могла не завершиться. Не повторяй её без явной просьбы.]",
+  );
+
 export const steerTurnContext = () =>
   tr(
     "[Your new message interrupted the previous turn — the owner did not cancel that request. Finish both: the previous request and the new one. Repeat reading and searches yourself; first check whether messages, emails or files from the interrupted turn have already been sent, and do not send them again without certainty.]",

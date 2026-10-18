@@ -1,5 +1,6 @@
 import { verifyTelegramRequest } from "eve/channels/telegram";
 import type { AttachSessionFn } from "eve/channels";
+import { listChatStatuses, setChatStatusIf } from "./run-status.ts";
 import { cancelEveTurn } from "./eve-cancel.ts";
 
 export const TELEGRAM_CANCEL_ROUTE = "/eve/v1/telegram/cancel";
@@ -65,6 +66,34 @@ export async function handleTelegramCancelRequest(
     (typeof turnId !== "string" || turnId.length === 0)
   ) {
     return new Response("turnId must be a non-empty string", { status: 400 });
+  }
+
+  // Стоп должен пережить новое сообщение, пришедшее до turn.cancelled.
+  for (const { chatKey, status } of listChatStatuses()) {
+    if (
+      status.status !== "running" ||
+      status.compacting ||
+      status.sessionId !== sessionId ||
+      (turnId !== undefined && status.turnId !== turnId)
+    )
+      continue;
+    setChatStatusIf(
+      chatKey,
+      {
+        status: "running",
+        sessionId,
+        turnId: status.turnId,
+        compacting: status.compacting,
+      },
+      (current) => ({
+        wasCancelled: "stop",
+        cancelContextDelivered:
+          current.wasCancelled === "stop"
+            ? current.cancelContextDelivered
+            : null,
+      }),
+      { touch: false },
+    );
   }
 
   const result = await cancelEveTurn(attachSession, { sessionId, turnId });

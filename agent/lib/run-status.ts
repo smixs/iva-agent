@@ -29,6 +29,8 @@ type StatusRecord = {
   [key: string]: unknown;
 };
 type StatusPatch = Record<string, unknown>;
+type StatusUpdate =
+  StatusPatch | ((current: StatusRecord) => StatusPatch | null);
 
 // Поле нужно только для отката на 0.3.x. Удалить после стабилизации 0.4.x.
 export const RETIRED_SESSION_ROUTING_FIELD = "continuationToken";
@@ -301,7 +303,7 @@ const keepStamp: Stamp = (prev) => prev.updatedAt;
 
 function updateChatStatus(
   chatKey: string,
-  patch: StatusPatch,
+  patch: StatusUpdate,
   expected: StatusPatch | null,
   stamp: Stamp,
 ): StatusRecord | null {
@@ -318,6 +320,8 @@ function updateChatStatus(
     ) {
       return null;
     }
+    const changes = typeof patch === "function" ? patch(prev) : patch;
+    if (changes === null) return null;
     const previousGeneration =
       typeof prev.generation === "number" &&
       Number.isSafeInteger(prev.generation) &&
@@ -326,11 +330,20 @@ function updateChatStatus(
         : 0;
     const next: StatusRecord = {
       ...prev,
-      ...patch,
+      ...changes,
       generation: previousGeneration + 1,
       updatedAt: stamp(prev),
     };
     delete next[RETIRED_SESSION_ROUTING_FIELD];
+    // Переданная пометка принадлежит старому ходу, а не начавшемуся следом.
+    if (
+      prev.cancelContextDelivered &&
+      next.status === "running" &&
+      (next.sessionId !== prev.sessionId || next.turnId !== prev.turnId)
+    ) {
+      delete next.wasCancelled;
+      delete next.cancelContextDelivered;
+    }
     // Keep inherited message IDs through heartbeats until the bridge can delete
     // them. A terminal record or a different pair must retire the old Stop key.
     if (
@@ -362,6 +375,7 @@ export function setChatStatus(
   return updateChatStatus(chatKey, patch, null, stampNow) as StatusRecord;
 }
 
+// Callback patch вычисляется под тем же замком после проверки expected.
 // Atomic compare-and-set для terminal Eve events: reset может успеть удалить
 // sessionId между ранним read и записью позднего события. touch: false — запись, которая не
 // говорит «ход жив» (вход очереди), updatedAt не двигает: иначе запись мёртвого хода
@@ -369,7 +383,7 @@ export function setChatStatus(
 export function setChatStatusIf(
   chatKey: string,
   expected: StatusPatch,
-  patch: StatusPatch,
+  patch: StatusUpdate,
   options?: { touch?: boolean },
 ): StatusRecord | null {
   return updateChatStatus(

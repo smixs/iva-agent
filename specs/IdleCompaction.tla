@@ -158,6 +158,8 @@ VARIABLES
   \* ghosts
   asksSince, badStack, badStackRec, badAskOff, idleDone, turnClean, badOff,
   falseNotice, leak, inboxLeak, hangSeen, hangTurn, badCancelMark, expired, leakWin, hangWin
+VARIABLES cancelCause, cancelState, cancelDelivered, stopBeforeHook, cancelMessages,
+          contextCause, contextNotes
 
 bridgeV == <<sent, pend, pendR, bq, wire, dw>>
 eveV == <<buf, started, ev, after, steps, ctx, ctrl, hung, stops>>
@@ -168,9 +170,12 @@ lossV == <<restarts, lostTold, lostSilent>>
 ghostV == <<asksSince, badStack, badStackRec, badAskOff, idleDone, turnClean, badOff,
             falseNotice, leak, inboxLeak, hangSeen, hangTurn, badCancelMark, expired, leakWin,
             hangWin>>
-vars == <<bridgeV, eveV, postV, recV, memV, lossV, ghostV>>
+baseVars == <<bridgeV, eveV, postV, recV, memV, lossV, ghostV>>
+cancelVars == <<cancelCause, cancelState, cancelDelivered, stopBeforeHook,
+                cancelMessages, contextCause, contextNotes>>
+vars == <<baseVars, cancelVars>>
 
-Init ==
+BaseInit ==
   /\ sent = 0 /\ pend = 0 /\ pendR = 0 /\ bq = 0 /\ wire = 0 /\ dw = 0
   /\ buf = 0 /\ started = 0 /\ ev = "parked" /\ after = "parked" /\ steps = 0 /\ ctx = "low"
   /\ ctrl = 0 /\ hung = FALSE /\ stops = 0
@@ -184,6 +189,50 @@ Init ==
   /\ idleDone = FALSE /\ turnClean = FALSE /\ badOff = FALSE /\ falseNotice = FALSE
   /\ leak = FALSE /\ inboxLeak = FALSE /\ hangSeen = FALSE /\ hangTurn = FALSE
   /\ badCancelMark = FALSE /\ expired = FALSE /\ leakWin = FALSE /\ hangWin = FALSE
+
+\* Cancellation seam: the existing per-chat mark, explicit Stop before its hook,
+\* the exact-turn cancel result and at most two replacing messages. Legacy checks
+\* keep this seam fixed; InterruptSpec explores its interleavings independently.
+InterruptInit ==
+  /\ cancelCause = "none" /\ cancelState = "live" /\ cancelDelivered = FALSE
+  /\ stopBeforeHook = FALSE /\ cancelMessages = 0
+  /\ contextCause = "none" /\ contextNotes = 0
+Init == BaseInit /\ InterruptInit
+SteerCause == IF cancelCause = "stop" THEN "stop" ELSE "steer"
+InterruptStop ==
+  /\ cancelState \in {"live", "pending"}
+  /\ cancelState' = "pending" /\ cancelCause' = "stop"
+  /\ stopBeforeHook' = TRUE /\ cancelDelivered' = FALSE
+  /\ contextCause' = "none" /\ contextNotes' = 0 /\ UNCHANGED cancelMessages
+InterruptComplete ==
+  /\ cancelState = "live" /\ cancelState' = "completed"
+  /\ UNCHANGED <<cancelCause, cancelDelivered, stopBeforeHook,
+                  cancelMessages, contextCause, contextNotes>>
+InterruptMessage ==
+  /\ cancelState \in {"live", "pending", "completed"} /\ cancelMessages < 2
+  /\ cancelMessages' = cancelMessages + 1
+  /\ IF cancelState = "completed"
+       THEN /\ contextCause' = "none" /\ contextNotes' = 0
+            /\ UNCHANGED <<cancelCause, cancelState, cancelDelivered>>
+       ELSE /\ cancelCause' = SteerCause /\ cancelState' = "pending"
+            /\ contextCause' = SteerCause /\ contextNotes' = 1
+            /\ cancelDelivered' = TRUE
+  /\ UNCHANGED stopBeforeHook
+InterruptHook ==
+  /\ cancelState = "pending" /\ cancelState' = "hooked"
+  /\ cancelCause' = IF cancelDelivered THEN "none" ELSE cancelCause
+  /\ UNCHANGED <<cancelDelivered, stopBeforeHook, cancelMessages, contextCause, contextNotes>>
+InterruptNext == InterruptStop \/ InterruptComplete \/ InterruptMessage \/ InterruptHook
+InterruptSpec == Init /\ [][InterruptNext /\ UNCHANGED baseVars]_vars
+InterruptTypeOK ==
+  /\ cancelCause \in {"none", "stop", "steer"}
+  /\ contextCause \in {"none", "stop", "steer"}
+  /\ cancelState \in {"live", "completed", "pending", "hooked"}
+  /\ cancelDelivered \in BOOLEAN /\ stopBeforeHook \in BOOLEAN
+  /\ cancelMessages \in 0..2 /\ contextNotes \in 0..1
+StopAcceptedKeepsCause == stopBeforeHook /\ cancelState = "pending" => cancelCause = "stop"
+NoFalseSteerContext == cancelState = "completed" => contextCause = "none"
+AtMostOneInterruptNote == contextNotes <= 1
 
 \* isRunning: a running record that is not stale.
 Running == rs = "running" /\ fresh
@@ -553,19 +602,21 @@ Restart ==
   /\ UNCHANGED <<asksSince, badStack, badStackRec, badAskOff, idleDone, turnClean, badOff,
                  falseNotice, leak, inboxLeak, badCancelMark, expired, leakWin>>
 
-Next ==
+BaseNext ==
   \/ Send \/ Route \/ Drain \/ Arrive
   \/ EveStartComp \/ BeginHook \/ EveStartTurn \/ Step \/ InTurnComp \/ TurnEnd \/ TurnFail \/ PostTurnSkip
   \/ WaitRelease \/ WaitClaim \/ PostAnswer \/ LateLand
   \/ CompDone \/ CompFail \/ StopComp \/ CancelH
   \/ Forget \/ Expire \/ Reap \/ Restart
 
+Next == BaseNext /\ UNCHANGED cancelVars
+
 \* Fair eve, bridge and code; people, failures, /stop and restarts are not forced.
 Spec == Init /\ [][Next]_vars
-        /\ WF_vars(Route) /\ WF_vars(Drain) /\ WF_vars(Arrive)
-        /\ WF_vars(EveStartComp) /\ WF_vars(BeginHook) /\ WF_vars(EveStartTurn) /\ WF_vars(Step \/ TurnEnd)
-        /\ WF_vars(WaitRelease) /\ WF_vars(WaitClaim) /\ WF_vars(PostAnswer) /\ WF_vars(LateLand)
-        /\ WF_vars(CompDone \/ CompFail) /\ WF_vars(CancelH) /\ WF_vars(Expire) /\ WF_vars(Reap)
+        /\ WF_baseVars(Route) /\ WF_baseVars(Drain) /\ WF_baseVars(Arrive)
+        /\ WF_baseVars(EveStartComp) /\ WF_baseVars(BeginHook) /\ WF_baseVars(EveStartTurn) /\ WF_baseVars(Step \/ TurnEnd)
+        /\ WF_baseVars(WaitRelease) /\ WF_baseVars(WaitClaim) /\ WF_baseVars(PostAnswer) /\ WF_baseVars(LateLand)
+        /\ WF_baseVars(CompDone \/ CompFail) /\ WF_baseVars(CancelH) /\ WF_baseVars(Expire) /\ WF_baseVars(Reap)
 
 TypeOK ==
   /\ sent \in 0..MaxMsgs /\ pend \in 0..MaxMsgs /\ pendR \in 0..MaxMsgs /\ bq \in 0..MaxMsgs

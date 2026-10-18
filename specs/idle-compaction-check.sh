@@ -15,11 +15,11 @@ META=$(mktemp -d) || exit 2
 trap 'rm -rf "$META"' EXIT
 ok=0; failed=0
 check() { # config expected; expected: none | <Invariant or property>
-  cfg=$1; expect=$2; run="$META/$cfg"; log="$run.log"
+  cfg=$1; expect=$2; modelDir=${3:-.}; run="$META/$cfg"; log="$run.log"
   cp "$cfg.cfg" "$run.cfg"
   # Свидетель — в один поток: порядок инвариантов на одной глубине не плавает.
   w=$WORKERS; [ "$expect" = none ] || w=1
-  "$TLC" -workers "$w" -deadlock -metadir "$run.states" -config "$run.cfg" IdleCompaction.tla >"$log" 2>&1
+  (cd "$modelDir" && "$TLC" -workers "$w" -deadlock -metadir "$run.states" -config "$cfg.cfg" IdleCompaction.tla) >"$log" 2>&1
   code=$?
   valid=false
   tlc_expect "$log" "$code" "$run.cfg" "$expect" "" && valid=true
@@ -29,6 +29,7 @@ check() { # config expected; expected: none | <Invariant or property>
     else echo "OK $cfg: $got violated (expected)"; fi
     ok=$((ok+1))
   else
+    tail -20 "$log"
     echo "FAIL $cfg: got '${got:-error}', expected '$expect'"; failed=$((failed+1))
   fi
 }
@@ -58,5 +59,10 @@ check IdleCompaction-offnotchecked NoAskWhileOff
 check IdleCompaction-repliesdirect QueuedWhileCompacting
 check IdleCompaction-noparkrelease none
 check IdleCompaction-noreap ChatFreed
+check IdleCompaction-interrupt none
+mkdir "$META/stop-mutant"
+sed 's/SteerCause == IF cancelCause = "stop" THEN "stop" ELSE "steer"/SteerCause == "steer"/' IdleCompaction.tla > "$META/stop-mutant/IdleCompaction.tla"
+cp IdleCompaction-stop-priority.cfg "$META/stop-mutant/"
+check IdleCompaction-stop-priority StopAcceptedKeepsCause "$META/stop-mutant"
 echo "idle-compaction-check: $ok ok, $failed failed"
 [ "$failed" -eq 0 ]

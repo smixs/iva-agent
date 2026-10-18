@@ -226,6 +226,7 @@ function session(sessionId: string, chatId: number) {
     /** Парковка без паузы после обработчика: видно, что он сам дождался ответа eve. */
     waitingOnly: () => emit("session.waiting", `turn_${seq}`, false),
     cancelled: () => emit("turn.cancelled", currentTurnId),
+    completed: () => emit("turn.completed", currentTurnId),
     failed: () => emit("turn.failed", `turn_${seq}`),
     compacted: () =>
       hookEvents["compaction.completed"](
@@ -249,10 +250,11 @@ async function incoming(
   sessionId: string,
   onSend?: (options: { context?: readonly string[] }) => Promise<void>,
   accepted = false,
+  onCancel: Session["cancel"] = async () => ({ status: "no_active_turn" }),
 ): Promise<number> {
   let sends = 0;
   const pending: Promise<unknown>[] = [];
-  const target = { id: sessionId } as Session;
+  const target = { id: sessionId, cancel: onCancel } as Session;
   const source = {
     send: async (
       _message: unknown,
@@ -324,6 +326,7 @@ test("interrupt cause is attached to the steering message before Eve cancels the
       await old.cancelled();
     },
     true,
+    async () => ({ status: "accepted", sessionId: "cause-old" }),
   );
   assert.equal(observed, true);
   assert.equal(statusOf(81)?.wasCancelled, undefined);
@@ -370,6 +373,153 @@ test("interrupt cause stop and legacy true are consumed once through the mounted
     });
     assert.equal(statusOf(82)?.wasCancelled, undefined);
   }
+});
+
+async function acceptedStop(sessionId: string, cancel: Session["cancel"]) {
+  const response = await route("/eve/v1/telegram/cancel").handler(
+    new Request("http://local/eve/v1/telegram/cancel", {
+      method: "POST",
+      headers: {
+        "x-telegram-bot-api-secret-token": "idle-compaction-test-secret",
+      },
+      body: JSON.stringify({ sessionId }),
+    }),
+    { attachSession: () => ({ cancel }) } as never,
+  );
+  assert.equal(response.status, 200);
+}
+
+test("r315 stop accepted before the hook wins over a new message", async () => {
+  const old = session("r315-stop", 84);
+  await old.started();
+  writeFileSync(settings, JSON.stringify({ turnPolicy: "steer" }));
+  await acceptedStop("r315-stop", async () => ({
+    status: "accepted",
+    sessionId: "r315-stop",
+  }));
+  assert.equal(statusOf(84)?.wasCancelled, "stop");
+  await incoming(
+    84,
+    "r315-after-stop",
+    async (options) => {
+      const context = options.context ?? [];
+      assert.equal(
+        context.filter((text) => text.includes("«Stop» button")).length,
+        1,
+      );
+      assert.equal(
+        context.filter((text) => text.includes("Your new message")).length,
+        0,
+      );
+      await old.cancelled();
+    },
+    true,
+  );
+  assert.equal(statusOf(84)?.wasCancelled, undefined);
+});
+
+test("r315 a finished turn with a running status gets no steer context", async () => {
+  const old = session("r315-finished", 85);
+  await old.started();
+  writeFileSync(settings, JSON.stringify({ turnPolicy: "steer" }));
+  await incoming(
+    85,
+    "r315-after-finished",
+    async (options) => {
+      assert.ok(
+        options.context?.every((text) => !text.includes("Your new message")),
+      );
+      await old.completed();
+    },
+    true,
+  );
+  assert.equal(statusOf(85)?.wasCancelled, undefined);
+});
+
+test("r315 two steering messages before the hook each carry at most one note", async () => {
+  const old = session("r315-two", 86);
+  await old.started();
+  writeFileSync(settings, JSON.stringify({ turnPolicy: "steer" }));
+  for (let index = 0; index < 2; index++) {
+    await incoming(
+      86,
+      `r315-steer-${index}`,
+      async (options) => {
+        assert.equal(
+          options.context?.filter((text) => text.includes("Your new message"))
+            .length,
+          1,
+        );
+        if (index === 1) await old.cancelled();
+      },
+      true,
+      async () => ({ status: "accepted", sessionId: "r315-two" }),
+    );
+  }
+});
+
+test("r315 a terminal hook before the cancellation response does not leak a note", async () => {
+  const old = session("r315-fast-hook", 87);
+  await old.started();
+  const turnId = statusOf(87)?.turnId;
+  writeFileSync(settings, JSON.stringify({ turnPolicy: "steer" }));
+  await incoming(
+    87,
+    "r315-fast-next",
+    async (options) => {
+      assert.equal(
+        options.context?.filter((text) => text.includes("Your new message"))
+          .length,
+        1,
+      );
+    },
+    true,
+    async (options) => {
+      assert.deepEqual(options, { turnId });
+      await old.cancelled();
+      return { status: "accepted", sessionId: "r315-fast-hook" };
+    },
+  );
+  assert.equal(statusOf(87)?.wasCancelled, undefined);
+  await incoming(
+    87,
+    "r315-fast-later",
+    async (options) => {
+      assert.ok(
+        options.context?.every((text) => !text.includes("previous turn")),
+      );
+    },
+    true,
+  );
+});
+
+test("r315 Stop arriving during the cancellation request still wins", async () => {
+  const old = session("r315-overlap", 88);
+  await old.started();
+  writeFileSync(settings, JSON.stringify({ turnPolicy: "steer" }));
+  await incoming(
+    88,
+    "r315-overlap-next",
+    async (options) => {
+      assert.equal(
+        options.context?.filter((text) => text.includes("«Stop» button"))
+          .length,
+        1,
+      );
+      assert.ok(
+        options.context?.every((text) => !text.includes("Your new message")),
+      );
+    },
+    true,
+    async () => {
+      await acceptedStop("r315-overlap", async () => {
+        await old.cancelled();
+        return { status: "accepted", sessionId: "r315-overlap" };
+      });
+      return { status: "accepted", sessionId: "r315-overlap" };
+    },
+  );
+  assert.equal(statusOf(88)?.wasCancelled, undefined);
 });
 
 test("interrupt cause survives storage and is consumed once (seed 20261018)", async () => {

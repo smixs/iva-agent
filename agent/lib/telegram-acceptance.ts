@@ -23,7 +23,7 @@ import {
   hasTelegramPendingInputRequests,
   setChatStatusIf,
 } from "./run-status.ts";
-import { steerTurnContext } from "./i18n.ts";
+import { steerTurnContext, stopTurnContext } from "./i18n.ts";
 import { traceInboundOutcome } from "./trace.ts";
 import { TELEGRAM_QUEUE_RECEIPT_FIELD } from "./telegram-parts.ts";
 import { readSettings } from "./settings.ts";
@@ -356,20 +356,64 @@ export async function handleAcceptedTelegramWebhook<TState>(
           ) as TelegramChannelState;
           const key = chatKeyOf(state.chatId ?? "", state.messageThreadId);
           const running = getChatStatus(key);
-          const expected = { generation: running?.generation };
-          const context = [...(options.context ?? [])];
+          const context = new Set(options.context ?? []);
           if (
             turnPolicy === "steer" &&
             running?.status === "running" &&
+            typeof running.sessionId === "string" &&
             typeof running.turnId === "string" &&
-            !running.compacting &&
-            setChatStatusIf(key, expected, { wasCancelled: "steer" })
-          )
-            context.push(steerTurnContext());
+            !running.compacting
+          ) {
+            const marked = setChatStatusIf(
+              key,
+              {
+                status: "running",
+                sessionId: running.sessionId,
+                turnId: running.turnId,
+                compacting: running.compacting,
+              },
+              (current) => ({ wasCancelled: current.wasCancelled || "steer" }),
+              { touch: false },
+            );
+            if (marked) {
+              const result = await args
+                .attachSession(running.sessionId)
+                .cancel({ turnId: running.turnId });
+              let cause = marked.wasCancelled;
+              setChatStatusIf(
+                key,
+                {},
+                (current) => {
+                  if (
+                    current.status !== "idle" &&
+                    (current.sessionId !== running.sessionId ||
+                      current.turnId !== running.turnId)
+                  )
+                    return null;
+                  cause = current.wasCancelled || cause;
+                  if (result.status !== "accepted")
+                    return current.wasCancelled === "steer"
+                      ? { wasCancelled: null, cancelContextDelivered: null }
+                      : null;
+                  return current.status === "running"
+                    ? { wasCancelled: cause, cancelContextDelivered: true }
+                    : { wasCancelled: null, cancelContextDelivered: null };
+                },
+                { touch: false },
+              );
+              if (result.status === "accepted") {
+                if (cause === "steer") context.add(steerTurnContext());
+                else {
+                  context.delete(steerTurnContext());
+                  context.add(stopTurnContext());
+                }
+              }
+            }
+          }
           const active = await source.send(message, {
             ...options,
             turnPolicy,
-            context,
+            context: [...context],
           });
           accepted = true;
           return active;

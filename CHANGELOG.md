@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- 🔧 **Стоп сохраняет свой смысл при новом сообщении**: сообщение сразу после Стопа больше не меняет причину остановки; пометка о перебивании появляется один раз и только после состоявшейся отмены. A message after Stop preserves its reason; an interrupt note appears once, only after an actual cancellation.
+
 - 💬 **Ива продолжает обе просьбы после дополнения**: если вы дописали сообщение, пока Ива отвечала, она больше не говорит „вы нажали Стоп“ и доводит обе просьбы. When your new message interrupts a reply, Iva continues both requests and checks prior sends before repeating them.
 
 ## [0.5.4] - 2026-10-18

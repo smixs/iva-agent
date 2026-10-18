@@ -5,7 +5,7 @@
 //
 // Модуль намеренно не знает про eve: канал (agent/channels/telegram.ts) остаётся
 // адаптером и приносит сюда только эффекты, поэтому пайплайн проверяется голым node.
-import { tr, steerTurnContext } from "./i18n.ts";
+import { tr, steerTurnContext, stopTurnContext } from "./i18n.ts";
 import { hasInboundAttackSignal, sanitizeInbound } from "./security-gate.ts";
 import { allowedTelegramUsers } from "./telegram-allowlist.ts";
 import {
@@ -618,14 +618,7 @@ export async function runTelegramInbound(
   const operationalPreContext: string[] = [];
   const cause = effects.consumeCancelledMark();
   if (cause === "steer") operationalPreContext.push(steerTurnContext());
-  else if (cause) {
-    operationalPreContext.push(
-      tr(
-        "[The previous turn was interrupted by the user with the «Stop» button — some of the work may be unfinished. Don't redo it without an explicit request.]",
-        "[Предыдущий ход был прерван пользователем кнопкой «Стоп» — часть работы могла не завершиться. Не повторяй её без явной просьбы.]",
-      ),
-    );
-  }
+  else if (cause) operationalPreContext.push(stopTurnContext());
   const rawBuffered = raw.iva_buffered;
   if (Array.isArray(rawBuffered) && rawBuffered.length) {
     // Буфер — недоверенный пользовательский текст: тот же санитайз, что у обычных реплик.

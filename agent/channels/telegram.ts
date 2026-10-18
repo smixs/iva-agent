@@ -59,7 +59,6 @@ import {
   chatKeyOf,
   getChatStatus,
   RUN_STALE_MS,
-  setChatStatus,
   setChatStatusIf,
 } from "../lib/run-status.js";
 import { handleTelegramResetRequest } from "../lib/telegram-reset-route.js";
@@ -642,10 +641,28 @@ const telegram = telegramChannel({
           });
         },
         consumeCancelledMark: () => {
-          const cause = getChatStatus(chatKey)?.wasCancelled;
-          if (!cause) return false;
-          setChatStatus(chatKey, { wasCancelled: null });
-          return cause === "steer" ? "steer" : "stop";
+          let cause: false | "stop" | "steer" = false;
+          setChatStatusIf(
+            chatKey,
+            {},
+            (current) => {
+              if (
+                !current.wasCancelled ||
+                current.cancelContextDelivered ||
+                (current.status === "running" &&
+                  typeof current.turnId === "string" &&
+                  current.wasCancelled === "steer")
+              )
+                return null;
+              cause = current.wasCancelled === "steer" ? "steer" : "stop";
+              return current.status === "running" &&
+                typeof current.turnId === "string"
+                ? { cancelContextDelivered: true }
+                : { wasCancelled: null, cancelContextDelivered: null };
+            },
+            { touch: false },
+          );
+          return cause;
         },
       }),
     );

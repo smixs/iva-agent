@@ -54,6 +54,53 @@ test("legacy whole-map is read and each touched key migrates independently", () 
   assert.equal(status.getChatStatus("legacy-a:")?.sessionId, undefined);
 });
 
+test("CAS derives its patch from the current cause and skips a mismatched pair", () => {
+  const key = "cause-cas:";
+  status.setChatStatus(key, {
+    sessionId: "cause-session",
+    turnId: "cause-turn",
+    wasCancelled: "steer",
+  });
+  status.setChatStatus(key, { wasCancelled: "stop" });
+  const updated = status.setChatStatusIf(
+    key,
+    { turnId: "cause-turn" },
+    (current) => ({
+      wasCancelled: current.wasCancelled,
+      status: "idle",
+    }),
+  );
+  assert.equal(updated?.wasCancelled, "stop");
+  let called = false;
+  assert.equal(
+    status.setChatStatusIf(key, { turnId: "stale" }, () => {
+      called = true;
+      return { wasCancelled: "steer" };
+    }),
+    null,
+  );
+  assert.equal(called, false);
+  assert.equal(
+    status.setChatStatusIf(key, {}, () => null),
+    null,
+  );
+  assert.deepEqual(status.getChatStatus(key), updated);
+});
+
+test("a delivered cancellation note is retired when the next turn starts", () => {
+  const key = "cause-next:";
+  status.setChatStatus(key, {
+    status: "running",
+    sessionId: "s",
+    turnId: "old",
+    wasCancelled: "stop",
+    cancelContextDelivered: true,
+  });
+  const next = status.setChatStatus(key, { turnId: "new" });
+  assert.equal(next.wasCancelled, undefined);
+  assert.equal(next.cancelContextDelivered, undefined);
+});
+
 test("the first normal rewrite removes the retired routing field", () => {
   const legacy = join(dataDir, "run-status.json");
   const key = "legacy-routing:";
