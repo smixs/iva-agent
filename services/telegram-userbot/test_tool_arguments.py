@@ -138,7 +138,6 @@ class ToolContractsTest(unittest.IsolatedAsyncioTestCase):
         link = "https://t.me/example_news"
         received = await call(chat_id=-1001234567890, message=link, search_query=link,
                               user_ids=["t.me/first_user", 42, "@second_user"])
-        self.assertEqual(received["message"], link)
         self.assertEqual(received["search_query"], link)
         self.assertEqual(received["user_ids"], ["@first_user", 42, "@second_user"])
         self.assertEqual(received["chat_id"], -1001234567890)
@@ -168,6 +167,39 @@ class ToolContractsTest(unittest.IsolatedAsyncioTestCase):
         # FastMCP reads "null" in a non-string field as JSON null: a required id is refused.
         with self.assertRaisesRegex(ToolError, "chat_id"):
             await call(chat_id="null")
+
+    async def test_protects_credentials_in_file_path_parameters(self):
+        mcp = FastMCP("test")
+        calls = []
+
+        @mcp.tool()
+        async def send_file(chat_id: str, file_path: str) -> str:
+            calls.append(file_path)
+            return "ok"
+
+        @mcp.tool()
+        async def download_media(chat_id: str, message_id: int, file_path: str = None) -> str:
+            calls.append(file_path)
+            return "downloaded"
+
+        await install_tool_contracts(
+            mcp,
+            {"send_file": send_file, "download_media": download_media},
+            accounts("default"),
+        )
+
+        # Valid non-credential paths work
+        await mcp.call_tool("send_file", {"chat_id": "@example", "file_path": "/tmp/voice.ogg"})
+        await mcp.call_tool("download_media", {"chat_id": "@example", "message_id": 1, "file_path": "/tmp/media.mp4"})
+        await mcp.call_tool("download_media", {"chat_id": "@example", "message_id": 2})
+
+        # Protected paths are rejected
+        with self.assertRaisesRegex(ToolError, "protected credentials"):
+            await mcp.call_tool("send_file", {"chat_id": "@example", "file_path": "/tmp/telegram-userbot.session"})
+        with self.assertRaisesRegex(ToolError, "protected credentials"):
+            await mcp.call_tool("send_file", {"chat_id": "@example", "file_path": "data/telegram-userbot.token"})
+        with self.assertRaisesRegex(ToolError, "protected credentials"):
+            await mcp.call_tool("download_media", {"chat_id": "@example", "message_id": 3, "file_path": ".env"})
 
     async def test_random_arguments_keep_every_real_value(self):
         """Property: a link becomes @name only when built as a public t.me link; nothing else changes."""

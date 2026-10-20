@@ -355,5 +355,66 @@ class AdoptLegacySessionTest(unittest.TestCase):
         self.assertIn("session moved from", message)
 
 
+class ExtractAccountLabelTest(unittest.TestCase):
+    def test_extract_various_formats(self):
+        from serve import _extract_account_label
+        self.assertEqual(_extract_account_label("telegram-userbot.session"), "default")
+        self.assertEqual(_extract_account_label("telegram-userbot-work.session"), "work")
+        self.assertEqual(_extract_account_label("telegram-userbot_personal.session"), "personal")
+        self.assertEqual(_extract_account_label("telegram-userbot.alerts.session"), "alerts")
+        self.assertEqual(_extract_account_label("finance.session"), "finance")
+        # Non-sessions and sidecars
+        self.assertIsNone(_extract_account_label("telegram-userbot.session-journal"))
+        self.assertIsNone(_extract_account_label("work.session-wal"))
+        self.assertIsNone(_extract_account_label("notes.txt"))
+
+
+class DiscoverSavedSessionsTest(unittest.TestCase):
+    def test_discovers_multiple_sessions(self):
+        from serve import _discover_saved_sessions
+        with tempfile.TemporaryDirectory() as tmp:
+            data = Path(tmp)
+            (data / "telegram-userbot.session").write_text("default auth")
+            (data / "telegram-userbot-work.session").write_text("work auth")
+            (data / "personal.session").write_text("personal auth")
+            (data / "telegram-userbot.session-journal").write_text("sidecar")
+
+            with env(ASSISTANT_DATA_DIR=str(data)):
+                sessions = _discover_saved_sessions()
+                self.assertIn("default", sessions)
+                self.assertIn("work", sessions)
+                self.assertIn("personal", sessions)
+                self.assertEqual(sessions["default"], data / "telegram-userbot.session")
+                self.assertEqual(sessions["work"], data / "telegram-userbot-work.session")
+                self.assertEqual(sessions["personal"], data / "personal.session")
+
+    def test_seeds_session_env_for_multiple_accounts(self):
+        from serve import _seed_session_env
+        with tempfile.TemporaryDirectory() as tmp:
+            data = Path(tmp)
+            (data / "telegram-userbot.session").write_text("default auth")
+            (data / "telegram-userbot-work.session").write_text("work auth")
+
+            with env(ASSISTANT_DATA_DIR=str(data)):
+                _seed_session_env()
+                self.assertEqual(os.environ.get("TELEGRAM_SESSION_NAME"), str(data / "telegram-userbot"))
+                self.assertEqual(os.environ.get("TELEGRAM_SESSION_NAME_WORK"), str(data / "telegram-userbot-work"))
+
+
+class AllowedRootsTest(unittest.TestCase):
+    def test_configures_temp_and_vault_roots_and_fallback(self):
+        from serve import _configure_allowed_roots
+        class FakeRuntime:
+            SERVER_ALLOWED_ROOTS = []
+        with tempfile.TemporaryDirectory() as tmp_vault:
+            with env(ASSISTANT_VAULT_DIR=tmp_vault):
+                fake_runtime = FakeRuntime()
+                roots = _configure_allowed_roots(runtime_module=fake_runtime)
+                self.assertTrue(any(str(Path(tempfile.gettempdir()).resolve()) in str(r) for r in roots))
+                self.assertTrue(any(str(Path(tmp_vault).resolve()) in str(r) for r in roots))
+                self.assertEqual(os.environ.get("TELEGRAM_ALLOW_SERVER_ROOTS_FALLBACK"), "1")
+                self.assertEqual(fake_runtime.SERVER_ALLOWED_ROOTS, roots)
+
+
 if __name__ == "__main__":
     unittest.main()

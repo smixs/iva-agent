@@ -210,6 +210,80 @@ def _adopt_legacy_session(path: Path) -> None:
             return
 
 
+def _adopt_all_legacy_sessions(default_target: Path) -> None:
+    _adopt_legacy_session(default_target)
+    here = Path.cwd()
+    data_dir = os.getenv("ASSISTANT_DATA_DIR")
+    legacy_dirs: list[Path] = []
+    old_anchor_dir = _root_dir() / "data"
+    if data_dir and os.path.isabs(data_dir) and Path(data_dir) != old_anchor_dir:
+        legacy_dirs.append(old_anchor_dir)
+    if data_dir and not os.path.isabs(data_dir):
+        legacy_dirs.append(here / data_dir)
+    legacy_dirs.append(here)
+
+    target_dir = _data_dir()
+    for ldir in legacy_dirs:
+        if not ldir.is_dir() or ldir.resolve() == target_dir.resolve():
+            continue
+        try:
+            for entry in sorted(ldir.iterdir()):
+                if not entry.is_file() or not entry.name.endswith(".session"):
+                    continue
+                if entry.name == SESSION_NAME:
+                    continue
+                target = target_dir / entry.name
+                if not target.exists() and entry.resolve() != target.resolve():
+                    _move_session(entry, target)
+        except OSError:
+            pass
+
+
+def _extract_account_label(filename: str) -> str | None:
+    if not filename.endswith(".session"):
+        return None
+    if any(filename.endswith(suffix) for suffix in SESSION_SIDECARS):
+        return None
+    stem = filename[:-len(".session")]
+    if stem.startswith("telegram-userbot-"):
+        label = stem[len("telegram-userbot-"):]
+    elif stem.startswith("telegram-userbot_"):
+        label = stem[len("telegram-userbot_"):]
+    elif stem.startswith("telegram-userbot."):
+        label = stem[len("telegram-userbot."):]
+    elif stem == "telegram-userbot":
+        return "default"
+    else:
+        label = stem
+    label = label.lower().strip()
+    return label if label else None
+
+
+def _discover_saved_sessions() -> dict[str, Path]:
+    sessions: dict[str, Path] = {}
+    default_session = _session_file()
+    sessions["default"] = default_session
+
+    prefix_file = "TELEGRAM_SESSION_FILE_"
+    for key, value in os.environ.items():
+        if key.startswith(prefix_file) and value:
+            label = key[len(prefix_file):].lower().strip()
+            if label and label != "default":
+                sessions[label] = Path(value.strip())
+
+    data_dir = _data_dir()
+    if data_dir.is_dir():
+        for entry in sorted(data_dir.iterdir()):
+            if not entry.is_file():
+                continue
+            if entry.resolve() == default_session.resolve() or entry.name == SESSION_NAME:
+                continue
+            label = _extract_account_label(entry.name)
+            if label and label != "default" and label not in sessions:
+                sessions[label] = entry
+    return sessions
+
+
 def _token_file() -> Path:
     # The token and Telethon session are one credential pair. The systemd boundary passes
     # their canonical absolute directory, and both Python and TypeScript consume it.
@@ -222,6 +296,46 @@ def _resolve_token() -> str:
         return env.strip()
     f = _token_file()
     return f.read_text().strip() if f.exists() else ""
+
+
+def _vault_dir() -> Path:
+    vault_env = (os.getenv("ASSISTANT_VAULT_DIR") or "").strip()
+    if vault_env:
+        path = Path(vault_env)
+        if not path.is_absolute():
+            path = _root_dir() / path
+        return path
+    return _root_dir() / "vault"
+
+
+def _configure_allowed_roots(runtime_module=None) -> list[Path]:
+    import tempfile
+
+    if runtime_module is None:
+        import telegram_mcp.runtime as mcp_runtime
+    else:
+        mcp_runtime = runtime_module
+
+    roots: list[Path] = []
+    tmp = Path(tempfile.gettempdir()).resolve()
+    if tmp.exists():
+        roots.append(tmp)
+    vault = _vault_dir().resolve()
+    try:
+        vault.mkdir(parents=True, mode=0o700, exist_ok=True)
+    except OSError:
+        pass
+    roots.append(vault)
+
+    for r in getattr(mcp_runtime, "SERVER_ALLOWED_ROOTS", []):
+        if r not in roots:
+            roots.append(r)
+
+    dedupe_fn = getattr(mcp_runtime, "_dedupe_paths", lambda items: list(dict.fromkeys(items)))
+    mcp_runtime.SERVER_ALLOWED_ROOTS = dedupe_fn(roots)
+    if "TELEGRAM_ALLOW_SERVER_ROOTS_FALLBACK" not in os.environ:
+        os.environ["TELEGRAM_ALLOW_SERVER_ROOTS_FALLBACK"] = "1"
+    return mcp_runtime.SERVER_ALLOWED_ROOTS
 
 
 def _seed_session_env() -> Path:
@@ -237,12 +351,27 @@ def _seed_session_env() -> Path:
     """
     path = _session_file()
     path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
-    _adopt_legacy_session(path)
+    _adopt_all_legacy_sessions(path)
     # Telethon appends ".session" to the name; strip it so we don't get ".session.session".
     name = str(path)
     if name.endswith(".session"):
-        name = name[: -len(".session")]
+        name = name[:-len(".session")]
     os.environ["TELEGRAM_SESSION_NAME"] = name
+
+    for label, session_path in _discover_saved_sessions().items():
+        if label == "default":
+            continue
+        try:
+            os.chmod(session_path, 0o600)
+        except OSError:
+            pass
+        s_name = str(session_path)
+        if s_name.endswith(".session"):
+            s_name = s_name[:-len(".session")]
+        env_key = f"TELEGRAM_SESSION_NAME_{label.upper()}"
+        if env_key not in os.environ and f"TELEGRAM_SESSION_STRING_{label.upper()}" not in os.environ:
+            os.environ[env_key] = s_name
+
     return path
 
 
@@ -266,8 +395,10 @@ def main() -> None:
 
     # Import AFTER seeding the session env — runtime builds `mcp` + the single
     # Telethon client; importing the tools package fires every @mcp.tool decorator.
-    from telegram_mcp.runtime import mcp, get_client, _apply_exposed_tools_mode
+    from telegram_mcp.runtime import mcp, get_client, _apply_exposed_tools_mode, clients
     import telegram_mcp.tools  # noqa: F401 — registers all tools with `mcp`
+
+    _configure_allowed_roots()
 
     # Honor TELEGRAM_EXPOSED_TOOLS (e.g. "read-only"); upstream normally does this in
     # its runner, which we bypass. Default "all".
@@ -275,19 +406,20 @@ def main() -> None:
     if removed:
         print(f"telegram-userbot: read-only mode, pruned {len(removed)} write tools", file=sys.stderr)
 
-    client = get_client()
+    default_client = clients.get("default") or next(iter(clients.values()))
 
     # Register onboarding tools AFTER pruning so QR login always works — you must be
     # able to connect the account even under read-only exposure.
     from onboarding import register_onboarding_tools
 
-    register_onboarding_tools(mcp, client)
+    register_onboarding_tools(mcp, default_client)
 
     # Enforce the anti-ban safety guide as server behavior (FloodWait compliance,
     # pacing, circuit-breaker) by wrapping the client's outbound methods in place.
     from guardrails import install_guardrails
 
-    install_guardrails(client)
+    for cl in clients.values():
+        install_guardrails(cl)
 
     import uvicorn
     from starlette.middleware.base import BaseHTTPMiddleware
@@ -304,14 +436,15 @@ def main() -> None:
     class EnsureConnectedMiddleware(BaseHTTPMiddleware):
         async def dispatch(self, request, call_next):
             try:
-                if not client.is_connected():
-                    await client.connect()
+                for cl in clients.values():
+                    if not cl.is_connected():
+                        await cl.connect()
             except Exception as exc:  # noqa: BLE001
                 print(f"telegram-userbot: reconnect failed: {exc}", file=sys.stderr)
             return await call_next(request)
 
     async def health(_request):
-        return JSONResponse(await _health_payload(client))
+        return JSONResponse(await _health_payload(default_client))
 
     async def amain() -> None:
         from tool_contracts import install_tool_contracts
@@ -321,13 +454,14 @@ def main() -> None:
             f"telegram-userbot: nullable signatures repaired for {len(repaired['nullable'])} tools",
             file=sys.stderr,
         )
-        await client.connect()  # NOT .start() — that would prompt for interactive login
-        authorized = await client.is_user_authorized()
-        print(
-            f"telegram-userbot: session {'authorized' if authorized else 'NOT authorized (onboarding mode)'}"
-            f" [{session_path}]",
-            file=sys.stderr,
-        )
+        for label, cl in clients.items():
+            await cl.connect()  # NOT .start() — that would prompt for interactive login
+            authorized = await cl.is_user_authorized()
+            print(
+                f"telegram-userbot: session '{label}' {'authorized' if authorized else 'NOT authorized (onboarding mode)'}"
+                f" [{session_path if label == 'default' else label}]",
+                file=sys.stderr,
+            )
 
         mcp.settings.host = host
         mcp.settings.port = port
