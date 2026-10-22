@@ -2,7 +2,7 @@
 
 <div align="center">
 
-<img src="assets/iva-header.webp" alt="Iva — self-hosted Telegram AI assistant with layered memory" width="100%">
+<img src="assets/iva-header.webp" alt="Iva - your personal AI in Telegram. Layered memory. Your server." width="100%">
 
 [![Release](https://img.shields.io/github/v/release/smixs/iva-agent?color=brightgreen)](https://github.com/smixs/iva-agent/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)

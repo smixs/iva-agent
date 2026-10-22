@@ -19,9 +19,10 @@
     <link rel="alternate" hreflang="en" href="https://iva-agent.com/" />
     <link rel="alternate" hreflang="ru" href="https://iva-agent.com/ru/" />
     <link rel="alternate" hreflang="x-default" href="https://iva-agent.com/" />
+    <link rel="icon" type="image/svg+xml" href="/iva-mark.svg" />
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
     <link rel="icon" type="image/png" sizes="192x192" href="/favicon-192.png" />
-    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/site.webmanifest" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -215,10 +216,14 @@
         letter-spacing: 0.04em;
         font-size: 15px;
       }
-      .nav-logo svg {
-        width: 17px;
-        height: 17px;
-        color: var(--green);
+      .nav-logo img {
+        width: 28px;
+        height: 25px;
+        flex-shrink: 0;
+      }
+      .nav-logo .logo-type {
+        width: 52px;
+        height: 13px;
       }
       .nav-links {
         display: flex;
@@ -316,6 +321,11 @@
         letter-spacing: -0.015em;
         color: #fff;
         padding-right: 0.06em;
+      }
+      .hero h1 img {
+        display: block;
+        width: clamp(210px, 25vw, 300px);
+        height: auto;
       }
       .hero-sub {
         margin-top: 26px;
@@ -967,21 +977,14 @@
     <nav aria-label="Основная навигация">
       <div class="liquid-glass nav-pill">
         <a class="nav-logo" href="#" aria-label="Iva, на главную">
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.6"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            aria-hidden="true"
-          >
-            <path d="M12 4v16" />
-            <path d="M12 7c-1.2-2.2-3.6-3-6-2.6.5 2.6 2.8 3.8 6 2.6z" />
-            <path d="M12 11c1.2-2.2 3.6-3 6-2.6-.5 2.6-2.8 3.8-6 2.6z" />
-            <path d="M12 15c-1-1.8-3-2.5-5-2.2.4 2.2 2.3 3.2 5 2.2z" />
-          </svg>
-          IVA
+          <img src="/iva-mark.svg" alt="" width="28" height="25" />
+          <img
+            class="logo-type"
+            src="/iva-wordmark.svg"
+            alt="Iva"
+            width="52"
+            height="13"
+          />
         </a>
         <div class="nav-links">
           <a href="#memory">Память</a>
@@ -1004,7 +1007,7 @@
         />
       </div>
       <div class="hero-mid">
-        <h1>IVA</h1>
+        <h1><img src="/iva-logo.svg" alt="Iva" width="870" height="900" /></h1>
         <p class="hero-sub">Лучший личный AI-ассистент для Telegram</p>
       </div>
       <div class="hero-bottom">
@@ -1507,7 +1510,15 @@
               >Majento</a
             >
           </p>
-          <span>Iva</span>
+          <span
+            ><img
+              src="/iva-mark.svg"
+              alt=""
+              width="24"
+              height="22"
+              style="vertical-align: middle; margin-right: 6px"
+            />Iva</span
+          >
           Open source ·
           <a href="https://github.com/smixs/iva-agent/blob/main/LICENSE">MIT</a
           ><br />

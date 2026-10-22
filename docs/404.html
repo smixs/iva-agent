@@ -6,9 +6,10 @@
     <title>404 — Iva</title>
     <meta name="robots" content="noindex" />
     <meta name="theme-color" content="#000000" />
+    <link rel="icon" type="image/svg+xml" href="/iva-mark.svg" />
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
     <link rel="icon" type="image/png" sizes="192x192" href="/favicon-192.png" />
-    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/site.webmanifest" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -59,10 +60,14 @@
         letter-spacing: 0.04em;
         font-size: 15px;
       }
-      .wordmark svg {
-        width: 17px;
-        height: 17px;
-        color: var(--green);
+      .wordmark img {
+        width: 28px;
+        height: 25px;
+        flex-shrink: 0;
+      }
+      .wordmark .logo-type {
+        width: 52px;
+        height: 13px;
       }
       h1 {
         font-family: "Archivo", sans-serif;
@@ -103,21 +108,14 @@
   </head>
   <body>
     <a class="wordmark" href="/">
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="1.6"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-        aria-hidden="true"
-      >
-        <path d="M12 4v16" />
-        <path d="M12 7c-1.2-2.2-3.6-3-6-2.6.5 2.6 2.8 3.8 6 2.6z" />
-        <path d="M12 11c1.2-2.2 3.6-3 6-2.6-.5 2.6-2.8 3.8-6 2.6z" />
-        <path d="M12 15c-1-1.8-3-2.5-5-2.2.4 2.2 2.3 3.2 5 2.2z" />
-      </svg>
-      IVA
+      <img src="/iva-mark.svg" alt="" width="28" height="25" />
+      <img
+        class="logo-type"
+        src="/iva-wordmark.svg"
+        alt="Iva"
+        width="52"
+        height="13"
+      />
     </a>
     <h1>404</h1>
     <p class="note">Page not found.</p>
