@@ -168,7 +168,7 @@ for (const home of ["dist/index.html", "dist/ru/index.html"]) {
     assert.equal(actualFAQ[index].question, question.name);
     assert.equal(actualFAQ[index].answer, question.acceptedAnswer.text);
   });
-  assert.equal((visible.match(/class="review"/g) || []).length, 11);
+  assert.equal((visible.match(/class="review"/g) || []).length, 3);
   const lang = home.includes("/ru/") ? "ru" : "en";
   assert.equal((visible.match(/class="usecase-row"/g) || []).length, 8);
   const main = visible.match(/<main\b[^>]*>([\s\S]*?)<\/main>/)![1];
