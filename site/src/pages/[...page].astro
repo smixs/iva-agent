@@ -1,0 +1,172 @@
+---
+import { getCollection, render } from "astro:content";
+import { readFileSync, existsSync } from "node:fs";
+import path from "node:path";
+import Base from "../layouts/Base.astro";
+import { docUrl } from "../lib/doc-links";
+import type { Lang } from "../lib/copy";
+export async function getStaticPaths() {
+  const entries = await getCollection("docs");
+  const routes = entries.map((entry) => ({
+    params: { page: docUrl(entry.id + ".md").slice(1, -1) },
+    props: { entry },
+  }));
+  const directories = new Set(
+    entries
+      .filter((e) => e.id.includes("/") && !e.id.startsWith("ru/"))
+      .map((e) => e.id.slice(0, e.id.lastIndexOf("/"))),
+  );
+  for (const directory of directories)
+    if (!entries.some((e) => e.id === directory + "/README"))
+      routes.push({
+        params: { page: "docs/" + directory },
+        props: {
+          directory,
+          entries: entries.filter((e) => e.id.startsWith(directory + "/")),
+        },
+      } as any);
+  return [
+    ...routes,
+    ...["about", "ru/about", "privacy"].map((page) => ({
+      params: { page },
+      props: { staticPage: page },
+    })),
+  ];
+}
+const { entry, directory, entries, staticPage } = Astro.props;
+const lang: Lang =
+  entry?.id.startsWith("ru/") || staticPage === "ru/about" ? "ru" : "en";
+let html = "",
+  title = "",
+  description = "",
+  Content;
+if (staticPage) {
+  const file =
+    staticPage === "privacy"
+      ? "privacy"
+      : lang === "ru"
+        ? "about-ru"
+        : "about-en";
+  html = readFileSync(path.resolve(`src/data/${file}.html`), "utf8");
+  title = html.match(/<h1>(.*?)<\/h1>/s)?.[1] || "Iva";
+  description =
+    html
+      .match(/<p>\s*([\s\S]*?)<\/p>/)?.[1]
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 155) || title;
+} else if (entry) {
+  ({ Content } = await render(entry));
+  const source = readFileSync(
+    path.resolve("../docs", entry.id + ".md"),
+    "utf8",
+  );
+  title = source.match(/^# (.+)$/m)?.[1] || entry.id;
+  description =
+    source
+      .split("\n")
+      .find(
+        (s: string) => s.trim() && !s.startsWith("#") && !s.startsWith("---"),
+      )
+      ?.replace(/[*`\[\]]/g, "")
+      .slice(0, 155) || title;
+} else {
+  title = directory;
+  description = "Iva documentation: " + directory;
+}
+const slug = entry?.id.replace(/^ru\//, "");
+const enPath = staticPage
+  ? staticPage === "ru/about"
+    ? "/about/"
+    : "/" + staticPage + "/"
+  : entry
+    ? docUrl(slug + ".md")
+    : Astro.url.pathname;
+const hasRu = entry && existsSync(path.resolve("../docs/ru", slug + ".md"));
+const ruPath = staticPage
+  ? staticPage === "privacy"
+    ? "/privacy/"
+    : "/ru/about/"
+  : hasRu
+    ? docUrl("ru/" + slug + ".md")
+    : enPath;
+const crumbs = [
+  {
+    name: lang === "ru" ? "Главная" : "Home",
+    url: lang === "ru" ? "/ru/" : "/",
+  },
+  {
+    name: lang === "ru" ? "Документация" : "Documentation",
+    url: lang === "ru" ? "/ru/docs/" : "/docs/",
+  },
+];
+if (directory) crumbs.push({ name: directory, url: Astro.url.pathname });
+else if (entry && !entry.id.endsWith("README"))
+  crumbs.push({ name: title, url: Astro.url.pathname });
+const schema =
+  entry || directory
+    ? [
+        {
+          "@context": "https://schema.org",
+          "@type": "BreadcrumbList",
+          itemListElement: crumbs.map((c, i) => ({
+            "@type": "ListItem",
+            position: i + 1,
+            name: c.name,
+            item: new URL(c.url, Astro.site).href,
+          })),
+        },
+      ]
+    : [];
+---
+
+<Base
+  title={title + " | Iva"}
+  description={description}
+  lang={lang}
+  en={enPath}
+  ru={ruPath}
+  schema={schema}
+>
+  <article class="section prose">
+    {(entry || directory) && (
+      <nav
+        class="breadcrumbs"
+        aria-label={lang === "ru" ? "Хлебные крошки" : "Breadcrumbs"}
+      >
+        {crumbs.map((c, i) => (
+          <>
+            <span aria-hidden="true">{i > 0 ? " / " : ""}</span>
+            <a
+              href={c.url}
+              aria-current={i === crumbs.length - 1 ? "page" : undefined}
+            >
+              {c.name}
+            </a>
+          </>
+        ))}
+      </nav>
+    )}
+    {staticPage ? (
+      <Fragment set:html={html} />
+    ) : entry ? (
+      Content && <Content />
+    ) : (
+      <>
+        <h1>{title}</h1>
+        <ul>
+          {entries.map((e: any) => (
+            <li>
+              <a href={docUrl(e.id + ".md")}>{e.id.split("/").at(-1)}</a>
+            </li>
+          ))}
+        </ul>
+      </>
+    )}
+    {entry && (
+      <a class="raw" href={"/" + entry.id + ".md"}>
+        {lang === "ru" ? "Исходный Markdown" : "View original Markdown"} ↗
+      </a>
+    )}
+  </article>
+</Base>

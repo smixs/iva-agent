@@ -1,0 +1,15 @@
+/_astro/*
+  Cache-Control: public, max-age=31536000, immutable
+/brand/*
+  Cache-Control: public, max-age=86400
+/media/*
+  Cache-Control: public, max-age=86400
+/*.md
+  Content-Type: text/markdown; charset=utf-8
+/install.txt
+  Content-Type: text/plain; charset=utf-8
+/llms*.txt
+  Content-Type: text/plain; charset=utf-8
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin

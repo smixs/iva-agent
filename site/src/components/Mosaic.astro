@@ -1,0 +1,109 @@
+---
+const { scene = "hero", alt = "", eager = false } = Astro.props;
+import parameters from "../data/mosaic.json";
+---
+
+<div class="mosaic" data-mosaic={JSON.stringify(parameters)}>
+  <img
+    src={`/media/${scene}.webp`}
+    alt={alt}
+    width="960"
+    height="960"
+    loading={eager ? "eager" : "lazy"}
+    decoding="async"
+  />
+  <canvas width="480" height="480" aria-hidden="true"></canvas>
+</div>
+<script>
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)");
+  document.querySelectorAll<HTMLElement>("[data-mosaic]").forEach((el) => {
+    const image = el.querySelector("img")!;
+    const canvas = el.querySelector("canvas")!;
+    const p = JSON.parse(el.dataset.mosaic!);
+    let visible = false,
+      raf = 0,
+      start = 0,
+      last = 0;
+    let ctx: CanvasRenderingContext2D | null = null;
+    let cells: { x: number; y: number; color: string; noise: number }[] = [];
+    function prepare() {
+      if (ctx || !image.naturalWidth) return;
+      ctx = canvas.getContext("2d");
+      const sample = document.createElement("canvas");
+      sample.width = sample.height = 24;
+      const sc = sample.getContext("2d", { willReadFrequently: true })!;
+      sc.drawImage(image, 0, 0, 24, 24);
+      const pixels = sc.getImageData(0, 0, 24, 24).data;
+      let greens = 0;
+      for (let y = 240; y < 480; y += p.cell)
+        for (let x = 0; x < 480; x += p.cell) {
+          const noise =
+            (Math.sin(x * 12.9898 + y * 78.233 + p.seed) * 43758.5453) % 1;
+          if (Math.abs(noise) > p.density) continue;
+          const index = (Math.floor(y / 20) * 24 + Math.floor(x / 20)) * 4;
+          const color = p.palette.reduce((best: number[], next: number[]) => {
+            const distance = (c: number[]) =>
+              c.reduce((sum, v, i) => sum + (v - pixels[index + i]) ** 2, 0);
+            return distance(next) < distance(best) ? next : best;
+          });
+          cells.push({
+            x,
+            y,
+            noise,
+            color:
+              Math.abs(noise) < 0.002 && greens++ < p.greenPoints
+                ? "#A4DC55"
+                : `rgb(${color.join(",")})`,
+          });
+        }
+    }
+    function frame(time: number) {
+      if (!visible || reduce.matches || document.hidden || !ctx) return;
+      raf = requestAnimationFrame(frame);
+      if (time - last < 40) return;
+      last = time;
+      if (!start) start = time;
+      const progress = Math.min((time - start) / p.assembleMs, 1);
+      ctx.clearRect(0, 0, 480, 480);
+      ctx.globalAlpha = 0.85;
+      for (const cell of cells) {
+        ctx.fillStyle = cell.color;
+        ctx.fillRect(
+          cell.x + (1 - progress) * 80 * cell.noise,
+          cell.y + (1 - progress) * 50,
+          p.cell - 1,
+          p.cell - 1,
+        );
+      }
+      ctx.globalAlpha = 1;
+      for (let i = 0; i < p.rows; i++)
+        ctx.drawImage(
+          image,
+          0,
+          ((780 + i * 24) * image.naturalHeight) / 960,
+          image.naturalWidth,
+          (18 * image.naturalHeight) / 960,
+          p.scan * Math.sin(time / 3500 + i * 1.3),
+          390 + i * 12,
+          480,
+          9,
+        );
+    }
+    function update() {
+      cancelAnimationFrame(raf);
+      if (!visible || reduce.matches || document.hidden) {
+        ctx?.clearRect(0, 0, 480, 480);
+        return;
+      }
+      prepare();
+      if (ctx) raf = requestAnimationFrame(frame);
+    }
+    new IntersectionObserver((entries) => {
+      visible = entries[0].isIntersecting;
+      update();
+    }).observe(el);
+    image.addEventListener("load", update, { once: true });
+    reduce.addEventListener("change", update);
+    document.addEventListener("visibilitychange", update);
+  });
+</script>

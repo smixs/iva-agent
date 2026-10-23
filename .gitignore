@@ -72,3 +72,10 @@ docs/agents/
 docs/quality/
 docs/audits/
 docs/*-prd.md
+
+# Static website
+site/node_modules/
+site/dist/
+site/.astro/
+!site/src/data/
+!site/src/data/**

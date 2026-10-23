@@ -1,0 +1,448 @@
+---
+import Base from "../layouts/Base.astro";
+import Chat from "./Chat.astro";
+import Mosaic from "./Mosaic.astro";
+import Reviews from "./Reviews.astro";
+import { homeCopy, rich, phrase, command, type Lang } from "../lib/copy";
+import { stats } from "../lib/stats";
+const { lang = "en" } = Astro.props as { lang: Lang };
+const ru = lang === "ru";
+const c = homeCopy[lang];
+const group = (n: number, k: string) =>
+  (c[n].groups as Record<string, string[]>)[k] || [];
+const t = (n: number, k: string) => group(n, k)[0] || "";
+const title = (n: number) => t(n, "H2");
+const prefix = ru ? "/ru" : "";
+const installLabel = ru
+  ? "Установить с ИИ-агентом"
+  : "Install with an AI agent";
+const copyLabel = ru ? "Копировать" : "Copy";
+const trust = (s: string) =>
+  s
+    .replace("265", String(stats.stars))
+    .replace("70", String(stats.releases))
+    .replace(
+      ru ? "11 участников" : "11 contributors",
+      `${stats.contributors} ${ru ? "участников" : "contributors"}`,
+    );
+const faq = c[11].faq!;
+const schema = [
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    name: "Iva",
+    url: "https://iva-agent.com",
+    applicationCategory: "ProductivityApplication",
+    operatingSystem: "Linux, macOS",
+    description: t(0, "Description"),
+    offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+    license: "https://opensource.org/license/mit",
+  },
+  {
+    "@context": "https://schema.org",
+    "@type": "Organization",
+    name: "Majento",
+    url: "https://majento.ai",
+    logo: "https://iva-agent.com/brand/mark-512.png",
+    sameAs: ["https://github.com/smixs/iva-agent"],
+  },
+  {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    inLanguage: lang,
+    mainEntity: faq.map((f) => ({
+      "@type": "Question",
+      name: f.question,
+      acceptedAnswer: { "@type": "Answer", text: f.answer.replace(/`/g, "") },
+    })),
+  },
+  {
+    "@context": "https://schema.org",
+    "@type": "VideoObject",
+    name: title(2),
+    description: t(2, "Текст"),
+    duration: "PT78S",
+    thumbnailUrl: "https://iva-agent.com/media/demo-poster.webp",
+    contentUrl: "https://iva-agent.com/media/iva-demo-v5.mp4",
+    uploadDate: "2026-10-23T09:20:00+05:00",
+    inLanguage: "ru",
+  },
+  {
+    "@context": "https://schema.org",
+    "@type": "HowTo",
+    name: title(10),
+    step: group(10, "Три шага").map((s, i) => ({
+      "@type": "HowToStep",
+      position: i + 1,
+      text: s,
+    })),
+  },
+];
+---
+
+<Base
+  lang={lang}
+  title={t(0, "Title")}
+  description={t(0, "Description")}
+  en="/"
+  ru="/ru/"
+  schema={schema}
+>
+  <section class="hero section">
+    <div class="hero-copy">
+      <p class="eyebrow">
+        <span class="free-badge">FREE</span>
+        {t(1, "Бейдж над заголовком").replace("`FREE` ", "")}
+      </p>
+      <h1>{t(1, "H1")}</h1>
+      <p class="lead">{t(1, "Подзаголовок")}</p>
+      <div class="actions">
+        <button class="button" data-copy={phrase(lang)}>
+          {installLabel}
+          <span aria-hidden="true"> ↗</span>
+        </button>
+        <a class="button secondary" href="#video">
+          {ru ? "▶ Что умеет Ива, 78 с" : "▶ See it in 78 seconds"}
+        </a>
+      </div>
+      <p class="note" role="status" data-copy-status>
+        {t(1, "Под кнопками, мелко")}
+      </p>
+    </div>
+    <div class="hero-visual">
+      <Chat lang={lang} />
+      <Mosaic eager scene="hero" />
+    </div>
+    <p class="trust">{trust(t(1, "Строка доверия"))}</p>
+  </section>
+  <section id="video" class="section video-section">
+    <div class="section-intro">
+      <h2>{title(2)}</h2>
+      <p>{t(2, "Текст")}</p>
+    </div>
+    <div class="video-layout">
+      <video
+        id="demo"
+        width="1080"
+        height="1080"
+        preload="none"
+        playsinline
+        muted
+        controls
+        poster="/media/demo-poster.webp"
+        aria-label={title(2)}
+      >
+        <source src="/media/iva-demo-v5.webm" type="video/webm" />
+        <source src="/media/iva-demo-v5.mp4" type="video/mp4" />
+      </video>
+      <div class="chapters">
+        {group(2, "Главы рядом с роликом").map((ch) => {
+          const [time, ...words] = ch.split(" ");
+          const [m, s] = time.split(":").map(Number);
+          return (
+            <button data-seek={m * 60 + s}>
+              <span>{time}</span>
+              {words.join(" ")}
+              <span aria-hidden="true">↗</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  </section>
+  <section id="scenarios" class="section">
+    <h2>{title(3)}</h2>
+    <div class="scenarios">
+      {group(3, "Шесть карточек").map((item, index) => (
+        <article class="scenario">
+          <Chat lang={lang} variant="mini" index={index} />
+          <p set:html={rich(item)} />
+        </article>
+      ))}
+    </div>
+    <a class="text-link" href={prefix + "/docs/use-cases/"}>
+      {t(3, "Ссылка под сеткой")}
+    </a>
+  </section>
+  <Reviews lang={lang} />
+  <section id="memory" class="section split">
+    <div>
+      <h2>{title(4)}</h2>
+      <p>{t(4, "Текст")}</p>
+      <ul class="plain-list">
+        {group(4, "Три пункта рядом со схемой").map((s) => (
+          <li set:html={rich(s)} />
+        ))}
+      </ul>
+      <a class="text-link" href={prefix + "/docs/memory/"}>
+        {ru ? "Как устроена память →" : "How memory works →"}
+      </a>
+    </div>
+    <div class="memory-visual">
+      <Mosaic scene="memory" />
+      <div class="memory-flow">
+        {(ru
+          ? ["День", "Неделя", "Месяц", "Год", "Профиль"]
+          : ["Day", "Week", "Month", "Year", "Profile"]
+        ).map((s) => (
+          <span>{s}</span>
+        ))}
+      </div>
+    </div>
+  </section>
+  <section id="writes-first" class="section split reverse">
+    <div class="notice-visual">
+      <Chat lang={lang} variant="notices" />
+      <Mosaic scene="hero" />
+    </div>
+    <div>
+      <h2>{title(5)}</h2>
+      <p>{t(5, "Подзаголовок")}</p>
+      <ul class="plain-list">
+        {group(5, "Пять пунктов").map((s) => (
+          <li set:html={rich(s)} />
+        ))}
+      </ul>
+    </div>
+  </section>
+  <section id="features" class="section">
+    <h2>{title(6)}</h2>
+    <div class="features">
+      {group(6, "12 ячеек").map((s, i) => (
+        <article>
+          <svg
+            width="28"
+            height="28"
+            viewBox="0 0 28 28"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.6"
+            aria-hidden="true"
+          >
+            <rect x="4" y="4" width="20" height="20" rx={i % 2 ? 3 : 10} />
+            <path
+              d={
+                i % 3 === 0
+                  ? "M9 14h10M14 9v10"
+                  : i % 3 === 1
+                    ? "m9 14 3 3 7-7"
+                    : "M9 10h10M9 14h10M9 18h6"
+              }
+            />
+          </svg>
+          <p set:html={rich(s)} />
+        </article>
+      ))}
+    </div>
+  </section>
+  <section id="userbot" class="section split">
+    <div>
+      <h2>{title(7)}</h2>
+      <p>{t(7, "Текст")}</p>
+      <p>{t(7, "Строка под текстом")}</p>
+      <a class="text-link" href="/docs/userbot/">
+        {ru ? "О юзерботе →" : "About the userbot →"}
+      </a>
+    </div>
+    <Mosaic scene="userbot" />
+  </section>
+  <section id="pricing" class="section pricing">
+    <div class="pricing-intro">
+      <span class="free-display">FREE</span>
+      <div>
+        <h2>{title(8)}</h2>
+        <p>{t(8, "Подзаголовок")}</p>
+      </div>
+    </div>
+    <div class="prices">
+      {group(8, "Три карточки").map((s) => (
+        <article>
+          <p set:html={rich(s)} />
+        </article>
+      ))}
+    </div>
+    <p>{t(8, "Строка под карточками")}</p>
+    <a class="button" href="#install">
+      {installLabel}
+    </a>
+  </section>
+  <section id="your-data" class="section split">
+    <div class="data-symbol" aria-hidden="true">
+      <img src="/brand/mark.svg" width="144" height="144" alt="" />
+      <span>
+        {ru ? "Ваш сервер." : "Your server."}
+        <br />
+        {ru ? "Ваши данные." : "Your data."}
+      </span>
+    </div>
+    <div>
+      <h2>{title(9)}</h2>
+      <ul class="plain-list">
+        {group(9, "Пункты").map((s) => (
+          <li>{s}</li>
+        ))}
+      </ul>
+    </div>
+  </section>
+  <section id="install" class="section">
+    <div class="section-intro">
+      <h2>{title(10)}</h2>
+    </div>
+    <div class="install-layout">
+      <div class="install-box">
+        <div
+          class="tabs"
+          role="tablist"
+          aria-label={ru ? "Способ установки" : "Installation method"}
+        >
+          {(ru
+            ? ["С ИИ-агентом", "Одной командой", "На Mac"]
+            : ["With an AI agent", "One command", "On Mac"]
+          ).map((s, i) => (
+            <button
+              id={"tab-" + i}
+              role="tab"
+              aria-selected={i === 0 ? "true" : "false"}
+              aria-controls={"panel-" + i}
+              tabindex={i === 0 ? 0 : -1}
+              data-tab={i}
+            >
+              {s}
+            </button>
+          ))}
+        </div>
+        {[
+          "Вкладка «С ИИ-агентом»",
+          "Вкладка «Одной командой»",
+          "Вкладка «На Mac»",
+        ].map((key, i) => (
+          <div
+            class="install-panel"
+            role="tabpanel"
+            id={"panel-" + i}
+            aria-labelledby={"tab-" + i}
+          >
+            <p set:html={rich(t(10, key))} />
+            <div class="command">
+              <code>{i === 0 ? phrase(lang) : command}</code>
+              <button
+                data-copy={i === 0 ? phrase(lang) : command}
+                aria-label={copyLabel}
+              >
+                {copyLabel}
+              </button>
+            </div>
+          </div>
+        ))}
+        <p class="copy-feedback" aria-live="polite" data-copy-status></p>
+        <ol class="install-steps">
+          {group(10, "Три шага").map((s) => (
+            <li>{s}</li>
+          ))}
+        </ol>
+      </div>
+      <Mosaic scene="userbot" />
+    </div>
+  </section>
+  <section id="faq" class="section faq">
+    <h2>{title(11)}</h2>
+    <div>
+      {faq.map((f) => (
+        <details>
+          <summary>{f.question}</summary>
+          <p set:html={rich(f.answer)} />
+        </details>
+      ))}
+    </div>
+  </section>
+  <section id="open-source" class="section open-source">
+    <h2>{title(12)}</h2>
+    <p class="project-stats">{trust(t(12, "Четыре цифры"))}</p>
+    <p>{t(12, "Текст")}</p>
+    <div class="actions">
+      <a href="https://github.com/smixs/iva-agent">GitHub ↗</a>
+      <a href="https://github.com/smixs/iva-agent/blob/main/CHANGELOG.md">
+        {ru ? "История изменений" : "Changelog"} ↗
+      </a>
+      <a href={prefix + "/about/"}>{ru ? "О команде" : "About the team"} →</a>
+    </div>
+  </section>
+  <section class="section final-cta">
+    <span class="free-badge">FREE</span>
+    <h2>{title(13)}</h2>
+    <div class="actions">
+      <a class="button" href="#install">
+        {installLabel}
+      </a>
+      <a class="button secondary" href="https://github.com/smixs/iva-agent">
+        {ru ? "Открыть на GitHub" : "Open on GitHub"} ↗
+      </a>
+    </div>
+  </section>
+</Base>
+<script>
+  const ru = document.documentElement.lang === "ru";
+  document
+    .querySelectorAll<HTMLButtonElement>("[data-copy]")
+    .forEach((button) =>
+      button.addEventListener("click", async () => {
+        const status = button
+          .closest("section")
+          ?.querySelector("[data-copy-status]");
+        try {
+          await navigator.clipboard.writeText(button.dataset.copy!);
+          if (status)
+            status.textContent = ru
+              ? "Скопировано. Вставьте в терминал или ИИ-агент."
+              : "Copied. Paste into your terminal or AI agent.";
+        } catch {
+          activate(0);
+          const target = document.querySelector("#panel-0 code")!;
+          const range = document.createRange();
+          range.selectNodeContents(target);
+          const selection = window.getSelection();
+          selection?.removeAllRanges();
+          selection?.addRange(range);
+          document.querySelector("#install")?.scrollIntoView();
+          const feedback = document.querySelector(".copy-feedback");
+          if (feedback)
+            feedback.textContent = ru
+              ? "Фраза выделена. Нажмите ⌘C или Ctrl+C."
+              : "Phrase selected. Press ⌘C or Ctrl+C.";
+        }
+      }),
+    );
+  const tabs = [...document.querySelectorAll<HTMLButtonElement>("[data-tab]")];
+  function activate(index: number) {
+    tabs.forEach((tab, i) => {
+      tab.setAttribute("aria-selected", String(i === index));
+      tab.tabIndex = i === index ? 0 : -1;
+      document.getElementById("panel-" + i)!.hidden = i !== index;
+    });
+  }
+  activate(0);
+  tabs.forEach((tab, i) => {
+    tab.addEventListener("click", () => activate(i));
+    tab.addEventListener("keydown", (event) => {
+      let next = i;
+      if (event.key === "ArrowRight") next = (i + 1) % tabs.length;
+      else if (event.key === "ArrowLeft")
+        next = (i + tabs.length - 1) % tabs.length;
+      else if (event.key === "Home") next = 0;
+      else if (event.key === "End") next = tabs.length - 1;
+      else return;
+      event.preventDefault();
+      activate(next);
+      tabs[next].focus();
+    });
+  });
+  document
+    .querySelectorAll<HTMLButtonElement>("[data-seek]")
+    .forEach((button) =>
+      button.addEventListener("click", () => {
+        const video = document.querySelector<HTMLVideoElement>("#demo")!;
+        video.currentTime = Number(button.dataset.seek);
+        video.play().catch(() => {});
+      }),
+    );
+</script>

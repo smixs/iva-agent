@@ -1,0 +1,2 @@
+// Review format in reviews.json, one object per language:
+// { "name": "Name", "handle": "@handle", "text": "Approved quote", "lang": "en", "date": "23.10.2026", "url": "https://t.me/aimasters_chat/123" }

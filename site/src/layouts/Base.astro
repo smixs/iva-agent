@@ -1,0 +1,152 @@
+---
+import "../styles/global.css";
+import type { Lang } from "../lib/copy";
+import { stats } from "../lib/stats";
+const {
+  title,
+  description,
+  lang = "en",
+  en,
+  ru,
+  schema = [],
+} = Astro.props as {
+  title: string;
+  description: string;
+  lang?: Lang;
+  en?: string;
+  ru?: string;
+  schema?: unknown[];
+};
+const isRu = lang === "ru";
+const home = isRu ? "/ru/" : "/";
+const canonical = new URL(Astro.url.pathname, Astro.site);
+const enPath = en || Astro.url.pathname.replace(/^\/ru\//, "/");
+const ruPath = ru || (enPath === "/privacy/" ? "/privacy/" : "/ru" + enPath);
+const og = `/brand/og-dark${isRu ? "-ru" : ""}.png`;
+const nav = isRu
+  ? ["Возможности", "Память", "Цена", "Установка", "Вопросы"]
+  : ["Features", "Memory", "Pricing", "Install", "FAQ"];
+const links = ["features", "memory", "pricing", "install", "faq"];
+const footer = isRu
+  ? [
+      "Документация",
+      "Сценарии",
+      "Вопросы",
+      "История изменений",
+      "О команде",
+      "Приватность",
+      "Бренд",
+      "MIT",
+      "English",
+    ]
+  : [
+      "Docs",
+      "Use cases",
+      "FAQ",
+      "Changelog",
+      "About the team",
+      "Privacy",
+      "Brand",
+      "MIT",
+      "Русский",
+    ];
+const prefix = isRu ? "/ru" : "";
+const footerLinks = [
+  prefix + "/docs/",
+  prefix + "/docs/use-cases/",
+  home + "#faq",
+  "https://github.com/smixs/iva-agent/blob/main/CHANGELOG.md",
+  prefix + "/about/",
+  "/privacy/",
+  "/docs/brand/",
+  "https://github.com/smixs/iva-agent/blob/main/LICENSE",
+  isRu ? enPath : ruPath,
+];
+---
+
+<!doctype html>
+<html lang={lang}>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={canonical} />
+    <link rel="alternate" hreflang="en" href={new URL(enPath, Astro.site)} />
+    <link rel="alternate" hreflang="ru" href={new URL(ruPath, Astro.site)} />
+    <link
+      rel="alternate"
+      hreflang="x-default"
+      href={new URL(enPath, Astro.site)}
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:image" content={new URL(og, Astro.site)} />
+    <meta property="og:locale" content={isRu ? "ru_RU" : "en_US"} />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={new URL(og, Astro.site)} />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+    <link rel="stylesheet" href="/analytics.css" />
+    {schema.map((item) => (
+      <script
+        type="application/ld+json"
+        set:html={JSON.stringify(item).replaceAll("<", "\\u003c")}
+      />
+    ))}
+  </head>
+  <body>
+    <a class="skip" href="#main">
+      {isRu ? "К содержанию" : "Skip to content"}
+    </a>
+    <header class="header">
+      <a
+        class="logo"
+        href={home}
+        aria-label={isRu ? "Ива, главная" : "Iva home"}
+      >
+        <img src="/brand/logo-light.svg" alt="IVA" width="104" height="48" />
+      </a>
+      <nav aria-label={isRu ? "Главная навигация" : "Main navigation"}>
+        {nav.map((n, i) => (
+          <a href={home + "#" + links[i]}>{n}</a>
+        ))}
+      </nav>
+      <div class="header-actions">
+        <a
+          class="language"
+          href={isRu ? enPath : ruPath}
+          lang={isRu ? "en" : "ru"}
+        >
+          {isRu ? "EN" : "RU"}
+        </a>
+        <a class="github" href="https://github.com/smixs/iva-agent">
+          GitHub ★ {stats.stars}
+        </a>
+        <a class="button small" href={home + "#install"}>
+          {isRu ? "Установить" : "Install"}
+        </a>
+      </div>
+    </header>
+    <main id="main">
+      <slot />
+    </main>
+    <footer class="footer">
+      <a href={home}>
+        <img src="/brand/logo-light.svg" alt="IVA" width="96" height="44" />
+      </a>
+      <nav aria-label={isRu ? "Ссылки в подвале" : "Footer links"}>
+        {footer.map((n, i) => (
+          <a href={footerLinks[i]}>{n}</a>
+        ))}
+      </nav>
+      <p>© {new Date().getFullYear()} Majento · Tashkent · MIT</p>
+    </footer>
+    <script is:inline src="/analytics.js" defer></script>
+  </body>
+</html>
