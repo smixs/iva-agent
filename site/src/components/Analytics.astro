@@ -13,11 +13,21 @@ const ru = lang === "ru";
   hidden
 >
   <h2 id="consent-title">{ru ? "Статистика посещений" : "Visit statistics"}</h2>
-  <p>
+  <p class="consent-description">
     {ru
       ? "Разрешить Google Analytics для статистики посещений? Счётчик загружается только после согласия."
       : "Allow Google Analytics to measure visits? The tracker loads only after you agree."}{" "}
     <a href="/privacy/">{ru ? "Подробнее" : "Details"}</a>
+  </p>
+  <p class="consent-question">
+    <a
+      href="/privacy/"
+      aria-label={
+        ru ? "Подробнее о Google Analytics" : "About Google Analytics"
+      }
+    >
+      Google Analytics?
+    </a>
   </p>
   <div class="actions">
     <button class="button secondary" data-consent="denied">

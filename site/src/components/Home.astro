@@ -19,6 +19,8 @@ const installLabel = ru
   ? "Установить с ИИ-агентом"
   : "Install with an AI agent";
 const copyLabel = ru ? "Копировать" : "Copy";
+const headingTerm = ru ? "AI‑ассистент" : "AI assistant";
+const headingParts = t(1, "H1").split(headingTerm);
 const trust = (s: string) =>
   s
     .replace("265", String(stats.stars))
@@ -96,7 +98,11 @@ const schema = [
         <span class="free-badge">FREE</span>
         {t(1, "Бейдж").replace("`FREE` ", "")}
       </p>
-      <h1>{t(1, "H1")}</h1>
+      <h1>
+        {headingParts[0]}
+        <span class="keep-words">{headingTerm}</span>
+        {headingParts[1]}
+      </h1>
       <p class="lead">{t(1, "Подзаголовок")}</p>
       <div class="actions">
         <button class="button" data-copy={phrase(lang)}>

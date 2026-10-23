@@ -2138,3 +2138,78 @@ summary:focus-visible {
 .telegram-window:not(.is-playing) .telegram-thinking i {
   animation-play-state: paused;
 }
+.keep-words {
+  white-space: nowrap;
+}
+.consent {
+  width: min(360px, calc(100% - 36px));
+  padding: 18px;
+  bottom: 18px;
+  left: 18px;
+  border-radius: 12px;
+}
+.consent h2 {
+  font-size: 20px;
+  margin-bottom: 10px;
+}
+.consent p {
+  font-size: 14px;
+  line-height: 1.45;
+  margin-bottom: 14px;
+}
+.consent .button {
+  font-size: 13px;
+  min-height: 38px;
+  padding: 8px 12px;
+}
+.consent .actions {
+  margin: 0;
+  gap: 10px;
+}
+.consent-question {
+  display: none;
+}
+@media (max-width: 768px) {
+  .consent {
+    left: 0;
+    bottom: 0;
+    width: 100%;
+    border-radius: 0;
+    border-width: 1px 0 0;
+    padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .consent h2 {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .consent-description {
+    display: none;
+  }
+  .consent .consent-question {
+    display: block;
+    white-space: nowrap;
+    margin: 0;
+    font-size: 12px;
+  }
+  .consent .actions {
+    flex-wrap: nowrap;
+    gap: 6px;
+  }
+  .consent .button {
+    font-size: 12px;
+    line-height: 16px;
+    min-height: 36px;
+    white-space: nowrap;
+    padding: 8px;
+  }
+}
