@@ -109,18 +109,13 @@ const ru = lang === "ru";
       }),
     );
   const events = new Set([
-    "install_tab",
     "copy_prompt",
-    "copy_command",
     "open_install_guide",
   ]);
   window.addEventListener("iva:analytics", ((event: CustomEvent) => {
     if (choice !== "granted" || gpc || !host || !events.has(event.detail?.name))
       return;
-    const parameters: Record<string, string | number> = {};
-    if (["agent", "curl", "mac"].includes(event.detail.method))
-      parameters.method = event.detail.method;
-    global.gtag?.("event", event.detail.name, parameters);
+    global.gtag?.("event", event.detail.name);
   }) as EventListener);
   window.addEventListener("storage", (event) => {
     if (event.key === key) location.reload();

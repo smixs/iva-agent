@@ -79,19 +79,8 @@
         "H2": [
           "Запуск за 5 минут"
         ],
-        "Вкладка «С ИИ-агентом»": [
-          "Вставьте в Claude Code или Codex фразу `Установи Иву, инструкции: https://iva-agent.com/install.txt`. Агент зайдёт на сервер, поставит Иву и проверит, что она отвечает."
-        ],
-        "Вкладка «Одной командой»": [
-          "Подойдёт сервер с Ubuntu или Debian, хватит 512 МБ памяти. Если связь оборвётся, установка продолжится."
-        ],
-        "Вкладка «На Mac»": [
-          "Та же команда в Терминале. Ива работает, пока Mac включён."
-        ],
-        "Шаги": [
-          "Создайте бота у @BotFather и скопируйте токен.",
-          "Запустите установку и вставьте токен.",
-          "Напишите боту «привет»."
+        "Подзаголовок": [
+          "Бесплатно, на вашем сервере или Mac."
         ]
       }
     },
@@ -144,16 +133,6 @@
           "answer": "Около 5 минут. Вставьте одну фразу в Claude Code или Codex, и агент поставит Иву. Можно и одной командой."
         }
       ]
-    },
-    {
-      "number": 12,
-      "groups": {
-        "H2": [
-          "Лучшего AI-ассистента в Telegram нет. Поставьте Иву сегодня, это бесплатно."
-        ],
-        "Кнопки": [],
-        "Подвал": []
-      }
     }
   ],
   "en": [
@@ -236,19 +215,8 @@
         "H2": [
           "Up and running in 5 minutes"
         ],
-        "Вкладка «С ИИ-агентом»": [
-          "Paste `Install Iva for me, instructions: https://iva-agent.com/install.txt` into Claude Code or Codex. The agent logs into your server, installs Iva and checks that she replies."
-        ],
-        "Вкладка «Одной командой»": [
-          "Any Ubuntu or Debian server with 512 MB of RAM will do. If the connection drops, the install picks up where it left off."
-        ],
-        "Вкладка «На Mac»": [
-          "The same command in Terminal. Iva works while your Mac is on."
-        ],
-        "Шаги": [
-          "Create a bot with @BotFather and copy the token.",
-          "Run the install and paste the token.",
-          "Say hi to your bot."
+        "Подзаголовок": [
+          "Free, on your server or Mac."
         ]
       }
     },
@@ -301,16 +269,6 @@
           "answer": "About 5 minutes. Paste one sentence into Claude Code or Codex and the agent installs Iva for you, or run a single command."
         }
       ]
-    },
-    {
-      "number": 12,
-      "groups": {
-        "H2": [
-          "There's no better AI assistant in Telegram. Get Iva today, it's free."
-        ],
-        "Кнопки": [],
-        "Подвал": []
-      }
     }
   ]
 }

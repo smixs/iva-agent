@@ -2,10 +2,8 @@
 import Base from "../layouts/Base.astro";
 import UseCases from "./UseCases.astro";
 import HeroChat from "./HeroChat.astro";
-import { extras } from "../data/home-extras";
-import Mosaic from "./Mosaic.astro";
 import Reviews from "./Reviews.astro";
-import { homeCopy, rich, phrase, command, type Lang } from "../lib/copy";
+import { homeCopy, rich, phrase, type Lang } from "../lib/copy";
 const { lang = "en" } = Astro.props as { lang: Lang };
 const ru = lang === "ru";
 const c = Object.fromEntries(
@@ -19,7 +17,6 @@ const prefix = ru ? "/ru" : "";
 const installLabel = ru
   ? "Установить с ИИ-агентом"
   : "Install with an AI agent";
-const copyLabel = ru ? "Копировать" : "Copy";
 const headingTerm = ru ? "AI‑ассистент" : "AI assistant";
 const headingParts = t(1, "H1").split(headingTerm);
 const faq = c[10].faq!;
@@ -57,16 +54,6 @@ const schema = [
       "@type": "Question",
       name: f.question,
       acceptedAnswer: { "@type": "Answer", text: f.answer.replace(/`/g, "") },
-    })),
-  },
-  {
-    "@context": "https://schema.org",
-    "@type": "HowTo",
-    name: title(9),
-    step: group(9, "Шаги").map((s, i) => ({
-      "@type": "HowToStep",
-      position: i + 1,
-      text: s,
     })),
   },
 ];
@@ -136,74 +123,16 @@ const schema = [
       ))}
     </ul>
   </section>
-  <section id="install" class="section">
-    <div class="section-intro">
-      <h2>{title(9)}</h2>
-    </div>
-    <div class="install-layout">
-      <div class="install-box">
-        <div
-          class="tabs"
-          role="tablist"
-          aria-label={ru ? "Способ установки" : "Installation method"}
-        >
-          {(ru
-            ? ["С ИИ-агентом", "Одной командой", "На Mac"]
-            : ["With an AI agent", "One command", "On Mac"]
-          ).map((s, i) => (
-            <button
-              id={"tab-" + i}
-              role="tab"
-              aria-selected={i === 0 ? "true" : "false"}
-              aria-controls={"panel-" + i}
-              tabindex={i === 0 ? 0 : -1}
-              data-tab={i}
-            >
-              {s}
-            </button>
-          ))}
-        </div>
-        {[
-          "Вкладка «С ИИ-агентом»",
-          "Вкладка «Одной командой»",
-          "Вкладка «На Mac»",
-        ].map((key, i) => (
-          <div
-            class="install-panel"
-            role="tabpanel"
-            id={"panel-" + i}
-            aria-labelledby={"tab-" + i}
-          >
-            <p set:html={rich(t(9, key))} />
-            {i === 1 && (
-              <a
-                class="script-source"
-                href="https://github.com/smixs/iva-agent/blob/main/install.sh"
-              >
-                {ru ? "Посмотреть скрипт" : "View the script"} ↗
-              </a>
-            )}
-            <div class="command">
-              <code>{i === 0 ? phrase(lang) : command}</code>
-              <button
-                data-copy={i === 0 ? phrase(lang) : command}
-                aria-label={copyLabel}
-              >
-                {copyLabel}
-              </button>
-            </div>
-          </div>
-        ))}
-        <a data-install-guide href={prefix + "/docs/install/"}>
-          {ru ? "Инструкция по установке" : "Installation guide"} →
-        </a>
-        <ol class="install-steps">
-          {group(9, "Шаги").map((s) => (
-            <li>{s}</li>
-          ))}
-        </ol>
-      </div>
-      <Mosaic scene="install" />
+  <section id="install" class="section install">
+    <h2>{title(9)}</h2>
+    <p class="lead">{t(9, "Подзаголовок")}</p>
+    <div class="actions">
+      <button class="button" data-copy={phrase(lang)}>
+        {installLabel}
+      </button>
+      <a class="install-guide" data-install-guide href={prefix + "/docs/install/"}>
+        {ru ? "Установить вручную" : "Install by hand"} →
+      </a>
     </div>
   </section>
   <section id="faq" class="section faq">
@@ -217,23 +146,12 @@ const schema = [
       ))}
     </div>
   </section>
-  <section class="section final-cta">
-    <h2>{title(12)}</h2>
-    <div class="actions">
-      <button class="button" data-copy={phrase(lang)}>
-        {extras[lang].start}
-      </button>
-      <a class="button secondary" href="https://github.com/smixs/iva-agent">
-        GitHub ↗
-      </a>
-    </div>
-  </section>
   <p class="toast" role="status" aria-live="polite" data-toast></p>
 </Base>
 <script>
   const ru = document.documentElement.lang === "ru";
-  // Copy the phrase or the command and say so in a toast that leaves by itself.
-  // If the clipboard is closed, the toast shows the text to copy by hand.
+  // Copy the install phrase and say so in a toast that leaves by itself.
+  // If the clipboard is closed, the toast shows the phrase to copy by hand.
   const toast = document.querySelector<HTMLElement>("[data-toast]")!;
   let toastTimer = 0;
   function say(message: string, ms: number, long = false) {
@@ -248,62 +166,22 @@ const schema = [
     .forEach((button) =>
       button.addEventListener("click", async () => {
         const text = button.dataset.copy!;
-        const isPrompt = text.includes("install.txt");
         try {
           await navigator.clipboard.writeText(text);
           say(
-            isPrompt
-              ? ru
-                ? "Фраза скопирована — отправьте её Claude Code или Codex"
-                : "Phrase copied — send it to Claude Code or Codex"
-              : ru
-                ? "Команда скопирована"
-                : "Command copied",
+            ru
+              ? "Фраза скопирована — отправьте её Claude Code или Codex"
+              : "Phrase copied — send it to Claude Code or Codex",
             3200,
           );
           window.dispatchEvent(
-            new CustomEvent("iva:analytics", {
-              detail: { name: isPrompt ? "copy_prompt" : "copy_command" },
-            }),
+            new CustomEvent("iva:analytics", { detail: { name: "copy_prompt" } }),
           );
         } catch {
           say((ru ? "Скопируйте вручную: " : "Copy by hand: ") + text, 9000, true);
         }
       }),
     );
-  const tabs = [...document.querySelectorAll<HTMLButtonElement>("[data-tab]")];
-  function activate(index: number, track = false) {
-    if (track)
-      window.dispatchEvent(
-        new CustomEvent("iva:analytics", {
-          detail: {
-            name: "install_tab",
-            method: ["agent", "curl", "mac"][index],
-          },
-        }),
-      );
-    tabs.forEach((tab, i) => {
-      tab.setAttribute("aria-selected", String(i === index));
-      tab.tabIndex = i === index ? 0 : -1;
-      document.getElementById("panel-" + i)!.hidden = i !== index;
-    });
-  }
-  activate(0);
-  tabs.forEach((tab, i) => {
-    tab.addEventListener("click", () => activate(i, true));
-    tab.addEventListener("keydown", (event) => {
-      let next = i;
-      if (event.key === "ArrowRight") next = (i + 1) % tabs.length;
-      else if (event.key === "ArrowLeft")
-        next = (i + tabs.length - 1) % tabs.length;
-      else if (event.key === "Home") next = 0;
-      else if (event.key === "End") next = tabs.length - 1;
-      else return;
-      event.preventDefault();
-      activate(next, true);
-      tabs[next].focus();
-    });
-  });
   document.querySelectorAll("[data-install-guide]").forEach((link) =>
     link.addEventListener("click", () =>
       window.dispatchEvent(

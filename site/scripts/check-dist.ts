@@ -3,7 +3,6 @@ import { readFileSync, existsSync, statSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { files } from "../src/lib/build.ts";
-import { extras } from "../src/data/home-extras.ts";
 const dist = path.resolve("dist");
 const copy = JSON.parse(readFileSync("src/data/copy.json", "utf8"));
 const usecases = JSON.parse(readFileSync("src/data/usecases.json", "utf8"));
@@ -171,10 +170,6 @@ for (const home of ["dist/index.html", "dist/ru/index.html"]) {
   });
   assert.equal((visible.match(/class="review"/g) || []).length, 11);
   const lang = home.includes("/ru/") ? "ru" : "en";
-  const final = visible.match(
-    /<section class="section final-cta"[\s\S]*?<\/section>/,
-  )![0];
-  assert.ok(final.includes(extras[lang].start));
   assert.equal((visible.match(/class="usecase-row"/g) || []).length, 8);
   const main = visible.match(/<main\b[^>]*>([\s\S]*?)<\/main>/)![1];
   const headings = [...main.matchAll(/<h2[^>]*>([\s\S]*?)<\/h2>/g)].map((m) =>

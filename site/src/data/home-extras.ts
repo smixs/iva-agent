@@ -1,7 +1,6 @@
-// Copy that is not in copy.json: the final button and the hero chat (demo film V6).
+// The hero chat copy (demo film V6).
 export const extras = {
   ru: {
-    start: "Начать бесплатно",
     chat: {
       label: "Пример разговора с Ивой в Telegram",
       title: "Ива",
@@ -32,7 +31,6 @@ export const extras = {
     },
   },
   en: {
-    start: "Start for free",
     chat: {
       label: "Example conversation with Iva in Telegram",
       title: "Iva",
