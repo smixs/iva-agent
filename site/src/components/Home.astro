@@ -92,12 +92,8 @@ const schema = [
       <div class="actions">
         <button class="button" data-copy={phrase(lang)}>
           {installLabel}
-          <span aria-hidden="true"> ↗</span>
         </button>
       </div>
-      <p class="note" role="status" aria-live="polite" data-copy-status>
-        {t(1, "Под кнопками")}
-      </p>
     </div>
     <div class="hero-visual">
       <HeroChat lang={lang} />
@@ -227,7 +223,6 @@ const schema = [
         <a data-install-guide href={prefix + "/docs/install/"}>
           {ru ? "Инструкция по установке" : "Installation guide"} →
         </a>
-        <p class="copy-feedback" aria-live="polite" data-copy-status></p>
         <ol class="install-steps">
           {group(9, "Шаги").map((s) => (
             <li>{s}</li>
@@ -270,69 +265,47 @@ const schema = [
         GitHub ↗
       </a>
     </div>
-    <p>{extras[lang].paste}</p>
-    <div class="command final-prompt">
-      <code>{phrase(lang)}</code>
-      <button data-copy={phrase(lang)}>{copyLabel}</button>
-    </div>
-    <p class="copy-feedback" aria-live="polite" data-copy-status></p>
   </section>
+  <p class="toast" role="status" aria-live="polite" data-toast></p>
 </Base>
 <script>
   const ru = document.documentElement.lang === "ru";
-  const feedbackTimers = new WeakMap<HTMLElement, number>();
+  // Copy the phrase or the command and say so in a toast that leaves by itself.
+  // If the clipboard is closed, the toast shows the text to copy by hand.
+  const toast = document.querySelector<HTMLElement>("[data-toast]")!;
+  let toastTimer = 0;
+  function say(message: string, ms: number, long = false) {
+    toast.textContent = message;
+    toast.classList.toggle("is-long", long);
+    toast.classList.add("is-on");
+    window.clearTimeout(toastTimer);
+    toastTimer = window.setTimeout(() => toast.classList.remove("is-on"), ms);
+  }
   document
     .querySelectorAll<HTMLButtonElement>("[data-copy]")
     .forEach((button) =>
       button.addEventListener("click", async () => {
-        const isPrompt =
-          button.dataset.copy ===
-          document.querySelector("#panel-0 code")?.textContent;
-        let feedback = button
-          .closest("section")
-          ?.querySelector<HTMLElement>("[data-copy-status]");
-        let message = "";
+        const text = button.dataset.copy!;
+        const isPrompt = text.includes("install.txt");
         try {
-          await navigator.clipboard.writeText(button.dataset.copy!);
-          message = isPrompt
-            ? ru
-              ? "Скопировано. Вставьте в своего ИИ-агента."
-              : "Copied. Paste it into your AI agent."
-            : ru
-              ? "Скопировано."
-              : "Copied.";
+          await navigator.clipboard.writeText(text);
+          say(
+            isPrompt
+              ? ru
+                ? "Фраза скопирована — отправьте её Claude Code или Codex"
+                : "Phrase copied — send it to Claude Code or Codex"
+              : ru
+                ? "Команда скопирована"
+                : "Command copied",
+            3200,
+          );
           window.dispatchEvent(
             new CustomEvent("iva:analytics", {
               detail: { name: isPrompt ? "copy_prompt" : "copy_command" },
             }),
           );
         } catch {
-          const index = isPrompt ? 0 : 1;
-          activate(index);
-          const target = document.querySelector(`#panel-${index} code`)!;
-          const range = document.createRange();
-          range.selectNodeContents(target);
-          window.getSelection()?.removeAllRanges();
-          window.getSelection()?.addRange(range);
-          document.querySelector("#install")?.scrollIntoView();
-          feedback = document.querySelector(".copy-feedback")!;
-          message = ru
-            ? "Не удалось скопировать. Выделите текст и скопируйте вручную."
-            : "Could not copy. Select the text and copy it manually.";
-        }
-        if (feedback) {
-          const original =
-            feedback.dataset.originalMessage ?? feedback.textContent ?? "";
-          feedback.dataset.originalMessage = original;
-          window.clearTimeout(feedbackTimers.get(feedback));
-          feedback.setAttribute("aria-live", "polite");
-          feedback.textContent = message;
-          feedbackTimers.set(
-            feedback,
-            window.setTimeout(() => {
-              feedback!.textContent = original;
-            }, 4000),
-          );
+          say((ru ? "Скопируйте вручную: " : "Copy by hand: ") + text, 9000, true);
         }
       }),
     );

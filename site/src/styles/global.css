@@ -228,12 +228,6 @@ button {
   padding: 3px 10px;
   border-radius: 4px;
 }
-.note {
-  font-size: 14px;
-  color: var(--muted);
-  margin-top: 16px;
-  margin-bottom: 0;
-}
 .hero-visual {
   position: relative;
   padding: 0 30px;
@@ -673,11 +667,6 @@ button {
 .install-steps li {
   padding: 6px 0 6px 5px;
 }
-.copy-feedback {
-  font-size: 14px;
-  color: var(--green);
-  margin: 10px 0 0;
-}
 .faq {
   display: grid;
   grid-template-columns: 0.7fr 1fr;
@@ -948,9 +937,6 @@ button {
   }
   .hero .button {
     font-size: 15px;
-  }
-  .note {
-    font-size: 13px;
   }
   .hero-visual {
     padding: 0 16px;
@@ -1893,9 +1879,6 @@ summary:focus-visible {
   .telegram-voice {
     min-width: 230px;
   }
-  .hero .note {
-    font-size: 13px;
-  }
   .hero .actions {
     gap: 10px;
   }
@@ -2176,25 +2159,10 @@ summary:focus-visible {
   font-weight: 600;
 }
 .telegram-window:not(.is-playing) .bubble-arrive { animation-play-state: paused; }
-.final-cta > p {
-  margin: 24px 0 12px;
-}
-.final-prompt {
-  text-align: left;
-  max-width: 760px;
-  margin: 0 auto;
-}
 @media (max-width: 768px) {
   .rotating-line {
     font-size: 16px;
     margin-top: -8px;
-  }
-  .final-prompt {
-    flex-wrap: wrap;
-  }
-  .final-prompt code {
-    white-space: normal;
-    overflow-wrap: anywhere;
   }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -2202,4 +2170,40 @@ summary:focus-visible {
     animation: none !important;
     transform: none;
   }
+}
+/* Toast after copying: one line at the bottom, leaves by itself. */
+.toast {
+  position: fixed;
+  inset: auto 0 max(20px, env(safe-area-inset-bottom));
+  z-index: 30;
+  width: fit-content;
+  max-width: min(560px, calc(100vw - 32px));
+  margin: 0 auto;
+  padding: 12px 18px;
+  border-radius: 10px;
+  background: var(--ink);
+  color: #fff;
+  font-size: 15px;
+  line-height: 1.4;
+  text-align: center;
+  text-wrap: balance;
+  box-shadow: 0 8px 28px rgba(20, 26, 23, 0.22);
+  transform: translateY(12px);
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 180ms ease,
+    transform 180ms ease,
+    visibility 0s 180ms;
+}
+.toast.is-long {
+  overflow-wrap: anywhere;
+}
+.toast.is-on {
+  transform: none;
+  opacity: 1;
+  visibility: visible;
+  transition:
+    opacity 180ms ease,
+    transform 180ms ease;
 }

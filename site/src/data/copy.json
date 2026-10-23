@@ -28,9 +28,6 @@
         ],
         "Кнопки": [
           "[Установить с ИИ-агентом]"
-        ],
-        "Под кнопками": [
-          "Бесплатно. Вставьте одну фразу в Claude Code или Codex, через 5 минут Ива ответит."
         ]
       }
     },
@@ -237,9 +234,6 @@
         ],
         "Кнопки": [
           "[Install with an AI agent]"
-        ],
-        "Под кнопками": [
-          "Free. Paste one sentence into Claude Code or Codex, and in 5 minutes Iva replies."
         ]
       }
     },

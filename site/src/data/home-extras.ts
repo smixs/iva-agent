@@ -15,7 +15,6 @@ export const extras = {
     briefing: "Ива собирает утренний бриф…",
     memoryLabel: "Ива запомнила:",
     start: "Начать бесплатно",
-    paste: "Вставьте эту фразу в своего ИИ-агента.",
   },
   en: {
     verbs: [
@@ -33,6 +32,5 @@ export const extras = {
     briefing: "Iva is preparing your morning brief…",
     memoryLabel: "Iva remembered:",
     start: "Start for free",
-    paste: "Paste this into your AI agent.",
   },
 };

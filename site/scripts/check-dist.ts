@@ -175,10 +175,6 @@ for (const home of ["dist/index.html", "dist/ru/index.html"]) {
     /<section class="section final-cta"[\s\S]*?<\/section>/,
   )![0];
   assert.ok(final.includes(extras[lang].start));
-  const installPhrase = visible.match(
-    /id="panel-0"[\s\S]*?<code>([\s\S]*?)<\/code>/,
-  )![1];
-  assert.ok(final.includes(`<code>${installPhrase}</code>`));
   assert.equal((visible.match(/class="usecase-row"/g) || []).length, 8);
   const main = visible.match(/<main\b[^>]*>([\s\S]*?)<\/main>/)![1];
   const headings = [...main.matchAll(/<h2[^>]*>([\s\S]*?)<\/h2>/g)].map((m) =>
