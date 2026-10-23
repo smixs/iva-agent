@@ -72,6 +72,7 @@ if (field && !still && document.documentElement.classList.contains("can-hover"))
   const colors = ["#368AD2", "#368AD2", "#8DBDE8", "#A4DC55"];
   const lit = new Map<string, { x: number; y: number; c: string; t: number }>();
   let raf = 0,
+    timer = 0,
     visible = false,
     idle = 0;
   const size = () => {
@@ -109,7 +110,8 @@ if (field && !still && document.documentElement.classList.contains("can-hover"))
       ctx.fillRect(p.x * cell + 1, p.y * cell + 1, cell - 2, cell - 2);
       next = Math.min(next, p.t + (life * (5 - step)) / 4 - now);
     }
-    if (next < Infinity) setTimeout(kick, Math.max(16, next));
+    clearTimeout(timer);
+    if (next < Infinity) timer = window.setTimeout(kick, Math.max(16, next));
   }
   const section = field.parentElement!;
   section.addEventListener("pointermove", (e) => {
@@ -142,9 +144,10 @@ document.querySelectorAll<HTMLButtonElement>("[data-copy]").forEach((button) =>
     const isPrompt = text.includes("install.txt");
     const status =
       button
-        .closest(".hero-cta, .final-action, .final")
+        .closest(".other-body, .hero-cta, .final-action")
         ?.querySelector<HTMLElement>("[data-copy-status]") ?? null;
     let message: string;
+    let ok = true;
     try {
       await navigator.clipboard.writeText(text);
       message = isPrompt
@@ -160,6 +163,7 @@ document.querySelectorAll<HTMLButtonElement>("[data-copy]").forEach((button) =>
         }),
       );
     } catch {
+      ok = false;
       const code = [...document.querySelectorAll("code")].find(
         (el) => el.textContent === text,
       );
@@ -178,6 +182,7 @@ document.querySelectorAll<HTMLButtonElement>("[data-copy]").forEach((button) =>
     if (!status) return;
     clearTimeout(timers.get(status));
     status.textContent = message;
+    status.dataset.state = ok ? "ok" : "error";
     timers.set(
       status,
       window.setTimeout(() => (status.textContent = ""), 4000),

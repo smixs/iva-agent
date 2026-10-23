@@ -4,8 +4,8 @@ export type Lang = "ru" | "en";
 // dash stays with the word before it, so no line ends on «с», «в» or «—».
 const glue = (s: string) =>
   s
-    .replace(/(^|[\s(«])(с|в|и|а|к|у|о|на|за|по|до|из|от|не|the|a|an|to|of|in|on|by)\s/giu, "$1$2\u00A0")
-    .replace(/(^|[\s(«])(с|в|и|а|к|у|о|на|за|по|до|из|от|не|the|a|an|to|of|in|on|by)\s/giu, "$1$2\u00A0")
+    .replace(/(^|[\s(«])(с|в|и|а|к|у|о|на|за|по|до|из|от|не|или|the|a|an|to|of|in|on|by|or)\s/giu, "$1$2\u00A0")
+    .replace(/(^|[\s(«])(с|в|и|а|к|у|о|на|за|по|до|из|от|не|или|the|a|an|to|of|in|on|by|or)\s/giu, "$1$2\u00A0")
     .replace(/ — /g, "\u00A0— ");
 const deep = <T,>(v: T): T =>
   (typeof v === "string"
@@ -15,7 +15,10 @@ const deep = <T,>(v: T): T =>
       : v && typeof v === "object"
         ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, deep(x)]))
         : v) as T;
-export const homeCopy = deep(home);
+// The chat inside the phone keeps the film's line breaks, so it is left as written.
+export const homeCopy = Object.fromEntries(
+  Object.entries(home).map(([lang, v]) => [lang, { ...deep(v), chat: v.chat }]),
+) as typeof home;
 export const phrase = (lang: Lang) =>
   lang === "ru"
     ? "Установи Иву, инструкции: https://iva-agent.com/install.txt"

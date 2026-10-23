@@ -13,26 +13,43 @@ export const mulberry = (seed: number) => () => {
 
 export type Corner = "tl" | "tr" | "bl" | "br";
 const COLORS = ["var(--blue)", "var(--blue-soft)", "var(--blue)", "var(--leaf)"];
+// Photo edges in design-5 carry a ladder of pixels, about half of them green.
+const EDGE = ["var(--blue)", "var(--leaf)", "var(--leaf-deep)", "var(--blue-soft)"];
 
 // A cluster of `count` pixels around a corner. Cells sit on a grid of `cell` px; density falls
 // off with distance from the corner, and a few pixels hang outside the edge, as in design-5.
-export function cluster(seed: number, at: Corner, count = 11, cell = 9) {
+export function cluster(
+  seed: number,
+  at: Corner,
+  count = 11,
+  cell = 9,
+  edge = false,
+) {
   const rnd = mulberry(seed);
   const sx = at.endsWith("l") ? 1 : -1;
   const sy = at.startsWith("t") ? 1 : -1;
   const taken = new Set<string>();
   const out: string[] = [];
   for (let tries = 0; out.length < count && tries < 400; tries++) {
-    const gx = Math.floor(Math.pow(rnd(), 1.6) * 7) - 2;
-    const gy = Math.floor(Math.pow(rnd(), 1.6) * 7) - 2;
-    if (gx + gy > 6) continue;
+    // A compact clump at the corner, or (edge) a ladder running down the vertical edge.
+    const gx = edge
+      ? Math.floor(Math.pow(rnd(), 1.6) * 3) - 1
+      : Math.floor(Math.pow(rnd(), 1.6) * 7) - 2;
+    const gy = edge
+      ? Math.floor(Math.pow(rnd(), 1.2) * 12) - 1
+      : Math.floor(Math.pow(rnd(), 1.6) * 7) - 2;
+    if (gx + gy > (edge ? 12 : 6)) continue;
     const key = gx + ":" + gy;
     if (taken.has(key)) continue;
     taken.add(key);
-    const small = rnd() < 0.22;
+    // Half-size pixels only where they stay whole device pixels.
+    const small = rnd() < (edge ? 0.1 : 0.22) && cell >= 8;
     const size = small ? cell / 2 : cell;
-    const color =
-      out.length === 3 ? "var(--leaf)" : COLORS[Math.floor(rnd() * 3)];
+    const color = edge
+      ? EDGE[Math.floor(rnd() * 4)]
+      : out.length === 3
+        ? "var(--leaf)"
+        : COLORS[Math.floor(rnd() * 3)];
     const delay = Math.round((gx + gy + 4) * 40 + rnd() * 90);
     const dx = Math.round((-sx * (2 + rnd() * 5) - sx * gx) * cell);
     const dy = Math.round((-sy * (1 + rnd() * 4) - sy * gy) * cell);

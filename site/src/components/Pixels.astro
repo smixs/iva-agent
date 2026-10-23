@@ -5,9 +5,16 @@ const {
   at,
   count = 11,
   cell = 9,
-} = Astro.props as { seed: number; at: Corner; count?: number; cell?: number };
+  edge = false,
+} = Astro.props as {
+  seed: number;
+  at: Corner;
+  count?: number;
+  cell?: number;
+  edge?: boolean;
+};
 ---
 
 <span class="px" data-at={at} aria-hidden="true">
-  {cluster(seed, at, count, cell).map((style) => <i style={style}></i>)}
+  {cluster(seed, at, count, cell, edge).map((style) => <i style={style}></i>)}
 </span>

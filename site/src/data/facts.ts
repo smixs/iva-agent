@@ -20,21 +20,21 @@ export type Cell = "yes" | "no" | "unknown";
 // Columns after Iva. Values follow design-5 until the fact sheet
 // (.scratch blocks-security-compare.md) lands; sources go next to each column.
 export const competitors: { name: string; values: Cell[] }[] = [
-  { name: "ChatGPT Dots", values: ["no", "no", "yes", "no", "no"] },
-  { name: "Claude Duet", values: ["no", "no", "yes", "yes", "no"] },
-  { name: "Meta Muse", values: ["no", "no", "yes", "no", "no"] },
-  { name: "Grok Bot", values: ["no", "no", "yes", "no", "no"] },
+  { name: "ChatGPT\nDots", values: ["no", "no", "yes", "no", "no"] },
+  { name: "Claude\nDuet", values: ["no", "no", "yes", "yes", "no"] },
+  { name: "Meta\nMuse", values: ["no", "no", "yes", "no", "no"] },
+  { name: "Grok\nBot", values: ["no", "no", "yes", "no", "no"] },
 ];
 
 // Two real reviews from @aimasters_chat (src: t.me links), shortened to one sentence each.
 export const reviews: {
-  name: string;
+  name: Record<Lang, string>;
   handle: string;
   url: string;
   quote: Record<Lang, string>;
 }[] = [
   {
-    name: "Михаил Шварц",
+    name: { ru: "Михаил Шварц", en: "Mikhail Shvarts" },
     handle: "@mihailschwarz",
     url: "https://t.me/aimasters_chat/8525",
     quote: {
@@ -43,7 +43,7 @@ export const reviews: {
     },
   },
   {
-    name: "Alina Kibets",
+    name: { ru: "Alina Kibets", en: "Alina Kibets" },
     handle: "@alinakibets",
     url: "https://t.me/aimasters_chat/8772",
     quote: {

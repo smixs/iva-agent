@@ -19,9 +19,10 @@ test("a cluster is the same for the same seed and never stacks two pixels", () =
       fc.constantFrom(...corners),
       fc.integer({ min: 1, max: 20 }),
       fc.integer({ min: 2, max: 16 }),
-      (seed, at, count, cell) => {
-        const a = cluster(seed, at, count, cell);
-        assert.deepEqual(a, cluster(seed, at, count, cell));
+      fc.boolean(),
+      (seed, at, count, cell, edge) => {
+        const a = cluster(seed, at, count, cell, edge);
+        assert.deepEqual(a, cluster(seed, at, count, cell, edge));
         assert.ok(a.length <= count);
         const places = a.map((s) => {
           const p = read(s);
@@ -30,8 +31,10 @@ test("a cluster is the same for the same seed and never stacks two pixels", () =
         assert.equal(new Set(places).size, places.length);
         for (const s of a) {
           const p = read(s);
-          assert.match(p["--c"], /^var\(--(blue|blue-soft|leaf)\)$/);
+          assert.match(p["--c"], /^var\(--(blue|blue-soft|leaf|leaf-deep)\)$/);
           assert.ok(parseInt(p["--d"]) >= 0);
+          const size = parseFloat(p["--s"]);
+          assert.ok(size === cell || (cell >= 8 && size === cell / 2));
         }
       },
     ),
