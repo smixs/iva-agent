@@ -2225,38 +2225,3 @@ summary:focus-visible {
     transform: none;
   }
 }
-
-/* Alternating editorial use cases. Art and copy occupy separate columns. */
-.usecase-rows { margin-top: 42px; }
-.usecase-row { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, .9fr); align-items: center; gap: 48px; padding: 44px 0; }
-.usecase-row:nth-child(even) { grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); }
-.usecase-row:nth-child(even) .case-art { grid-column: 2; grid-row: 1; }
-.usecase-row:nth-child(even) .case-copy { grid-column: 1; grid-row: 1; }
-.case-art { min-width: 0; aspect-ratio: 4 / 3; overflow: hidden; background: #fff; }
-.case-motion { position: relative; transform: translate3d(0, var(--case-y, 0px), 0); }
-.case-picture, .case-picture img { display: block; width: 100%; }
-.case-picture img { height: auto; aspect-ratio: 4 / 3; }
-.case-copy { min-width: 0; max-width: 460px; }
-.case-number { display: block; color: #276fa9; font-size: 14px; letter-spacing: .06em; margin-bottom: 18px; }
-.case-copy h3 { font-size: clamp(32px, 3.1vw, 44px); line-height: 1.08; letter-spacing: -.035em; margin: 0 0 22px; }
-.case-copy p { font-size: clamp(18px, 1.4vw, 20px); line-height: 1.5; margin: 0; color: var(--muted); }
-.case-pixels { position: absolute; inset: 0; pointer-events: none; }
-.case-pixels i { position: absolute; width: 5px; height: 5px; background: #368ad2; opacity: .6; }
-.case-art.has-entered .case-picture { animation: case-appear .7s ease-out both; }
-.case-art.has-entered .case-pixels i { animation: case-pixel .65s var(--delay) cubic-bezier(.2,.7,.2,1) both; }
-.case-art:not(.is-in-view) *, .case-art.is-paused * { animation-play-state: paused; }
-@keyframes case-appear { from { opacity: .65; } to { opacity: 1; } }
-@keyframes case-pixel { from { opacity: 0; transform: translate(var(--offset), 10px) scale(.4); } to { opacity: .6; transform: none; } }
-@media (max-width: 760px) {
-  .usecase-rows { margin-top: 24px; }
-  .usecase-row, .usecase-row:nth-child(even) { grid-template-columns: minmax(0, 1fr); gap: 22px; padding: 26px 0 36px; }
-  .usecase-row:nth-child(even) .case-art, .usecase-row:nth-child(even) .case-copy { grid-column: auto; grid-row: auto; }
-  .case-copy { max-width: 100%; }
-  .case-number { margin-bottom: 12px; }
-  .case-copy h3 { font-size: clamp(30px, 7.7vw, 36px); margin-bottom: 16px; }
-  .case-copy p { font-size: 18px; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .case-motion { transform: none; }
-  .case-art *, .case-art.has-entered * { animation: none !important; }
-}

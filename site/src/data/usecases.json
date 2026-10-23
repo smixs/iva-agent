@@ -5,49 +5,57 @@
         "id": "morning",
         "title": "План на утро",
         "text": "Утром Ива сама присылает план дня.",
-        "alt": "Человек у окна с кофе и телефоном"
+        "alt": "Человек у окна с кофе и телефоном",
+        "tag": "Утро"
       },
       {
         "id": "voice",
         "title": "Голосовое из машины",
         "text": "Наговорили на ходу, а задачи уже записаны.",
-        "alt": "Пассажир такси записывает голосовое"
+        "alt": "Пассажир такси записывает голосовое",
+        "tag": "В дороге"
       },
       {
         "id": "memory",
         "title": "Память на месяцы",
         "text": "Помнит договорённости, даже старые.",
-        "alt": "Коллеги на встрече сверяются с телефоном"
+        "alt": "Коллеги на встрече сверяются с телефоном",
+        "tag": "Память"
       },
       {
         "id": "birthday",
         "title": "Напоминания",
         "text": "Напомнит в нужный день, просить второй раз не придётся.",
-        "alt": "Друзья вручают подарок на день рождения"
+        "alt": "Друзья вручают подарок на день рождения",
+        "tag": "Даты"
       },
       {
         "id": "invoice",
         "title": "Счёт клиенту",
         "text": "Счёт и документы готовит прямо в чате.",
-        "alt": "Фрилансер за ноутбуком"
+        "alt": "Фрилансер за ноутбуком",
+        "tag": "Работа"
       },
       {
         "id": "goal",
         "title": "Цель до результата",
         "text": "Сама доводит дело до конца.",
-        "alt": "Человек отмечает завершённые шаги в блокноте"
+        "alt": "Человек отмечает завершённые шаги в блокноте",
+        "tag": "Цели"
       },
       {
         "id": "mail",
         "title": "Почта и календарь",
         "text": "Разбирает почту и подсказывает, кому ответить.",
-        "alt": "Человек проверяет почту между встречами"
+        "alt": "Человек проверяет почту между встречами",
+        "tag": "Почта"
       },
       {
         "id": "family",
         "title": "Своя Ива для семьи",
         "text": "У каждого в семье может быть своя Ива.",
-        "alt": "Семья дома, у каждого свой телефон"
+        "alt": "Семья дома, у каждого свой телефон",
+        "tag": "Семья"
       }
     ],
     "more": [
@@ -63,49 +71,57 @@
         "id": "morning",
         "title": "Your morning plan",
         "text": "Every morning Iva sends your plan for the day.",
-        "alt": "A person by the window with coffee and a phone"
+        "alt": "A person by the window with coffee and a phone",
+        "tag": "Morning"
       },
       {
         "id": "voice",
         "title": "A voice note on the go",
         "text": "You talk on the go, and the tasks are already written down.",
-        "alt": "A taxi passenger recording a voice note"
+        "alt": "A taxi passenger recording a voice note",
+        "tag": "On the go"
       },
       {
         "id": "memory",
         "title": "Memory that lasts months",
         "text": "She remembers what you agreed on, even months ago.",
-        "alt": "Colleagues checking a phone during a meeting"
+        "alt": "Colleagues checking a phone during a meeting",
+        "tag": "Memory"
       },
       {
         "id": "birthday",
         "title": "Reminders",
         "text": "She reminds you on the right day, no need to ask twice.",
-        "alt": "Friends giving a birthday present"
+        "alt": "Friends giving a birthday present",
+        "tag": "Dates"
       },
       {
         "id": "invoice",
         "title": "An invoice for your client",
         "text": "Invoices and documents, right in the chat.",
-        "alt": "A freelancer working at a laptop"
+        "alt": "A freelancer working at a laptop",
+        "tag": "Work"
       },
       {
         "id": "goal",
         "title": "A goal, all the way through",
         "text": "She sees things through on her own.",
-        "alt": "A person checking off completed steps in a notebook"
+        "alt": "A person checking off completed steps in a notebook",
+        "tag": "Goals"
       },
       {
         "id": "mail",
         "title": "Email and calendar",
         "text": "She goes through your mail and tells you who needs a reply.",
-        "alt": "A person checking email between meetings"
+        "alt": "A person checking email between meetings",
+        "tag": "Inbox"
       },
       {
         "id": "family",
         "title": "An Iva for everyone at home",
         "text": "Everyone in the family can have their own Iva.",
-        "alt": "A family at home, each with their own phone"
+        "alt": "A family at home, each with their own phone",
+        "tag": "Family"
       }
     ],
     "more": [
