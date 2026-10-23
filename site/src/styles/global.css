@@ -1659,13 +1659,6 @@ summary:focus-visible {
 }
 
 /* Security: heading, one line, three points with line icons. */
-.security {
-  text-align: center;
-}
-.security h2,
-.security .lead {
-  margin-inline: auto;
-}
 .security .lead {
   max-width: 720px;
   margin-bottom: 0;
@@ -1675,7 +1668,7 @@ summary:focus-visible {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 32px;
   max-width: 960px;
-  margin: 48px auto 0;
+  margin: 48px 0 0;
   padding: 0;
   list-style: none;
   font-size: 18px;
@@ -1684,7 +1677,7 @@ summary:focus-visible {
 }
 .security-points li {
   display: grid;
-  justify-items: center;
+  justify-items: start;
   align-content: start;
   gap: 14px;
 }
