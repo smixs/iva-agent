@@ -144,17 +144,6 @@
       ]
     },
     {
-      "number": 11,
-      "groups": {
-        "H2": [
-          "Открытый проект, новые версии каждую неделю"
-        ],
-        "Текст": [
-          "Иву делает команда Majento из Ташкента. Ива собрана на eve, открытой основе для ИИ-агентов от Vercel. Код и история изменений открыты на GitHub."
-        ]
-      }
-    },
-    {
       "number": 12,
       "groups": {
         "H2": [
@@ -308,17 +297,6 @@
           "answer": "About 5 minutes. Paste one sentence into Claude Code or Codex and the agent installs Iva for you, or run a single command."
         }
       ]
-    },
-    {
-      "number": 11,
-      "groups": {
-        "H2": [
-          "Open source, with new releases every week"
-        ],
-        "Текст": [
-          "Iva is made by the Majento team in Tashkent and built on eve, Vercel's open foundation for AI agents. The code and changelog are open on GitHub."
-        ]
-      }
     },
     {
       "number": 12,
