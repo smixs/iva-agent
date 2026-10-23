@@ -46,8 +46,7 @@ summary:focus-visible {
   outline: 3px solid var(--blue);
   outline-offset: 5px;
 }
-img,
-video {
+img {
   max-width: 100%;
   height: auto;
   display: block;
@@ -385,42 +384,7 @@ button {
   background: white;
   color: var(--muted);
 }
-.video-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(250px, 0.65fr);
-  gap: 54px;
-  align-items: center;
-}
-.video-layout video {
-  border: 1px solid var(--line);
-  border-radius: 20px;
-  width: 100%;
-  aspect-ratio: 1;
-  background: var(--panel);
-}
-.chapters {
-  display: grid;
-  gap: 4px;
-}
-.chapters button {
-  display: flex;
-  align-items: center;
-  gap: 17px;
-  text-align: left;
-  border: 0;
-  border-bottom: 1px solid var(--line);
-  padding: 19px 0;
-  background: none;
-  font-size: 16px;
-}
-.chapters button span:first-child {
-  color: var(--link);
-  font-variant-numeric: tabular-nums;
-  flex-shrink: 0;
-}
-.chapters button span:last-child {
-  margin-left: auto;
-}
+
 .scenarios {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1002,24 +966,13 @@ button {
     font-size: 12px;
     margin-top: 5px;
   }
-  .video-layout,
   .split,
   .install-layout,
   .faq {
     grid-template-columns: 1fr;
     gap: 30px;
   }
-  .video-layout video {
-    border-radius: 16px;
-  }
-  .chapters {
-    gap: 0;
-  }
-  .chapters button {
-    font-size: 14px;
-    padding: 14px 0;
-    min-height: 52px;
-  }
+
   .section-intro p {
     font-size: 17px;
   }
@@ -1470,10 +1423,7 @@ summary:focus-visible {
   padding: 10px 14px;
   min-height: 44px;
 }
-.chapters .active {
-  color: var(--link);
-  font-weight: 700;
-}
+
 .script-source {
   display: block;
   margin: 12px 0;
@@ -1489,28 +1439,7 @@ summary:focus-visible {
     grid-column: 1;
   }
 }
-.transcript {
-  padding-top: 0;
-  padding-bottom: 40px;
-  border-top: 0 !important;
-}
-.transcript summary {
-  cursor: pointer;
-  font-weight: 600;
-  font-size: 16px;
-  color: var(--link);
-}
-.transcript details > div {
-  padding-top: 25px;
-  max-width: 760px;
-}
-.transcript h3 {
-  font-size: 19px;
-}
-.transcript p {
-  font-size: 16px;
-  margin-bottom: 10px;
-}
+
 .mosaic,
 .hero-visual > .mosaic,
 .notice-visual > .mosaic {

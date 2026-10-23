@@ -129,8 +129,6 @@ const ru = lang === "ru";
     "copy_prompt",
     "copy_command",
     "open_install_guide",
-    "video_play",
-    "video_chapter",
   ]);
   window.addEventListener("iva:analytics", ((event: CustomEvent) => {
     if (choice !== "granted" || gpc || !host || !events.has(event.detail?.name))
@@ -138,8 +136,6 @@ const ru = lang === "ru";
     const parameters: Record<string, string | number> = {};
     if (["agent", "curl", "mac"].includes(event.detail.method))
       parameters.method = event.detail.method;
-    if (typeof event.detail.chapter === "number")
-      parameters.chapter = event.detail.chapter;
     global.gtag?.("event", event.detail.name, parameters);
   }) as EventListener);
   window.addEventListener("storage", (event) => {

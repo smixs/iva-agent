@@ -4,12 +4,13 @@ import Scenes from "./Scenes.astro";
 import HeroChat from "./HeroChat.astro";
 import Mosaic from "./Mosaic.astro";
 import Reviews from "./Reviews.astro";
-import transcript from "../data/transcript.json";
 import { homeCopy, rich, phrase, command, type Lang } from "../lib/copy";
 import { stats } from "../lib/stats";
 const { lang = "en" } = Astro.props as { lang: Lang };
 const ru = lang === "ru";
-const c = homeCopy[lang];
+const c = Object.fromEntries(
+  homeCopy[lang].map((section) => [section.number, section]),
+);
 const group = (n: number, k: string) =>
   (c[n].groups as Record<string, string[]>)[k] || [];
 const t = (n: number, k: string) => group(n, k)[0] || "";
@@ -62,17 +63,6 @@ const schema = [
   },
   {
     "@context": "https://schema.org",
-    "@type": "VideoObject",
-    name: title(3),
-    description: t(3, "Текст"),
-    duration: "PT78S",
-    thumbnailUrl: "https://iva-agent.com/media/demo-poster.webp",
-    contentUrl: "https://iva-agent.com/media/iva-demo-v5.mp4",
-    uploadDate: "2026-10-23T09:20:00+05:00",
-    inLanguage: "ru",
-  },
-  {
-    "@context": "https://schema.org",
     "@type": "HowTo",
     name: title(9),
     step: group(9, "Шаги").map((s, i) => ({
@@ -109,11 +99,6 @@ const schema = [
           {installLabel}
           <span aria-hidden="true"> ↗</span>
         </button>
-        <a class="button secondary" href="#video">
-          {t(1, "Кнопки")
-            .match(/\[([^\]]+)\]/g)![1]
-            .slice(1, -1)}
-        </a>
       </div>
       <p class="note" role="status" aria-live="polite" data-copy-status>
         {t(1, "Под кнопками")}
@@ -125,54 +110,6 @@ const schema = [
     <p class="trust">{trust(t(1, "Строка доверия"))}</p>
   </section>
   <Scenes lang={lang} title={title(2)} />
-  <section id="video" class="section video-section">
-    <div class="section-intro">
-      <h2>{title(3)}</h2>
-      <p>{t(3, "Текст")}</p>
-    </div>
-    <div class="video-layout">
-      <video
-        id="demo"
-        width="1080"
-        height="1080"
-        preload="none"
-        playsinline
-        muted
-        controls
-        poster="/media/demo-poster.webp"
-        aria-label={title(3)}
-      >
-        <source src="/media/iva-demo-v5.webm" type="video/webm" />
-        <source src="/media/iva-demo-v5.mp4" type="video/mp4" />
-      </video>
-      <div class="chapters">
-        {group(3, "Главы").map((ch, index) => {
-          const [time, ...words] = ch.split(" ");
-
-          return (
-            <button data-seek={[3.5, 11, 20, 33, 48, 65.8][index]}>
-              <span>{time}</span>
-              {words.join(" ")}
-              <span aria-hidden="true">↗</span>
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  </section>
-  <div class="section transcript">
-    <details>
-      <summary>{ru ? "Что в ролике" : "What's in the video"}</summary>
-      {transcript[lang].map((scene) => (
-        <div>
-          <h3>{scene[0]}</h3>
-          {scene.slice(1).map((line) => (
-            <p>{line}</p>
-          ))}
-        </div>
-      ))}
-    </details>
-  </div>
   <Reviews lang={lang} />
   <section id="pricing" class="section pricing">
     <div class="pricing-intro">
@@ -434,27 +371,6 @@ const schema = [
       tabs[next].focus();
     });
   });
-  const video = document.querySelector<HTMLVideoElement>("#demo")!;
-  video.addEventListener("play", () =>
-    window.dispatchEvent(
-      new CustomEvent("iva:analytics", { detail: { name: "video_play" } }),
-    ),
-  );
-  function updateChapter() {
-    const buttons = [
-      ...document.querySelectorAll<HTMLButtonElement>("[data-seek]"),
-    ];
-    const index = buttons.findLastIndex(
-      (b) => Number(b.dataset.seek) <= video.currentTime + 0.05,
-    );
-    buttons.forEach((button, i) => {
-      button.classList.toggle("active", i === index);
-      if (i === index) button.setAttribute("aria-current", "true");
-      else button.removeAttribute("aria-current");
-    });
-  }
-  video.addEventListener("timeupdate", updateChapter);
-  video.addEventListener("seeked", updateChapter);
   document.querySelectorAll("[data-install-guide]").forEach((link) =>
     link.addEventListener("click", () =>
       window.dispatchEvent(
@@ -464,19 +380,4 @@ const schema = [
       ),
     ),
   );
-  document
-    .querySelectorAll<HTMLButtonElement>("[data-seek]")
-    .forEach((button) =>
-      button.addEventListener("click", () => {
-        const video = document.querySelector<HTMLVideoElement>("#demo")!;
-        video.currentTime = Number(button.dataset.seek);
-        updateChapter();
-        window.dispatchEvent(
-          new CustomEvent("iva:analytics", {
-            detail: { name: "video_chapter", chapter: video.currentTime },
-          }),
-        );
-        video.play().catch(() => {});
-      }),
-    );
 </script>

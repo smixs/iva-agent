@@ -27,7 +27,7 @@
           "Наговорите голосовое, и Ива разложит его по задачам. Она помнит, о чём вы договорились полгода назад, и сама напоминает. Живёт на вашем сервере или Mac."
         ],
         "Кнопки": [
-          "[Установить с ИИ-агентом] [▶ Ива за 78 секунд]"
+          "[Установить с ИИ-агентом]"
         ],
         "Под кнопками": [
           "Бесплатно. Вставьте одну фразу в Claude Code или Codex, через 5 минут Ива ответит."
@@ -42,25 +42,6 @@
       "groups": {
         "H2": [
           "Что Ива делает каждый день"
-        ]
-      }
-    },
-    {
-      "number": 3,
-      "groups": {
-        "H2": [
-          "Ива за 78 секунд"
-        ],
-        "Текст": [
-          "Один день в обычном Telegram: утренний план, голосовое, счёт, покупки и цель, которую Ива доводит до конца."
-        ],
-        "Главы": [
-          "0:03 План на утро",
-          "0:11 Почта, календарь и другие сервисы",
-          "0:20 Голосовое и «кто мне писал»",
-          "0:33 Задача в Битрикс24 и такси",
-          "0:48 Счёт, адрес, покупки",
-          "1:05 Цель до результата"
         ]
       }
     },
@@ -261,7 +242,7 @@
           "Send a voice note and Iva sorts it into tasks. She remembers what you agreed on six months ago and reminds you herself. She runs on your own server or Mac."
         ],
         "Кнопки": [
-          "[Install with an AI agent] [▶ Iva in 78 seconds]"
+          "[Install with an AI agent]"
         ],
         "Под кнопками": [
           "Free. Paste one sentence into Claude Code or Codex, and in 5 minutes Iva replies."
@@ -276,25 +257,6 @@
       "groups": {
         "H2": [
           "What Iva does every day"
-        ]
-      }
-    },
-    {
-      "number": 3,
-      "groups": {
-        "H2": [
-          "Iva in 78 seconds"
-        ],
-        "Текст": [
-          "One day in plain Telegram: the morning plan, a voice note, an invoice, groceries and a goal Iva sees through."
-        ],
-        "Главы": [
-          "0:03 Morning plan",
-          "0:11 Mail, calendar and other services",
-          "0:20 A voice note and \"who wrote to me\"",
-          "0:33 A Bitrix24 task and a taxi",
-          "0:48 An invoice, an address, groceries",
-          "1:05 A goal, all the way"
         ]
       }
     },

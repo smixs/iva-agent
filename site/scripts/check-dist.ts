@@ -134,6 +134,26 @@ for (const home of ["dist/index.html", "dist/ru/index.html"]) {
   const faq = schemas.find((s) => s["@type"] === "FAQPage");
   assert.equal(faq.mainEntity.length, 10);
   const visible = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/g, "");
+  assert.doesNotMatch(
+    html,
+    /<video\b|id="video"|data-seek=|VideoObject|iva-demo-v5|demo-poster/,
+  );
+  const homeURL = new URL(
+    home.includes("/ru/") ? "/ru/" : "/",
+    "https://iva-agent.com",
+  );
+  for (const match of visible.matchAll(/\bhref="([^"]+)"/g)) {
+    const url = new URL(match[1], homeURL);
+    if (
+      url.origin === homeURL.origin &&
+      url.pathname === homeURL.pathname &&
+      url.hash
+    )
+      assert.ok(
+        visible.includes(`id="${decodeURIComponent(url.hash.slice(1))}"`),
+        `${home}: missing anchor ${url.hash}`,
+      );
+  }
   const faqHTML = visible.match(/<section id="faq"[\s\S]*?<\/section>/)![0];
   const actualFAQ = [
     ...faqHTML.matchAll(
