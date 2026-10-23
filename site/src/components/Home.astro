@@ -1,7 +1,6 @@
 ---
 import Base from "../layouts/Base.astro";
 import UseCases from "./UseCases.astro";
-import usecases from "../data/usecases.json";
 import HeroChat from "./HeroChat.astro";
 import { extras } from "../data/home-extras";
 import Mosaic from "./Mosaic.astro";
@@ -114,17 +113,6 @@ const schema = [
     <a class="button" href="#install">
       {installLabel}
     </a>
-  </section>
-  <section id="more" class="section more-features">
-    <span id="userbot" class="legacy-anchor" aria-hidden="true"></span>
-    <span id="menu" class="legacy-anchor" aria-hidden="true"></span>
-    <h2>{title(6)}</h2>
-    <ul>
-      {[...group(6, "H2").slice(1), ...usecases[lang].more]
-        .map((s) => (
-          <li>{s}</li>
-        ))}
-    </ul>
   </section>
   <section id="memory" class="section split">
     <div>

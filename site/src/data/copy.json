@@ -66,24 +66,6 @@
       }
     },
     {
-      "number": 6,
-      "groups": {
-        "H2": [
-          "Что ещё умеет Ива",
-          "Читает фото, чеки, визитки и скриншоты.",
-          "Правит PDF, DOCX и таблицы XLSX.",
-          "Ищет в интернете и даёт ссылки на источники.",
-          "Ходит по сайтам и заполняет формы.",
-          "Работает с Gmail, Календарём, Документами и Таблицами Google.",
-          "Пишет ответ на глазах, кнопка ■ его останавливает.",
-          "Шесть способов подключить модель, сменить можно в /menu.",
-          "По желанию читает ваши чаты в Telegram и говорит, что вы пропустили.",
-          "Обновляется кнопкой в чате и откатывается, если что-то пошло не так.",
-          "Ей можно добавить новые умения и подключить ваши сервисы."
-        ]
-      }
-    },
-    {
       "number": 7,
       "groups": {
         "H2": [
@@ -266,24 +248,6 @@
           "Voice and search fit in the free tiers. Type /usage and Iva tells you what you've spent."
         ],
         "Кнопка": []
-      }
-    },
-    {
-      "number": 6,
-      "groups": {
-        "H2": [
-          "What else Iva can do",
-          "Reads photos, receipts, business cards and screenshots.",
-          "Edits PDFs, DOCX files and XLSX spreadsheets.",
-          "Searches the web and links to her sources.",
-          "Browses sites and fills in forms herself.",
-          "Works with Gmail, Google Calendar, Docs and Sheets.",
-          "Writes her reply as you watch, and ■ stops it.",
-          "Six ways to connect a model, switchable in /menu.",
-          "If you want, reads your Telegram chats and tells you what you missed.",
-          "Updates with a button in the chat and rolls back if something goes wrong.",
-          "You can teach her new skills and connect your own services."
-        ]
       }
     },
     {

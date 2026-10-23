@@ -193,11 +193,6 @@ for (const home of ["dist/index.html", "dist/ru/index.html"]) {
       );
     }
   }
-  for (const value of usecases[lang].more)
-    assert.ok(
-      content.includes(plain(value)),
-      `${home}: missing usecase copy: ${value}`,
-    );
   for (const section of copy[lang].slice(1)) {
     for (const [key, values] of Object.entries(section.groups)) {
       if (

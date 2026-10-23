@@ -1323,20 +1323,6 @@ summary:focus-visible {
   }
 }
 
-.more-features {
-  border-top: 1px solid var(--line);
-  border-bottom: 1px solid var(--line);
-}
-.more-features ul {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 14px 44px;
-  padding-left: 22px;
-}
-.more-features li {
-  padding-left: 4px;
-  line-height: 1.5;
-}
 @media (max-width: 768px) {
   .more-features ul { grid-template-columns: 1fr; gap: 14px; }
 }

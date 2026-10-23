@@ -49,12 +49,6 @@
         "text": "У каждого свой помощник и свои напоминания.",
         "alt": "Мама, сын-подросток и бабушка на кухне"
       }
-    ],
-    "more": [
-      "Список покупок ведёт в чате - добавит молоко, яйца и корм коту по вашему сообщению.",
-      "К встречам собирает статус из вашего календаря, Битрикс24 и рабочих чатов.",
-      "Находит всё, что вы ей когда-то говорили - хоть рецепт плова, надиктованный летом.",
-      "Расшифрует запись встречи и выпишет решения и ваши поручения."
     ]
   },
   "en": {
@@ -107,12 +101,6 @@
         "text": "Everyone gets their own assistant and reminders.",
         "alt": "A mother, her teenage son and a grandmother in the kitchen"
       }
-    ],
-    "more": [
-      "Keeps your shopping list in the chat - send a message and milk, eggs and cat food are on it.",
-      "Prepares a status for your meetings from your calendar, Bitrix24 and work chats.",
-      "Finds anything you have ever told her - even a plov recipe you dictated last summer.",
-      "Transcribes a meeting recording and pulls out the decisions and your action items."
     ]
   }
 }
