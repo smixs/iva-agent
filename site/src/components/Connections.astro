@@ -16,7 +16,7 @@ const svg = import.meta.glob<string>("../assets/logos/*.svg", {
 });
 const mark = (id: string) => svg[`../assets/logos/${id}.svg`];
 const ru = lang === "ru";
-// The fourth value is the height of a wide wordmark, tuned so the marks look even.
+// The third value is the height of a wordmark, tuned so the marks look even.
 const items: [string, string, number?][] = [
   ["gmail", "Gmail"],
   ["googlecalendar", ru ? "Google Календарь" : "Google Calendar"],
@@ -48,7 +48,8 @@ const items: [string, string, number?][] = [
           style={height ? `--h:${height}px` : undefined}
           set:html={mark(id)}
         />
-        <span>{name}</span>
+        {/* A wordmark already spells the name; it is kept for screen readers only. */}
+        <span class:list={{ "sr-only": height }}>{name}</span>
       </li>
     ))}
     <li class="connection-any">{ru ? "и любой MCP-сервер" : "and any MCP server"}</li>

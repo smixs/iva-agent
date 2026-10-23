@@ -1641,6 +1641,7 @@ summary:focus-visible {
   list-style: none;
 }
 .connection-grid li {
+  position: relative;
   display: grid;
   justify-items: center;
   align-content: start;
@@ -1663,12 +1664,8 @@ summary:focus-visible {
 .connection-grid .connection-any {
   grid-column: span 2;
   align-self: center;
-  justify-self: center;
-  padding: 10px 18px;
-  border: 1px dashed var(--blue);
-  border-radius: 999px;
   color: var(--ink);
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 600;
 }
 @media (max-width: 768px) {
@@ -1680,4 +1677,16 @@ summary:focus-visible {
   .connection-grid li {
     font-size: 13px;
   }
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.connection-grid li:has(> .sr-only) {
+  align-content: center;
 }
