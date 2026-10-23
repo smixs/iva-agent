@@ -4,70 +4,103 @@ const { lang = "en" } = Astro.props;
 const ru = lang === "ru";
 ---
 
-<TelegramFrame lang={lang}>
-  <div class="telegram-date">{ru ? "Сегодня" : "Today"}</div>
-  <div class="telegram-bubble telegram-in" data-chat-step="brief">
-    <strong>{ru ? "☀️ Доброе утро!" : "☀️ Good morning!"}</strong>
-    <p>
-      {ru
-        ? "Сегодня созвон с Анной в 11:00, счёт поставщику до 18:00. Анна просила смету, я подготовила черновик."
-        : "A call with Anna at 11:00, a supplier invoice by 18:00. Anna asked for a quote. I prepared a draft."}
-    </p>
-    <span class="telegram-time">08:30</span>
-  </div>
-  <div
-    class="telegram-bubble telegram-out telegram-voice"
-    data-chat-step="voice"
-  >
-    <span class="voice-control" aria-hidden="true">
-      <svg width="15" height="18" viewBox="0 0 15 18">
-        <path d="M2 1 14 9 2 17Z" fill="currentColor" />
+<div class="hero-phone">
+  <div class="hero-phone-screen">
+    <div class="phone-status" aria-hidden="true">
+      <span>9:41</span>
+      <span class="phone-island"></span>
+      <svg width="58" height="14" viewBox="0 0 58 14" fill="none">
+        <g fill="currentColor">
+          <rect x="0" y="9" width="3" height="4" rx="1" />
+          <rect x="4" y="6" width="3" height="7" rx="1" />
+          <rect x="8" y="3" width="3" height="10" rx="1" />
+          <rect x="12" y="0" width="3" height="13" rx="1" />
+        </g>
+        <path
+          d="M20 4a9 9 0 0 1 12 0M22 7a6 6 0 0 1 8 0M25 10a2 2 0 0 1 2 0"
+          stroke="currentColor"
+          stroke-width="1.8"
+          stroke-linecap="round"
+        />
+        <rect x="38" y="2" width="17" height="10" rx="2.4" stroke="currentColor" />
+        <rect x="40" y="4" width="13" height="6" rx="1" fill="currentColor" />
+        <path
+          d="M57 5v4"
+          stroke="currentColor"
+          stroke-width="1.5"
+          stroke-linecap="round"
+        />
       </svg>
-    </span>
-    <div class="voice-track">
-      <div class="telegram-wave" aria-hidden="true">
-        {Array.from({ length: 36 }, (_, i) => (
-          <i
-            style={`--bar:${6 + Math.round(21 * Math.abs(Math.sin(i * 1.7) * Math.cos(i * 0.6)))}px;--delay:${-i * 0.09}s`}
-          />
-        ))}
-      </div>
-      <span class="voice-duration">0:23</span>
     </div>
-    <span class="telegram-time">
-      09:12 <span>✓✓</span>
-    </span>
+    <TelegramFrame lang={lang}>
+      <div class="telegram-date">{ru ? "Сегодня" : "Today"}</div>
+      <div class="telegram-bubble telegram-in" data-chat-step="brief">
+        <strong>{ru ? "☀️ Доброе утро!" : "☀️ Good morning!"}</strong>
+        <p>
+          {ru
+            ? "Сегодня созвон с Анной в 11:00, счёт поставщику до 18:00. Анна просила смету, я подготовила черновик."
+            : "A call with Anna at 11:00, a supplier invoice by 18:00. Anna asked for a quote. I prepared a draft."}
+        </p>
+        <span class="telegram-time">08:30</span>
+      </div>
+      <div
+        class="telegram-bubble telegram-out telegram-voice"
+        data-chat-step="voice"
+      >
+        <span class="voice-control" aria-hidden="true">
+          <svg width="15" height="18" viewBox="0 0 15 18">
+            <path d="M2 1 14 9 2 17Z" fill="currentColor" />
+          </svg>
+        </span>
+        <div class="voice-track">
+          <div class="telegram-wave" aria-hidden="true">
+            {Array.from({ length: 36 }, (_, i) => (
+              <i
+                style={`--bar:${6 + Math.round(21 * Math.abs(Math.sin(i * 1.7) * Math.cos(i * 0.6)))}px;--delay:${-i * 0.09}s`}
+              />
+            ))}
+          </div>
+          <span class="voice-duration">0:23</span>
+        </div>
+        <span class="telegram-time">
+          09:12 <span>✓✓</span>
+        </span>
+      </div>
+      <div class="telegram-bubble telegram-in" data-chat-step="tasks">
+        <p>{ru ? "Записала 3 задачи:" : "Saved 3 tasks:"}</p>
+        <ul>
+          <li>{ru ? "смета для Анны, к 11:00" : "quote for Anna, by 11:00"}</li>
+          <li>{ru ? "оплатить хостинг, пятница" : "pay for hosting, Friday"}</li>
+          <li>{ru ? "купить корм коту" : "buy cat food"}</li>
+        </ul>
+        <p>
+          {ru
+            ? "Напомню про созвон за 15 минут."
+            : "I'll remind you 15 minutes before the call."}
+        </p>
+        <span class="telegram-time">09:12</span>
+      </div>
+      <div class="telegram-actions" data-chat-step="buttons">
+        <span>{ru ? "Открыть задачи" : "Open tasks"}</span>
+        <span>{ru ? "Перенести" : "Reschedule"}</span>
+      </div>
+      <div class="telegram-bubble telegram-out" data-chat-step="question">
+        {ru
+          ? "Что мы решили с Анной по срокам в прошлый раз?"
+          : "What did we agree with Anna about the deadline last time?"}
+        <span class="telegram-time">
+          09:14 <span>✓✓</span>
+        </span>
+      </div>
+      <div class="telegram-bubble telegram-in" data-chat-step="answer">
+        {ru
+          ? "14 октября договорились: первая версия к 1 ноября, правки неделю. Сохранила в карточке «Анна, проект Аврора»."
+          : "On October 14: first version by November 1, then a week for revisions. Saved in “Anna, Aurora project”."}
+        <span class="telegram-time">09:14</span>
+      </div>
+    </TelegramFrame>
+    <div class="phone-home" aria-hidden="true">
+      <span></span>
+    </div>
   </div>
-  <div class="telegram-bubble telegram-in" data-chat-step="tasks">
-    <p>{ru ? "Записала 3 задачи:" : "Saved 3 tasks:"}</p>
-    <ul>
-      <li>{ru ? "смета для Анны, к 11:00" : "quote for Anna, by 11:00"}</li>
-      <li>{ru ? "оплатить хостинг, пятница" : "pay for hosting, Friday"}</li>
-      <li>{ru ? "купить корм коту" : "buy cat food"}</li>
-    </ul>
-    <p>
-      {ru
-        ? "Напомню про созвон за 15 минут."
-        : "I'll remind you 15 minutes before the call."}
-    </p>
-    <span class="telegram-time">09:12</span>
-  </div>
-  <div class="telegram-actions" data-chat-step="buttons">
-    <span>{ru ? "Открыть задачи" : "Open tasks"}</span>
-    <span>{ru ? "Перенести" : "Reschedule"}</span>
-  </div>
-  <div class="telegram-bubble telegram-out" data-chat-step="question">
-    {ru
-      ? "Что мы решили с Анной по срокам в прошлый раз?"
-      : "What did we agree with Anna about the deadline last time?"}
-    <span class="telegram-time">
-      09:14 <span>✓✓</span>
-    </span>
-  </div>
-  <div class="telegram-bubble telegram-in" data-chat-step="answer">
-    {ru
-      ? "14 октября договорились: первая версия к 1 ноября, правки неделю. Сохранила в карточке «Анна, проект Аврора»."
-      : "On October 14: first version by November 1, then a week for revisions. Saved in “Anna, Aurora project”."}
-    <span class="telegram-time">09:14</span>
-  </div>
-</TelegramFrame>
+</div>

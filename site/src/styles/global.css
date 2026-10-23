@@ -2146,3 +2146,130 @@ summary:focus-visible {
     padding: 8px;
   }
 }
+
+/* Flat phone enclosure: the existing Telegram animation remains inside. */
+.hero-phone {
+  width: 304px;
+  max-width: 100%;
+  aspect-ratio: 9 / 19.5;
+  margin: 0 auto;
+  padding: 6px;
+  border: 1px solid #7f8b85;
+  border-radius: 42px;
+  background: #1a2327;
+  scroll-margin-top: 100px;
+}
+.hero-phone-screen {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 35px;
+  background: #f8faf7;
+}
+.phone-status {
+  display: grid;
+  grid-template-columns: 1fr 88px 1fr;
+  align-items: center;
+  flex-shrink: 0;
+  height: 46px;
+  padding: 0 16px;
+  color: #111b21;
+  font-size: 12px;
+  font-weight: 600;
+}
+.phone-status > svg {
+  justify-self: end;
+}
+.phone-island {
+  position: relative;
+  width: 88px;
+  height: 25px;
+  border-radius: 20px;
+  background: #101714;
+}
+.phone-island:after {
+  content: "";
+  position: absolute;
+  right: 10px;
+  top: 10px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #344348;
+}
+.phone-home {
+  display: grid;
+  place-items: center;
+  height: 18px;
+  flex-shrink: 0;
+  background: #f8faf7;
+}
+.phone-home > span {
+  width: 88px;
+  height: 3px;
+  border-radius: 3px;
+  background: #1a2327;
+}
+.hero-phone .telegram-window {
+  width: 100%;
+  max-width: none;
+  min-height: 0;
+  height: auto;
+  flex: 1;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  font-size: 14px;
+}
+.hero-phone .telegram-toolbar {
+  height: 58px;
+  padding: 8px 12px;
+}
+.hero-phone .telegram-toolbar img {
+  width: 36px;
+  height: 36px;
+}
+.hero-phone .telegram-peer strong {
+  font-size: 16px;
+}
+.hero-phone .telegram-history {
+  padding: 10px 9px;
+}
+.hero-phone .telegram-bubble {
+  max-width: 94%;
+}
+.hero-phone .telegram-compose {
+  height: 46px;
+  padding: 7px 10px;
+  gap: 8px;
+}
+.hero-phone .telegram-compose > span {
+  font-size: 14px;
+  padding: 5px 9px;
+}
+.hero-phone .telegram-compose > svg {
+  width: 18px;
+}
+@media (min-width: 769px) {
+  .hero {
+    grid-template-areas: "copy phone" "trust phone";
+    grid-template-rows: 1fr auto;
+  }
+  .hero-copy {
+    grid-area: copy;
+  }
+  .hero-visual {
+    grid-area: phone;
+  }
+  .hero .trust {
+    grid-area: trust;
+    grid-column: auto;
+  }
+}
+@media (max-width: 768px) {
+  .hero-phone {
+    width: min(304px, calc((100svh - 150px) * 9 / 19.5));
+  }
+}
