@@ -33,7 +33,7 @@ export function cluster(seed: number, at: Corner, count = 11, cell = 9) {
     const size = small ? cell / 2 : cell;
     const color =
       out.length === 3 ? "var(--leaf)" : COLORS[Math.floor(rnd() * 3)];
-    const delay = Math.round((gx + gy + 2) * 45 + rnd() * 90);
+    const delay = Math.round((gx + gy + 4) * 40 + rnd() * 90);
     const dx = Math.round((-sx * (2 + rnd() * 5) - sx * gx) * cell);
     const dy = Math.round((-sy * (1 + rnd() * 4) - sy * gy) * cell);
     const hx = (rnd() < 0.5 ? -1 : 1) * cell;
