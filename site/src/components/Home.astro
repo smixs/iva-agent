@@ -114,23 +114,6 @@ const schema = [
       {installLabel}
     </a>
   </section>
-  <section id="memory" class="section split">
-    <div>
-      <h2>{title(7)}</h2>
-      <p>{t(7, "Текст")}</p>
-    </div>
-    <div class="memory-visual">
-      <Mosaic scene="memory" />
-      <div class="memory-flow">
-        {(ru
-          ? ["День", "Неделя", "Месяц", "Год", "Профиль"]
-          : ["Day", "Week", "Month", "Year", "Profile"]
-        ).map((s) => (
-          <span>{s}</span>
-        ))}
-      </div>
-    </div>
-  </section>
   <section id="your-data" class="section split">
     <span id="security" class="legacy-anchor" aria-hidden="true"></span>
     <span id="works" class="legacy-anchor" aria-hidden="true"></span>

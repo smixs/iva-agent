@@ -30,7 +30,7 @@ const pixelsFor = (index: number) =>
   <h2>{title}</h2>
   <div class="usecase-rows">
     {usecases[lang].rows.map((row, index) => (
-      <article class="usecase-row" data-usecase-row aria-labelledby={`case-${row.id}`}>
+      <article id={row.id} class="usecase-row" data-usecase-row aria-labelledby={`case-${row.id}`}>
         <div class="case-art">
           <div class="case-motion" data-case-motion>
             <picture class="case-picture">

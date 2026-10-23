@@ -66,17 +66,6 @@
       }
     },
     {
-      "number": 7,
-      "groups": {
-        "H2": [
-          "Помнит то, что вы сказали месяцы назад"
-        ],
-        "Текст": [
-          "Всё, что вы говорите, Ива записывает в дневник. По ночам она сводит дни в недели, недели в месяцы и обновляет заметки о людях и проектах. Короткую справку о вас она помнит всегда. Это обычные файлы в вашем git, их можно открыть в Obsidian и забрать с собой."
-        ]
-      }
-    },
-    {
       "number": 8,
       "groups": {
         "H2": [
@@ -248,17 +237,6 @@
           "Voice and search fit in the free tiers. Type /usage and Iva tells you what you've spent."
         ],
         "Кнопка": []
-      }
-    },
-    {
-      "number": 7,
-      "groups": {
-        "H2": [
-          "Remembers what you said months ago"
-        ],
-        "Текст": [
-          "Iva writes everything you say into a daily log. At night she rolls days into weeks and weeks into months, and updates her notes on people and projects. She always keeps a short profile of you in mind. It's all plain files in your own git, so you can open them in Obsidian and take them anywhere."
-        ]
       }
     },
     {

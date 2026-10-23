@@ -345,21 +345,6 @@ button {
   height: 100%;
   pointer-events: none;
 }
-.memory-flow {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
-  justify-content: center;
-  margin-top: -5px;
-  position: relative;
-}
-.memory-flow span {
-  border: 1px solid var(--line);
-  padding: 8px 10px;
-  background: var(--panel);
-  font-size: 13px;
-  border-radius: 5px;
-}
 .notice-visual {
   position: relative;
   padding: 35px 22px;
@@ -1107,9 +1092,6 @@ summary:focus-visible {
 .back {
   font-size: 15px;
 }
-.memory-flow span {
-  font-size: 14px;
-}
 .button:not(.secondary) {
   background: var(--leaf);
   border-color: var(--leaf);
@@ -1172,9 +1154,6 @@ summary:focus-visible {
   }
   .footer .company-link {
     grid-column: 1;
-  }
-  .memory-flow {
-    gap: 6px;
   }
 }
 .analytics-settings {
@@ -1244,9 +1223,6 @@ summary:focus-visible {
 }
 .install-layout > .mosaic {
   display: block;
-}
-.memory-flow span {
-  font-size: 14px;
 }
 .section > div > p {
   position: relative;
