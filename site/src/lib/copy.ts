@@ -1,6 +1,21 @@
 import home from "../data/home.json";
 export type Lang = "ru" | "en";
-export const homeCopy = home;
+// Typographic glue: a short preposition or conjunction stays with the next word, and a
+// dash stays with the word before it, so no line ends on «с», «в» or «—».
+const glue = (s: string) =>
+  s
+    .replace(/(^|[\s(«])(с|в|и|а|к|у|о|на|за|по|до|из|от|не|the|a|an|to|of|in|on|by)\s/giu, "$1$2\u00A0")
+    .replace(/(^|[\s(«])(с|в|и|а|к|у|о|на|за|по|до|из|от|не|the|a|an|to|of|in|on|by)\s/giu, "$1$2\u00A0")
+    .replace(/ — /g, "\u00A0— ");
+const deep = <T,>(v: T): T =>
+  (typeof v === "string"
+    ? glue(v)
+    : Array.isArray(v)
+      ? v.map(deep)
+      : v && typeof v === "object"
+        ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, deep(x)]))
+        : v) as T;
+export const homeCopy = deep(home);
 export const phrase = (lang: Lang) =>
   lang === "ru"
     ? "Установи Иву, инструкции: https://iva-agent.com/install.txt"

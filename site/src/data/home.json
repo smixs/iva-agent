@@ -35,7 +35,8 @@
         "На вашем сервере"
       ],
       "stars": "звёзд на GitHub",
-      "releases": "выпусков за 4 месяца"
+      "releases": "выпусков за 4 месяца",
+      "hint": "Кнопка копирует фразу для Claude Code или Codex:"
     },
     "chat": {
       "label": "Пример разговора с Ивой в Telegram",
@@ -265,7 +266,8 @@
         "On your server"
       ],
       "stars": "stars on GitHub",
-      "releases": "releases in 4 months"
+      "releases": "releases in 4 months",
+      "hint": "The button copies a sentence for Claude Code or Codex:"
     },
     "chat": {
       "label": "Example conversation with Iva in Telegram",

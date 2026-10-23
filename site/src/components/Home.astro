@@ -6,24 +6,22 @@ import Veil from "./Veil.astro";
 import Icon from "./Icon.astro";
 import { homeCopy, rich, phrase, command, type Lang } from "../lib/copy";
 import { integrations, competitors, reviews, type Cell } from "../data/facts";
+import { initials } from "../lib/pixels";
 import { stats } from "../lib/stats";
 const { lang = "en" } = Astro.props as { lang: Lang };
 const ru = lang === "ru";
 const c = homeCopy[lang];
 const prefix = ru ? "/ru" : "";
 const corners = ["tr", "bl", "tl", "br"] as const;
+const opposite = { tr: "bl", bl: "tr", tl: "br", br: "tl" } as const;
 // Arrow drawn from square pixels on a 5 x 5 grid; the head steps forward on hover.
 const arrow = [
   [0, 2], [1, 2], [2, 2], [3, 2], [4, 2], [3, 1], [2, 0], [3, 3], [2, 4],
 ];
 const iva: Cell[] = c.compare.rows.map(() => "yes");
 const columns = [{ name: ru ? "Ива" : "Iva", values: iva }, ...competitors];
-const initials = (name: string) =>
-  name
-    .split(" ")
-    .map((w) => w[0])
-    .join("")
-    .slice(0, 2);
+// Reviewers' initials drawn as a 5 x 7 pixel font: real people get no generated faces.
+const monogram = (name: string) => initials(name.split(" ").map((w) => w[0]).join(""));
 const schema = [
   {
     "@context": "https://schema.org",
@@ -87,13 +85,15 @@ const schema = [
         <button
           class="btn btn-cta"
           data-copy={phrase(lang)}
-          data-reveal
-          data-glitch
+          aria-describedby="hero-hint"
         >
           {c.hero.cta}
           <span class="px-arrow" aria-hidden="true">{arrow.map(([x, y]) => <i style={`--x:${x};--y:${y}`}></i>)}</span>
-          <Pixels seed={31} at="tr" count={9} cell={7} />
+          <Pixels seed={31} at="tr" count={9} cell={5} />
         </button>
+        <p id="hero-hint" class="cta-hint">
+          {c.hero.hint} <code>{phrase(lang)}</code>
+        </p>
         <p class="copy-status" role="status" aria-live="polite" data-copy-status>
         </p>
       </div>
@@ -113,14 +113,27 @@ const schema = [
     </div>
     <div class="hero-visual" data-reveal>
       <svg class="hero-leaves" viewBox="0 0 760 680" aria-hidden="true">
+        <defs>
+          <linearGradient id="leaf-g" x1="0" y1="0" x2=".35" y2="1">
+            <stop offset="0" stop-color="#bfe873"></stop>
+            <stop offset=".55" stop-color="#8fd03f"></stop>
+            <stop offset="1" stop-color="#4fa83a"></stop>
+          </linearGradient>
+          <linearGradient id="leaf-b" x1="1" y1="0" x2=".2" y2="1">
+            <stop offset="0" stop-color="#6db2ec"></stop>
+            <stop offset="1" stop-color="#2a74bf"></stop>
+          </linearGradient>
+        </defs>
         <path
           class="leaf-green"
-          d="M300 662C140 600 40 470 48 330 56 200 170 100 470 36c50 154 30 324-40 444-40 80-90 140-130 182z"
+          fill="url(#leaf-g)"
+          d="M330 640C210 590 92 470 70 330 52 210 110 96 246 8c96 86 168 206 186 340 14 104-20 210-102 292z"
         ></path>
-        <path class="leaf-rib" d="M300 650c0-180 40-390 170-606"></path>
+        <path class="leaf-rib" d="M330 632C300 470 282 300 246 16"></path>
         <path
           class="leaf-blue"
-          d="M575 590c-22-112 2-236 60-320 28-42 54-70 80-92 14 120 2 220-36 296-28 58-62 96-104 116z"
+          fill="url(#leaf-b)"
+          d="M572 600c-24-110-6-232 52-322 28-44 58-78 92-104 16 116 4 220-34 300-28 58-64 100-110 126z"
         ></path>
       </svg>
       <Pixels seed={7} at="tl" count={12} cell={10} />
@@ -135,7 +148,7 @@ const schema = [
     <ul class="case-grid">
       {
         c.cases.items.map((item, i) => (
-          <li class="case" data-reveal data-glitch>
+          <li class="case" data-reveal data-glitch style={`--i:${i}`}>
             <figure class="case-media">
               <picture>
                 <source
@@ -155,7 +168,8 @@ const schema = [
                 />
               </picture>
               <Veil seed={100 + i} at={corners[i]} />
-              <Pixels seed={200 + i} at={corners[i]} />
+              <Pixels seed={200 + i} at={corners[i]} count={9} cell={10} />
+              <Pixels seed={250 + i} at={opposite[corners[i]]} count={5} cell={10} />
             </figure>
             <h3>{item.title}</h3>
             <p>{item.text}</p>
@@ -220,6 +234,10 @@ const schema = [
     <div class="table-wrap" data-reveal>
       <table>
         <caption class="sr-only">{c.compare.caption}</caption>
+        <colgroup>
+          <col class="col-label" />
+          {columns.map((_, i) => <col class:list={["col-value", { "col-iva": i === 0 }]} />)}
+        </colgroup>
         <thead>
           <tr>
             <td></td>
@@ -227,7 +245,7 @@ const schema = [
               columns.map((col, i) => (
                 <th scope="col" class={i === 0 ? "is-iva" : undefined}>
                   {col.name}
-                  {i === 0 && <Pixels seed={500} at="tr" count={7} cell={6} />}
+                  {i === 0 && <Pixels seed={500} at="tr" count={7} cell={5} />}
                 </th>
               ))
             }
@@ -288,21 +306,77 @@ const schema = [
       <ul>
         {
           reviews.map((r, i) => (
-            <li class="review" data-reveal data-glitch>
-              <a href={r.url} class="review-avatar" style={`--tone:${i ? "var(--blue)" : "var(--cta)"}`}>
-                <span aria-hidden="true">{initials(r.name)}</span>
-                <span class="sr-only">{c.world.source}: {r.name}</span>
-                <Pixels seed={600 + i} at={i ? "br" : "tr"} count={8} cell={7} />
-              </a>
+            <li class="review" data-reveal data-glitch style={`--i:${i}`}>
+              <span class="review-avatar" style={`--tone:${i ? "var(--blue)" : "var(--cta)"}`} aria-hidden="true">
+                <svg viewBox={`0 0 ${monogram(r.name).w} 7`}>
+                  {monogram(r.name).cells.map(([x, y], k) => (
+                    <rect x={x} y={y} width="0.94" height="0.94" style={`--d:${(k * 37) % 420}ms`} />
+                  ))}
+                </svg>
+                <Pixels seed={600 + i} at={i ? "br" : "tr"} count={8} cell={5} />
+              </span>
               <blockquote>{ru ? `«${r.quote.ru}»` : `“${r.quote.en}”`}</blockquote>
-              <p class="review-who">
+              <a class="review-who" href={r.url}>
                 {r.name} <span>{r.handle}</span>
-              </p>
+                <span class="sr-only">, {c.world.source}</span>
+              </a>
             </li>
           ))
         }
       </ul>
       <p class="world-caption">{c.world.reviewsLabel}</p>
+    </div>
+  </section>
+
+  <section id="install" class="final wrap" aria-labelledby="final-title">
+    <canvas class="px-field" data-px-field aria-hidden="true"></canvas>
+    <div class="final-copy">
+      <h2 id="final-title">{c.final.h2}</h2>
+      <p>{c.final.text.map((line) => <span>{line} </span>)}</p>
+      <div class="phrase">
+        <code data-phrase>{phrase(lang)}</code>
+      </div>
+      <details class="other-ways">
+        <summary>{c.final.other}<Icon name="plus" size={18} /></summary>
+        <div class="other-body">
+          <ol>
+            {c.final.steps.map((s) => <li>{s}</li>)}
+          </ol>
+          <h3>{c.final.command}</h3>
+          <p>{c.final.oneCommand} {c.final.mac}</p>
+          <div class="phrase is-command">
+            <code>{command}</code>
+            <button class="btn-copy" data-copy={command}>
+              <Icon name="copy" size={20} />
+              <span>{c.final.copy}</span>
+            </button>
+          </div>
+          <p class="other-links">
+            <a href="https://github.com/smixs/iva-agent/blob/main/install.sh"
+              >{c.final.script}</a
+            >
+            <a data-install-guide href={prefix + "/docs/install/"}>{c.final.guide}</a>
+          </p>
+        </div>
+      </details>
+    </div>
+    <div class="final-action" data-reveal>
+      <svg class="final-leaves" viewBox="0 0 240 210" aria-hidden="true">
+        <path
+          class="leaf-blue"
+          d="M120 196C92 150 92 98 118 56 138 24 172 6 214 0c6 54-2 100-26 138-18 28-40 46-68 58z"
+        ></path>
+        <path
+          class="leaf-green"
+          d="M112 196C70 176 38 140 28 98 22 70 26 40 40 12c40 26 66 58 76 98 8 30 6 58-4 86z"
+        ></path>
+      </svg>
+      <button class="btn btn-cta btn-xl" data-copy={phrase(lang)}>
+        {c.final.cta}
+        <span class="px-arrow" aria-hidden="true">{arrow.map(([x, y]) => <i style={`--x:${x};--y:${y}`}></i>)}</span>
+        <Pixels seed={32} at="tr" count={9} cell={5} />
+      </button>
+      <p class="copy-status" role="status" aria-live="polite" data-copy-status></p>
     </div>
   </section>
 
@@ -318,65 +392,6 @@ const schema = [
         ))
       }
     </div>
-  </section>
-
-  <section id="install" class="final wrap" aria-labelledby="final-title">
-    <canvas class="px-field" data-px-field aria-hidden="true"></canvas>
-    <div class="final-inner">
-      <div class="final-copy">
-        <h2 id="final-title">{c.final.h2}</h2>
-        <p>{c.final.text.map((line) => <span>{line} </span>)}</p>
-      </div>
-      <div class="final-action" data-reveal>
-        <svg class="final-leaves" viewBox="0 0 220 200" aria-hidden="true">
-          <path
-            class="leaf-blue"
-            d="M120 196C92 150 92 98 118 56 138 24 172 6 214 0c6 54-2 100-26 138-18 28-40 46-68 58z"
-          ></path>
-          <path
-            class="leaf-green"
-            d="M112 196C70 176 38 140 28 98 22 70 26 40 40 12c40 26 66 58 76 98 8 30 6 58-4 86z"
-          ></path>
-        </svg>
-        <button class="btn btn-cta btn-xl" data-copy={phrase(lang)} data-glitch>
-          {c.final.cta}
-          <span class="px-arrow" aria-hidden="true">{arrow.map(([x, y]) => <i style={`--x:${x};--y:${y}`}></i>)}</span>
-          <Pixels seed={32} at="tr" count={9} cell={7} />
-        </button>
-      </div>
-    </div>
-    <div class="phrase">
-      <code data-phrase>{phrase(lang)}</code>
-      <button class="btn-copy" data-copy={phrase(lang)} aria-label={c.final.copy}>
-        <Icon name="copy" size={20} />
-        <span>{c.final.copy}</span>
-      </button>
-    </div>
-    <p class="copy-status" role="status" aria-live="polite" data-copy-status>
-    </p>
-    <details class="other-ways">
-      <summary>{c.final.other}<Icon name="plus" size={18} /></summary>
-      <div class="other-body">
-        <ol>
-          {c.final.steps.map((s) => <li>{s}</li>)}
-        </ol>
-        <h3>{c.final.command}</h3>
-        <p>{c.final.oneCommand} {c.final.mac}</p>
-        <div class="phrase is-command">
-          <code>{command}</code>
-          <button class="btn-copy" data-copy={command} aria-label={c.final.copy}>
-            <Icon name="copy" size={20} />
-            <span>{c.final.copy}</span>
-          </button>
-        </div>
-        <p class="other-links">
-          <a href="https://github.com/smixs/iva-agent/blob/main/install.sh"
-            >{c.final.script}</a
-          >
-          <a data-install-guide href={prefix + "/docs/install/"}>{c.final.guide}</a>
-        </p>
-      </div>
-    </details>
   </section>
 </Base>
 <script>

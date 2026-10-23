@@ -37,6 +37,7 @@ const checks = "M1 5.4 4 8.4 10.2 1.6M6.6 8.1 7 8.4 13.2 1.6";
         <div class="tg-date">{c.today}</div>
       </div>
       <div class="tg-step" data-step="1">
+        <div class="tg-slot">
         <div class="tg-card">
           <div class="tg-h1">{c.brief.title}</div>
           <div class="tg-p">{c.brief.intro}</div>
@@ -50,15 +51,19 @@ const checks = "M1 5.4 4 8.4 10.2 1.6M6.6 8.1 7 8.4 13.2 1.6";
           }
           <div class="tg-time is-block">{c.brief.time}</div>
         </div>
+        </div>
       </div>
       <div class="tg-step" data-step="2">
+        <div class="tg-slot">
         <div class="tg-in">
           <svg class="tg-tail" viewBox="-7 -17 14 17"><path d={tail}></path></svg>
           <span>{c.birthday.text}</span>
           <span class="tg-time">{c.birthday.time}</span>
         </div>
+        </div>
       </div>
       <div class="tg-step" data-step="3">
+        <div class="tg-slot">
         <div class="tg-voice">
           <svg class="tg-tail" viewBox="-7 -17 14 17"><path d={tail}></path></svg>
           <span class="tg-play">
@@ -91,15 +96,20 @@ const checks = "M1 5.4 4 8.4 10.2 1.6M6.6 8.1 7 8.4 13.2 1.6";
             </span>
           </span>
         </div>
+        </div>
       </div>
       <div class="tg-step" data-step="4">
+        <div class="tg-slot">
         <div class="tg-thinking">{c.thinking}</div>
+        </div>
       </div>
       <div class="tg-step" data-step="5">
+        <div class="tg-slot">
         <div class="tg-in">
           <svg class="tg-tail" viewBox="-7 -17 14 17"><path d={tail}></path></svg>
           <span>{c.reply.text}</span>
           <span class="tg-time">{c.reply.time}</span>
+        </div>
         </div>
       </div>
     </div>

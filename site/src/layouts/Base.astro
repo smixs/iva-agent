@@ -4,8 +4,8 @@ import Analytics from "../components/Analytics.astro";
 
 import { homeCopy, type Lang } from "../lib/copy";
 import Icon from "../components/Icon.astro";
-import cyrillic from "../assets/fonts/unbounded-700-cyrillic.woff2?url";
-import latin from "../assets/fonts/unbounded-700-latin.woff2?url";
+import cyrillic from "../assets/fonts/onest-900-cyrillic.woff2?url";
+import latin from "../assets/fonts/onest-900-latin.woff2?url";
 import { stats } from "../lib/stats";
 const {
   title,
@@ -101,6 +101,7 @@ const footerLinks = [
         {c.nav.map(([label, id]) => <a href={home + "#" + id}>{label}</a>)}
       </nav>
       <div class="header-actions">
+        <a class="nav-install" href={home + "#install"}>{c.install}</a>
         <a class="language" href={isRu ? enPath : ruPath} lang={isRu ? "en" : "ru"}>
           {isRu ? "EN" : "RU"}
         </a>
@@ -112,7 +113,14 @@ const footerLinks = [
           <Icon name="github" size={22} />
           <span>{stats.stars}</span>
         </a>
-        <button class="mobile-toggle" hidden aria-expanded="false" aria-controls="mobile-nav">
+        <button
+          class="mobile-toggle"
+          hidden
+          aria-expanded="false"
+          aria-controls="mobile-nav"
+          data-open={c.menu}
+          data-close={isRu ? "Закрыть" : "Close"}
+        >
           {c.menu}
         </button>
       </div>
@@ -158,6 +166,7 @@ const footerLinks = [
         menu.hidden = true;
         menu.classList.remove("is-open");
         toggle.setAttribute("aria-expanded", "false");
+        toggle.textContent = toggle.dataset.open!;
         toggle.focus();
       }
       toggle.addEventListener("click", () => {
@@ -165,6 +174,7 @@ const footerLinks = [
         menu.hidden = open;
         menu.classList.toggle("is-open", !open);
         toggle.setAttribute("aria-expanded", String(!open));
+        toggle.textContent = open ? toggle.dataset.open! : toggle.dataset.close!;
       });
       document.addEventListener("keydown", (event) => {
         if (event.key === "Escape" && !menu.hidden) close();

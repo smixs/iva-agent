@@ -202,8 +202,8 @@ for (const home of ["dist/index.html", "dist/ru/index.html"]) {
     c.data.h2,
     c.compare.h2,
     c.world.h2.join(" "),
-    c.faq.h2,
     c.final.h2,
+    c.faq.h2,
   ]);
   const content = plain(visible);
   for (const value of [
