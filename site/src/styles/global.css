@@ -122,9 +122,6 @@ button {
   margin: auto;
   scroll-margin-top: 30px;
 }
-.section + .section {
-  border-top: 1px solid var(--line);
-}
 
 .lead {
   color: var(--muted);
@@ -625,7 +622,6 @@ button {
   background: #fff;
 }
 .pricing {
-  border-top: 1px solid var(--line) !important;
   border-radius: 0;
 }
 .hero h1 {
@@ -1552,7 +1548,6 @@ summary:focus-visible {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 32px;
-  max-width: 960px;
   margin: 48px 0 0;
   padding: 0;
   list-style: none;
