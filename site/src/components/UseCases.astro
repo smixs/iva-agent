@@ -67,6 +67,14 @@ const pixelsFor = (index: number) =>
   .case-art { min-width: 0; aspect-ratio: 4 / 3; }
   .case-motion { position: relative; transform: translate3d(0, var(--case-y, 0px), 0); will-change: transform; }
   .case-picture, .case-picture img { display: block; width: 100%; height: auto; }
+  /* Some scenes keep a pale backdrop with straight edges; every picture fades out over
+     its outer 16 % on all four sides, so none shows a rectangle. */
+  .case-picture img {
+    -webkit-mask-image: linear-gradient(90deg, transparent, #000 16%, #000 84%, transparent), linear-gradient(180deg, transparent, #000 16%, #000 84%, transparent);
+    -webkit-mask-composite: source-in;
+    mask-image: linear-gradient(90deg, transparent, #000 16%, #000 84%, transparent), linear-gradient(180deg, transparent, #000 16%, #000 84%, transparent);
+    mask-composite: intersect;
+  }
 
   .case-copy { min-width: 0; max-width: 34ch; }
   .case-copy h3 {
