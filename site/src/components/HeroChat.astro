@@ -182,13 +182,14 @@ const checks = "M1 5.4 4 8.4 10.2 1.6M6.6 8.1 7 8.4 13.2 1.6";
     const step = (n: number) =>
       chat.querySelector<HTMLElement>(`[data-step="${n}"]`)!;
     chat.classList.add("is-playing");
+    // A message every 0.7–0.8 s; the whole scene settles in under 5 s.
     const plan: [number, () => void][] = [
-      [450, () => step(1).classList.add("is-in")],
-      [1900, () => step(2).classList.add("is-in")],
-      [3300, () => step(3).classList.add("is-in")],
-      [4300, () => (chat.classList.add("is-typing"), step(4).classList.add("is-in"))],
-      [5800, () => step(4).classList.remove("is-in")],
-      [5900, () => (step(5).classList.add("is-in"), chat.classList.remove("is-typing"))],
+      [300, () => step(1).classList.add("is-in")],
+      [1050, () => step(2).classList.add("is-in")],
+      [1800, () => step(3).classList.add("is-in")],
+      [2500, () => (chat.classList.add("is-typing"), step(4).classList.add("is-in"))],
+      [3300, () => step(4).classList.remove("is-in")],
+      [3350, () => (step(5).classList.add("is-in"), chat.classList.remove("is-typing"))],
     ];
     const io = new IntersectionObserver((entries) => {
       if (!entries[0].isIntersecting) return;
