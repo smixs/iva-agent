@@ -1,0 +1,118 @@
+{
+  "ru": {
+    "rows": [
+      {
+        "id": "morning",
+        "title": "План на утро",
+        "text": "Утром Ива сама присылает план дня.",
+        "alt": "Человек у окна с кофе и телефоном"
+      },
+      {
+        "id": "voice",
+        "title": "Голосовое из машины",
+        "text": "Наговорили на ходу, а задачи уже записаны.",
+        "alt": "Пассажир такси записывает голосовое"
+      },
+      {
+        "id": "memory",
+        "title": "Память на месяцы",
+        "text": "Помнит договорённости, даже старые.",
+        "alt": "Коллеги на встрече сверяются с телефоном"
+      },
+      {
+        "id": "birthday",
+        "title": "Напоминания",
+        "text": "Напомнит в нужный день, просить второй раз не придётся.",
+        "alt": "Друзья вручают подарок на день рождения"
+      },
+      {
+        "id": "invoice",
+        "title": "Счёт клиенту",
+        "text": "Счёт и документы готовит прямо в чате.",
+        "alt": "Фрилансер за ноутбуком"
+      },
+      {
+        "id": "goal",
+        "title": "Цель до результата",
+        "text": "Сама доводит дело до конца.",
+        "alt": "Человек отмечает завершённые шаги в блокноте"
+      },
+      {
+        "id": "mail",
+        "title": "Почта и календарь",
+        "text": "Разбирает почту и подсказывает, кому ответить.",
+        "alt": "Человек проверяет почту между встречами"
+      },
+      {
+        "id": "family",
+        "title": "Своя Ива для семьи",
+        "text": "У каждого в семье может быть своя Ива.",
+        "alt": "Семья дома, у каждого свой телефон"
+      }
+    ],
+    "more": [
+      "Список покупок всегда под рукой.",
+      "Собирает статус из календаря, Битрикс24 и рабочих чатов.",
+      "Найдёт всё, что вы ей когда-то говорили.",
+      "Расшифрует голосовое или запись встречи и выделит главное."
+    ]
+  },
+  "en": {
+    "rows": [
+      {
+        "id": "morning",
+        "title": "Your morning plan",
+        "text": "Every morning Iva sends your plan for the day.",
+        "alt": "A person by the window with coffee and a phone"
+      },
+      {
+        "id": "voice",
+        "title": "A voice note on the go",
+        "text": "You talk on the go, and the tasks are already written down.",
+        "alt": "A taxi passenger recording a voice note"
+      },
+      {
+        "id": "memory",
+        "title": "Memory that lasts months",
+        "text": "She remembers what you agreed on, even months ago.",
+        "alt": "Colleagues checking a phone during a meeting"
+      },
+      {
+        "id": "birthday",
+        "title": "Reminders",
+        "text": "She reminds you on the right day, no need to ask twice.",
+        "alt": "Friends giving a birthday present"
+      },
+      {
+        "id": "invoice",
+        "title": "An invoice for your client",
+        "text": "Invoices and documents, right in the chat.",
+        "alt": "A freelancer working at a laptop"
+      },
+      {
+        "id": "goal",
+        "title": "A goal, all the way through",
+        "text": "She sees things through on her own.",
+        "alt": "A person checking off completed steps in a notebook"
+      },
+      {
+        "id": "mail",
+        "title": "Email and calendar",
+        "text": "She goes through your mail and tells you who needs a reply.",
+        "alt": "A person checking email between meetings"
+      },
+      {
+        "id": "family",
+        "title": "An Iva for everyone at home",
+        "text": "Everyone in the family can have their own Iva.",
+        "alt": "A family at home, each with their own phone"
+      }
+    ],
+    "more": [
+      "Your shopping list, always at hand.",
+      "She pulls a status from your calendar, Bitrix24 and work chats.",
+      "She finds anything you've ever told her.",
+      "She transcribes a voice note or a meeting and pulls out what matters."
+    ]
+  }
+}

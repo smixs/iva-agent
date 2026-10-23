@@ -1,20 +1,15 @@
 ---
 import { extras } from "../data/home-extras";
 import type { Lang } from "../lib/copy";
-const {
-  lang = "en",
-  compact = false,
-  hero = !compact,
-} = Astro.props as { lang?: Lang; compact?: boolean; hero?: boolean };
+const { lang = "en" } = Astro.props as { lang?: Lang };
 const ru = lang === "ru";
 const copy = extras[lang];
 ---
 
 <div
-  class:list={["telegram-window", { "telegram-compact": compact }]}
-  data-compact={!hero ? "true" : undefined}
+  class="telegram-window"
   data-telegram-chat
-  data-hero-chat={hero ? "" : undefined}
+  data-hero-chat
   role="group"
   aria-label={ru ? "Пример разговора с Ивой" : "Example conversation with Iva"}
 >
@@ -37,11 +32,10 @@ const copy = extras[lang];
       width="42"
       height="42"
       alt=""
-      loading={compact ? "lazy" : "eager"}
+      loading="eager"
       decoding="async"
     />
   </div>
-  {hero && (
     <div
       class="telegram-activity"
       data-activity
@@ -51,7 +45,6 @@ const copy = extras[lang];
     >
       {copy.saved}
     </div>
-  )}
   <div
     class="telegram-history"
     role="group"
@@ -130,17 +123,7 @@ const copy = extras[lang];
         [8500, "answer"],
         [9200, "memory"],
       ];
-      const beats: [number, string][] = chat.dataset.compact
-        ? steps
-            .flatMap((step, i): [number, string][] => {
-              const at = Number(step.dataset.at);
-              const result: [number, string][] = [[at, step.dataset.chatStep!]];
-              if (i > 0 && step.classList.contains("telegram-in"))
-                result.unshift([at - 1000, "thinking"]);
-              return result;
-            })
-            .sort((a, b) => a[0] - b[0])
-        : heroBeats;
+      const beats = heroBeats;
       let raf = 0,
         start = 0,
         index = 0,

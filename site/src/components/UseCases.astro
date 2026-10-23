@@ -1,0 +1,73 @@
+---
+import usecases from "../data/usecases.json";
+import type { Lang } from "../lib/copy";
+const { lang, title } = Astro.props as { lang: Lang; title: string };
+---
+
+<section id="features" class="section use-cases">
+  <span id="asks" class="legacy-anchor" aria-hidden="true"></span>
+  <span id="scenarios" class="legacy-anchor" aria-hidden="true"></span>
+  <h2>{title}</h2>
+  <div class="usecase-rows">
+    {usecases[lang].rows.map((row, index) => (
+      <article class="usecase-row" data-usecase={row.id} aria-labelledby={`case-${row.id}`}>
+        <div class="case-art" data-case-art>
+          <div class="case-motion">
+            <picture class="case-picture">
+              <source type="image/avif" srcset={`/media/usecases/${row.id}-800.avif 800w, /media/usecases/${row.id}-1600.avif 1600w`} sizes="(max-width: 760px) 100vw, 55vw" />
+              <img src={`/media/usecases/${row.id}-800.webp`} srcset={`/media/usecases/${row.id}-800.webp 800w, /media/usecases/${row.id}-1600.webp 1600w`} sizes="(max-width: 760px) 100vw, 55vw" width="1600" height="1200" alt={row.alt} loading="lazy" decoding="async" />
+            </picture>
+            <span class="case-pixels" aria-hidden="true">
+              {[[8,28],[12,65],[20,83],[83,18],[89,57],[80,86]].map(([x,y],n) => <i style={`left:${x}%;top:${y}%;--delay:${n*.055}s;--offset:${n%2===0?8:-8}px`} />)}
+            </span>
+          </div>
+        </div>
+        <div class="case-copy">
+          <span class="case-number" aria-hidden="true">{String(index+1).padStart(2,"0")}</span>
+          <h3 id={`case-${row.id}`}>{row.title}</h3>
+          <p>{row.text}</p>
+        </div>
+      </article>
+    ))}
+  </div>
+</section>
+<script>
+  const arts = [...document.querySelectorAll<HTMLElement>("[data-case-art]")];
+  const reduced = matchMedia("(prefers-reduced-motion: reduce)");
+  const visible = new Set<HTMLElement>();
+  let frame = 0;
+  function paint() {
+    frame = 0;
+    if (reduced.matches || document.hidden) return;
+    for (const art of visible) {
+      const rect = art.getBoundingClientRect();
+      const offset = Math.max(-12, Math.min(12, (innerHeight / 2 - rect.top - rect.height / 2) / innerHeight * 24));
+      art.style.setProperty("--case-y", `${offset.toFixed(2)}px`);
+    }
+  }
+  function requestPaint() {
+    if (!frame && visible.size && !reduced.matches && !document.hidden) frame = requestAnimationFrame(paint);
+  }
+  // One observer serves the eight images; scroll work is limited to visible art.
+  const observer = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      const art = entry.target as HTMLElement;
+      art.classList.toggle("is-in-view", entry.isIntersecting);
+      if (entry.isIntersecting) { visible.add(art); art.classList.add("has-entered"); }
+      else visible.delete(art);
+    }
+    requestPaint();
+  }, { threshold: .05 });
+  arts.forEach(art => observer.observe(art));
+  addEventListener("scroll", requestPaint, { passive: true });
+  addEventListener("resize", requestPaint);
+  reduced.addEventListener("change", () => {
+    cancelAnimationFrame(frame); frame = 0;
+    if (reduced.matches) arts.forEach(art => art.style.removeProperty("--case-y"));
+    else requestPaint();
+  });
+  document.addEventListener("visibilitychange", () => {
+    arts.forEach(art => art.classList.toggle("is-paused", document.hidden));
+    requestPaint();
+  });
+</script>

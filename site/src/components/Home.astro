@@ -1,8 +1,8 @@
 ---
 import Base from "../layouts/Base.astro";
-import Scenes from "./Scenes.astro";
+import UseCases from "./UseCases.astro";
+import usecases from "../data/usecases.json";
 import HeroChat from "./HeroChat.astro";
-import Overnight from "./Overnight.astro";
 import RotatingLine from "./RotatingLine.astro";
 import { extras } from "../data/home-extras";
 import Mosaic from "./Mosaic.astro";
@@ -113,8 +113,7 @@ const schema = [
     </div>
     <p class="trust">{trust(t(1, "Строка доверия"))}</p>
   </section>
-  <Scenes lang={lang} title={title(2)} />
-  <Overnight lang={lang} />
+  <UseCases lang={lang} title={title(2)} />
   <Reviews lang={lang} />
   <section id="pricing" class="section pricing">
     <div class="pricing-intro">
@@ -141,8 +140,7 @@ const schema = [
     <span id="menu" class="legacy-anchor" aria-hidden="true"></span>
     <h2>{title(6)}</h2>
     <ul>
-      {group(6, "H2")
-        .slice(1)
+      {[...group(6, "H2").slice(1), ...usecases[lang].more]
         .map((s) => (
           <li>{s}</li>
         ))}
