@@ -12,6 +12,7 @@ const {
   ru,
   schema = [],
   noindex = false,
+  ruAlternate = true,
 } = Astro.props as {
   title: string;
   description: string;
@@ -20,6 +21,7 @@ const {
   ru?: string;
   schema?: unknown[];
   noindex?: boolean;
+  ruAlternate?: boolean;
 };
 const isRu = lang === "ru";
 const home = isRu ? "/ru/" : "/";
@@ -78,7 +80,9 @@ const footerLinks = [
     {noindex && <meta name="robots" content="noindex" />}
     <link rel="canonical" href={canonical} />
     <link rel="alternate" hreflang="en" href={new URL(enPath, Astro.site)} />
-    <link rel="alternate" hreflang="ru" href={new URL(ruPath, Astro.site)} />
+    {ruAlternate && (
+      <link rel="alternate" hreflang="ru" href={new URL(ruPath, Astro.site)} />
+    )}
     <link
       rel="alternate"
       hreflang="x-default"

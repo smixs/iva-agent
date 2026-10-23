@@ -94,7 +94,7 @@ const ruPath = staticPage
     : "/ru/about/"
   : hasRu
     ? docUrl("ru/" + slug + ".md")
-    : enPath;
+    : "/ru/docs/";
 const crumbs = [
   {
     name: lang === "ru" ? "Главная" : "Home",
@@ -132,6 +132,7 @@ const schema =
   en={enPath}
   ru={ruPath}
   schema={schema}
+  ruAlternate={Boolean(hasRu) || Boolean(staticPage)}
 >
   <article class="section prose">
     {(entry || directory) && (

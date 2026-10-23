@@ -33,6 +33,10 @@ export function copyLegacy() {
       "astro:build:done": async ({ dir }: { dir: URL }) => {
         const out = dir.pathname;
         cpSync(
+          path.join(out, "sitemap-index.xml"),
+          path.join(out, "sitemap.xml"),
+        );
+        cpSync(
           path.join(out, "ru/404/index.html"),
           path.join(out, "ru/404.html"),
         );
