@@ -4,14 +4,17 @@ import UseCases from "./UseCases.astro";
 import Connections from "./Connections.astro";
 import HeroChat from "./HeroChat.astro";
 import Reviews from "./Reviews.astro";
-import { homeCopy, rich, phrase, type Lang } from "../lib/copy";
+import { homeCopy, rich, phrase, glue, type Lang } from "../lib/copy";
 const { lang = "en" } = Astro.props as { lang: Lang };
 const ru = lang === "ru";
 const c = Object.fromEntries(
   homeCopy[lang].map((section) => [section.number, section]),
 );
 const group = (n: number, k: string) =>
-  (c[n].groups as Record<string, string[]>)[k] || [];
+  ((c[n].groups as Record<string, string[]>)[k] || []).map((s) =>
+    // Section 0 is the page title and description: plain text, no typesetting.
+    n === 0 ? s : glue(s),
+  );
 const t = (n: number, k: string) => group(n, k)[0] || "";
 const title = (n: number) => t(n, "H2");
 const installLabel = ru

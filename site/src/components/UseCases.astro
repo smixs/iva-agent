@@ -1,6 +1,6 @@
 ---
 import usecases from "../data/usecases.json";
-import type { Lang } from "../lib/copy";
+import { glue, type Lang } from "../lib/copy";
 const { lang, title } = Astro.props as { lang: Lang; title: string };
 
 // Glitch squares live only in the picture's outer corners, which the art leaves
@@ -45,8 +45,8 @@ const pixelsFor = (index: number) =>
           </div>
         </div>
         <div class="case-copy">
-          <h3 id={`case-${row.id}`}>{row.title}</h3>
-          <p>{row.text}</p>
+          <h3 id={`case-${row.id}`}>{glue(row.title)}</h3>
+          <p>{glue(row.text)}</p>
         </div>
       </article>
     ))}

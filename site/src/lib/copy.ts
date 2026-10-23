@@ -12,3 +12,10 @@ export const rich = (s: string) =>
     .replaceAll(">", "&gt;")
     .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
     .replace(/`(.*?)`/g, "<code>$1</code>");
+// Russian typesetting: a short preposition or conjunction never ends a line, and a
+// spaced hyphen becomes a dash. Applied to visible copy only.
+export const glue = (s: string) =>
+  s
+    .replace(/ - /g, " — ")
+    .replace(/(^|[\s(«])([а-яёА-ЯЁ]{1,2}) /g, "$1$2 ")
+    .replace(/(^|[\s(«])([а-яёА-ЯЁ]{1,2}) /g, "$1$2 ");
