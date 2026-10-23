@@ -1,5 +1,6 @@
 ---
 import "../styles/global.css";
+import Analytics from "../components/Analytics.astro";
 
 import type { Lang } from "../lib/copy";
 import { stats } from "../lib/stats";
@@ -103,7 +104,6 @@ const footerLinks = [
         set:html={JSON.stringify(item).replaceAll("<", "\\u003c")}
       />
     ))}
-    <link rel="stylesheet" href="/analytics.css" />
   </head>
   <body>
     <a class="skip" href="#main">
@@ -193,7 +193,7 @@ const footerLinks = [
         </a>
       </p>
     </footer>
-    <script is:inline src="/analytics.js" defer></script>
+    <Analytics lang={lang} />
     <script>
       const menu = document.querySelector<HTMLElement>("#mobile-nav")!;
       const toggle =

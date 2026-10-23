@@ -76,22 +76,30 @@ for (const page of pages) {
       failures.push(`${path.relative(dist, page)}: ${value}`);
   }
 }
+for (const page of pages) {
+  for(const image of readFileSync(page,'utf8').matchAll(/<(?:img|video)\b[^>]*>/g)) assert.ok(/\bwidth=/.test(image[0])&&/\bheight=/.test(image[0]), `${page}: missing dimensions`);
+}
+for(const file of ['dist/404.html','dist/ru/404.html'])assert.ok(readFileSync(file,'utf8').includes('name="robots" content="noindex"'));
+assert.ok(readFileSync('dist/privacy/index.html','utf8').includes('lang="ru"'));
 for (const home of ["dist/index.html", "dist/ru/index.html"]) {
   const html = readFileSync(home, "utf8")
     .replaceAll("&#39;", "'")
     .replaceAll("&#x27;", "'")
     .replaceAll("&quot;", '"')
     .replaceAll("&amp;", "&");
+  for(const id of ['features','memory','install','userbot','security','works','menu','asks'])assert.equal((html.match(new RegExp('id="'+id+'"','g'))||[]).length,1,`${home}: ${id}`);
   const schemas = [
     ...html.matchAll(
       /<script type="application\/ld\+json">([\s\S]*?)<\/script>/g,
     ),
   ].map((m) => JSON.parse(m[1]));
+  assert.equal(schemas.find(s=>s['@type']==='SoftwareApplication').description, html.match(/<meta name="description" content="([^"]*)"/)![1]);
   const faq = schemas.find((s) => s["@type"] === "FAQPage");
   assert.equal(faq.mainEntity.length, 10);
   const visible = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/g, "");
+  const faqHTML = visible.match(/<section id="faq"[\s\S]*?<\/section>/)![0];
   const actualFAQ = [
-    ...visible.matchAll(
+    ...faqHTML.matchAll(
       /<details[^>]*>\s*<summary[^>]*>([\s\S]*?)<\/summary>\s*<p[^>]*>([\s\S]*?)<\/p>/g,
     ),
   ].map((m) => ({

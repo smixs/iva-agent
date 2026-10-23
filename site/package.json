@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "astro build",
+    "build": "astro build --force",
     "preview": "astro preview",
     "check:dist": "node scripts/check-dist.ts"
   },

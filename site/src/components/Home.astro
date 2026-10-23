@@ -3,6 +3,7 @@ import Base from "../layouts/Base.astro";
 import Chat from "./Chat.astro";
 import Mosaic from "./Mosaic.astro";
 import Reviews from "./Reviews.astro";
+import transcript from "../data/transcript.json";
 import { homeCopy, rich, phrase, command, type Lang } from "../lib/copy";
 import { stats } from "../lib/stats";
 const { lang = "en" } = Astro.props as { lang: Lang };
@@ -136,11 +137,11 @@ const schema = [
         <source src="/media/iva-demo-v5.mp4" type="video/mp4" />
       </video>
       <div class="chapters">
-        {group(2, "Главы рядом с роликом").map((ch) => {
+        {group(2, "Главы рядом с роликом").map((ch, index) => {
           const [time, ...words] = ch.split(" ");
-          const [m, s] = time.split(":").map(Number);
+
           return (
-            <button data-seek={m * 60 + s}>
+            <button data-seek={[3.5, 11, 20, 33, 48, 65.8][index]}>
               <span>{time}</span>
               {words.join(" ")}
               <span aria-hidden="true">↗</span>
@@ -150,6 +151,19 @@ const schema = [
       </div>
     </div>
   </section>
+  <div class="section transcript">
+    <details>
+      <summary>{ru ? "Что в ролике" : "What's in the video"}</summary>
+      {transcript[lang].map((scene) => (
+        <div>
+          <h3>{scene[0]}</h3>
+          {scene.slice(1).map((line) => (
+            <p>{line}</p>
+          ))}
+        </div>
+      ))}
+    </details>
+  </div>
   <section id="scenarios" class="section">
     <span id="asks" class="legacy-anchor" aria-hidden="true"></span>
     <h2>{title(3)}</h2>
@@ -327,6 +341,14 @@ const schema = [
             aria-labelledby={"tab-" + i}
           >
             <p set:html={rich(t(10, key))} />
+            {i === 1 && (
+              <a
+                class="script-source"
+                href="https://github.com/smixs/iva-agent/blob/main/install.sh"
+              >
+                {ru ? "Посмотреть скрипт" : "View the script"} ↗
+              </a>
+            )}
             <div class="command">
               <code>{i === 0 ? phrase(lang) : command}</code>
               <button
@@ -338,6 +360,9 @@ const schema = [
             </div>
           </div>
         ))}
+        <a data-install-guide href={prefix + "/docs/install/"}>
+          {ru ? "Инструкция по установке" : "Installation guide"} →
+        </a>
         <p class="copy-feedback" aria-live="polite" data-copy-status></p>
         <ol class="install-steps">
           {group(10, "Три шага").map((s) => (
@@ -435,7 +460,16 @@ const schema = [
       }),
     );
   const tabs = [...document.querySelectorAll<HTMLButtonElement>("[data-tab]")];
-  function activate(index: number) {
+  function activate(index: number, track = false) {
+    if (track)
+      window.dispatchEvent(
+        new CustomEvent("iva:analytics", {
+          detail: {
+            name: "install_tab",
+            method: ["agent", "curl", "mac"][index],
+          },
+        }),
+      );
     tabs.forEach((tab, i) => {
       tab.setAttribute("aria-selected", String(i === index));
       tab.tabIndex = i === index ? 0 : -1;
@@ -444,7 +478,7 @@ const schema = [
   }
   activate(0);
   tabs.forEach((tab, i) => {
-    tab.addEventListener("click", () => activate(i));
+    tab.addEventListener("click", () => activate(i, true));
     tab.addEventListener("keydown", (event) => {
       let next = i;
       if (event.key === "ArrowRight") next = (i + 1) % tabs.length;
@@ -454,16 +488,51 @@ const schema = [
       else if (event.key === "End") next = tabs.length - 1;
       else return;
       event.preventDefault();
-      activate(next);
+      activate(next, true);
       tabs[next].focus();
     });
   });
+  const video = document.querySelector<HTMLVideoElement>("#demo")!;
+  video.addEventListener("play", () =>
+    window.dispatchEvent(
+      new CustomEvent("iva:analytics", { detail: { name: "video_play" } }),
+    ),
+  );
+  video.addEventListener("timeupdate", () => {
+    const buttons = [
+      ...document.querySelectorAll<HTMLButtonElement>("[data-seek]"),
+    ];
+    const index = buttons.findLastIndex(
+      (b) => Number(b.dataset.seek) <= video.currentTime,
+    );
+    buttons.forEach((button, i) => {
+      button.classList.toggle("active", i === index);
+      if (i === index) button.setAttribute("aria-current", "true");
+      else button.removeAttribute("aria-current");
+    });
+  });
+  document
+    .querySelectorAll("[data-install-guide]")
+    .forEach((link) =>
+      link.addEventListener("click", () =>
+        window.dispatchEvent(
+          new CustomEvent("iva:analytics", {
+            detail: { name: "open_install_guide" },
+          }),
+        ),
+      ),
+    );
   document
     .querySelectorAll<HTMLButtonElement>("[data-seek]")
     .forEach((button) =>
       button.addEventListener("click", () => {
         const video = document.querySelector<HTMLVideoElement>("#demo")!;
         video.currentTime = Number(button.dataset.seek);
+        window.dispatchEvent(
+          new CustomEvent("iva:analytics", {
+            detail: { name: "video_chapter", chapter: video.currentTime },
+          }),
+        );
         video.play().catch(() => {});
       }),
     );

@@ -1430,3 +1430,80 @@ summary:focus-visible {
     gap: 6px;
   }
 }
+.analytics-settings {
+  border: 0;
+  background: none;
+  color: var(--muted);
+  text-decoration: underline;
+  font-size: 13px;
+  padding: 4px 0;
+  justify-self: start;
+  grid-column: 2;
+  min-height: 35px;
+}
+.consent {
+  position: fixed;
+  bottom: 22px;
+  left: 22px;
+  width: min(460px, calc(100% - 44px));
+  z-index: 20;
+  padding: 24px;
+  background: #fff;
+  border: 1px solid var(--ink);
+  border-radius: 16px;
+  font-size: 15px;
+}
+.consent h2 {
+  font-size: 24px;
+  line-height: 1.15;
+  margin-bottom: 15px;
+}
+.consent p {
+  margin-bottom: 18px;
+}
+.consent .button {
+  font-size: 14px;
+  padding: 10px 14px;
+  min-height: 44px;
+}
+.chapters .active {
+  color: var(--link);
+  font-weight: 700;
+}
+.script-source {
+  display: block;
+  margin: 12px 0;
+  font-size: 14px;
+}
+.install-box > [data-install-guide] {
+  display: inline-block;
+  margin-top: 18px;
+  font-size: 14px;
+}
+@media (max-width: 768px) {
+  .analytics-settings {
+    grid-column: 1;
+  }
+}
+.transcript {
+  padding-top: 0;
+  padding-bottom: 40px;
+  border-top: 0 !important;
+}
+.transcript summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 16px;
+  color: var(--link);
+}
+.transcript details > div {
+  padding-top: 25px;
+  max-width: 760px;
+}
+.transcript h3 {
+  font-size: 19px;
+}
+.transcript p {
+  font-size: 16px;
+  margin-bottom: 10px;
+}

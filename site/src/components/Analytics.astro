@@ -1,0 +1,150 @@
+---
+const { lang = "en" } = Astro.props;
+const ru = lang === "ru";
+---
+
+<button class="analytics-settings" data-analytics-settings hidden>
+  {ru ? "Настройки аналитики" : "Analytics settings"}
+</button>
+<aside
+  class="consent"
+  data-consent-banner
+  aria-labelledby="consent-title"
+  hidden
+>
+  <h2 id="consent-title">{ru ? "Статистика посещений" : "Visit statistics"}</h2>
+  <p>
+    {ru
+      ? "Разрешить Google Analytics для статистики посещений? Счётчик загружается только после согласия."
+      : "Allow Google Analytics to measure visits? The tracker loads only after you agree."}{" "}
+    <a href="/privacy/">{ru ? "Подробнее" : "Details"}</a>
+  </p>
+  <div class="actions">
+    <button class="button secondary" data-consent="denied">
+      {ru ? "Отказаться" : "Decline"}
+    </button>
+    <button class="button" data-consent="granted">
+      {ru ? "Разрешить" : "Allow analytics"}
+    </button>
+  </div>
+</aside>
+<script>
+  const key = "iva-analytics-consent-v1",
+    id = "G-9C8EPEEBPP";
+  const host = location.hostname === "iva-agent.com";
+  const global = window as any;
+  const gpc = Boolean((navigator as any).globalPrivacyControl);
+  const banner = document.querySelector<HTMLElement>("[data-consent-banner]")!;
+  const settings = document.querySelector<HTMLButtonElement>(
+    "[data-analytics-settings]",
+  )!;
+  document.querySelector("footer")?.append(settings);
+  settings.hidden = false;
+  let choice: string | null = null,
+    loaded = false;
+  global["ga-disable-" + id] = true;
+  try {
+    const saved = JSON.parse(localStorage.getItem(key) || "null");
+    if (
+      saved?.expires > Date.now() &&
+      ["granted", "denied"].includes(saved.value)
+    )
+      choice = saved.value;
+  } catch {}
+  function start() {
+    if (choice !== "granted" || gpc || !host || loaded) return;
+    loaded = true;
+    global["ga-disable-" + id] = false;
+    global.dataLayer = global.dataLayer || [];
+    global.gtag = function () {
+      global.dataLayer.push(arguments);
+    };
+    global.gtag("consent", "default", {
+      analytics_storage: "granted",
+      ad_storage: "denied",
+      ad_user_data: "denied",
+      ad_personalization: "denied",
+    });
+    global.gtag("js", new Date());
+    let referrer = "";
+    try {
+      const url = new URL(document.referrer);
+      referrer = url.origin + url.pathname;
+    } catch {}
+    global.gtag("config", id, {
+      page_location: location.origin + location.pathname,
+      page_referrer: referrer,
+      allow_google_signals: false,
+      allow_ad_personalization_signals: false,
+    });
+    const script = document.createElement("script");
+    script.async = true;
+    script.src = "https://www.googletagmanager.com/gtag/js?id=" + id;
+    document.head.append(script);
+  }
+  settings.addEventListener("click", () => {
+    banner.hidden = false;
+    banner.querySelector<HTMLButtonElement>("button")?.focus();
+  });
+  banner
+    .querySelectorAll<HTMLButtonElement>("[data-consent]")
+    .forEach((button) =>
+      button.addEventListener("click", () => {
+        choice = button.dataset.consent!;
+        try {
+          localStorage.setItem(
+            key,
+            JSON.stringify({
+              value: choice,
+              expires: Date.now() + 365 * 86400000,
+            }),
+          );
+        } catch {
+          banner.dataset.persistence = "current-page";
+        }
+        banner.hidden = true;
+        settings.focus();
+        if (choice === "denied") {
+          global["ga-disable-" + id] = true;
+          global.gtag?.("consent", "update", { analytics_storage: "denied" });
+        } else if (loaded && !gpc) {
+          global["ga-disable-" + id] = false;
+          global.gtag?.("consent", "update", { analytics_storage: "granted" });
+        }
+        start();
+      }),
+    );
+  const events = new Set([
+    "install_tab",
+    "copy_prompt",
+    "copy_command",
+    "open_install_guide",
+    "video_play",
+    "video_chapter",
+  ]);
+  window.addEventListener("iva:analytics", ((event: CustomEvent) => {
+    if (choice !== "granted" || gpc || !host || !events.has(event.detail?.name))
+      return;
+    const parameters: Record<string, string | number> = {};
+    if (["agent", "curl", "mac"].includes(event.detail.method))
+      parameters.method = event.detail.method;
+    if (typeof event.detail.chapter === "number")
+      parameters.chapter = event.detail.chapter;
+    global.gtag?.("event", event.detail.name, parameters);
+  }) as EventListener);
+  window.addEventListener("storage", (event) => {
+    if (event.key === key) location.reload();
+  });
+  banner.hidden = choice !== null || gpc;
+  start();
+  if (host) {
+    const script = document.createElement("script");
+    script.defer = true;
+    script.src = "https://static.cloudflareinsights.com/beacon.min.js";
+    script.setAttribute(
+      "data-cf-beacon",
+      JSON.stringify({ token: "a2173fbb88ec41eb9d2a80dfe632d844" }),
+    );
+    document.head.append(script);
+  }
+</script>

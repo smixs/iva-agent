@@ -21,6 +21,11 @@ export function rewriteUrl(url: string, source: string): string {
       return docUrl(relative + "/README.md");
     return "/" + relative + (fragment ? "#" + fragment : "");
   }
+  if (
+    resolved.startsWith(path.join(repoRoot, "assets") + path.sep) &&
+    existsSync(resolved)
+  )
+    return "/" + path.relative(repoRoot, resolved);
   return (
     "https://github.com/smixs/iva-agent/blob/main/" +
     path.relative(repoRoot, resolved) +

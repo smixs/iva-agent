@@ -8,6 +8,7 @@ import {
 } from "node:fs";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
+import { imageMetadata } from "astro/assets/utils";
 import { docUrl } from "./doc-links.ts";
 export function files(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
@@ -29,7 +30,7 @@ export function copyLegacy() {
   return {
     name: "iva-legacy-addresses",
     hooks: {
-      "astro:build:done": ({ dir }: { dir: URL }) => {
+      "astro:build:done": async ({ dir }: { dir: URL }) => {
         const out = dir.pathname;
         cpSync(
           path.join(out, "ru/404/index.html"),
@@ -54,6 +55,35 @@ export function copyLegacy() {
         if (existsSync("../assets"))
           cpSync("../assets", path.join(out, "assets"), { recursive: true });
         cpSync("../install.sh", path.join(out, "install.sh"));
+        for (const page of files(out).filter((f) => f.endsWith(".html"))) {
+          let html = readFileSync(page, "utf8");
+          const images = [...html.matchAll(/<img\b[^>]*>/g)];
+          for (const match of images) {
+            const tag = match[0];
+            const src = tag.match(/src="([^"]+)"/)?.[1];
+            if (!src?.startsWith("/")) continue;
+            const asset = path.join(out, src);
+            if (!existsSync(asset)) continue;
+            let next = tag;
+            if (!/\bwidth=/.test(tag) || !/\bheight=/.test(tag)) {
+              const metadata = await imageMetadata(readFileSync(asset), src);
+              next = next.replace(
+                /\s*\/?>$/,
+                ` width="${metadata.width}" height="${metadata.height}">`,
+              );
+            }
+            if (!/\bdecoding=/.test(next))
+              next = next.replace(/\s*\/?>$/, ' decoding="async">');
+            if (
+              page.includes("/docs/") &&
+              !/\bloading=/.test(next) &&
+              !src.includes("/brand/")
+            )
+              next = next.replace(/\s*\/?>$/, ' loading="lazy">');
+            html = html.replace(tag, next);
+          }
+          writeFileSync(page, html);
+        }
         const markdown = files("../docs")
           .filter((f) => f.endsWith(".md"))
           .sort();
