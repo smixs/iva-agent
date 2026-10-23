@@ -31,9 +31,6 @@
         ],
         "Под кнопками": [
           "Бесплатно. Вставьте одну фразу в Claude Code или Codex, через 5 минут Ива ответит."
-        ],
-        "Строка доверия": [
-          "Открытый код MIT · ★ 265 на GitHub · 70 выпусков за 4 месяца · Ubuntu, Debian, Mac"
         ]
       }
     },
@@ -195,9 +192,6 @@
         "H2": [
           "Открытый проект, новые версии каждую неделю"
         ],
-        "Цифры": [
-          "★ 265 на GitHub · 70 выпусков за 4 месяца · 11 участников · около 5000 автотестов"
-        ],
         "Текст": [
           "Иву делает команда Majento из Ташкента. Ива собрана на eve, открытой основе для ИИ-агентов от Vercel. Код и история изменений открыты на GitHub."
         ]
@@ -246,9 +240,6 @@
         ],
         "Под кнопками": [
           "Free. Paste one sentence into Claude Code or Codex, and in 5 minutes Iva replies."
-        ],
-        "Строка доверия": [
-          "Open source, MIT · ★ 265 on GitHub · 70 releases in 4 months · Ubuntu, Debian, Mac"
         ]
       }
     },
@@ -409,9 +400,6 @@
       "groups": {
         "H2": [
           "Open source, with new releases every week"
-        ],
-        "Цифры": [
-          "★ 265 on GitHub · 70 releases in 4 months · 11 contributors · about 5,000 tests"
         ],
         "Текст": [
           "Iva is made by the Majento team in Tashkent and built on eve, Vercel's open foundation for AI agents. The code and changelog are open on GitHub."

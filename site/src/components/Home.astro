@@ -8,7 +8,6 @@ import { extras } from "../data/home-extras";
 import Mosaic from "./Mosaic.astro";
 import Reviews from "./Reviews.astro";
 import { homeCopy, rich, phrase, command, type Lang } from "../lib/copy";
-import { stats } from "../lib/stats";
 const { lang = "en" } = Astro.props as { lang: Lang };
 const ru = lang === "ru";
 const c = Object.fromEntries(
@@ -25,14 +24,6 @@ const installLabel = ru
 const copyLabel = ru ? "Копировать" : "Copy";
 const headingTerm = ru ? "AI‑ассистент" : "AI assistant";
 const headingParts = t(1, "H1").split(headingTerm);
-const trust = (s: string) =>
-  s
-    .replace("265", String(stats.stars))
-    .replace("70", String(stats.releases))
-    .replace(
-      ru ? "11 участников" : "11 contributors",
-      `${stats.contributors} ${ru ? "участников" : "contributors"}`,
-    );
 const faq = c[10].faq!;
 const schema = [
   {
@@ -111,7 +102,6 @@ const schema = [
     <div class="hero-visual">
       <HeroChat lang={lang} />
     </div>
-    <p class="trust">{trust(t(1, "Строка доверия"))}</p>
   </section>
   <UseCases lang={lang} title={title(2)} />
   <Reviews lang={lang} />
@@ -260,7 +250,6 @@ const schema = [
   </section>
   <section id="open-source" class="section open-source">
     <h2>{title(11)}</h2>
-    <p class="project-stats">{trust(t(11, "Цифры"))}</p>
     <p>{t(11, "Текст")}</p>
     <div class="actions">
       <a href="https://github.com/smixs/iva-agent">GitHub ↗</a>

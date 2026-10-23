@@ -144,6 +144,23 @@ button {
 .header-actions {
   gap: 18px;
 }
+.header .github {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-variant-numeric: tabular-nums;
+}
+.header .github svg {
+  fill: currentColor;
+}
+.header .github:hover {
+  border-color: var(--ink);
+  color: var(--ink);
+}
 .button {
   border: 1px solid var(--ink);
   border-radius: 8px;
@@ -215,14 +232,6 @@ button {
   font-size: 14px;
   color: var(--muted);
   margin-top: 16px;
-  margin-bottom: 0;
-}
-.trust {
-  grid-column: 1/-1;
-  padding-top: 22px;
-  border-top: 1px solid var(--line);
-  font-size: 14px;
-  color: var(--muted);
   margin-bottom: 0;
 }
 .hero-visual {
@@ -715,12 +724,6 @@ button {
   margin-left: auto;
   margin-right: auto;
 }
-.project-stats {
-  font-size: 23px;
-  color: var(--green);
-  font-weight: 600;
-  line-height: 1.6;
-}
 .open-source .actions {
   justify-content: center;
   font-size: 16px;
@@ -858,9 +861,6 @@ button {
   .header nav {
     gap: 14px;
   }
-  .github {
-    display: none;
-  }
   .section {
     padding: 70px 30px;
   }
@@ -961,10 +961,6 @@ button {
   .hero-visual > .mosaic {
     inset: 0 -5%;
     opacity: 0.5;
-  }
-  .trust {
-    font-size: 12px;
-    margin-top: 5px;
   }
   .split,
   .install-layout,
@@ -1076,9 +1072,6 @@ button {
   }
   .faq summary {
     font-size: 17px;
-  }
-  .project-stats {
-    font-size: 21px;
   }
   .final-cta {
     margin-bottom: 30px;
@@ -1362,8 +1355,7 @@ summary:focus-visible {
   .header-actions {
     gap: 14px;
   }
-  .header-actions .language,
-  .header-actions .github {
+  .header-actions .language {
     display: none;
   }
   .mobile-nav:not([hidden]) {
@@ -1534,10 +1526,6 @@ summary:focus-visible {
   display: block;
   padding: 0;
   min-width: 0;
-}
-.trust {
-  margin-top: 0;
-  padding-top: 20px;
 }
 .telegram-window {
   --tg-blue: #0589ff;
@@ -1905,11 +1893,6 @@ summary:focus-visible {
   .telegram-voice {
     min-width: 230px;
   }
-  .hero .trust {
-    font-size: 12px;
-    padding-top: 18px;
-    margin: 0;
-  }
   .hero .note {
     font-size: 13px;
   }
@@ -2112,18 +2095,13 @@ summary:focus-visible {
 }
 @media (min-width: 769px) {
   .hero {
-    grid-template-areas: "copy phone" "trust phone";
-    grid-template-rows: 1fr auto;
+    grid-template-areas: "copy phone";
   }
   .hero-copy {
     grid-area: copy;
   }
   .hero-visual {
     grid-area: phone;
-  }
-  .hero .trust {
-    grid-area: trust;
-    grid-column: auto;
   }
 }
 @media (max-width: 768px) {
