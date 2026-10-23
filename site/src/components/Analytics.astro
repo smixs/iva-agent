@@ -110,7 +110,6 @@ const ru = lang === "ru";
     );
   const events = new Set([
     "copy_prompt",
-    "open_install_guide",
   ]);
   window.addEventListener("iva:analytics", ((event: CustomEvent) => {
     if (choice !== "granted" || gpc || !host || !events.has(event.detail?.name))

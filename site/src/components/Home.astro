@@ -14,7 +14,6 @@ const group = (n: number, k: string) =>
   (c[n].groups as Record<string, string[]>)[k] || [];
 const t = (n: number, k: string) => group(n, k)[0] || "";
 const title = (n: number) => t(n, "H2");
-const prefix = ru ? "/ru" : "";
 const installLabel = ru
   ? "Установить с ИИ-агентом"
   : "Install with an AI agent";
@@ -127,15 +126,9 @@ const schema = [
   </section>
   <section id="install" class="section install">
     <h2>{title(9)}</h2>
-    <p class="lead">{t(9, "Подзаголовок")}</p>
-    <div class="actions">
-      <button class="button" data-copy={phrase(lang)}>
-        {installLabel}
-      </button>
-      <a class="install-guide" data-install-guide href={prefix + "/docs/install/"}>
-        {ru ? "Установить вручную" : "Install by hand"} →
-      </a>
-    </div>
+    <button class="button" data-copy={phrase(lang)}>
+      {installLabel}
+    </button>
   </section>
   <section id="faq" class="section faq">
     <h2>{title(10)}</h2>
@@ -184,13 +177,4 @@ const schema = [
         }
       }),
     );
-  document.querySelectorAll("[data-install-guide]").forEach((link) =>
-    link.addEventListener("click", () =>
-      window.dispatchEvent(
-        new CustomEvent("iva:analytics", {
-          detail: { name: "open_install_guide" },
-        }),
-      ),
-    ),
-  );
 </script>

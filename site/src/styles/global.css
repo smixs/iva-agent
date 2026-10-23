@@ -1578,16 +1578,6 @@ summary:focus-visible {
 }
 
 /* Install: heading, one line, the button and a quiet link for the manual way. */
-.install .lead {
-  max-width: 720px;
-}
-.install .actions {
-  gap: 24px;
-}
-.install-guide {
-  color: var(--link);
-  font-weight: 500;
-}
 
 /* Reviews: three short quotes, name and a link to the message. */
 .reviews {
