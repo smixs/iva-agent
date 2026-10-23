@@ -6,6 +6,25 @@ import { files } from "../src/lib/build.ts";
 const dist = path.resolve("dist");
 const copy = JSON.parse(readFileSync("src/data/copy.json", "utf8"));
 const usecases = JSON.parse(readFileSync("src/data/usecases.json", "utf8"));
+// Emoji are allowed only inside the Telegram chat (data-tg-content), where they are
+// part of how Telegram looks. Everything else on the site uses SVG icons.
+const emoji = /\p{Extended_Pictographic}|\uFE0F/u;
+// Text symbols that are pictographic only with U+FE0F: ©, ®, ™ and arrows like ↗.
+const notEmoji = new Set(["\u00A9", "\u00AE", "\u2122", "\u2194", "\u2195", "\u2196", "\u2197", "\u2198", "\u2199"]);
+const findEmoji = (html: string) =>
+  [...html.matchAll(new RegExp(emoji, "gu"))]
+    .map((m) => m[0])
+    .filter((ch) => !notEmoji.has(ch));
+const outsideChat = (html: string) => {
+  let out = "",
+    i = 0;
+  for (const m of html.matchAll(/<div class="tg-list" data-tg-content[^>]*>/g)) {
+    out += html.slice(i, m.index);
+    // The chat list ends where the scroll edge starts.
+    i = html.indexOf('<div class="tg-edge-top"', m.index);
+  }
+  return out + html.slice(i);
+};
 const plain = (s: string) =>
   s
     .replace(/<[^>]*>/g, " ")
@@ -206,6 +225,23 @@ for (const home of ["dist/index.html", "dist/ru/index.html"]) {
         assert.ok(content.includes(plain(value)), `${home}: v2 copy: ${value}`);
     }
   }
+}
+// Home pages: no emoji anywhere outside the chat. Other pages render the repo docs as
+// written, so only their header and footer are checked.
+for (const page of pages) {
+  const html = readFileSync(page, "utf8");
+  const home = /^(ru\/)?index\.html$/.test(path.relative(dist, page));
+  const scope = home
+    ? outsideChat(html)
+    : [
+        ...(html.match(/<header class="header[\s\S]*?<\/header>/) || []),
+        ...(html.match(/<footer class="footer[\s\S]*?<\/footer>/) || []),
+      ].join("");
+  assert.deepEqual(
+    findEmoji(scope),
+    [],
+    `${path.relative(dist, page)}: emoji outside the chat`,
+  );
 }
 console.log(
   `HTML: ${pages.length} pages; ${json} JSON-LD blocks parsed; 10 FAQ entries per locale; ${links} internal references checked.`,
