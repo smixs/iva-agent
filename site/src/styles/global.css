@@ -771,6 +771,8 @@ code {
   margin-bottom: clamp(14px, 1.4vw, 22px);
 }
 .table-wrap {
+  /* Positioned, so the visually hidden cell labels stay inside its scroll box. */
+  position: relative;
   border: 1px solid var(--line);
   border-radius: 12px;
   overflow: hidden;
