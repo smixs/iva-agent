@@ -44,8 +44,7 @@
 body {
   margin: 0;
 }
-button,
-input {
+button {
   font: inherit;
 }
 button,
@@ -126,11 +125,7 @@ button {
 .section + .section {
   border-top: 1px solid var(--line);
 }
-.section-intro {
-  max-width: 780px;
-  margin-bottom: 40px;
-}
-.section-intro p,
+
 .lead {
   color: var(--muted);
   font-size: 20px;
@@ -233,80 +228,12 @@ button {
 .hero-copy {
   padding: 25px 0;
 }
-.msg {
-  padding: 10px 12px;
-  border-radius: 12px;
-  max-width: 94%;
-  position: relative;
-}
-.msg small {
-  display: block;
-  text-align: right;
-  color: var(--muted);
-  font-size: 9px;
-  margin-top: 4px;
-}
-.msg p {
-  margin: 5px 0;
-}
-.msg ul {
-  padding-left: 17px;
-  margin: 6px 0;
-}
-.incoming {
-  align-self: flex-start;
-  background: white;
-  border-bottom-left-radius: 3px;
-}
-.outgoing {
-  align-self: flex-end;
-  background: #e6f6d2;
-  border-bottom-right-radius: 3px;
-}
-.chip {
-  font-size: 11px;
-  font-weight: 700;
-  background: var(--leaf);
-  border-radius: 3px;
-  padding: 1px 4px;
-}
-.wave {
-  display: flex;
-  gap: 2px;
-  height: 27px;
-  align-items: center;
-}
-.wave i {
-  width: 3px;
-  background: var(--blue);
-  border-radius: 2px;
-}
 
 .scenarios {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 36px 24px;
   margin: 40px 0 28px;
-}
-.scenario {
-  min-width: 0;
-}
-.scenario > p {
-  font-size: 16px;
-  margin: 18px 0 0;
-}
-.scenario strong {
-  display: block;
-  font-size: 19px;
-  margin-bottom: 6px;
-}
-.text-link {
-  font-weight: 600;
-  font-size: 16px;
-}
-.notice-visual {
-  position: relative;
-  padding: 35px 22px;
 }
 .features {
   display: grid;
@@ -333,14 +260,6 @@ button {
   display: block;
   font-size: 19px;
   margin-bottom: 7px;
-}
-.warning {
-  padding: 18px 20px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  color: var(--ink) !important;
-  background: var(--panel);
-  font-size: 16px;
 }
 .pricing {
   background: var(--panel);
@@ -610,21 +529,10 @@ button {
     grid-template-columns: 1fr;
     gap: 30px;
   }
-
-  .section-intro p {
-    font-size: 17px;
-  }
   .scenarios {
     grid-template-columns: 1fr;
     gap: 30px;
     margin-top: 30px;
-  }
-  .scenario > p {
-    font-size: 16px;
-  }
-  .scenarios .scenario {
-    padding-bottom: 24px;
-    border-bottom: 1px solid var(--line);
   }
   .features {
     grid-template-columns: 1fr 1fr;
@@ -639,12 +547,6 @@ button {
   }
   .features article {
     padding: 22px 0;
-  }
-  .reverse > div:first-child {
-    order: 2;
-  }
-  .notice-visual {
-    padding: 20px;
   }
   .pricing-intro {
     display: block;
@@ -716,11 +618,6 @@ button {
 }
 
 /* White paper stays clear beneath every heading and paragraph. */
-.notice-visual {
-  display: grid;
-  gap: 20px;
-  padding: 0;
-}
 .pricing {
   background: #fff;
 }
@@ -855,12 +752,6 @@ summary:focus-visible {
     grid-column: 1;
   }
 }
-
-.notice-visual {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 20px;
-}
 .section > div > p {
   position: relative;
 }
@@ -921,10 +812,6 @@ summary:focus-visible {
   .hero .button {
     font-size: 15px;
   }
-}
-
-@media (max-width: 768px) {
-  .more-features ul { grid-template-columns: 1fr; gap: 14px; }
 }
 .keep-words {
   white-space: nowrap;
