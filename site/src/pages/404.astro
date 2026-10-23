@@ -1,25 +1,5 @@
 ---
-import Base from "../layouts/Base.astro";
+import NotFound from "../components/NotFound.astro";
 ---
 
-<Base
-  title="Page not found | Iva"
-  description="Find Iva documentation or return to the homepage."
-  en="/404.html"
-  ru="/404.html"
->
-  <section class="section prose">
-    <p>404</p>
-    <h1>Page not found</h1>
-    <p>Страница по этому адресу отсутствует.</p>
-    <div class="actions">
-      <a class="button" href="/">
-        Iva home
-      </a>
-      <a class="button secondary" href="/ru/">
-        Главная
-      </a>
-      <a href="/docs/">Documentation</a>
-    </div>
-  </section>
-</Base>
+<NotFound lang="en" />

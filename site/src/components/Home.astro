@@ -151,6 +151,7 @@ const schema = [
     </div>
   </section>
   <section id="scenarios" class="section">
+    <span id="asks" class="legacy-anchor" aria-hidden="true"></span>
     <h2>{title(3)}</h2>
     <div class="scenarios">
       {group(3, "Шесть карточек").map((item, index) => (
@@ -206,6 +207,7 @@ const schema = [
     </div>
   </section>
   <section id="features" class="section">
+    <span id="menu" class="legacy-anchor" aria-hidden="true"></span>
     <h2>{title(6)}</h2>
     <div class="features">
       {group(6, "12 ячеек").map((s, i) => (
@@ -267,6 +269,8 @@ const schema = [
     </a>
   </section>
   <section id="your-data" class="section split">
+    <span id="security" class="legacy-anchor" aria-hidden="true"></span>
+    <span id="works" class="legacy-anchor" aria-hidden="true"></span>
     <div class="data-symbol" aria-hidden="true">
       <img src="/brand/mark.svg" width="144" height="144" alt="" />
       <span>
@@ -386,29 +390,47 @@ const schema = [
     .querySelectorAll<HTMLButtonElement>("[data-copy]")
     .forEach((button) =>
       button.addEventListener("click", async () => {
-        const status = button
+        const isPrompt =
+          button.dataset.copy ===
+          document.querySelector("#panel-0 code")?.textContent;
+        let feedback = button
           .closest("section")
-          ?.querySelector("[data-copy-status]");
+          ?.querySelector<HTMLElement>("[data-copy-status]");
+        let message = "";
         try {
           await navigator.clipboard.writeText(button.dataset.copy!);
-          if (status)
-            status.textContent = ru
-              ? "Скопировано. Вставьте в терминал или ИИ-агент."
-              : "Copied. Paste into your terminal or AI agent.";
+          message = isPrompt
+            ? ru
+              ? "Скопировано. Вставьте в своего ИИ-агента."
+              : "Copied. Paste it into your AI agent."
+            : ru
+              ? "Скопировано."
+              : "Copied.";
+          window.dispatchEvent(
+            new CustomEvent("iva:analytics", {
+              detail: { name: isPrompt ? "copy_prompt" : "copy_command" },
+            }),
+          );
         } catch {
-          activate(0);
-          const target = document.querySelector("#panel-0 code")!;
+          const index = isPrompt ? 0 : 1;
+          activate(index);
+          const target = document.querySelector(`#panel-${index} code`)!;
           const range = document.createRange();
           range.selectNodeContents(target);
-          const selection = window.getSelection();
-          selection?.removeAllRanges();
-          selection?.addRange(range);
+          window.getSelection()?.removeAllRanges();
+          window.getSelection()?.addRange(range);
           document.querySelector("#install")?.scrollIntoView();
-          const feedback = document.querySelector(".copy-feedback");
-          if (feedback)
-            feedback.textContent = ru
-              ? "Фраза выделена. Нажмите ⌘C или Ctrl+C."
-              : "Phrase selected. Press ⌘C or Ctrl+C.";
+          feedback = document.querySelector(".copy-feedback")!;
+          message = ru
+            ? "Не удалось скопировать. Выделите текст и скопируйте вручную."
+            : "Could not copy. Select the text and copy it manually.";
+        }
+        if (feedback) {
+          feedback.setAttribute("aria-live", "polite");
+          feedback.textContent = message;
+          setTimeout(() => {
+            if (feedback?.textContent === message) feedback.textContent = "";
+          }, 4000);
         }
       }),
     );

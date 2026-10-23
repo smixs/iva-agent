@@ -1,0 +1,34 @@
+---
+import Base from "../layouts/Base.astro";
+const { lang = "en" } = Astro.props;
+const ru = lang === "ru";
+---
+
+<Base
+  lang={lang}
+  title={ru ? "Страница не найдена | Ива" : "Page not found | Iva"}
+  description={
+    ru
+      ? "Вернуться к Иве или открыть документацию."
+      : "Return to Iva or open the documentation."
+  }
+  en="/404.html"
+  ru="/ru/404.html"
+  noindex
+>
+  <section class="section prose">
+    <p>404</p>
+    <h1>{ru ? "Страница не найдена" : "Page not found"}</h1>
+    <div class="actions">
+      <a class="button" href={ru ? "/ru/" : "/"}>
+        {ru ? "Главная" : "Home"}
+      </a>
+      <a href={ru ? "/ru/docs/" : "/docs/"}>
+        {ru ? "Документация" : "Documentation"}
+      </a>
+      <a href={ru ? "/404.html" : "/ru/404.html"}>
+        {ru ? "English" : "Русский"}
+      </a>
+    </div>
+  </section>
+</Base>

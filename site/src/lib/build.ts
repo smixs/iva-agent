@@ -31,6 +31,10 @@ export function copyLegacy() {
     hooks: {
       "astro:build:done": ({ dir }: { dir: URL }) => {
         const out = dir.pathname;
+        cpSync(
+          path.join(out, "ru/404/index.html"),
+          path.join(out, "ru/404.html"),
+        );
         const replaced = new Set([
           "index.html",
           "ru/index.html",

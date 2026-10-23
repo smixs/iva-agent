@@ -1324,3 +1324,109 @@ button {
     padding: 22px;
   }
 }
+[hidden] {
+  display: none !important;
+}
+button:focus-visible,
+a:focus-visible,
+summary:focus-visible {
+  outline: 2px solid #368ad2;
+  outline-offset: 2px;
+}
+.section {
+  position: relative;
+}
+.legacy-anchor {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  scroll-margin-top: 100px;
+}
+.mobile-toggle,
+.mobile-nav,
+.mobile-mark {
+  display: none;
+}
+.company-link {
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+  margin-top: 5px !important;
+}
+.company-link a {
+  font-size: inherit;
+}
+.about-links {
+  margin: 20px 0 40px;
+}
+.back {
+  font-size: 15px;
+}
+.memory-flow span {
+  font-size: 14px;
+}
+.button:not(.secondary) {
+  background: var(--leaf);
+  border-color: var(--leaf);
+  color: var(--ink) !important;
+}
+.button:not(.secondary):hover {
+  background: #b4e773;
+}
+.logo {
+  padding: 6px 0;
+}
+.footer > a {
+  padding: 6px 0;
+}
+@media (max-width: 768px) {
+  .header nav {
+    display: none;
+  }
+  .header {
+    padding: 12px 22px;
+    gap: 15px;
+  }
+  .logo .full-logo {
+    display: none;
+  }
+  .logo .mobile-mark {
+    display: block;
+    width: 40px;
+    height: 40px;
+  }
+  .mobile-toggle:not([hidden]) {
+    display: block;
+    border: 1px solid var(--line);
+    padding: 8px 12px;
+    border-radius: 6px;
+    background: white;
+    font-size: 14px;
+    margin-left: auto;
+  }
+  .header-actions {
+    gap: 14px;
+  }
+  .header-actions .language,
+  .header-actions .github {
+    display: none;
+  }
+  .mobile-nav:not([hidden]) {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 18px;
+    padding: 22px;
+    border-bottom: 1px solid var(--line);
+    font-size: 16px;
+  }
+  .section {
+    scroll-margin-top: 100px;
+  }
+  .footer .company-link {
+    grid-column: 1;
+  }
+  .memory-flow {
+    gap: 6px;
+  }
+}

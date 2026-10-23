@@ -48,6 +48,11 @@ if (staticPage) {
         ? "about-ru"
         : "about-en";
   html = readFileSync(path.resolve(`src/data/${file}.html`), "utf8");
+  if (staticPage !== "privacy")
+    html = html.replace(
+      /<a\b[^>]*href="https:\/\/majento.ai\/(?:ru\/)?ai-implementation\/[^"]*"[^>]*>[\s\S]*?<\/a\s*>/,
+      `<a class="button secondary" href="https://majento.ai/ai-implementation/?utm_source=iva-agent.com&amp;utm_medium=referral&amp;utm_campaign=ecosystem">${lang === "ru" ? "Обсудить внедрение с Majento" : "Discuss an implementation with Majento"}</a>`,
+    );
   title = html.match(/<h1>(.*?)<\/h1>/s)?.[1] || "Iva";
   description =
     html
@@ -146,6 +151,19 @@ const schema =
           </>
         ))}
       </nav>
+    )}
+    {staticPage && staticPage !== "privacy" && (
+      <>
+        <a class="back" href={lang === "ru" ? "/ru/" : "/"}>
+          {lang === "ru" ? "← Вернуться к Иве" : "← Back to Iva"}
+        </a>
+        <div class="actions about-links">
+          <a href={lang === "ru" ? "/ru/docs/" : "/docs/"}>
+            {lang === "ru" ? "Документация Ивы" : "Iva docs"}
+          </a>
+          <a href="https://github.com/smixs/iva-agent">GitHub</a>
+        </div>
+      </>
     )}
     {staticPage ? (
       <Fragment set:html={html} />

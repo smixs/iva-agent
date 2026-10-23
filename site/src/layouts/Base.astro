@@ -1,5 +1,6 @@
 ---
 import "../styles/global.css";
+
 import type { Lang } from "../lib/copy";
 import { stats } from "../lib/stats";
 const {
@@ -9,6 +10,7 @@ const {
   en,
   ru,
   schema = [],
+  noindex = false,
 } = Astro.props as {
   title: string;
   description: string;
@@ -16,6 +18,7 @@ const {
   en?: string;
   ru?: string;
   schema?: unknown[];
+  noindex?: boolean;
 };
 const isRu = lang === "ru";
 const home = isRu ? "/ru/" : "/";
@@ -71,6 +74,7 @@ const footerLinks = [
     <meta name="viewport" content="width=device-width" />
     <title>{title}</title>
     <meta name="description" content={description} />
+    {noindex && <meta name="robots" content="noindex" />}
     <link rel="canonical" href={canonical} />
     <link rel="alternate" hreflang="en" href={new URL(enPath, Astro.site)} />
     <link rel="alternate" hreflang="ru" href={new URL(ruPath, Astro.site)} />
@@ -92,13 +96,14 @@ const footerLinks = [
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/site.webmanifest" />
-    <link rel="stylesheet" href="/analytics.css" />
+
     {schema.map((item) => (
       <script
         type="application/ld+json"
         set:html={JSON.stringify(item).replaceAll("<", "\\u003c")}
       />
     ))}
+    <link rel="stylesheet" href="/analytics.css" />
   </head>
   <body>
     <a class="skip" href="#main">
@@ -110,13 +115,34 @@ const footerLinks = [
         href={home}
         aria-label={isRu ? "Ива, главная" : "Iva home"}
       >
-        <img src="/brand/logo-light.svg" alt="IVA" width="104" height="48" />
+        <img
+          class="full-logo"
+          src="/brand/logo-light.svg"
+          alt="IVA"
+          width="104"
+          height="48"
+        />
+        <img
+          class="mobile-mark"
+          src="/brand/mark.svg"
+          alt="IVA"
+          width="40"
+          height="40"
+        />
       </a>
       <nav aria-label={isRu ? "Главная навигация" : "Main navigation"}>
         {nav.map((n, i) => (
           <a href={home + "#" + links[i]}>{n}</a>
         ))}
       </nav>
+      <button
+        class="mobile-toggle"
+        hidden
+        aria-expanded="false"
+        aria-controls="mobile-nav"
+      >
+        {isRu ? "Меню" : "Menu"}
+      </button>
       <div class="header-actions">
         <a
           class="language"
@@ -133,6 +159,18 @@ const footerLinks = [
         </a>
       </div>
     </header>
+    <nav
+      id="mobile-nav"
+      class="mobile-nav"
+      aria-label={isRu ? "Мобильная навигация" : "Mobile navigation"}
+    >
+      {nav.map((n, i) => (
+        <a href={home + "#" + links[i]}>{n}</a>
+      ))}
+      <a href={isRu ? enPath : ruPath}>{isRu ? "EN" : "RU"}</a>
+      <a href="https://github.com/smixs/iva-agent">GitHub ★ {stats.stars}</a>
+      <a href={home + "#install"}>{isRu ? "Установить" : "Install"}</a>
+    </nav>
     <main id="main">
       <slot />
     </main>
@@ -146,7 +184,54 @@ const footerLinks = [
         ))}
       </nav>
       <p>© {new Date().getFullYear()} Majento · Tashkent · MIT</p>
+      <p class="company-link">
+        {isRu
+          ? "Разработка ИИ-систем для компаний:"
+          : "Custom AI systems for companies:"}{" "}
+        <a href="https://majento.ai/?utm_source=iva-agent.com&amp;utm_medium=referral&amp;utm_campaign=ecosystem">
+          Majento
+        </a>
+      </p>
     </footer>
     <script is:inline src="/analytics.js" defer></script>
+    <script>
+      const menu = document.querySelector<HTMLElement>("#mobile-nav")!;
+      const toggle =
+        document.querySelector<HTMLButtonElement>(".mobile-toggle")!;
+      menu.hidden = true;
+      toggle.hidden = false;
+      function close() {
+        menu.hidden = true;
+        toggle.setAttribute("aria-expanded", "false");
+        toggle.focus();
+      }
+      toggle.addEventListener("click", () => {
+        const open = toggle.getAttribute("aria-expanded") === "true";
+        menu.hidden = open;
+        toggle.setAttribute("aria-expanded", String(!open));
+      });
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && !menu.hidden) close();
+      });
+      document.addEventListener("click", (event) => {
+        if (
+          !menu.hidden &&
+          !menu.contains(event.target as Node) &&
+          !toggle.contains(event.target as Node)
+        )
+          close();
+      });
+      menu.querySelectorAll("a").forEach((link) =>
+        link.addEventListener("click", (event) => {
+          const url = new URL(link.href);
+          close();
+          if (url.pathname === location.pathname && url.hash) {
+            event.preventDefault();
+            document.querySelector(url.hash)?.scrollIntoView();
+            history.pushState(null, "", url.hash);
+          }
+        }),
+      );
+    </script>
   </body>
 </html>

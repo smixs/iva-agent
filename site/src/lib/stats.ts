@@ -13,24 +13,42 @@ export async function getStats() {
       if (!response.ok) throw new Error(`GitHub ${response.status}`);
       return response;
     };
-    const [repo, releases, contributors] = await Promise.all([
+    const [repo, contributors] = await Promise.all([
       get(""),
-      get("/releases?per_page=1"),
       get("/contributors?per_page=1&anon=1"),
     ]);
-    const count = async (response: Response) => {
-      const last = response.headers
-        .get("link")
-        ?.match(/[?&]page=(\d+)>; rel="last"/);
-      return last ? Number(last[1]) : (await response.json()).length;
+    let releases = 0,
+      page = 1,
+      hasNext = true;
+    while (hasNext) {
+      const response = await get(`/releases?per_page=100&page=${page}`);
+      const entries = (await response.json()) as { tag_name: string }[];
+      releases += entries.filter((release) =>
+        release.tag_name.startsWith("v"),
+      ).length;
+      hasNext = Boolean(response.headers.get("link")?.includes('rel="next"'));
+      page++;
+    }
+    const last = contributors.headers
+      .get("link")
+      ?.match(/[?&]page=(\d+)>; rel="last"/);
+    const result = {
+      stars: (await repo.json()).stargazers_count as number,
+      releases,
+      contributors: last
+        ? Number(last[1])
+        : ((await contributors.json()).length as number),
     };
-    return {
-      stars: (await repo.json()).stargazers_count,
-      releases: await count(releases),
-      contributors: await count(contributors),
-    };
+    if (!Object.values(result).every(Number.isFinite))
+      throw new Error("Invalid GitHub stats");
+    console.log(
+      `[stats] ${result.stars} stars; ${releases} Iva releases (v* only); ${result.contributors} contributors`,
+    );
+    return result;
   } catch {
-    console.log("[stats] GitHub unavailable; using checked-in stats.json");
+    console.log(
+      "[stats] GitHub unavailable; using stats.json: 265 stars, 70 releases, 11 contributors",
+    );
     return fallback;
   }
 }

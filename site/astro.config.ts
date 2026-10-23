@@ -16,6 +16,7 @@ export default defineConfig({
   markdown: { processor: unified({ remarkPlugins: [docLinks] }) },
   integrations: [
     sitemap({
+      filter: (page) => !page.includes("404"),
       serialize(item) {
         const p = new URL(item.url).pathname;
         let source = "src/components/Home.astro";
