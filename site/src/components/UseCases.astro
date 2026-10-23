@@ -3,8 +3,8 @@ import usecases from "../data/usecases.json";
 import type { Lang } from "../lib/copy";
 const { lang, title } = Astro.props as { lang: Lang; title: string };
 
-// Glitch squares live only in the picture's outer corners, which the elliptical mask
-// leaves empty, so they never touch the scene or the text. They flash for 300 ms when
+// Glitch squares live only in the picture's outer corners, which the art leaves
+// pure white, so they never touch the scene or the text. They flash for 300 ms when
 // the row enters and on hover, and are invisible at rest. [left %, top %, size px].
 const CORNER: [number, number, number][] = [
   [3, 6, 7], [9, 3, 5], [2, 15, 5], [4, 88, 6], [11, 95, 5], [2, 79, 8],
@@ -67,12 +67,6 @@ const pixelsFor = (index: number) =>
   .case-art { min-width: 0; aspect-ratio: 4 / 3; }
   .case-motion { position: relative; transform: translate3d(0, var(--case-y, 0px), 0); will-change: transform; }
   .case-picture, .case-picture img { display: block; width: 100%; height: auto; }
-  /* Generated art is near-white, not white, at its edges; a soft elliptical mask
-     removes the faint rectangle so each picture melts into the page. */
-  .case-picture img {
-    -webkit-mask-image: radial-gradient(closest-side, #000 80%, transparent 100%);
-    mask-image: radial-gradient(closest-side, #000 80%, transparent 100%);
-  }
 
   .case-copy { min-width: 0; max-width: 34ch; }
   .case-copy h3 {

@@ -5,49 +5,49 @@
         "id": "morning",
         "title": "Утром день уже расписан",
         "text": "План дня приходит сам, черновики готовы.",
-        "alt": "Человек у окна с кофе и телефоном"
+        "alt": "Женщина у окна с чаем смотрит в телефон"
       },
       {
         "id": "voice",
         "title": "Наговорили, и задачи записаны",
         "text": "Голосовое на ходу становится задачами со сроками.",
-        "alt": "Пассажир такси записывает голосовое"
+        "alt": "Мужчина в такси надиктовывает голосовое"
       },
       {
         "id": "memory",
         "title": "Помнит договорённости месяцами",
         "text": "Ответит, что вы решили, с датой и деталями.",
-        "alt": "Коллеги за столиком кафе, женщина сверяется с телефоном"
+        "alt": "Двое коллег за столиком кафе сверяются с телефоном"
       },
       {
         "id": "birthday",
         "title": "Ни одного забытого дня рождения",
         "text": "Скажите один раз, Ива напомнит в нужный день.",
-        "alt": "Отец получает подарок от дочери"
+        "alt": "Дочь дарит отцу подарок"
       },
       {
         "id": "invoice",
         "title": "Счёт одной фразой",
         "text": "Напишите часы и ставку, получите PDF.",
-        "alt": "Фрилансер за ноутбуком"
+        "alt": "Женщина работает за ноутбуком"
       },
       {
         "id": "goal",
         "title": "Доводит дело до конца сама",
         "text": "Поставьте цель, Ива напишет, проверит и доложит.",
-        "alt": "Человек отмечает завершённые шаги в блокноте"
+        "alt": "Мужчина отмечает шаги в блокноте у ноутбука"
       },
       {
         "id": "mail",
         "title": "Важная почта одним взглядом",
         "text": "Кто ждёт ответа, а что можно не читать.",
-        "alt": "Человек проверяет почту между встречами"
+        "alt": "Женщина в костюме на ходу читает почту в телефоне"
       },
       {
         "id": "family",
         "title": "Своя Ива у каждого в семье",
         "text": "У каждого свой помощник и свои напоминания.",
-        "alt": "Мама, сын-подросток и бабушка на кухне"
+        "alt": "Мама, сын и бабушка за столом, у каждого свой телефон"
       }
     ]
   },
@@ -57,49 +57,49 @@
         "id": "morning",
         "title": "Your day, planned by morning",
         "text": "Your plan arrives on its own, drafts ready.",
-        "alt": "A person by the window with coffee and a phone"
+        "alt": "A woman by the window with tea, looking at her phone"
       },
       {
         "id": "voice",
         "title": "Say it, and it's a task",
         "text": "A voice note on the go becomes tasks with deadlines.",
-        "alt": "A taxi passenger recording a voice note"
+        "alt": "A man in a taxi recording a voice note"
       },
       {
         "id": "memory",
         "title": "Agreements, remembered for months",
         "text": "Ask what you decided and get the date and details.",
-        "alt": "Colleagues at a café table, the woman checking her phone"
+        "alt": "Two colleagues at a café table checking a phone"
       },
       {
         "id": "birthday",
         "title": "Never miss a birthday",
         "text": "Say it once, and Iva reminds you on the day.",
-        "alt": "A father receiving a gift from his daughter"
+        "alt": "A daughter giving her father a gift"
       },
       {
         "id": "invoice",
         "title": "An invoice in one message",
         "text": "Send the hours and rate, get a PDF.",
-        "alt": "A freelancer working at a laptop"
+        "alt": "A woman working at a laptop"
       },
       {
         "id": "goal",
         "title": "She sees it through herself",
         "text": "Set a goal, and Iva writes, follows up and reports back.",
-        "alt": "A person checking off completed steps in a notebook"
+        "alt": "A man checking off steps in a notebook by his laptop"
       },
       {
         "id": "mail",
         "title": "Important mail at a glance",
         "text": "Who is waiting for a reply, and what can wait.",
-        "alt": "A person checking email between meetings"
+        "alt": "A woman in a suit reading mail on her phone on the go"
       },
       {
         "id": "family",
         "title": "An Iva for everyone in the family",
         "text": "Everyone gets their own assistant and reminders.",
-        "alt": "A mother, her teenage son and a grandmother in the kitchen"
+        "alt": "A mother, her son and a grandmother at the table, each with a phone"
       }
     ]
   }
