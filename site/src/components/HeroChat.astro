@@ -1,83 +1,200 @@
 ---
+// The hero conversation, rebuilt from the demo film's Chat.tsx (header capsules, wallpaper,
+// rich card, bubbles with tails, outgoing voice, «Думаю…» draft, composer). Messages arrive
+// one by one when the phone scrolls into view; without JS or with reduced motion the
+// finished conversation is shown as is.
 import Phone from "./Phone.astro";
-import TelegramFrame from "./TelegramFrame.astro";
 import { extras } from "../data/home-extras";
-const { lang = "en" } = Astro.props;
-const ru = lang === "ru";
+import type { Lang } from "../lib/copy";
+const { lang = "en" } = Astro.props as { lang?: Lang };
+const c = extras[lang].chat;
+// mulberry32 with the film's seed, so the voice wave matches the film bar for bar.
+let seed = 704;
+const rnd = () => {
+  seed = (seed + 0x6d2b79f5) | 0;
+  let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+  t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+};
+const bars = 36;
+const wave = Array.from({ length: bars }, (_, i) => {
+  const env = Math.pow(Math.sin((Math.PI * (i + 0.5)) / bars), 0.55);
+  return Math.max(2.2, (0.16 + 0.84 * env * (0.3 + 0.7 * rnd())) * 20);
+});
+const tail =
+  "M0 -16.5C0 -7.5 -1.6 -2.6 -6.4 -0.35C-6.9 -0.1 -6.75 0.25 -6.25 0.3C-2.6 0.75 1.6 -0.1 4.6 -2.2L4.6 0L0 0Z";
+const checks = "M1 5.4 4 8.4 10.2 1.6M6.6 8.1 7 8.4 13.2 1.6";
 ---
 
-<Phone>
-  <TelegramFrame lang={lang}>
-    <div class="telegram-date">{ru ? "Сегодня" : "Today"}</div>
-    <div class="telegram-bubble telegram-in" data-chat-step="brief">
-      <strong>{ru ? "☀️ Доброе утро!" : "☀️ Good morning!"}</strong>
-      <p>
-        {ru
-          ? "Сегодня созвон с Анной в 11:00, счёт поставщику до 18:00. Анна просила смету, я подготовила черновик."
-          : "A call with Anna at 11:00, a supplier invoice by 18:00. Anna asked for a quote. I prepared a draft."}
-      </p>
-      <span class="telegram-time">08:30</span>
-    </div>
-    <div
-      class="telegram-bubble telegram-out telegram-voice"
-      data-chat-step="voice"
-    >
-      <span class="voice-control" aria-hidden="true">
-        <svg width="15" height="18" viewBox="0 0 15 18">
-          <path d="M2 1 14 9 2 17Z" fill="currentColor" />
-        </svg>
-      </span>
-      <div class="voice-track">
-        <div class="telegram-wave" aria-hidden="true">
-          {Array.from({ length: 36 }, (_, i) => (
-            <i
-              style={`--bar:${6 + Math.round(21 * Math.abs(Math.sin(i * 1.7) * Math.cos(i * 0.6)))}px;--delay:${-i * 0.09}s`}
-            />
-          ))}
-        </div>
-        <span class="voice-duration">0:23</span>
+<Phone time={c.voice.time.replace(/^0/, "")}>
+  <div class="tg" data-chat role="img" aria-label={c.label}>
+    <img
+      class="tg-wall"
+      src="/media/tg-wall.webp"
+      alt=""
+      width="402"
+      height="858"
+      decoding="async"
+      aria-hidden="true"
+    />
+    <div class="tg-list" data-tg-content aria-hidden="true">
+      <div class="tg-step is-static">
+        <div class="tg-date">{c.today}</div>
       </div>
-      <span class="telegram-time">
-        09:12 <span>✓✓</span>
+      <div class="tg-step" data-step="1">
+        <div class="tg-slot">
+        <div class="tg-card">
+          <div class="tg-h1">{c.brief.title}</div>
+          <div class="tg-p">{c.brief.intro}</div>
+          {
+            c.brief.items.map(([emoji, text]) => (
+              <div class="tg-item">
+                <span>{emoji}</span>
+                <span>{text}</span>
+              </div>
+            ))
+          }
+          <div class="tg-time is-block">{c.brief.time}</div>
+        </div>
+        </div>
+      </div>
+      <div class="tg-step" data-step="2">
+        <div class="tg-slot">
+        <div class="tg-in">
+          <svg class="tg-tail" viewBox="-7 -17 14 17"><path d={tail}></path></svg>
+          <span>{c.birthday.text}</span>
+          <span class="tg-time">{c.birthday.time}</span>
+        </div>
+        </div>
+      </div>
+      <div class="tg-step" data-step="3">
+        <div class="tg-slot">
+        <div class="tg-voice">
+          <svg class="tg-tail" viewBox="-7 -17 14 17"><path d={tail}></path></svg>
+          <span class="tg-play">
+            <svg viewBox="0 0 16 18"
+              ><path
+                d="M2 2.2C2 1.1 3.2.5 4.1 1.1l10 6.6c.8.6.8 1.8 0 2.4l-10 6.6C3.2 17.3 2 16.7 2 15.6z"
+              ></path></svg
+            >
+          </span>
+          <span class="tg-voice-body">
+            <svg class="tg-wave" viewBox={`0 0 ${bars * 3.7} 20`}>
+              {
+                wave.map((h, i) => (
+                  <rect
+                    x={(i * 3.7).toFixed(2)}
+                    y={(20 - h).toFixed(2)}
+                    width="2.2"
+                    height={h.toFixed(2)}
+                    rx="1.1"
+                  />
+                ))
+              }
+            </svg>
+            <span class="tg-voice-meta">
+              <span>{c.voice.duration}</span>
+              <span class="tg-out-time">
+                {c.voice.time}
+                <svg viewBox="0 0 17 10"><path d={checks}></path></svg>
+              </span>
+            </span>
+          </span>
+        </div>
+        </div>
+      </div>
+      <div class="tg-step" data-step="4">
+        <div class="tg-slot">
+        <div class="tg-thinking">{c.thinking}</div>
+        </div>
+      </div>
+      <div class="tg-step" data-step="5">
+        <div class="tg-slot">
+        <div class="tg-in">
+          <svg class="tg-tail" viewBox="-7 -17 14 17"><path d={tail}></path></svg>
+          <span>{c.reply.text}</span>
+          <span class="tg-time">{c.reply.time}</span>
+        </div>
+        </div>
+      </div>
+    </div>
+    <div class="tg-edge-top" aria-hidden="true"></div>
+    <div class="tg-edge-bottom" aria-hidden="true"></div>
+    <div class="tg-head" aria-hidden="true">
+      <span class="tg-glass tg-back">
+        <svg viewBox="0 0 24 24"><path d="M15 4.5 7.5 12 15 19.5"></path></svg>
+        <b>3</b>
+      </span>
+      <span class="tg-glass tg-peer">
+        <strong>{c.title}</strong>
+        <span class="tg-sub">
+          <span class="tg-bot">{c.bot}</span>
+          <span class="tg-typing"><i></i><i></i><i></i>{c.typing}</span>
+        </span>
+      </span>
+      <span class="tg-glass tg-avatar">
+        <span
+          ><img
+            src="/brand/mark.svg"
+            alt=""
+            width="40"
+            height="40"
+            decoding="async"
+          /></span
+        >
       </span>
     </div>
-    <div class="telegram-bubble telegram-in" data-chat-step="tasks">
-      <p>{ru ? "Записала 3 задачи:" : "Saved 3 tasks:"}</p>
-      <ul>
-        <li>{ru ? "смета для Анны, к 11:00" : "quote for Anna, by 11:00"}</li>
-        <li>{ru ? "оплатить хостинг, пятница" : "pay for hosting, Friday"}</li>
-        <li>{ru ? "купить корм коту" : "buy cat food"}</li>
-      </ul>
-      <p>
-        {ru
-          ? "Напомню про созвон за 15 минут."
-          : "I'll remind you 15 minutes before the call."}
-      </p>
-      <span class="telegram-time">09:12</span>
-    </div>
-    <div class="telegram-actions" data-chat-step="buttons">
-      <span>{ru ? "Открыть задачи" : "Open tasks"}</span>
-      <span>{ru ? "Перенести" : "Reschedule"}</span>
-    </div>
-    <div class="telegram-bubble telegram-out" data-chat-step="question">
-      {ru
-        ? "Что мы решили с Анной по срокам в прошлый раз?"
-        : "What did we agree with Anna about the deadline last time?"}
-      <span class="telegram-time">
-        09:14 <span>✓✓</span>
+    <div class="tg-compose" aria-hidden="true">
+      <span class="tg-menu">
+        <svg viewBox="0 0 17 17"
+          ><path d="M3.5 5h10M3.5 8.5h10M3.5 12h10"></path></svg
+        >
+      </span>
+      <span class="tg-glass tg-clip">
+        <svg viewBox="0 0 24 24"
+          ><path
+            d="M20 11.2 12.4 18.8a5 5 0 0 1-7.1-7.1l8-8a3.4 3.4 0 0 1 4.8 4.8l-8 8a1.7 1.7 0 0 1-2.4-2.4l7.3-7.3"
+          ></path></svg
+        >
+      </span>
+      <span class="tg-glass tg-field">
+        <span>{c.input}</span>
+        <svg viewBox="0 0 24 24"
+          ><path d="M12 20.5A8.5 8.5 0 1 1 20.5 12"></path><path
+            d="M20.5 12c-4.6 0-8.5 3.8-8.5 8.5"></path></svg
+        >
+      </span>
+      <span class="tg-glass tg-mic">
+        <svg viewBox="0 0 24 24"
+          ><path d="M9 6a3 3 0 0 1 6 0v5.5a3 3 0 0 1-6 0z"></path><path
+            d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3"></path></svg
+        >
       </span>
     </div>
-    <div class="telegram-bubble telegram-in" data-chat-step="answer">
-      {ru
-        ? "14 октября договорились: первая версия к 1 ноября, правки неделю. Сохранила в карточке «Анна, проект Аврора»."
-        : "On October 14: first version by November 1, then a week for revisions. Saved in “Anna, Aurora project”."}
-      <span class="telegram-time">09:14</span>
-    </div>
-    <div class="telegram-memory" data-chat-step="memory">
-      <span>{extras[ru ? "ru" : "en"].memoryLabel}</span>
-      {ru
-        ? "у «Авроры» первая версия к 1 ноября"
-        : "Aurora's first version is due November 1"}
-    </div>
-  </TelegramFrame>
+  </div>
 </Phone>
+
+<script>
+  // The film's order (STYLE.md §10): each step arrives on the "arrive" spring; the header
+  // shows «печатает» while the draft «Думаю…» is up, then the reply replaces it.
+  const chat = document.querySelector<HTMLElement>("[data-chat]");
+  if (chat && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    const step = (n: number) =>
+      chat.querySelector<HTMLElement>(`[data-step="${n}"]`)!;
+    chat.classList.add("is-playing");
+    const plan: [number, () => void][] = [
+      [450, () => step(1).classList.add("is-in")],
+      [1900, () => step(2).classList.add("is-in")],
+      [3300, () => step(3).classList.add("is-in")],
+      [4300, () => (chat.classList.add("is-typing"), step(4).classList.add("is-in"))],
+      [5800, () => step(4).classList.remove("is-in")],
+      [5900, () => (step(5).classList.add("is-in"), chat.classList.remove("is-typing"))],
+    ];
+    const io = new IntersectionObserver((entries) => {
+      if (!entries[0].isIntersecting) return;
+      io.disconnect();
+      plan.forEach(([at, fn]) => setTimeout(fn, at));
+    });
+    io.observe(chat);
+  }
+</script>

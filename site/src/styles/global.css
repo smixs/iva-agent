@@ -1,4 +1,26 @@
 :root {
+  /* Springs of the demo film (tokens.ts SPRING), sampled into linear(). */
+  --spring-arrive: linear(
+    0, 0.028, 0.097, 0.192, 0.301, 0.415, 0.527, 0.632, 0.727, 0.809, 0.879,
+    0.936, 0.98, 1.014, 1.037, 1.053, 1.062, 1.065, 1.064, 1.06, 1.054, 1.048,
+    1.04, 1.033, 1.026, 1.02, 1.014, 1.009, 1.005, 1.002, 1, 0.998, 0.997,
+    0.996, 0.996, 0.997, 0.998, 0.999, 1
+  );
+  --spring-release: linear(
+    0, 0.084, 0.283, 0.537, 0.793, 1.013, 1.174, 1.266, 1.295, 1.272, 1.214,
+    1.14, 1.064, 0.999, 0.951, 0.922, 0.913, 0.919, 0.936, 0.958, 0.98, 1,
+    1.014, 1.023, 1.026, 1.024, 1.019, 1.013, 1.006, 1, 0.996, 0.993, 0.993,
+    0.996, 1
+  );
+  --spring-land: linear(
+    0, 0.03, 0.216, 0.489, 0.768, 0.999, 1.153, 1.227, 1.233, 1.193, 1.129,
+    1.062, 1.006, 0.967, 0.947, 0.944, 0.953, 0.967, 0.983, 0.997, 1.007,
+    1.012, 1.013, 1.008, 1.001, 0.997, 1
+  );
+  --spring-settle: linear(
+    0, 0.065, 0.198, 0.35, 0.493, 0.617, 0.718, 0.797, 0.857, 0.901, 0.933,
+    0.955, 0.971, 0.981, 0.988, 0.993, 0.996, 0.998, 1
+  );
   --ink: #1a2327;
   --muted: #5b6770;
   --panel: #f4f6f8;
@@ -210,72 +232,6 @@ button {
 .hero-copy {
   padding: 25px 0;
 }
-.hero-visual {
-  position: relative;
-  padding: 0 30px;
-  min-width: 0;
-}
-.hero-visual > .mosaic {
-  position: absolute;
-  inset: 5% -10% 0;
-  opacity: 0.58;
-  z-index: 0;
-}
-.hero-visual > .tg {
-  position: relative;
-  z-index: 1;
-  max-width: 370px;
-  margin: 0 auto;
-}
-.tg {
-  border: 1px solid var(--line);
-  border-radius: 20px;
-  overflow: hidden;
-  background: #eaf0f4;
-  font-size: 13px;
-  line-height: 1.38;
-  text-align: left;
-  color: var(--ink);
-}
-.tg-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  background: #f4f6f8;
-  padding: 13px 16px;
-}
-.tg-head img {
-  background: white;
-  border-radius: 50%;
-  padding: 4px;
-}
-.tg-head strong {
-  font-size: 15px;
-}
-.tg-head small {
-  display: block;
-  color: var(--muted);
-  font-size: 11px;
-}
-.tg-dots {
-  margin-left: auto;
-  font-weight: bold;
-  font-size: 24px;
-}
-.tg-body {
-  padding: 12px 14px 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 9px;
-}
-.tg-day {
-  color: var(--muted);
-  font-size: 10px;
-  align-self: center;
-  padding: 2px 9px;
-  border-radius: 20px;
-  background: #dce5eb;
-}
 .msg {
   padding: 10px 12px;
   border-radius: 12px;
@@ -313,26 +269,6 @@ button {
   border-radius: 3px;
   padding: 1px 4px;
 }
-.voice {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  flex-wrap: wrap;
-}
-.voice > span {
-  font-size: 18px;
-  background: var(--blue);
-  color: white;
-  border-radius: 50%;
-  width: 32px;
-  height: 32px;
-  text-align: center;
-  padding-top: 4px;
-}
-.voice > small {
-  width: 100%;
-  margin-top: -5px;
-}
 .wave {
   display: flex;
   gap: 2px;
@@ -343,31 +279,6 @@ button {
   width: 3px;
   background: var(--blue);
   border-radius: 2px;
-}
-.voice div small {
-  text-align: left;
-  font-size: 10px;
-}
-.tg-keyboard {
-  display: flex;
-  gap: 5px;
-  font-size: 11px;
-  color: var(--link);
-  font-weight: 600;
-}
-.tg-keyboard span {
-  background: white;
-  border-radius: 6px;
-  padding: 7px 10px;
-  flex: 1;
-  text-align: center;
-}
-.tg-input {
-  display: flex;
-  justify-content: space-between;
-  padding: 12px 18px;
-  background: white;
-  color: var(--muted);
 }
 
 .scenarios {
@@ -387,21 +298,6 @@ button {
   display: block;
   font-size: 19px;
   margin-bottom: 6px;
-}
-.tg-mini {
-  border-radius: 14px;
-  font-size: 12px;
-  min-height: 238px;
-}
-.tg-mini .tg-head {
-  padding: 10px 13px;
-}
-.tg-mini .tg-head img {
-  width: 30px;
-  height: 30px;
-}
-.tg-mini .tg-body {
-  gap: 10px;
 }
 .text-link {
   font-weight: 600;
@@ -472,11 +368,6 @@ button {
   position: absolute;
   inset: 0;
   opacity: 0.5;
-}
-.notice-visual > .tg {
-  position: relative;
-  max-width: 350px;
-  margin: auto;
 }
 .features {
   display: grid;
@@ -839,9 +730,6 @@ button {
     gap: 25px;
     padding-top: 40px;
   }
-  .hero-visual {
-    padding: 0 5px;
-  }
   .hero .actions {
     gap: 10px;
   }
@@ -915,16 +803,6 @@ button {
   .hero .button {
     font-size: 15px;
   }
-  .hero-visual {
-    padding: 0 16px;
-  }
-  .hero-visual > .tg {
-    max-width: 350px;
-  }
-  .hero-visual > .mosaic {
-    inset: 0 -5%;
-    opacity: 0.5;
-  }
   .split,
   .install-layout,
   .faq {
@@ -939,13 +817,6 @@ button {
     grid-template-columns: 1fr;
     gap: 30px;
     margin-top: 30px;
-  }
-  .tg-mini {
-    min-height: 0;
-    font-size: 13px;
-  }
-  .tg-mini .tg-body {
-    min-height: 145px;
   }
   .scenario > p {
     font-size: 16px;
@@ -1089,23 +960,6 @@ button {
 }
 
 /* White paper stays clear beneath every heading and paragraph. */
-.hero-visual {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 18px;
-  padding: 0 20px;
-}
-.hero-visual > .mosaic {
-  position: relative;
-  inset: auto;
-  opacity: 1;
-  max-height: 170px;
-  aspect-ratio: 2.5;
-  order: 2;
-}
-.hero-visual > .mosaic img {
-  object-fit: contain;
-}
 .notice-visual {
   display: grid;
   gap: 20px;
@@ -1144,14 +998,6 @@ button {
   max-width: 680px;
 }
 @media (max-width: 760px) {
-  .hero-visual {
-    padding: 0 8px;
-  }
-  .hero-visual > .mosaic {
-    inset: auto;
-    opacity: 1;
-    height: 150px;
-  }
   .notice-visual > .mosaic {
     height: 140px;
   }
@@ -1162,10 +1008,6 @@ button {
   width: 100%;
 }
 @media (max-width: 760px) {
-  .hero-visual > .mosaic {
-    height: auto;
-    aspect-ratio: 2.5;
-  }
   .notice-visual > .mosaic {
     height: auto;
     aspect-ratio: 2.5;
@@ -1396,7 +1238,6 @@ summary:focus-visible {
 }
 
 .mosaic,
-.hero-visual > .mosaic,
 .notice-visual > .mosaic {
   position: relative;
   inset: auto;
@@ -1421,14 +1262,6 @@ summary:focus-visible {
   width: 100%;
   height: 100%;
 }
-.hero-visual {
-  grid-template-columns: 1fr;
-  gap: 20px;
-}
-.hero-visual > .mosaic {
-  max-width: 100%;
-  order: 2;
-}
 .notice-visual {
   display: grid;
   grid-template-columns: 1fr;
@@ -1452,7 +1285,6 @@ summary:focus-visible {
 }
 @media (max-width: 768px) {
   .mosaic,
-  .hero-visual > .mosaic,
   .notice-visual > .mosaic {
     aspect-ratio: var(--mobile-ratio);
   }
@@ -1485,331 +1317,12 @@ summary:focus-visible {
   max-width: 620px;
   font-size: 20px;
 }
-.hero-visual {
-  display: block;
-  padding: 0;
-  min-width: 0;
-}
-.telegram-window {
-  --tg-blue: #0589ff;
-  --tg-out: #e1fec7;
-  --tg-meta: #4fa84c;
-  position: relative;
-  isolation: isolate;
-  width: 100%;
-  max-width: 410px;
-  height: 568px;
-  margin: 0 auto;
-  border: 1px solid #ced6d5;
-  border-radius: 24px;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  background: url("/media/telegram/bg-default.png") center/100% 100%;
-  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
-  font-size: 15px;
-  line-height: 1.32;
-  letter-spacing: 0;
-  color: #111b21;
-}
-.telegram-window:before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  background: url("/media/telegram/pattern.svg") center/440px auto repeat;
-  opacity: 0.5;
-  mix-blend-mode: overlay;
-}
-.telegram-toolbar {
-  height: 69px;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  padding: 10px 16px;
-  gap: 12px;
-  background: rgba(250, 252, 248, 0.96);
-  border-bottom: 1px solid rgba(70, 100, 80, 0.12);
-  position: relative;
-  z-index: 1;
-}
-.telegram-back {
-  color: var(--tg-blue);
-  font-size: 40px;
-  font-weight: 300;
-  line-height: 1;
-}
-.telegram-peer {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  text-align: center;
-  gap: 2px;
-}
-.telegram-peer strong {
-  font-size: 17px;
-  line-height: 1.2;
-}
-.telegram-peer > span {
-  font-size: 12px;
-  color: #647367;
-  min-height: 16px;
-}
-.is-typing .telegram-peer > span {
-  color: var(--tg-blue);
-}
-.telegram-toolbar img {
-  padding: 6px;
-  background: #fff;
-  border-radius: 50%;
-  width: 42px;
-  height: 42px;
-  object-fit: contain;
-}
-.telegram-history {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
-  scrollbar-width: none;
-  padding: 14px 12px 10px;
-  overscroll-behavior: contain;
-}
-.telegram-history::-webkit-scrollbar {
-  display: none;
-}
-.telegram-messages {
-  display: flex;
-  flex-direction: column;
-  gap: 9px;
-  min-height: 100%;
-  justify-content: flex-end;
-}
-.telegram-date {
-  align-self: center;
-  background: rgba(76, 111, 78, 0.66);
-  color: white;
-  font-size: 11px;
-  border-radius: 20px;
-  padding: 3px 10px;
-  margin: 0 0 6px;
-}
-.telegram-bubble {
-  position: relative;
-  max-width: 92%;
-  border-radius: 15px;
-  padding: 10px 12px 6px;
-  flex-shrink: 0;
-}
-.telegram-bubble p {
-  font-size: inherit;
-  margin: 5px 0;
-}
-.telegram-bubble ul {
-  font-size: inherit;
-  padding-left: 19px;
-  margin: 7px 0;
-}
-.telegram-bubble li {
-  margin: 3px 0;
-}
-.telegram-bubble strong {
-  font-size: 16px;
-  font-weight: 600;
-}
-.telegram-in {
-  align-self: flex-start;
-  background: white;
-  border-bottom-left-radius: 4px;
-}
-.telegram-out {
-  align-self: flex-end;
-  background: var(--tg-out);
-  border-bottom-right-radius: 4px;
-}
-.telegram-time {
-  display: block;
-  text-align: right;
-  white-space: nowrap;
-  font-size: 10px;
-  color: #7b8980;
-  line-height: 14px;
-  margin-top: 3px;
-}
-.telegram-out .telegram-time {
-  color: var(--tg-meta);
-}
-.telegram-time > span {
-  font-size: 12px;
-  letter-spacing: -3px;
-  margin-left: 3px;
-}
-.telegram-voice {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 234px;
-  flex-wrap: wrap;
-  padding: 11px 12px 5px;
-}
-.voice-control {
-  color: white;
-  width: 38px;
-  height: 38px;
-  background: var(--tg-blue);
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-.voice-control svg {
-  margin-left: 3px;
-}
-.voice-track {
-  flex: 1;
-  min-width: 0;
-}
-.telegram-wave {
-  height: 30px;
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  overflow: hidden;
-}
-.telegram-wave i {
-  display: block;
-  flex: 1;
-  min-width: 2px;
-  max-width: 3px;
-  background: var(--tg-blue);
-  height: var(--bar);
-  border-radius: 2px;
-  transform-origin: center;
-}
-.voice-duration {
-  display: block;
-  color: var(--tg-meta);
-  font-size: 11px;
-  margin-top: 2px;
-}
-.telegram-voice > .telegram-time {
-  width: 100%;
-  margin-top: -6px;
-}
-.telegram-actions {
-  display: flex;
-  align-self: flex-start;
-  gap: 6px;
-  width: 92%;
-}
-.telegram-actions span {
-  flex: 1;
-  color: var(--tg-blue);
-  background: rgba(255, 255, 255, 0.94);
-  border-radius: 8px;
-  padding: 9px 6px;
-  text-align: center;
-  font-size: 12px;
-  font-weight: 600;
-}
-.telegram-compose {
-  height: 52px;
-  flex-shrink: 0;
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  padding: 10px 15px;
-  background: rgba(250, 252, 248, 0.97);
-  border-top: 1px solid rgba(70, 100, 80, 0.12);
-  color: #6e7e72;
-}
-.telegram-compose > span {
-  flex: 1;
-  color: #849087;
-  font-size: 15px;
-  border-radius: 18px;
-  background: #fff;
-  padding: 6px 12px;
-  border: 1px solid #e1e8df;
-}
-.telegram-thinking {
-  display: flex;
-  gap: 4px;
-  align-items: center;
-  min-height: 33px;
-  padding: 10px 14px;
-}
-.telegram-thinking i {
-  width: 5px;
-  height: 5px;
-  background: #8b9c8e;
-  border-radius: 50%;
-  animation: typing-dot 1s infinite;
-}
-.telegram-thinking i:nth-child(2) {
-  animation-delay: 0.15s;
-}
-.telegram-thinking i:nth-child(3) {
-  animation-delay: 0.3s;
-}
-.bubble-arrive {
-  animation: bubble-arrive 0.3s cubic-bezier(0.2, 0.7, 0.2, 1) both;
-}
-.is-playing .voice-playing .telegram-wave i {
-  animation: voice-wave 0.6s var(--delay) ease-in-out infinite alternate;
-}
-.is-playing [data-chat-step="tasks"].bubble-arrive li {
-  animation: bubble-arrive 0.3s both;
-}
-.is-playing [data-chat-step="tasks"].bubble-arrive li:nth-child(2) {
-  animation-delay: 0.1s;
-}
-.is-playing [data-chat-step="tasks"].bubble-arrive li:nth-child(3) {
-  animation-delay: 0.2s;
-}
-@keyframes bubble-arrive {
-  from {
-    opacity: 0;
-    transform: translateY(12px) scale(0.98);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-@keyframes typing-dot {
-  0%,
-  70%,
-  100% {
-    opacity: 0.4;
-    transform: translateY(0);
-  }
-  35% {
-    opacity: 1;
-    transform: translateY(-3px);
-  }
-}
-@keyframes voice-wave {
-  from {
-    transform: scaleY(0.45);
-    opacity: 0.55;
-  }
-  to {
-    transform: scaleY(1);
-    opacity: 1;
-  }
-}
 @media (max-width: 1100px) and (min-width: 769px) {
   .hero {
     gap: 30px;
   }
   .hero h1 {
     font-size: 56px;
-  }
-  .telegram-window {
-    height: 550px;
-    font-size: 14px;
   }
   .hero .lead {
     font-size: 18px;
@@ -1834,42 +1347,11 @@ summary:focus-visible {
   .hero .lead {
     font-size: 18px;
   }
-  .hero-visual {
-    padding: 0;
-    width: 100%;
-  }
-  .telegram-window {
-    max-width: 390px;
-    height: 552px;
-    font-size: 14px;
-    border-radius: 22px;
-  }
-  .telegram-toolbar {
-    height: 62px;
-  }
-  .telegram-bubble {
-    max-width: 94%;
-  }
-  .telegram-wave {
-    gap: 2px;
-  }
-  .telegram-voice {
-    min-width: 230px;
-  }
   .hero .actions {
     gap: 10px;
   }
   .hero .button {
     font-size: 15px;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .telegram-window * {
-    animation: none !important;
-  }
-  .telegram-window [data-chat-step] {
-    opacity: 1;
-    transform: none;
   }
 }
 
@@ -1889,9 +1371,6 @@ summary:focus-visible {
 }
 @media (max-width: 768px) {
   .more-features ul { grid-template-columns: 1fr; gap: 14px; }
-}
-.telegram-window:not(.is-playing) .telegram-thinking i {
-  animation-play-state: paused;
 }
 .keep-words {
   white-space: nowrap;
@@ -1949,110 +1428,6 @@ summary:focus-visible {
 }
 
 /* Flat phone enclosure: the existing Telegram animation remains inside. */
-.hero-phone {
-  width: 304px;
-  max-width: 100%;
-  aspect-ratio: 9 / 19.5;
-  margin: 0 auto;
-  padding: 6px;
-  border: 1px solid #7f8b85;
-  border-radius: 42px;
-  background: #1a2327;
-  scroll-margin-top: 100px;
-}
-.hero-phone-screen {
-  height: 100%;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  border-radius: 35px;
-  background: #f8faf7;
-}
-.phone-status {
-  display: grid;
-  grid-template-columns: 1fr 88px 1fr;
-  align-items: center;
-  flex-shrink: 0;
-  height: 46px;
-  padding: 0 16px;
-  color: #111b21;
-  font-size: 12px;
-  font-weight: 600;
-}
-.phone-status > svg {
-  justify-self: end;
-}
-.phone-island {
-  position: relative;
-  width: 88px;
-  height: 25px;
-  border-radius: 20px;
-  background: #101714;
-}
-.phone-island:after {
-  content: "";
-  position: absolute;
-  right: 10px;
-  top: 10px;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: #344348;
-}
-.phone-home {
-  display: grid;
-  place-items: center;
-  height: 18px;
-  flex-shrink: 0;
-  background: #f8faf7;
-}
-.phone-home > span {
-  width: 88px;
-  height: 3px;
-  border-radius: 3px;
-  background: #1a2327;
-}
-.hero-phone .telegram-window {
-  width: 100%;
-  max-width: none;
-  min-height: 0;
-  height: auto;
-  flex: 1;
-  margin: 0;
-  border: 0;
-  border-radius: 0;
-  font-size: 14px;
-}
-.hero-phone .telegram-toolbar {
-  height: 58px;
-  padding: 8px 12px;
-}
-.hero-phone .telegram-toolbar img {
-  width: 36px;
-  height: 36px;
-}
-.hero-phone .telegram-peer strong {
-  font-size: 16px;
-}
-.hero-phone .telegram-history {
-  padding: 10px 9px;
-}
-.hero-phone .telegram-bubble {
-  max-width: 94%;
-}
-.hero-phone .telegram-compose {
-  height: 46px;
-  padding: 7px 10px;
-  gap: 8px;
-}
-.hero-phone .telegram-compose > span {
-  font-size: 14px;
-  padding: 5px 9px;
-}
-.hero-phone .telegram-compose > svg {
-  width: 18px;
-}
 @media (min-width: 769px) {
   .hero {
     grid-template-areas: "copy phone";
@@ -2060,46 +1435,10 @@ summary:focus-visible {
   .hero-copy {
     grid-area: copy;
   }
-  .hero-visual {
-    grid-area: phone;
-  }
-}
-@media (max-width: 768px) {
-  .hero-phone {
-    width: min(304px, calc((100svh - 150px) * 9 / 19.5));
-  }
 }
 
 /* Small additions to the shared Telegram stories, with no animation libraries. */
 /* Hidden variants still reserve the longest line, preventing text or hero shifts. */
-.telegram-activity {
-  position: relative;
-  z-index: 1;
-  padding: 7px 10px;
-  background: #fff;
-  border-top: 1px solid #e3e8ec;
-  color: #24669b;
-  font-size: 11px;
-  line-height: 1.4;
-  min-height: 31px;
-  flex-shrink: 0;
-}
-.telegram-memory {
-  position: relative;
-  align-self: flex-start;
-  max-width: 94%;
-  padding: 6px 9px;
-  border-radius: 8px;
-  background: #f0f7fc;
-  color: #245c86;
-  font-size: 11px;
-  line-height: 1.35;
-  flex-shrink: 0;
-}
-.telegram-memory > span {
-  font-weight: 600;
-}
-.telegram-window:not(.is-playing) .bubble-arrive { animation-play-state: paused; }
 /* Toast after copying: one line at the bottom, leaves by itself. */
 .toast {
   position: fixed;
@@ -2135,4 +1474,637 @@ summary:focus-visible {
   transition:
     opacity 180ms ease,
     transform 180ms ease;
+}
+/* ---------- Phone: demo film V6 (Phone.tsx, Chat.tsx), 1 pt = var(--pt) ----------
+   Body 434 x 890 pt (1 : 2.05), screen 402 x 858 pt. On phones the body is at most
+   280 px wide; on wide screens it fits the first screen under the header. */
+.hero-visual {
+  --pt: min(0.8px, calc((100svh - 220px) / 890));
+  display: flex;
+  justify-content: center;
+  min-width: 0;
+}
+@media (min-width: 769px) {
+  .hero {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+  }
+}
+@media (max-width: 768px) {
+  .hero {
+    display: flex;
+    flex-direction: column;
+  }
+  .hero-visual {
+    --pt: calc(min(280px, 100vw - 64px) / 434);
+  }
+}
+.phone {
+  position: relative;
+  z-index: 1;
+  flex: none;
+  width: calc(434 * var(--pt));
+  height: calc(890 * var(--pt));
+  border-radius: calc(73.3 * var(--pt));
+  background: linear-gradient(
+    90deg,
+    #7d958b 0%,
+    #3a4c45 1.6%,
+    #22302b 4%,
+    #2e3e38 30%,
+    #34463f 50%,
+    #2e3e38 70%,
+    #22302b 96%,
+    #3a4c45 98.4%,
+    #7d958b 100%
+  );
+  box-shadow:
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.16),
+    inset 0 1px 1.3px rgba(255, 255, 255, 0.22),
+    0 calc(15 * var(--pt)) calc(37 * var(--pt)) rgba(9, 34, 28, 0.3),
+    0 calc(2.7 * var(--pt)) calc(8 * var(--pt)) rgba(9, 34, 28, 0.18);
+}
+.phone-btn {
+  position: absolute;
+  left: calc(-2.3 * var(--pt));
+  top: calc(var(--top) * var(--pt));
+  width: calc(3.3 * var(--pt));
+  height: calc(var(--h) * var(--pt));
+  border-radius: calc(1.3 * var(--pt));
+  background: linear-gradient(90deg, #22302b, #4b5f57 50%, #22302b);
+}
+.phone-btn.is-right {
+  left: auto;
+  right: calc(-2.3 * var(--pt));
+}
+.phone-rim {
+  position: absolute;
+  inset: calc(4.67 * var(--pt));
+  border-radius: calc(68.7 * var(--pt));
+  background: #050706;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07);
+}
+.phone-screen {
+  position: absolute;
+  left: calc(11.33 * var(--pt));
+  top: calc(11.33 * var(--pt));
+  width: calc(402 * var(--pt));
+  height: calc(858 * var(--pt));
+  border-radius: calc(57.3 * var(--pt));
+  overflow: hidden;
+  background: #dfe6c9;
+  isolation: isolate;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", Inter,
+    "Helvetica Neue", Arial, sans-serif;
+  color: #17211d;
+}
+.phone-status {
+  position: absolute;
+  inset: 0 0 auto;
+  height: calc(54 * var(--pt));
+  z-index: 6;
+}
+.phone-time {
+  position: absolute;
+  left: calc(70 * var(--pt));
+  top: calc(33 * var(--pt));
+  transform: translate(-50%, -52%);
+  font-weight: 600;
+  font-size: calc(18 * var(--pt));
+  letter-spacing: calc(-0.2 * var(--pt));
+  font-variant-numeric: tabular-nums;
+}
+.phone-icons {
+  position: absolute;
+  right: calc(31 * var(--pt));
+  top: calc(33 * var(--pt));
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  gap: calc(6 * var(--pt));
+  fill: currentColor;
+}
+.i-signal {
+  width: calc(17.8 * var(--pt));
+  height: calc(11.5 * var(--pt));
+}
+.i-wifi {
+  width: calc(16.8 * var(--pt));
+  height: calc(12 * var(--pt));
+}
+.i-battery {
+  width: calc(27.3 * var(--pt));
+  height: calc(13 * var(--pt));
+}
+.phone-island {
+  position: absolute;
+  left: 50%;
+  top: calc(14 * var(--pt));
+  width: calc(124 * var(--pt));
+  height: calc(36 * var(--pt));
+  margin-left: calc(-62 * var(--pt));
+  border-radius: calc(18 * var(--pt));
+  background: #000;
+  z-index: 7;
+}
+.phone-island i {
+  position: absolute;
+  right: calc(11 * var(--pt));
+  top: calc(11.5 * var(--pt));
+  width: calc(13 * var(--pt));
+  height: calc(13 * var(--pt));
+  border-radius: 50%;
+  background: radial-gradient(
+    circle at 40% 38%,
+    #2b3550 0%,
+    #10131d 55%,
+    #05060a 100%
+  );
+}
+.phone-home {
+  position: absolute;
+  left: 50%;
+  bottom: calc(8 * var(--pt));
+  width: calc(134 * var(--pt));
+  height: calc(5 * var(--pt));
+  margin-left: calc(-67 * var(--pt));
+  border-radius: calc(3 * var(--pt));
+  background: #17211d;
+  z-index: 7;
+}
+
+/* Telegram chat (Chat.tsx). */
+.tg {
+  position: absolute;
+  inset: 0;
+  font-size: calc(17 * var(--pt));
+  line-height: calc(22.5 * var(--pt));
+  letter-spacing: calc(-0.15 * var(--pt));
+}
+.tg-wall {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.tg-list {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: calc(754 * var(--pt));
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  overflow: hidden;
+}
+.tg-step {
+  display: grid;
+  grid-template-rows: 1fr;
+  padding-inline: calc(12 * var(--pt));
+}
+.tg-step > * {
+  min-height: 0;
+}
+.tg-slot > * {
+  margin-top: calc(8 * var(--pt));
+}
+.tg-slot {
+  display: grid;
+  overflow: hidden;
+  padding-inline: calc(8 * var(--pt));
+  margin-inline: calc(-8 * var(--pt));
+}
+.tg-step[data-step="4"] {
+  display: none;
+}
+.tg-date {
+  justify-self: center;
+  margin: 0 0 calc(2 * var(--pt));
+  padding: calc(3 * var(--pt)) calc(10 * var(--pt));
+  border-radius: calc(12 * var(--pt));
+  background: rgba(23, 50, 42, 0.66);
+  color: #fff;
+  font-weight: 600;
+  font-size: calc(14 * var(--pt));
+  line-height: calc(18 * var(--pt));
+  letter-spacing: 0;
+}
+.tg-card {
+  background: #fff;
+  border-radius: calc(18 * var(--pt));
+  box-shadow: 0 calc(0.6 * var(--pt)) calc(1.2 * var(--pt))
+    rgba(23, 33, 29, 0.1);
+  padding: calc(12 * var(--pt)) calc(15 * var(--pt)) calc(7 * var(--pt));
+}
+.tg-h1 {
+  font-family: ui-serif, "New York", "Source Serif 4", Georgia, serif;
+  font-size: calc(23 * var(--pt));
+  line-height: calc(28 * var(--pt));
+  letter-spacing: calc(-0.2 * var(--pt));
+  margin: calc(1 * var(--pt)) 0 calc(5 * var(--pt));
+}
+.tg-p {
+  margin: calc(2 * var(--pt)) 0;
+}
+.tg-item {
+  display: flex;
+  gap: calc(8 * var(--pt));
+  margin: calc(5 * var(--pt)) 0;
+}
+.tg-item > span:first-child {
+  width: calc(22 * var(--pt));
+  flex: none;
+  text-align: center;
+}
+.tg-time {
+  float: right;
+  margin: calc(8 * var(--pt)) 0 calc(-4 * var(--pt)) calc(12 * var(--pt));
+  font-size: calc(12 * var(--pt));
+  line-height: calc(15 * var(--pt));
+  color: rgba(23, 33, 29, 0.64);
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+}
+.tg-time.is-block {
+  float: none;
+  margin: calc(4 * var(--pt)) 0 0;
+  text-align: right;
+}
+.tg-in,
+.tg-voice {
+  position: relative;
+  justify-self: start;
+  max-width: calc(330 * var(--pt));
+  background: #fff;
+  border-radius: calc(18 * var(--pt)) calc(18 * var(--pt))
+    calc(18 * var(--pt)) 0;
+  box-shadow: 0 calc(0.6 * var(--pt)) calc(1 * var(--pt))
+    rgba(23, 33, 29, 0.1);
+  padding: calc(8 * var(--pt)) calc(13 * var(--pt));
+}
+.tg-tail {
+  position: absolute;
+  left: calc(-7 * var(--pt));
+  bottom: 0;
+  width: calc(14 * var(--pt));
+  height: calc(17 * var(--pt));
+  overflow: visible;
+  fill: #fff;
+}
+.tg-voice {
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: calc(9 * var(--pt));
+  background: #e1fec7;
+  border-radius: calc(18 * var(--pt)) calc(18 * var(--pt)) 0
+    calc(18 * var(--pt));
+  padding: calc(7 * var(--pt)) calc(11 * var(--pt)) calc(6 * var(--pt))
+    calc(7 * var(--pt));
+}
+.tg-voice .tg-tail {
+  left: auto;
+  right: calc(-7 * var(--pt));
+  transform: scaleX(-1);
+  fill: #e1fec7;
+}
+.tg-play {
+  display: grid;
+  place-items: center;
+  width: calc(40 * var(--pt));
+  height: calc(40 * var(--pt));
+  border-radius: 50%;
+  background: #4fa84c;
+  flex: none;
+}
+.tg-play svg {
+  width: calc(16 * var(--pt));
+  height: calc(18 * var(--pt));
+  margin-left: calc(2 * var(--pt));
+  fill: #fff;
+}
+.tg-voice-body {
+  display: flex;
+  flex-direction: column;
+}
+.tg-wave {
+  width: calc(133.2 * var(--pt));
+  height: calc(20 * var(--pt));
+  fill: rgba(79, 168, 76, 0.6);
+}
+.tg-voice-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: calc(14 * var(--pt));
+  margin-top: calc(3 * var(--pt));
+  font-size: calc(12 * var(--pt));
+  line-height: calc(15 * var(--pt));
+  color: #4fa84c;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+}
+.tg-out-time {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(3 * var(--pt));
+}
+.tg-out-time svg {
+  width: calc(17 * var(--pt));
+  height: calc(10 * var(--pt));
+  fill: none;
+  stroke: #4fa84c;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.tg-thinking {
+  justify-self: start;
+  background: rgba(226, 225, 229, 0.98);
+  border-radius: calc(12 * var(--pt));
+  padding: calc(6 * var(--pt)) calc(12 * var(--pt));
+  font-size: calc(16 * var(--pt));
+  line-height: calc(21 * var(--pt));
+  color: rgba(23, 33, 29, 0.82);
+}
+.tg-edge-top {
+  position: absolute;
+  inset: 0 0 auto;
+  height: calc(140 * var(--pt));
+  backdrop-filter: blur(calc(22 * var(--pt))) saturate(1.2) brightness(0.96);
+  -webkit-backdrop-filter: blur(calc(22 * var(--pt))) saturate(1.2)
+    brightness(0.96);
+  background: linear-gradient(
+    180deg,
+    rgba(232, 242, 206, 0.98) 0%,
+    rgba(232, 242, 206, 0.97) 84%,
+    rgba(232, 242, 206, 0.85) 94%,
+    rgba(232, 242, 206, 0) 100%
+  );
+  mask-image: linear-gradient(180deg, #000 0%, #000 92%, transparent 100%);
+  -webkit-mask-image: linear-gradient(
+    180deg,
+    #000 0%,
+    #000 92%,
+    transparent 100%
+  );
+  z-index: 2;
+}
+.tg-edge-bottom {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(752 * var(--pt));
+  height: calc(120 * var(--pt));
+  backdrop-filter: blur(calc(5 * var(--pt)));
+  -webkit-backdrop-filter: blur(calc(5 * var(--pt)));
+  background: linear-gradient(
+    0deg,
+    rgba(236, 242, 236, 0.55) 0%,
+    rgba(236, 242, 236, 0.2) 50%,
+    rgba(236, 242, 236, 0) 100%
+  );
+  mask-image: linear-gradient(0deg, #000 0%, #000 60%, transparent 100%);
+  -webkit-mask-image: linear-gradient(
+    0deg,
+    #000 0%,
+    #000 60%,
+    transparent 100%
+  );
+  z-index: 2;
+}
+.tg-glass {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: calc(40 * var(--pt));
+  border-radius: calc(20 * var(--pt));
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.8) 0%,
+    rgba(255, 255, 255, 0.62) 100%
+  );
+  backdrop-filter: blur(calc(7 * var(--pt))) saturate(1.6);
+  -webkit-backdrop-filter: blur(calc(7 * var(--pt))) saturate(1.6);
+  box-shadow:
+    inset 0 calc(0.6 * var(--pt)) 0 rgba(255, 255, 255, 0.95),
+    inset 0 calc(-0.5 * var(--pt)) 0 rgba(255, 255, 255, 0.45),
+    inset 0 0 0 calc(0.33 * var(--pt)) rgba(255, 255, 255, 0.55),
+    0 calc(1 * var(--pt)) calc(2 * var(--pt)) rgba(23, 33, 29, 0.07),
+    0 calc(5 * var(--pt)) calc(16 * var(--pt)) rgba(23, 33, 29, 0.09);
+}
+.tg-head {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+.tg-head .tg-glass {
+  top: calc(66 * var(--pt));
+}
+.tg-back {
+  left: calc(15 * var(--pt));
+  width: calc(54 * var(--pt));
+  gap: calc(3 * var(--pt));
+}
+.tg-back svg {
+  width: calc(22 * var(--pt));
+  height: calc(22 * var(--pt));
+  margin-left: calc(-3 * var(--pt));
+  fill: none;
+  stroke: #17211d;
+  stroke-width: 2.1;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.tg-back b {
+  min-width: calc(17 * var(--pt));
+  height: calc(17 * var(--pt));
+  border-radius: calc(8.5 * var(--pt));
+  background: #0589ff;
+  color: #fff;
+  font-size: calc(11.5 * var(--pt));
+  line-height: calc(17 * var(--pt));
+  font-weight: 600;
+  text-align: center;
+  letter-spacing: 0;
+}
+.tg-peer {
+  left: 50%;
+  transform: translateX(-50%);
+  min-width: calc(92 * var(--pt));
+  padding: 0 calc(22 * var(--pt));
+  flex-direction: column;
+  white-space: nowrap;
+}
+.tg-peer strong {
+  font-weight: 600;
+  font-size: calc(17 * var(--pt));
+  line-height: calc(20 * var(--pt));
+  letter-spacing: calc(-0.25 * var(--pt));
+}
+.tg-sub {
+  font-size: calc(13 * var(--pt));
+  line-height: calc(16 * var(--pt));
+  color: rgba(23, 33, 29, 0.64);
+  letter-spacing: 0;
+}
+.tg-typing {
+  display: none;
+  align-items: center;
+  gap: calc(4 * var(--pt));
+  color: #0589ff;
+}
+.tg-typing i {
+  width: calc(4 * var(--pt));
+  height: calc(4 * var(--pt));
+  margin-right: calc(-1.8 * var(--pt));
+  border-radius: 50%;
+  background: currentColor;
+  animation: tg-dot 900ms ease-in-out infinite;
+}
+.tg-typing i:nth-child(2) {
+  animation-delay: 150ms;
+}
+.tg-typing i:nth-child(3) {
+  animation-delay: 300ms;
+  margin-right: calc(2 * var(--pt));
+}
+@keyframes tg-dot {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+.is-typing .tg-typing {
+  display: inline-flex;
+}
+.is-typing .tg-bot {
+  display: none;
+}
+.tg-avatar {
+  left: calc(347 * var(--pt));
+  width: calc(40 * var(--pt));
+  padding: calc(2 * var(--pt));
+}
+.tg-avatar > span {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: #0b1218;
+}
+.tg-avatar img {
+  height: 64%;
+  width: auto;
+  margin-left: 6%;
+}
+.tg-compose {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+}
+.tg-compose > span {
+  position: absolute;
+  top: calc(768 * var(--pt));
+  height: calc(36 * var(--pt));
+}
+.tg-compose svg {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.tg-menu {
+  left: calc(8 * var(--pt));
+  width: calc(36 * var(--pt));
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #0589ff;
+  box-shadow: 0 calc(1.5 * var(--pt)) calc(6 * var(--pt))
+    rgba(5, 137, 255, 0.3);
+}
+.tg-menu svg {
+  width: calc(17 * var(--pt));
+  height: calc(17 * var(--pt));
+  stroke: #fff;
+  stroke-width: 1.9;
+}
+.tg-clip,
+.tg-mic {
+  width: calc(36 * var(--pt));
+  border-radius: 50% !important;
+}
+.tg-clip {
+  left: calc(52 * var(--pt));
+}
+.tg-mic {
+  left: calc(358 * var(--pt));
+}
+.tg-clip svg,
+.tg-mic svg {
+  width: calc(20 * var(--pt));
+  height: calc(20 * var(--pt));
+  stroke: #17211d;
+  stroke-width: 1.75;
+}
+.tg-field {
+  left: calc(92 * var(--pt));
+  width: calc(258 * var(--pt));
+  justify-content: space-between;
+  padding: 0 calc(10 * var(--pt)) 0 calc(14 * var(--pt));
+  border-radius: calc(18 * var(--pt)) !important;
+  color: rgba(23, 33, 29, 0.64);
+}
+.tg-field svg {
+  width: calc(21 * var(--pt));
+  height: calc(21 * var(--pt));
+  stroke: currentColor;
+  stroke-width: 1.6;
+}
+
+/* Arrival (film STYLE.md §10, Chat.tsx Collapse): the list makes room on the "arrive"
+   spring while the message rises 18 pt from under the composer on the "land" spring and
+   clears its blur. Text is never scaled. Without JS everything is shown. */
+.js .is-playing .tg-step:not(.is-static) {
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 850ms var(--spring-arrive);
+}
+.js .is-playing .tg-step:not(.is-static) .tg-slot > * {
+  opacity: 0;
+  transform: translateY(calc(18 * var(--pt)));
+  filter: blur(calc(4 * var(--pt)));
+  transition:
+    opacity 233ms cubic-bezier(0.33, 1, 0.68, 1),
+    filter 233ms cubic-bezier(0.33, 1, 0.68, 1),
+    transform 1130ms var(--spring-land) 33ms;
+}
+.js .is-playing .tg-step.is-in {
+  grid-template-rows: 1fr;
+}
+.js .is-playing .tg-step.is-in .tg-slot > * {
+  opacity: 1;
+  transform: none;
+  filter: none;
+}
+.js .is-playing .tg-step[data-step="4"] {
+  display: grid;
+}
+.js .is-playing .tg-step[data-step="4"]:not(.is-in) {
+  transition: grid-template-rows 650ms var(--spring-settle) 33ms;
+}
+.js .is-playing .tg-step[data-step="4"]:not(.is-in) .tg-slot > * {
+  transform: none;
+  filter: none;
+  transition: opacity 200ms linear;
+}
+.tg-voice .tg-wave rect {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
 }
