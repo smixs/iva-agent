@@ -343,10 +343,15 @@ button {
   max-width: 1280px;
   margin: auto;
   padding: 35px 48px;
-  border-top: 1px solid var(--line);
   display: grid;
   grid-template-columns: 120px 1fr;
   gap: 25px;
+}
+/* One rule over the footer, exactly as wide as the content column. */
+.footer::before {
+  content: "";
+  grid-column: 1 / -1;
+  border-top: 1px solid var(--line);
 }
 .footer nav {
   display: flex;
@@ -654,8 +659,6 @@ summary:focus-visible {
   display: none;
 }
 .company-link {
-  padding-top: 16px;
-  border-top: 1px solid var(--line);
   margin-top: 5px !important;
 }
 .company-link a {
