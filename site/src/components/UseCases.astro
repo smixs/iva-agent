@@ -43,7 +43,6 @@ const pixelsFor = (index: number) =>
           </div>
         </div>
         <div class="case-copy">
-          <span class="case-tag">{row.tag}</span>
           <h3 id={`case-${row.id}`}>{row.title}</h3>
           <p>{row.text}</p>
         </div>
@@ -74,12 +73,8 @@ const pixelsFor = (index: number) =>
   }
 
   .case-copy { min-width: 0; max-width: 34ch; }
-  .case-tag {
-    display: block; margin-bottom: 14px;
-    font-size: 14px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: #368ad2;
-  }
   .case-copy h3 {
-    margin: 0 0 18px; font-size: clamp(32px, 3.2vw, 44px); line-height: 1.08;
+    margin: 0 0 14px; font-size: clamp(32px, 3.2vw, 44px); line-height: 1.08;
     letter-spacing: -.03em; font-weight: 700; color: #1a2327;
   }
   .case-copy p { margin: 0; font-size: 19px; line-height: 1.5; color: #5b6770; }
