@@ -57,6 +57,73 @@ if (chat) {
   }
 }
 
+// Pixel field behind the final call to action: the pointer leaves a short trail of
+// brand pixels that fade in four steps; now and then a pixel lights up by itself.
+// Mouse only, paused off screen, off with reduced motion.
+const field = document.querySelector<HTMLCanvasElement>("[data-px-field]");
+if (field && !still && document.documentElement.classList.contains("can-hover")) {
+  const ctx = field.getContext("2d")!;
+  const cell = 12;
+  const colors = ["#368AD2", "#368AD2", "#8DBDE8", "#A4DC55"];
+  const lit = new Map<string, { x: number; y: number; c: string; t: number }>();
+  let raf = 0,
+    visible = false,
+    idle = 0;
+  const size = () => {
+    const r = field.getBoundingClientRect();
+    const dpr = Math.min(devicePixelRatio, 2);
+    field.width = Math.round(r.width * dpr);
+    field.height = Math.round(r.height * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  };
+  const light = (gx: number, gy: number, now: number) =>
+    lit.set(gx + ":" + gy, {
+      x: gx,
+      y: gy,
+      c: colors[(gx * 7 + gy * 13) % colors.length],
+      t: now,
+    });
+  const frame = (now: number) => {
+    raf = 0;
+    ctx.clearRect(0, 0, field.width, field.height);
+    if (now - idle > 900) {
+      idle = now;
+      const w = field.clientWidth / cell,
+        h = field.clientHeight / cell;
+      light(Math.floor(w * (0.55 + Math.random() * 0.45)), Math.floor(Math.random() * h), now);
+    }
+    for (const [key, p] of lit) {
+      const age = (now - p.t) / 1400;
+      if (age >= 1) {
+        lit.delete(key);
+        continue;
+      }
+      ctx.globalAlpha = Math.ceil((1 - age) * 4) / 4;
+      ctx.fillStyle = p.c;
+      ctx.fillRect(p.x * cell + 1, p.y * cell + 1, cell - 2, cell - 2);
+    }
+    if (visible) raf = requestAnimationFrame(frame);
+  };
+  const section = field.parentElement!;
+  section.addEventListener("pointermove", (e) => {
+    const r = field.getBoundingClientRect();
+    const gx = Math.floor((e.clientX - r.left) / cell),
+      gy = Math.floor((e.clientY - r.top) / cell);
+    const now = performance.now();
+    light(gx, gy, now);
+    if (Math.random() < 0.5) light(gx + (Math.random() < 0.5 ? -1 : 1), gy, now);
+    if (Math.random() < 0.3) light(gx, gy + (Math.random() < 0.5 ? -1 : 1), now);
+  });
+  new IntersectionObserver(([entry]) => {
+    visible = entry.isIntersecting;
+    if (visible) {
+      size();
+      if (!raf) raf = requestAnimationFrame(frame);
+    }
+  }).observe(field);
+  addEventListener("resize", () => visible && size());
+}
+
 // Copy the install phrase or command; on failure select it so it can be copied by hand.
 const timers = new WeakMap<HTMLElement, number>();
 document.querySelectorAll<HTMLButtonElement>("[data-copy]").forEach((button) =>

@@ -120,13 +120,13 @@ h2 {
   text-wrap: balance;
 }
 h2 {
-  font-size: clamp(27px, 3.15vw, 46px);
+  font-size: clamp(27px, 3.4vw, 50px);
   line-height: 1.08;
   letter-spacing: -0.035em;
   margin-bottom: clamp(22px, 2.4vw, 34px);
 }
 h3 {
-  font-size: 21px;
+  font-size: 23px;
   line-height: 1.2;
   letter-spacing: -0.01em;
 }
@@ -245,6 +245,9 @@ code {
   color: var(--link);
   text-decoration: underline;
 }
+.footer p a {
+  text-decoration: underline;
+}
 .footer-top {
   display: flex;
   align-items: center;
@@ -353,12 +356,12 @@ code {
     transform 160ms var(--ease-out);
 }
 .btn-cta {
-  min-height: 60px;
-  padding: 0 28px 0 30px;
+  min-height: 64px;
+  padding: 0 30px 0 32px;
   border-radius: 16px;
   background: var(--cta);
   color: #fff;
-  font-size: 19px;
+  font-size: 20px;
   font-weight: 700;
   letter-spacing: -0.005em;
 }
@@ -417,8 +420,8 @@ code {
   border-bottom: 1px solid var(--line);
 }
 .hero h1 {
-  font-size: clamp(38px, 5vw, 72px);
-  line-height: 1.02;
+  font-size: clamp(38px, 5.6vw, 82px);
+  line-height: 1.01;
   letter-spacing: -0.045em;
   margin-bottom: 30px;
 }
@@ -426,7 +429,7 @@ code {
   display: block;
 }
 .hero-lead {
-  font-size: clamp(19px, 1.65vw, 23px);
+  font-size: clamp(19px, 1.75vw, 25px);
   line-height: 1.38;
   color: var(--ink-2);
   margin-bottom: 30px;
@@ -444,7 +447,7 @@ code {
   display: flex;
   flex-wrap: wrap;
   gap: 4px 0;
-  font-size: 16px;
+  font-size: 17px;
   color: var(--ink-2);
   margin-bottom: 30px;
 }
@@ -552,7 +555,7 @@ code {
 }
 .case p {
   color: var(--ink-2);
-  font-size: 16px;
+  font-size: 17px;
   line-height: 1.45;
   max-width: 30ch;
 }
@@ -561,10 +564,10 @@ code {
 .plate-inner {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  grid-template-columns: minmax(0, 0.72fr) minmax(0, 1.28fr);
   align-items: center;
   gap: clamp(24px, 3vw, 48px);
-  padding: clamp(24px, 3vw, 44px) clamp(20px, 4vw, 60px);
+  padding: clamp(24px, 2.6vw, 36px) clamp(20px, 3.4vw, 52px);
   border-radius: 32px;
   background: var(--leaf-tint);
   --veil-bg: var(--leaf-tint);
@@ -592,7 +595,7 @@ code {
   margin-bottom: 14px;
 }
 .plate-lead {
-  font-size: clamp(18px, 1.5vw, 21px);
+  font-size: clamp(18px, 1.6vw, 23px);
   line-height: 1.4;
   color: var(--ink-2);
   margin-bottom: 30px;
@@ -609,7 +612,7 @@ code {
   display: flex;
   align-items: center;
   gap: 14px;
-  font-size: 15px;
+  font-size: 16px;
   line-height: 1.35;
   color: var(--ink-2);
 }
@@ -848,9 +851,22 @@ td.is-yes .icon {
 
 /* ---------- 6. Final ---------- */
 .final {
+  position: relative;
   margin-top: clamp(44px, 5vw, 72px);
   padding-top: clamp(36px, 4vw, 56px);
   border-top: 1px solid var(--line);
+}
+.px-field {
+  position: absolute;
+  inset: 0 calc(-1 * var(--gutter)) -24px;
+  width: calc(100% + 2 * var(--gutter));
+  height: calc(100% + 24px);
+  pointer-events: none;
+  mask-image: linear-gradient(90deg, transparent 0%, #000 35%, #000 100%);
+  -webkit-mask-image: linear-gradient(90deg, transparent 0%, #000 35%, #000 100%);
+}
+.final > :not(.px-field) {
+  position: relative;
 }
 .final-inner {
   display: flex;
