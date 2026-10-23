@@ -1,0 +1,242 @@
+---
+const { lang = "en" } = Astro.props;
+const ru = lang === "ru";
+---
+
+<div
+  class="telegram-window"
+  data-hero-chat
+  role="group"
+  aria-label={ru ? "Пример разговора с Ивой" : "Example conversation with Iva"}
+>
+  <div class="telegram-toolbar">
+    <span class="telegram-back" aria-hidden="true">
+      ‹
+    </span>
+    <div class="telegram-peer">
+      <strong>{ru ? "Ива" : "Iva"}</strong>
+      <span
+        data-peer-status
+        data-idle={ru ? "бот" : "bot"}
+        data-typing={ru ? "печатает…" : "typing…"}
+      >
+        {ru ? "бот" : "bot"}
+      </span>
+    </div>
+    <img src="/brand/mark.svg" width="42" height="42" alt="" />
+  </div>
+  <div
+    class="telegram-history"
+    tabindex="0"
+    aria-label={ru ? "История переписки" : "Conversation history"}
+  >
+    <div class="telegram-messages">
+      <div class="telegram-date">{ru ? "Сегодня" : "Today"}</div>
+      <div class="telegram-bubble telegram-in" data-chat-step="brief">
+        <strong>{ru ? "☀️ Доброе утро!" : "☀️ Good morning!"}</strong>
+        <p>
+          {ru
+            ? "Сегодня созвон с Анной в 11:00, счёт поставщику до 18:00. Анна просила смету, я подготовила черновик."
+            : "A call with Anna at 11:00, a supplier invoice by 18:00. Anna asked for a quote. I prepared a draft."}
+        </p>
+        <span class="telegram-time">08:30</span>
+      </div>
+      <div
+        class="telegram-bubble telegram-out telegram-voice"
+        data-chat-step="voice"
+      >
+        <span class="voice-control" aria-hidden="true">
+          <svg width="15" height="18" viewBox="0 0 15 18">
+            <path d="M2 1 14 9 2 17Z" fill="currentColor" />
+          </svg>
+        </span>
+        <div class="voice-track">
+          <div class="telegram-wave" aria-hidden="true">
+            {Array.from({ length: 36 }, (_, i) => (
+              <i
+                style={`--bar:${6 + Math.round(21 * Math.abs(Math.sin(i * 1.7) * Math.cos(i * 0.6)))}px;--delay:${-i * 0.09}s`}
+              />
+            ))}
+          </div>
+          <span class="voice-duration">0:23</span>
+        </div>
+        <span class="telegram-time">
+          09:12 <span>✓✓</span>
+        </span>
+      </div>
+      <div class="telegram-bubble telegram-in" data-chat-step="tasks">
+        <p>{ru ? "Записала 3 задачи:" : "Saved 3 tasks:"}</p>
+        <ul>
+          <li>{ru ? "смета для Анны, к 11:00" : "quote for Anna, by 11:00"}</li>
+          <li>
+            {ru ? "оплатить хостинг, пятница" : "pay for hosting, Friday"}
+          </li>
+          <li>{ru ? "купить корм коту" : "buy cat food"}</li>
+        </ul>
+        <p>
+          {ru
+            ? "Напомню про созвон за 15 минут."
+            : "I'll remind you 15 minutes before the call."}
+        </p>
+        <span class="telegram-time">09:12</span>
+      </div>
+      <div class="telegram-actions" data-chat-step="buttons">
+        <span>{ru ? "Открыть задачи" : "Open tasks"}</span>
+        <span>{ru ? "Перенести" : "Reschedule"}</span>
+      </div>
+      <div class="telegram-bubble telegram-out" data-chat-step="question">
+        {ru
+          ? "Что мы решили с Анной по срокам в прошлый раз?"
+          : "What did we agree with Anna about the deadline last time?"}
+        <span class="telegram-time">
+          09:14 <span>✓✓</span>
+        </span>
+      </div>
+      <div class="telegram-bubble telegram-in" data-chat-step="answer">
+        {ru
+          ? "14 октября договорились: первая версия к 1 ноября, правки неделю. Сохранила в карточке «Анна, проект Аврора»."
+          : "On October 14: first version by November 1, then a week for revisions. Saved in “Anna, Aurora project”."}
+        <span class="telegram-time">09:14</span>
+      </div>
+      <div
+        class="telegram-bubble telegram-in telegram-thinking"
+        data-thinking
+        hidden
+        aria-hidden="true"
+      >
+        <i />
+        <i />
+        <i />
+      </div>
+    </div>
+  </div>
+  <div class="telegram-compose">
+    <svg
+      width="21"
+      height="24"
+      viewBox="0 0 21 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="1.8"
+      aria-hidden="true"
+    >
+      <path d="m14 6-7 9a3 3 0 0 0 5 4l6-9a5 5 0 0 0-8-6L3 14a7 7 0 0 0 11 8" />
+    </svg>
+    <span>{ru ? "Сообщение" : "Message"}</span>
+    <svg
+      width="21"
+      height="24"
+      viewBox="0 0 21 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="1.8"
+      aria-hidden="true"
+    >
+      <rect x="7" y="2" width="7" height="13" rx="3.5" />
+      <path d="M3 10v2a7.5 7.5 0 0 0 15 0v-2M10.5 20v3M6 23h9" />
+    </svg>
+  </div>
+</div>
+<script>
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)");
+  document.querySelectorAll<HTMLElement>("[data-hero-chat]").forEach((chat) => {
+    const history = chat.querySelector<HTMLElement>(".telegram-history")!;
+    const status = chat.querySelector<HTMLElement>("[data-peer-status]")!;
+    const thinking = chat.querySelector<HTMLElement>("[data-thinking]")!;
+    const steps = [...chat.querySelectorAll<HTMLElement>("[data-chat-step]")];
+    // V5 beats at 60 fps: typing 50f, voice -> thinking 50f -> answer 90f;
+    // follow-up 150f later, typing 40f, answer 60f. Scene transitions are omitted.
+    const beats: [number, string][] = [
+      [800, "brief"],
+      [2000, "voice"],
+      [2833, "thinking"],
+      [4333, "tasks"],
+      [5200, "buttons"],
+      [6833, "question"],
+      [7500, "thinking"],
+      [8500, "answer"],
+    ];
+    let raf = 0,
+      start = 0,
+      index = 0,
+      visible = true,
+      lastScroll = 0;
+    const scroll = () => {
+      history.scrollTop = history.scrollHeight;
+    };
+    function typing(on: boolean) {
+      thinking.hidden = !on;
+      status.textContent = on ? status.dataset.typing! : status.dataset.idle!;
+      chat.classList.toggle("is-typing", on);
+      if (on) chat.querySelector(".telegram-messages")?.append(thinking);
+    }
+    function final() {
+      cancelAnimationFrame(raf);
+      steps.forEach((s) => (s.hidden = false));
+      typing(false);
+      chat.classList.remove("is-playing");
+      requestAnimationFrame(scroll);
+    }
+    function reset() {
+      steps.forEach((s) => {
+        s.hidden = true;
+        s.classList.remove("bubble-arrive", "voice-playing");
+      });
+      typing(true);
+      chat.classList.add("is-playing");
+      history.scrollTop = 0;
+      index = 0;
+    }
+    function frame(time: number) {
+      if (reduce.matches || document.hidden || !visible) return;
+      if (!start) {
+        start = time;
+        reset();
+      }
+      let elapsed = time - start;
+      if (elapsed > 13000) {
+        start = time;
+        reset();
+        elapsed = 0;
+      }
+      while (index < beats.length && elapsed >= beats[index][0]) {
+        const name = beats[index++][1];
+        if (name === "thinking") typing(true);
+        else {
+          typing(false);
+          const step = steps.find((s) => s.dataset.chatStep === name)!;
+          step.hidden = false;
+          step.classList.add("bubble-arrive");
+          if (name === "voice") step.classList.add("voice-playing");
+        }
+        lastScroll = time;
+      }
+      // Follow arriving bubbles inside the fixed viewport, like Telegram's chat list.
+      if (time - lastScroll < 500)
+        history.scrollTop +=
+          (history.scrollHeight - history.clientHeight - history.scrollTop) *
+          0.22;
+      raf = requestAnimationFrame(frame);
+    }
+    function update() {
+      cancelAnimationFrame(raf);
+      if (reduce.matches) {
+        final();
+        return;
+      }
+      if (!visible || document.hidden) return;
+      start = 0;
+      raf = requestAnimationFrame(frame);
+    }
+    reduce.addEventListener("change", update);
+    document.addEventListener("visibilitychange", update);
+    new IntersectionObserver(
+      (entries) => {
+        visible = entries[0].isIntersecting;
+        update();
+      },
+      { threshold: 0.1 },
+    ).observe(chat);
+    update();
+  });
+</script>

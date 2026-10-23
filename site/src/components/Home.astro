@@ -1,6 +1,7 @@
 ---
 import Base from "../layouts/Base.astro";
 import Chat from "./Chat.astro";
+import HeroChat from "./HeroChat.astro";
 import Mosaic from "./Mosaic.astro";
 import Reviews from "./Reviews.astro";
 import transcript from "../data/transcript.json";
@@ -111,8 +112,7 @@ const schema = [
       </p>
     </div>
     <div class="hero-visual">
-      <Chat lang={lang} />
-      <Mosaic eager scene="hero" />
+      <HeroChat lang={lang} />
     </div>
     <p class="trust">{trust(t(1, "Строка доверия"))}</p>
   </section>
