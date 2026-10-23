@@ -106,7 +106,7 @@ const schema = [
           {ru ? "▶ Что умеет Ива, 78 с" : "▶ See it in 78 seconds"}
         </a>
       </div>
-      <p class="note" role="status" data-copy-status>
+      <p class="note" role="status" aria-live="polite" data-copy-status>
         {t(1, "Под кнопками, мелко")}
       </p>
     </div>
@@ -405,6 +405,7 @@ const schema = [
 </Base>
 <script>
   const ru = document.documentElement.lang === "ru";
+  const feedbackTimers = new WeakMap<HTMLElement, number>();
   document
     .querySelectorAll<HTMLButtonElement>("[data-copy]")
     .forEach((button) =>
@@ -445,11 +446,18 @@ const schema = [
             : "Could not copy. Select the text and copy it manually.";
         }
         if (feedback) {
+          const original =
+            feedback.dataset.originalMessage ?? feedback.textContent ?? "";
+          feedback.dataset.originalMessage = original;
+          window.clearTimeout(feedbackTimers.get(feedback));
           feedback.setAttribute("aria-live", "polite");
           feedback.textContent = message;
-          setTimeout(() => {
-            if (feedback?.textContent === message) feedback.textContent = "";
-          }, 4000);
+          feedbackTimers.set(
+            feedback,
+            window.setTimeout(() => {
+              feedback!.textContent = original;
+            }, 4000),
+          );
         }
       }),
     );
@@ -492,19 +500,21 @@ const schema = [
       new CustomEvent("iva:analytics", { detail: { name: "video_play" } }),
     ),
   );
-  video.addEventListener("timeupdate", () => {
+  function updateChapter() {
     const buttons = [
       ...document.querySelectorAll<HTMLButtonElement>("[data-seek]"),
     ];
     const index = buttons.findLastIndex(
-      (b) => Number(b.dataset.seek) <= video.currentTime,
+      (b) => Number(b.dataset.seek) <= video.currentTime + 0.05,
     );
     buttons.forEach((button, i) => {
       button.classList.toggle("active", i === index);
       if (i === index) button.setAttribute("aria-current", "true");
       else button.removeAttribute("aria-current");
     });
-  });
+  }
+  video.addEventListener("timeupdate", updateChapter);
+  video.addEventListener("seeked", updateChapter);
   document.querySelectorAll("[data-install-guide]").forEach((link) =>
     link.addEventListener("click", () =>
       window.dispatchEvent(
@@ -520,6 +530,7 @@ const schema = [
       button.addEventListener("click", () => {
         const video = document.querySelector<HTMLVideoElement>("#demo")!;
         video.currentTime = Number(button.dataset.seek);
+        updateChapter();
         window.dispatchEvent(
           new CustomEvent("iva:analytics", {
             detail: { name: "video_chapter", chapter: video.currentTime },
