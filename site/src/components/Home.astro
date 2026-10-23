@@ -1,39 +1,29 @@
 ---
 import Base from "../layouts/Base.astro";
-import UseCases from "./UseCases.astro";
-import usecases from "../data/usecases.json";
 import HeroChat from "./HeroChat.astro";
-import RotatingLine from "./RotatingLine.astro";
-import { extras } from "../data/home-extras";
-import Mosaic from "./Mosaic.astro";
-import Reviews from "./Reviews.astro";
+import Pixels from "./Pixels.astro";
+import Veil from "./Veil.astro";
+import Icon from "./Icon.astro";
 import { homeCopy, rich, phrase, command, type Lang } from "../lib/copy";
+import { integrations, competitors, reviews, type Cell } from "../data/facts";
 import { stats } from "../lib/stats";
 const { lang = "en" } = Astro.props as { lang: Lang };
 const ru = lang === "ru";
-const c = Object.fromEntries(
-  homeCopy[lang].map((section) => [section.number, section]),
-);
-const group = (n: number, k: string) =>
-  (c[n].groups as Record<string, string[]>)[k] || [];
-const t = (n: number, k: string) => group(n, k)[0] || "";
-const title = (n: number) => t(n, "H2");
+const c = homeCopy[lang];
 const prefix = ru ? "/ru" : "";
-const installLabel = ru
-  ? "Установить с ИИ-агентом"
-  : "Install with an AI agent";
-const copyLabel = ru ? "Копировать" : "Copy";
-const headingTerm = ru ? "AI‑ассистент" : "AI assistant";
-const headingParts = t(1, "H1").split(headingTerm);
-const trust = (s: string) =>
-  s
-    .replace("265", String(stats.stars))
-    .replace("70", String(stats.releases))
-    .replace(
-      ru ? "11 участников" : "11 contributors",
-      `${stats.contributors} ${ru ? "участников" : "contributors"}`,
-    );
-const faq = c[10].faq!;
+const corners = ["tr", "bl", "tl", "br"] as const;
+// Arrow drawn from square pixels on a 5 x 5 grid; the head steps forward on hover.
+const arrow = [
+  [0, 2], [1, 2], [2, 2], [3, 2], [4, 2], [3, 1], [2, 0], [3, 3], [2, 4],
+];
+const iva: Cell[] = c.compare.rows.map(() => "yes");
+const columns = [{ name: ru ? "Ива" : "Iva", values: iva }, ...competitors];
+const initials = (name: string) =>
+  name
+    .split(" ")
+    .map((w) => w[0])
+    .join("")
+    .slice(0, 2);
 const schema = [
   {
     "@context": "https://schema.org",
@@ -42,7 +32,7 @@ const schema = [
     url: "https://iva-agent.com",
     applicationCategory: "ProductivityApplication",
     operatingSystem: "Linux, macOS",
-    description: t(0, "Description"),
+    description: c.description,
     offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
     license: "https://opensource.org/license/mit",
   },
@@ -58,7 +48,7 @@ const schema = [
     "@context": "https://schema.org",
     "@type": "FAQPage",
     inLanguage: lang,
-    mainEntity: faq.map((f) => ({
+    mainEntity: c.faq.items.map((f) => ({
       "@type": "Question",
       name: f.question,
       acceptedAnswer: { "@type": "Answer", text: f.answer.replace(/`/g, "") },
@@ -67,8 +57,8 @@ const schema = [
   {
     "@context": "https://schema.org",
     "@type": "HowTo",
-    name: title(9),
-    step: group(9, "Шаги").map((s, i) => ({
+    name: c.final.h2,
+    step: c.final.steps.map((s, i) => ({
       "@type": "HowToStep",
       position: i + 1,
       text: s,
@@ -79,314 +69,315 @@ const schema = [
 
 <Base
   lang={lang}
-  title={t(0, "Title")}
-  description={t(0, "Description")}
+  title={c.title}
+  description={c.description}
   en="/"
   ru="/ru/"
   schema={schema}
 >
-  <section class="hero section">
+  <section class="hero wrap">
     <div class="hero-copy">
-      <p class="eyebrow">
-        <span class="free-badge">FREE</span>
-        {t(1, "Бейдж").replace("`FREE` ", "")}
-      </p>
       <h1>
-        {headingParts[0]}
-        <span class="keep-words">{headingTerm}</span>
-        {headingParts[1]}
+        {c.hero.h1.map((line) => <span>{line}</span>)}
       </h1>
-      <RotatingLine lang={lang} />
-      <p class="lead">{t(1, "Подзаголовок")}</p>
-      <div class="actions">
-        <button class="button" data-copy={phrase(lang)}>
-          {installLabel}
-          <span aria-hidden="true"> ↗</span>
-        </button>
-      </div>
-      <p class="note" role="status" aria-live="polite" data-copy-status>
-        {t(1, "Под кнопками")}
+      <p class="hero-lead">
+        {c.hero.lead.map((line) => <span>{line} </span>)}
       </p>
+      <div class="hero-cta">
+        <button
+          class="btn btn-cta"
+          data-copy={phrase(lang)}
+          data-reveal
+          data-glitch
+        >
+          {c.hero.cta}
+          <span class="px-arrow" aria-hidden="true">{arrow.map(([x, y]) => <i style={`--x:${x};--y:${y}`}></i>)}</span>
+          <Pixels seed={31} at="tr" count={9} cell={7} />
+        </button>
+        <p class="copy-status" role="status" aria-live="polite" data-copy-status>
+        </p>
+      </div>
+      <ul class="hero-facts">
+        {c.hero.facts.map((f) => <li>{f}</li>)}
+      </ul>
+      <div class="hero-stats">
+        <a href="https://github.com/smixs/iva-agent">
+          <Icon name="github" size={26} />
+          <span><b>{stats.stars}</b> {c.hero.stars}</span>
+        </a>
+        <a href="https://github.com/smixs/iva-agent/releases">
+          <Icon name="bars" size={26} />
+          <span><b>{stats.releases}</b> {c.hero.releases}</span>
+        </a>
+      </div>
     </div>
-    <div class="hero-visual">
+    <div class="hero-visual" data-reveal>
+      <svg class="hero-leaves" viewBox="0 0 760 680" aria-hidden="true">
+        <path
+          class="leaf-green"
+          d="M300 662C140 600 40 470 48 330 56 200 170 100 470 36c50 154 30 324-40 444-40 80-90 140-130 182z"
+        ></path>
+        <path class="leaf-rib" d="M300 650c0-180 40-390 170-606"></path>
+        <path
+          class="leaf-blue"
+          d="M575 590c-22-112 2-236 60-320 28-42 54-70 80-92 14 120 2 220-36 296-28 58-62 96-104 116z"
+        ></path>
+      </svg>
+      <Pixels seed={7} at="tl" count={12} cell={10} />
+      <Pixels seed={8} at="br" count={12} cell={10} />
       <HeroChat lang={lang} />
     </div>
-    <p class="trust">{trust(t(1, "Строка доверия"))}</p>
   </section>
-  <UseCases lang={lang} title={title(2)} />
-  <Reviews lang={lang} />
-  <section id="pricing" class="section pricing">
-    <div class="pricing-intro">
-      <span class="free-display">FREE</span>
-      <div>
-        <h2>{title(5)}</h2>
-        <p>{t(5, "Подзаголовок")}</p>
-      </div>
-    </div>
-    <div class="prices">
-      {group(5, "Три карточки: какую модель подключить").map((s) => (
-        <article>
-          <p set:html={rich(s)} />
-        </article>
-      ))}
-    </div>
-    <p>{t(5, "Строка под карточками")}</p>
-    <a class="button" href="#install">
-      {installLabel}
-    </a>
-  </section>
-  <section id="more" class="section more-features">
-    <span id="userbot" class="legacy-anchor" aria-hidden="true"></span>
-    <span id="menu" class="legacy-anchor" aria-hidden="true"></span>
-    <h2>{title(6)}</h2>
-    <ul>
-      {[...group(6, "H2").slice(1), ...usecases[lang].more]
-        .map((s) => (
-          <li>{s}</li>
-        ))}
+
+  <section id="features" class="cases wrap" aria-labelledby="cases-title">
+    <span id="memory" class="legacy-anchor"></span>
+    <h2 id="cases-title">{c.cases.h2}</h2>
+    <ul class="case-grid">
+      {
+        c.cases.items.map((item, i) => (
+          <li class="case" data-reveal data-glitch>
+            <figure class="case-media">
+              <picture>
+                <source
+                  type="image/avif"
+                  srcset={`/media/cases/${item.id}-800.avif 800w, /media/cases/${item.id}-1600.avif 1600w`}
+                  sizes="(min-width: 1100px) 300px, (min-width: 640px) 45vw, 92vw"
+                />
+                <img
+                  src={`/media/cases/${item.id}-800.webp`}
+                  srcset={`/media/cases/${item.id}-800.webp 800w, /media/cases/${item.id}-1600.webp 1600w`}
+                  sizes="(min-width: 1100px) 300px, (min-width: 640px) 45vw, 92vw"
+                  alt={item.alt}
+                  width="800"
+                  height="600"
+                  loading="lazy"
+                  decoding="async"
+                />
+              </picture>
+              <Veil seed={100 + i} at={corners[i]} />
+              <Pixels seed={200 + i} at={corners[i]} />
+            </figure>
+            <h3>{item.title}</h3>
+            <p>{item.text}</p>
+          </li>
+        ))
+      }
     </ul>
   </section>
-  <section id="memory" class="section split">
-    <div>
-      <h2>{title(7)}</h2>
-      <p>{t(7, "Текст")}</p>
-    </div>
-    <div class="memory-visual">
-      <Mosaic scene="memory" />
-      <div class="memory-flow">
-        {(ru
-          ? ["День", "Неделя", "Месяц", "Год", "Профиль"]
-          : ["Day", "Week", "Month", "Year", "Profile"]
-        ).map((s) => (
-          <span>{s}</span>
-        ))}
+
+  <section id="security" class="plate wrap" aria-labelledby="data-title">
+    <div class="plate-inner" data-reveal data-glitch>
+      <figure class="plate-media">
+        <svg class="plate-leaf" viewBox="0 0 400 300" aria-hidden="true">
+          <path
+            d="M30 290C60 170 150 70 390 20 350 170 250 270 30 290z"></path>
+          <path d="M30 290C140 200 250 110 390 20"></path>
+        </svg>
+        <picture>
+          <source
+            type="image/avif"
+            srcset="/media/devices-800.avif 800w, /media/devices-1600.avif 1600w"
+            sizes="(min-width: 900px) 460px, 90vw"
+          />
+          <img
+            src="/media/devices-800.webp"
+            srcset="/media/devices-800.webp 800w, /media/devices-1600.webp 1600w"
+            sizes="(min-width: 900px) 460px, 90vw"
+            alt={c.data.alt}
+            width="800"
+            height="549"
+            loading="lazy"
+            decoding="async"
+          />
+        </picture>
+        <Veil seed={300} at="bl" />
+      </figure>
+      <div class="plate-copy">
+        <h2 id="data-title">{c.data.h2}</h2>
+        <p class="plate-lead">
+          {c.data.lead.map((line) => <span>{line} </span>)}
+        </p>
+        <ul class="plate-points">
+          {
+            c.data.points.map(([icon, text], i) => (
+              <li>
+                <span class="point-icon">
+                  <Icon name={icon} size={26} />
+                  <Pixels seed={400 + i} at="tr" count={6} cell={5} />
+                </span>
+                <span>{text}</span>
+              </li>
+            ))
+          }
+        </ul>
       </div>
     </div>
   </section>
-  <section id="your-data" class="section split">
-    <span id="security" class="legacy-anchor" aria-hidden="true"></span>
-    <span id="works" class="legacy-anchor" aria-hidden="true"></span>
-    <Mosaic scene="privacy" />
-    <div>
-      <h2>{title(8)}</h2>
-      <ul class="plain-list">
-        {group(8, "Пункты").map((s) => (
-          <li>{s}</li>
-        ))}
+
+  <section class="compare wrap" aria-labelledby="compare-title">
+    <span id="pricing" class="legacy-anchor"></span>
+    <h2 id="compare-title">{c.compare.h2}</h2>
+    <div class="table-wrap" data-reveal>
+      <table>
+        <caption class="sr-only">{c.compare.caption}</caption>
+        <thead>
+          <tr>
+            <td></td>
+            {
+              columns.map((col, i) => (
+                <th scope="col" class={i === 0 ? "is-iva" : undefined}>
+                  {col.name}
+                  {i === 0 && <Pixels seed={500} at="tr" count={7} cell={6} />}
+                </th>
+              ))
+            }
+          </tr>
+        </thead>
+        <tbody>
+          {
+            c.compare.rows.map((row, r) => (
+              <tr>
+                <th scope="row">{row}</th>
+                {columns.map((col, i) => {
+                  const v = col.values[r];
+                  return (
+                    <td class:list={[`is-${v}`, { "is-iva": i === 0 }]}>
+                      {v === "unknown" ? (
+                        <span class="cell-unknown">{c.compare.unknown}</span>
+                      ) : (
+                        <>
+                          <Icon name={v === "yes" ? "check" : "dash"} />
+                          <span class="sr-only">{c.compare[v]}</span>
+                        </>
+                      )}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))
+          }
+        </tbody>
+      </table>
+    </div>
+    <p class="compare-note">{c.compare.note}</p>
+  </section>
+
+  <section class="world wrap" aria-labelledby="world-title">
+    <span id="works" class="legacy-anchor"></span>
+    <span id="menu" class="legacy-anchor"></span>
+    <span id="userbot" class="legacy-anchor"></span>
+    <div class="world-apps">
+      <h2 id="world-title">
+        {c.world.h2.map((line) => <span>{line}</span>)}
+      </h2>
+      <ul class="logos" data-reveal>
+        {
+          integrations.map((app) => (
+            <li style={`--brand:${app.color}`}>
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d={app.d} />
+              </svg>
+              <span>{app[lang]}</span>
+            </li>
+          ))
+        }
       </ul>
     </div>
-  </section>
-  <section id="install" class="section">
-    <div class="section-intro">
-      <h2>{title(9)}</h2>
-    </div>
-    <div class="install-layout">
-      <div class="install-box">
-        <div
-          class="tabs"
-          role="tablist"
-          aria-label={ru ? "Способ установки" : "Installation method"}
-        >
-          {(ru
-            ? ["С ИИ-агентом", "Одной командой", "На Mac"]
-            : ["With an AI agent", "One command", "On Mac"]
-          ).map((s, i) => (
-            <button
-              id={"tab-" + i}
-              role="tab"
-              aria-selected={i === 0 ? "true" : "false"}
-              aria-controls={"panel-" + i}
-              tabindex={i === 0 ? 0 : -1}
-              data-tab={i}
-            >
-              {s}
-            </button>
-          ))}
-        </div>
-        {[
-          "Вкладка «С ИИ-агентом»",
-          "Вкладка «Одной командой»",
-          "Вкладка «На Mac»",
-        ].map((key, i) => (
-          <div
-            class="install-panel"
-            role="tabpanel"
-            id={"panel-" + i}
-            aria-labelledby={"tab-" + i}
-          >
-            <p set:html={rich(t(9, key))} />
-            {i === 1 && (
-              <a
-                class="script-source"
-                href="https://github.com/smixs/iva-agent/blob/main/install.sh"
-              >
-                {ru ? "Посмотреть скрипт" : "View the script"} ↗
+    <div id="reviews" class="world-reviews">
+      <span id="asks" class="legacy-anchor"></span>
+      <ul>
+        {
+          reviews.map((r, i) => (
+            <li class="review" data-reveal data-glitch>
+              <a href={r.url} class="review-avatar" style={`--tone:${i ? "var(--blue)" : "var(--cta)"}`}>
+                <span aria-hidden="true">{initials(r.name)}</span>
+                <span class="sr-only">{c.world.source}: {r.name}</span>
+                <Pixels seed={600 + i} at={i ? "br" : "tr"} count={8} cell={7} />
               </a>
-            )}
-            <div class="command">
-              <code>{i === 0 ? phrase(lang) : command}</code>
-              <button
-                data-copy={i === 0 ? phrase(lang) : command}
-                aria-label={copyLabel}
-              >
-                {copyLabel}
-              </button>
-            </div>
-          </div>
-        ))}
-        <a data-install-guide href={prefix + "/docs/install/"}>
-          {ru ? "Инструкция по установке" : "Installation guide"} →
-        </a>
-        <p class="copy-feedback" aria-live="polite" data-copy-status></p>
-        <ol class="install-steps">
-          {group(9, "Шаги").map((s) => (
-            <li>{s}</li>
-          ))}
-        </ol>
+              <blockquote>{ru ? `«${r.quote.ru}»` : `“${r.quote.en}”`}</blockquote>
+              <p class="review-who">
+                {r.name} <span>{r.handle}</span>
+              </p>
+            </li>
+          ))
+        }
+      </ul>
+      <p class="world-caption">{c.world.reviewsLabel}</p>
+    </div>
+  </section>
+
+  <section id="faq" class="faq wrap">
+    <h2>{c.faq.h2}</h2>
+    <div class="faq-list">
+      {
+        c.faq.items.map((f) => (
+          <details>
+            <summary>{f.question}</summary>
+            <p set:html={rich(f.answer)} />
+          </details>
+        ))
+      }
+    </div>
+  </section>
+
+  <section id="install" class="final wrap" aria-labelledby="final-title">
+    <div class="final-inner">
+      <div class="final-copy">
+        <h2 id="final-title">{c.final.h2}</h2>
+        <p>{c.final.text.map((line) => <span>{line} </span>)}</p>
       </div>
-      <Mosaic scene="install" />
+      <div class="final-action" data-reveal>
+        <svg class="final-leaves" viewBox="0 0 220 200" aria-hidden="true">
+          <path
+            class="leaf-blue"
+            d="M120 196C92 150 92 98 118 56 138 24 172 6 214 0c6 54-2 100-26 138-18 28-40 46-68 58z"
+          ></path>
+          <path
+            class="leaf-green"
+            d="M112 196C70 176 38 140 28 98 22 70 26 40 40 12c40 26 66 58 76 98 8 30 6 58-4 86z"
+          ></path>
+        </svg>
+        <button class="btn btn-cta btn-xl" data-copy={phrase(lang)} data-glitch>
+          {c.final.cta}
+          <span class="px-arrow" aria-hidden="true">{arrow.map(([x, y]) => <i style={`--x:${x};--y:${y}`}></i>)}</span>
+          <Pixels seed={32} at="tr" count={9} cell={7} />
+        </button>
+      </div>
     </div>
-  </section>
-  <section id="faq" class="section faq">
-    <h2>{title(10)}</h2>
-    <div>
-      {faq.map((f) => (
-        <details>
-          <summary>{f.question}</summary>
-          <p set:html={rich(f.answer)} />
-        </details>
-      ))}
-    </div>
-  </section>
-  <section id="open-source" class="section open-source">
-    <h2>{title(11)}</h2>
-    <p class="project-stats">{trust(t(11, "Цифры"))}</p>
-    <p>{t(11, "Текст")}</p>
-    <div class="actions">
-      <a href="https://github.com/smixs/iva-agent">GitHub ↗</a>
-      <a href="https://github.com/smixs/iva-agent/blob/main/CHANGELOG.md">
-        {ru ? "История изменений" : "Changelog"} ↗
-      </a>
-      <a href={prefix + "/about/"}>{ru ? "О команде" : "About the team"} →</a>
-    </div>
-  </section>
-  <section class="section final-cta">
-    <span class="free-badge">FREE</span>
-    <h2>{title(12)}</h2>
-    <div class="actions">
-      <button class="button" data-copy={phrase(lang)}>
-        {extras[lang].start}
+    <div class="phrase">
+      <code data-phrase>{phrase(lang)}</code>
+      <button class="btn-copy" data-copy={phrase(lang)} aria-label={c.final.copy}>
+        <Icon name="copy" size={20} />
+        <span>{c.final.copy}</span>
       </button>
-      <a class="button secondary" href="https://github.com/smixs/iva-agent">
-        GitHub ↗
-      </a>
     </div>
-    <p>{extras[lang].paste}</p>
-    <div class="command final-prompt">
-      <code>{phrase(lang)}</code>
-      <button data-copy={phrase(lang)}>{copyLabel}</button>
-    </div>
-    <p class="copy-feedback" aria-live="polite" data-copy-status></p>
+    <p class="copy-status" role="status" aria-live="polite" data-copy-status>
+    </p>
+    <details class="other-ways">
+      <summary>{c.final.other}<Icon name="plus" size={18} /></summary>
+      <div class="other-body">
+        <ol>
+          {c.final.steps.map((s) => <li>{s}</li>)}
+        </ol>
+        <h3>{c.final.command}</h3>
+        <p>{c.final.oneCommand} {c.final.mac}</p>
+        <div class="phrase is-command">
+          <code>{command}</code>
+          <button class="btn-copy" data-copy={command} aria-label={c.final.copy}>
+            <Icon name="copy" size={20} />
+            <span>{c.final.copy}</span>
+          </button>
+        </div>
+        <p class="other-links">
+          <a href="https://github.com/smixs/iva-agent/blob/main/install.sh"
+            >{c.final.script}</a
+          >
+          <a data-install-guide href={prefix + "/docs/install/"}>{c.final.guide}</a>
+        </p>
+      </div>
+    </details>
   </section>
 </Base>
 <script>
-  const ru = document.documentElement.lang === "ru";
-  const feedbackTimers = new WeakMap<HTMLElement, number>();
-  document
-    .querySelectorAll<HTMLButtonElement>("[data-copy]")
-    .forEach((button) =>
-      button.addEventListener("click", async () => {
-        const isPrompt =
-          button.dataset.copy ===
-          document.querySelector("#panel-0 code")?.textContent;
-        let feedback = button
-          .closest("section")
-          ?.querySelector<HTMLElement>("[data-copy-status]");
-        let message = "";
-        try {
-          await navigator.clipboard.writeText(button.dataset.copy!);
-          message = isPrompt
-            ? ru
-              ? "Скопировано. Вставьте в своего ИИ-агента."
-              : "Copied. Paste it into your AI agent."
-            : ru
-              ? "Скопировано."
-              : "Copied.";
-          window.dispatchEvent(
-            new CustomEvent("iva:analytics", {
-              detail: { name: isPrompt ? "copy_prompt" : "copy_command" },
-            }),
-          );
-        } catch {
-          const index = isPrompt ? 0 : 1;
-          activate(index);
-          const target = document.querySelector(`#panel-${index} code`)!;
-          const range = document.createRange();
-          range.selectNodeContents(target);
-          window.getSelection()?.removeAllRanges();
-          window.getSelection()?.addRange(range);
-          document.querySelector("#install")?.scrollIntoView();
-          feedback = document.querySelector(".copy-feedback")!;
-          message = ru
-            ? "Не удалось скопировать. Выделите текст и скопируйте вручную."
-            : "Could not copy. Select the text and copy it manually.";
-        }
-        if (feedback) {
-          const original =
-            feedback.dataset.originalMessage ?? feedback.textContent ?? "";
-          feedback.dataset.originalMessage = original;
-          window.clearTimeout(feedbackTimers.get(feedback));
-          feedback.setAttribute("aria-live", "polite");
-          feedback.textContent = message;
-          feedbackTimers.set(
-            feedback,
-            window.setTimeout(() => {
-              feedback!.textContent = original;
-            }, 4000),
-          );
-        }
-      }),
-    );
-  const tabs = [...document.querySelectorAll<HTMLButtonElement>("[data-tab]")];
-  function activate(index: number, track = false) {
-    if (track)
-      window.dispatchEvent(
-        new CustomEvent("iva:analytics", {
-          detail: {
-            name: "install_tab",
-            method: ["agent", "curl", "mac"][index],
-          },
-        }),
-      );
-    tabs.forEach((tab, i) => {
-      tab.setAttribute("aria-selected", String(i === index));
-      tab.tabIndex = i === index ? 0 : -1;
-      document.getElementById("panel-" + i)!.hidden = i !== index;
-    });
-  }
-  activate(0);
-  tabs.forEach((tab, i) => {
-    tab.addEventListener("click", () => activate(i, true));
-    tab.addEventListener("keydown", (event) => {
-      let next = i;
-      if (event.key === "ArrowRight") next = (i + 1) % tabs.length;
-      else if (event.key === "ArrowLeft")
-        next = (i + tabs.length - 1) % tabs.length;
-      else if (event.key === "Home") next = 0;
-      else if (event.key === "End") next = tabs.length - 1;
-      else return;
-      event.preventDefault();
-      activate(next, true);
-      tabs[next].focus();
-    });
-  });
-  document.querySelectorAll("[data-install-guide]").forEach((link) =>
-    link.addEventListener("click", () =>
-      window.dispatchEvent(
-        new CustomEvent("iva:analytics", {
-          detail: { name: "open_install_guide" },
-        }),
-      ),
-    ),
-  );
+  import "../scripts/motion";
 </script>

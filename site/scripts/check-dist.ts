@@ -3,10 +3,27 @@ import { readFileSync, existsSync, statSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { files } from "../src/lib/build.ts";
-import { extras } from "../src/data/home-extras.ts";
 const dist = path.resolve("dist");
-const copy = JSON.parse(readFileSync("src/data/copy.json", "utf8"));
-const usecases = JSON.parse(readFileSync("src/data/usecases.json", "utf8"));
+const copy = JSON.parse(readFileSync("src/data/home.json", "utf8"));
+// Emoji are allowed only inside the Telegram chat (data-tg-content), where they are
+// part of how Telegram looks. Everything else on the site uses SVG icons.
+const emoji = /\p{Extended_Pictographic}|\uFE0F/u;
+const notEmoji = new Set(["\u00A9", "\u00AE", "\u2122"]);
+const findEmoji = (html: string) =>
+  [...html.matchAll(new RegExp(emoji, "gu"))]
+    .map((m) => m[0])
+    .filter((ch) => !notEmoji.has(ch));
+const outsideChat = (html: string) => {
+  let out = "",
+    i = 0;
+  for (const m of html.matchAll(/<div class="tg-list" data-tg-content[^>]*>/g)) {
+    out += html.slice(i, m.index);
+    // The chat list ends where the scroll edge starts.
+    const end = html.indexOf('<div class="tg-edge-top"', m.index);
+    i = end;
+  }
+  return out + html.slice(i);
+};
 const plain = (s: string) =>
   s
     .replace(/<[^>]*>/g, " ")
@@ -169,62 +186,50 @@ for (const home of ["dist/index.html", "dist/ru/index.html"]) {
     assert.equal(actualFAQ[index].question, question.name);
     assert.equal(actualFAQ[index].answer, question.acceptedAnswer.text);
   });
-  assert.equal((visible.match(/class="review"/g) || []).length, 11);
   const lang = home.includes("/ru/") ? "ru" : "en";
-  const final = visible.match(
-    /<section class="section final-cta"[\s\S]*?<\/section>/,
-  )![0];
-  assert.ok(final.includes(extras[lang].start));
-  const installPhrase = visible.match(
-    /id="panel-0"[\s\S]*?<code>([\s\S]*?)<\/code>/,
-  )![1];
-  assert.ok(final.includes(`<code>${installPhrase}</code>`));
-  assert.equal((visible.match(/class="usecase-row"/g) || []).length, 8);
+  const c = copy[lang];
+  assert.equal((visible.match(/class="review"/g) || []).length, 2);
+  assert.equal((visible.match(/class="case"/g) || []).length, 4);
+  const final = visible.match(/<section id="install"[\s\S]*?<\/section>/)![0];
+  assert.ok(final.includes(c.final.cta));
+  assert.ok(final.includes("install.txt</code>"));
   const main = visible.match(/<main\b[^>]*>([\s\S]*?)<\/main>/)![1];
   const headings = [...main.matchAll(/<h2[^>]*>([\s\S]*?)<\/h2>/g)].map((m) =>
     plain(m[1]),
   );
-  assert.deepEqual(
-    headings,
-    copy[lang].slice(2).map((section: any) => section.groups.H2[0]),
-  );
+  assert.deepEqual(headings, [
+    c.cases.h2,
+    c.data.h2,
+    c.compare.h2,
+    c.world.h2.join(" "),
+    c.faq.h2,
+    c.final.h2,
+  ]);
   const content = plain(visible);
-  for (const value of extras[lang].verbs)
-    assert.ok(
-      content.includes(plain(value)),
-      `${home}: missing addition: ${value}`,
-    );
-  for (const row of usecases[lang].rows) {
-    for (const value of [row.title, row.text]) {
-      assert.ok(
-        content.includes(plain(value)),
-        `${home}: missing usecase copy: ${value}`,
-      );
-    }
-  }
-  for (const value of usecases[lang].more)
-    assert.ok(
-      content.includes(plain(value)),
-      `${home}: missing usecase copy: ${value}`,
-    );
-  for (const section of copy[lang].slice(1)) {
-    for (const [key, values] of Object.entries(section.groups)) {
-      if (
-        [
-          "Кнопки",
-          "Кнопка",
-          "Подвал",
-          "Главы",
-          "Крупно",
-          "Цифры",
-          "Строка доверия",
-        ].includes(key)
-      )
-        continue;
-      for (const value of values as string[])
-        assert.ok(content.includes(plain(value)), `${home}: v2 copy: ${value}`);
-    }
-  }
+  for (const value of [
+    ...c.hero.h1,
+    ...c.hero.lead,
+    c.hero.cta,
+    ...c.cases.items.flatMap((i: any) => [i.title, i.text]),
+    ...c.data.lead,
+    ...c.data.points.map((p: string[]) => p[1]),
+    ...c.compare.rows,
+  ])
+    assert.ok(content.includes(plain(value)), `${home}: missing copy: ${value}`);
+  const stray = findEmoji(outsideChat(html));
+  assert.deepEqual(stray, [], `${home}: emoji outside the chat`);
+}
+for (const page of pages) {
+  const html = readFileSync(page, "utf8");
+  const chrome = [
+    ...(html.match(/<header class="header[\s\S]*?<\/header>/) || []),
+    ...(html.match(/<footer class="footer[\s\S]*?<\/footer>/) || []),
+  ].join("");
+  assert.deepEqual(
+    findEmoji(chrome),
+    [],
+    `${path.relative(dist, page)}: emoji in header or footer`,
+  );
 }
 console.log(
   `HTML: ${pages.length} pages; ${json} JSON-LD blocks parsed; 10 FAQ entries per locale; ${links} internal references checked.`,

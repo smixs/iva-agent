@@ -2,7 +2,10 @@
 import "../styles/global.css";
 import Analytics from "../components/Analytics.astro";
 
-import type { Lang } from "../lib/copy";
+import { homeCopy, type Lang } from "../lib/copy";
+import Icon from "../components/Icon.astro";
+import cyrillic from "../assets/fonts/unbounded-700-cyrillic.woff2?url";
+import latin from "../assets/fonts/unbounded-700-latin.woff2?url";
 import { stats } from "../lib/stats";
 const {
   title,
@@ -29,41 +32,14 @@ const canonical = new URL(Astro.url.pathname, Astro.site);
 const enPath = en || Astro.url.pathname.replace(/^\/ru\//, "/");
 const ruPath = ru || (enPath === "/privacy/" ? "/privacy/" : "/ru" + enPath);
 const og = `/media/og-${lang}.png`;
-const nav = isRu
-  ? ["Что умеет", "Цена", "Установка", "Вопросы"]
-  : ["What she does", "Pricing", "Install", "FAQ"];
-const links = ["features", "pricing", "install", "faq"];
-const footer = isRu
-  ? [
-      "Документация",
-      "Вопросы",
-      "История изменений",
-      "О команде",
-      "Приватность",
-      "Бренд",
-      "MIT",
-      "English",
-    ]
-  : [
-      "Docs",
-      "FAQ",
-      "Changelog",
-      "About the team",
-      "Privacy",
-      "Brand",
-      "MIT",
-      "Русский",
-    ];
+const c = homeCopy[lang];
 const prefix = isRu ? "/ru" : "";
 const footerLinks = [
   prefix + "/docs/",
-  home + "#faq",
   "https://github.com/smixs/iva-agent/blob/main/CHANGELOG.md",
   prefix + "/about/",
   "/privacy/",
   "/docs/brand/",
-  "https://github.com/smixs/iva-agent/blob/main/LICENSE",
-  isRu ? enPath : ruPath,
 ];
 ---
 
@@ -98,6 +74,10 @@ const footerLinks = [
     <meta name="twitter:title" content={title} />
     <meta name="twitter:description" content={description} />
     <meta name="twitter:image" content={new URL(og, Astro.site)} />
+    <link rel="preload" href={latin} as="font" type="font/woff2" crossorigin />
+    {isRu && (
+      <link rel="preload" href={cyrillic} as="font" type="font/woff2" crossorigin />
+    )}
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/site.webmanifest" />
@@ -113,96 +93,59 @@ const footerLinks = [
     <a class="skip" href="#main">
       {isRu ? "К содержанию" : "Skip to content"}
     </a>
-    <header class="header">
-      <a
-        class="logo"
-        href={home}
-        aria-label={isRu ? "Ива, главная" : "Iva home"}
-      >
-        <img
-          class="full-logo"
-          src="/brand/logo-light.svg"
-          alt="IVA"
-          width="104"
-          height="48"
-        />
-        <img
-          class="mobile-mark"
-          src="/brand/mark.svg"
-          alt="IVA"
-          width="40"
-          height="40"
-        />
+    <header class="header wrap">
+      <a class="logo" href={home} aria-label={isRu ? "Ива, главная" : "Iva home"}>
+        <img src="/brand/logo-light.svg" alt="IVA" width="96" height="54" />
       </a>
-      <nav aria-label={isRu ? "Главная навигация" : "Main navigation"}>
-        {nav.map((n, i) => (
-          <a href={home + "#" + links[i]}>{n}</a>
-        ))}
+      <nav class="nav" aria-label={isRu ? "Главная навигация" : "Main navigation"}>
+        {c.nav.map(([label, id]) => <a href={home + "#" + id}>{label}</a>)}
       </nav>
-      <button
-        class="mobile-toggle"
-        hidden
-        aria-expanded="false"
-        aria-controls="mobile-nav"
-      >
-        {isRu ? "Меню" : "Menu"}
-      </button>
       <div class="header-actions">
-        <a
-          class="language"
-          href={isRu ? enPath : ruPath}
-          lang={isRu ? "en" : "ru"}
-        >
+        <a class="language" href={isRu ? enPath : ruPath} lang={isRu ? "en" : "ru"}>
           {isRu ? "EN" : "RU"}
         </a>
-        <a class="github" href="https://github.com/smixs/iva-agent">
-          GitHub ★ {stats.stars}
+        <a
+          class="github"
+          href="https://github.com/smixs/iva-agent"
+          aria-label={`GitHub, ${stats.stars} ${isRu ? "звёзд" : "stars"}`}
+        >
+          <Icon name="github" size={22} />
+          <span>{stats.stars}</span>
         </a>
-        <a class="button small" href={home + "#install"}>
-          {isRu ? "Установить" : "Install"}
-        </a>
+        <button class="mobile-toggle" hidden aria-expanded="false" aria-controls="mobile-nav">
+          {c.menu}
+        </button>
       </div>
     </header>
-    <nav
-      id="mobile-nav"
-      class="mobile-nav"
-      aria-label={isRu ? "Мобильная навигация" : "Mobile navigation"}
-    >
-      {nav.map((n, i) => (
-        <a href={home + "#" + links[i]}>{n}</a>
-      ))}
-      <a href={isRu ? enPath : ruPath}>{isRu ? "EN" : "RU"}</a>
-      <a href="https://github.com/smixs/iva-agent">GitHub ★ {stats.stars}</a>
-      <a href={home + "#install"}>{isRu ? "Установить" : "Install"}</a>
+    <nav id="mobile-nav" class="mobile-nav" aria-label={isRu ? "Мобильная навигация" : "Mobile navigation"}>
+      {c.nav.map(([label, id]) => <a href={home + "#" + id}>{label}</a>)}
+      <a href={home + "#install"}>{c.install}</a>
+      <a href={isRu ? enPath : ruPath}>{isRu ? "English" : "Русский"}</a>
     </nav>
     <main id="main">
       <slot />
     </main>
-    <footer class="footer">
-      <a href={home}>
-        <img
-          src="/brand/logo-light.svg"
-          alt="IVA"
-          width="96"
-          height="44"
-          loading="lazy"
-          decoding="async"
-        />
-      </a>
-      <nav aria-label={isRu ? "Ссылки в подвале" : "Footer links"}>
-        {footer.map((n, i) => (
-          <a href={footerLinks[i]}>{n}</a>
-        ))}
-      </nav>
-      <p>© {new Date().getFullYear()} Majento · Tashkent · MIT</p>
-      <p class="company-link">
-        {isRu
-          ? "Разработка ИИ-систем для компаний:"
-          : "Custom AI systems for companies:"}{" "}
-        <a href="https://majento.ai/?utm_source=iva-agent.com&amp;utm_medium=referral&amp;utm_campaign=ecosystem">
-          Majento
+    <footer class="footer wrap">
+      <div class="footer-top">
+        <a href={home} class="footer-logo">
+          <img src="/brand/logo-light.svg" alt="IVA" width="84" height="47" loading="lazy" decoding="async" />
         </a>
-      </p>
+        <ul class="footer-meta">
+          <li><a href="https://github.com/smixs/iva-agent/blob/main/LICENSE">{c.footer.mit}</a></li>
+          <li><a href="https://github.com/smixs/iva-agent"><Icon name="github" size={18} />GitHub</a></li>
+          <li><a href={home}>iva-agent.com</a></li>
+        </ul>
+      </div>
+      <div class="footer-bottom">
+        <nav aria-label={isRu ? "Ссылки в подвале" : "Footer links"}>
+          {c.footer.links.map((n, i) => <a href={footerLinks[i]}>{n}</a>)}
+          <a href={isRu ? enPath : ruPath}>{isRu ? "English" : "Русский"}</a>
+        </nav>
+        <p>
+          © {new Date().getFullYear()} Majento, Tashkent. {c.footer.majento}{" "}
+          <a href="https://majento.ai/?utm_source=iva-agent.com&amp;utm_medium=referral&amp;utm_campaign=ecosystem">Majento</a>
+        </p>
+      </div>
     </footer>
     <Analytics lang={lang} />
     <script>

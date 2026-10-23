@@ -1,0 +1,8 @@
+---
+import { veil, type Corner } from "../lib/pixels";
+const { seed, at } = Astro.props as { seed: number; at: Corner };
+---
+
+<span class="veil" aria-hidden="true">
+  {veil(seed, at).map((d) => <i style={`--d:${d}ms`}></i>)}
+</span>

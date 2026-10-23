@@ -1,6 +1,6 @@
-import copy from "../data/copy.json";
+import home from "../data/home.json";
 export type Lang = "ru" | "en";
-export const homeCopy = copy;
+export const homeCopy = home;
 export const phrase = (lang: Lang) =>
   lang === "ru"
     ? "Установи Иву, инструкции: https://iva-agent.com/install.txt"

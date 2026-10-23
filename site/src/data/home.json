@@ -1,0 +1,462 @@
+{
+  "ru": {
+    "title": "Ива: лучший AI-ассистент в Telegram. Бесплатно",
+    "description": "Ива живёт в вашем Telegram. Превращает голосовые в задачи, помнит договорённости месяцами, сама напоминает и присылает план дня. Бесплатно.",
+    "nav": [
+      [
+        "Возможности",
+        "features"
+      ],
+      [
+        "Безопасность",
+        "security"
+      ],
+      [
+        "Отзывы",
+        "reviews"
+      ]
+    ],
+    "install": "Установить",
+    "menu": "Меню",
+    "hero": {
+      "h1": [
+        "Лучший",
+        "AI‑ассистент",
+        "в Telegram"
+      ],
+      "lead": [
+        "Помнит важное. Разбирается с делами.",
+        "Всегда рядом в вашем Telegram."
+      ],
+      "cta": "Установить с ИИ-агентом",
+      "facts": [
+        "Бесплатно",
+        "Открытый код",
+        "На вашем сервере"
+      ],
+      "stars": "звёзд на GitHub",
+      "releases": "выпусков за 4 месяца"
+    },
+    "chat": {
+      "label": "Пример разговора с Ивой в Telegram",
+      "title": "Ива",
+      "bot": "бот",
+      "typing": "печатает",
+      "today": "Сегодня",
+      "input": "Сообщение",
+      "brief": {
+        "title": "☀️ Доброе утро, Сергей!",
+        "intro": "Сегодня 3 встречи:",
+        "items": [
+          [
+            "👥",
+            "10:00 — команда"
+          ],
+          [
+            "🤝",
+            "14:30 — встреча с клиентом"
+          ],
+          [
+            "✉️",
+            "2 письма ждут ответа"
+          ]
+        ],
+        "time": "08:24"
+      },
+      "birthday": {
+        "text": "🎂 У мамы день рождения в пятницу. Подобрать подарок?",
+        "time": "08:24"
+      },
+      "voice": {
+        "duration": "0:12",
+        "time": "08:25"
+      },
+      "thinking": "Думаю…",
+      "reply": {
+        "text": "✅ Записала: подарок маме до четверга. Подборку пришлю вечером.",
+        "time": "08:25"
+      }
+    },
+    "cases": {
+      "h2": "Для жизни, в которой много всего",
+      "items": [
+        {
+          "id": "morning",
+          "title": "Утро уже собрано",
+          "text": "Встречи, погода и письма одним сообщением.",
+          "alt": "Женщина у окна с чашкой чая смотрит в телефон"
+        },
+        {
+          "id": "voice",
+          "title": "Сказали — записала",
+          "text": "Из голосового в задачи и напоминания.",
+          "alt": "Мужчина в такси надиктовывает голосовое сообщение"
+        },
+        {
+          "id": "birthday",
+          "title": "Помнит за вас",
+          "text": "Даты, обещания и разговор полгода назад.",
+          "alt": "Дочь дарит отцу подарок на день рождения"
+        },
+        {
+          "id": "family",
+          "title": "Своя Ива у каждого",
+          "text": "Помощник для всей семьи.",
+          "alt": "Мама, сын и бабушка за столом, у каждого свой телефон"
+        }
+      ]
+    },
+    "data": {
+      "h2": "Ваши данные. Ваши правила.",
+      "lead": [
+        "Ива живёт на вашем сервере или Mac.",
+        "Данные остаются у вас."
+      ],
+      "alt": "Mac mini и ноутбук среди листьев Ивы",
+      "points": [
+        [
+          "code",
+          "Открытый код MIT"
+        ],
+        [
+          "shield",
+          "Вы видите каждое действие"
+        ],
+        [
+          "lock",
+          "Отправка и оплата с вашего подтверждения"
+        ]
+      ]
+    },
+    "compare": {
+      "h2": "Больше свободы в привычном чате",
+      "caption": "Ива и другие ассистенты в мессенджерах",
+      "rows": [
+        "Бесплатно",
+        "Свой сервер",
+        "Telegram",
+        "Память",
+        "Открытый код"
+      ],
+      "yes": "есть",
+      "no": "нет",
+      "unknown": "нет данных",
+      "note": "Сравнение по официальным страницам продуктов на октябрь 2026."
+    },
+    "world": {
+      "h2": [
+        "Уже умеет работать",
+        "с вашим миром"
+      ],
+      "reviewsLabel": "Отзывы пользователей",
+      "source": "Сообщение в чате"
+    },
+    "final": {
+      "h2": "Одна фраза. Ива у вас.",
+      "text": [
+        "Попросите Claude Code или Codex установить Иву.",
+        "Через 5 минут она ответит в Telegram."
+      ],
+      "cta": "Начать бесплатно",
+      "copy": "Копировать",
+      "other": "Другие способы установки",
+      "command": "Одной командой",
+      "script": "Посмотреть скрипт",
+      "guide": "Инструкция по установке",
+      "oneCommand": "Подойдёт сервер с Ubuntu или Debian, хватит 512 МБ памяти. Если связь оборвётся, установка продолжится.",
+      "mac": "Та же команда в Терминале. Ива работает, пока Mac включён.",
+      "steps": [
+        "Создайте бота у @BotFather и скопируйте токен.",
+        "Запустите установку и вставьте токен.",
+        "Напишите боту «привет»."
+      ]
+    },
+    "footer": {
+      "mit": "Открытый код MIT",
+      "links": [
+        "Документация",
+        "История изменений",
+        "О команде",
+        "Приватность",
+        "Бренд"
+      ],
+      "majento": "Разработка ИИ-систем для компаний:",
+      "analytics": "Настройки аналитики"
+    },
+    "faq": {
+      "h2": "Частые вопросы",
+      "items": [
+        {
+          "question": "Ива правда бесплатная?",
+          "answer": "Да. Ива бесплатная, код открыт под лицензией MIT. Если у вас есть подписка ChatGPT или Claude, Ива работает на ней, и больше платить не нужно."
+        },
+        {
+          "question": "Нужен ли сервер? Подойдёт ли Mac?",
+          "answer": "Подойдёт и то и другое. Сервер с Ubuntu или Debian и 512 МБ памяти или ваш Mac, который не выключается."
+        },
+        {
+          "question": "Какие модели можно подключить?",
+          "answer": "Шесть вариантов. Подписка ChatGPT, подписка Claude Pro или Max, OpenCode Go, Ollama Cloud, OpenRouter с сотнями моделей и любой свой OpenAI-совместимый адрес. Модель меняется в /menu."
+        },
+        {
+          "question": "Где хранятся мои данные?",
+          "answer": "На вашем сервере. Память Ивы лежит там обычными файлами, их можно открыть в Obsidian."
+        },
+        {
+          "question": "Чем Ива лучше ChatGPT в Telegram?",
+          "answer": "Ива помнит вас месяцами и пишет первой. Она ведёт заметки о людях и проектах, работает с почтой, календарём и документами, а данные остаются у вас."
+        },
+        {
+          "question": "Понимает ли русский и голосовые?",
+          "answer": "Да. Ива говорит по-русски и по-английски, а голосовые расшифровывает на русском, узбекском и английском."
+        },
+        {
+          "question": "Нужен ли домен или HTTPS?",
+          "answer": "Нет. Ива забирает сообщения у Telegram, ей не нужны домен, сертификат и открытые порты."
+        },
+        {
+          "question": "Безопасно ли читать мои чаты?",
+          "answer": "Это выключено по умолчанию и включается только по вашему желанию. Ива читает чаты в обычном человеческом темпе, а в режиме «только чтение» ничего не отправляет."
+        },
+        {
+          "question": "Как обновлять Иву?",
+          "answer": "Кнопкой «Обновить» в чате. Ива скачает новую версию, проверит её и перезапустится. Если что-то пойдёт не так, она вернёт прошлую."
+        },
+        {
+          "question": "Сколько занимает установка?",
+          "answer": "Около 5 минут. Вставьте одну фразу в Claude Code или Codex, и агент поставит Иву. Можно и одной командой."
+        }
+      ]
+    }
+  },
+  "en": {
+    "title": "Iva: the best AI assistant in Telegram. Free",
+    "description": "Iva lives in your Telegram. She turns voice notes into tasks, remembers what you agreed on for months, reminds you and sends your plan for the day. Free.",
+    "nav": [
+      [
+        "Features",
+        "features"
+      ],
+      [
+        "Security",
+        "security"
+      ],
+      [
+        "Reviews",
+        "reviews"
+      ]
+    ],
+    "install": "Install",
+    "menu": "Menu",
+    "hero": {
+      "h1": [
+        "The best",
+        "AI assistant",
+        "in Telegram"
+      ],
+      "lead": [
+        "Remembers what matters. Handles your errands.",
+        "Always there in your Telegram."
+      ],
+      "cta": "Install with an AI agent",
+      "facts": [
+        "Free",
+        "Open source",
+        "On your server"
+      ],
+      "stars": "stars on GitHub",
+      "releases": "releases in 4 months"
+    },
+    "chat": {
+      "label": "Example conversation with Iva in Telegram",
+      "title": "Iva",
+      "bot": "bot",
+      "typing": "typing",
+      "today": "Today",
+      "input": "Message",
+      "brief": {
+        "title": "☀️ Good morning, Sergey!",
+        "intro": "3 meetings today:",
+        "items": [
+          [
+            "👥",
+            "10:00 — team sync"
+          ],
+          [
+            "🤝",
+            "14:30 — client meeting"
+          ],
+          [
+            "✉️",
+            "2 emails need a reply"
+          ]
+        ],
+        "time": "08:24"
+      },
+      "birthday": {
+        "text": "🎂 Mom's birthday is on Friday. Shall I find a gift?",
+        "time": "08:24"
+      },
+      "voice": {
+        "duration": "0:12",
+        "time": "08:25"
+      },
+      "thinking": "Thinking…",
+      "reply": {
+        "text": "✅ Noted: a gift for Mom by Thursday. I'll send ideas tonight.",
+        "time": "08:25"
+      }
+    },
+    "cases": {
+      "h2": "For a life with a lot going on",
+      "items": [
+        {
+          "id": "morning",
+          "title": "Your morning, sorted",
+          "text": "Meetings, weather and email in one message.",
+          "alt": "A woman by the window with a cup of tea looks at her phone"
+        },
+        {
+          "id": "voice",
+          "title": "Say it, she saves it",
+          "text": "From a voice note to tasks and reminders.",
+          "alt": "A man in a taxi dictates a voice message"
+        },
+        {
+          "id": "birthday",
+          "title": "Remembers for you",
+          "text": "Dates, promises and that talk six months ago.",
+          "alt": "A daughter gives her father a birthday present"
+        },
+        {
+          "id": "family",
+          "title": "An Iva for everyone",
+          "text": "An assistant for the whole family.",
+          "alt": "A mother, her son and grandmother at the table, each with a phone"
+        }
+      ]
+    },
+    "data": {
+      "h2": "Your data. Your rules.",
+      "lead": [
+        "Iva lives on your server or Mac.",
+        "Your data stays with you."
+      ],
+      "alt": "A Mac mini and a laptop among Iva's leaves",
+      "points": [
+        [
+          "code",
+          "Open source, MIT"
+        ],
+        [
+          "shield",
+          "You see every action"
+        ],
+        [
+          "lock",
+          "Sending and paying only with your approval"
+        ]
+      ]
+    },
+    "compare": {
+      "h2": "More freedom in the chat you already use",
+      "caption": "Iva and other messenger assistants",
+      "rows": [
+        "Free",
+        "Your own server",
+        "Telegram",
+        "Memory",
+        "Open source"
+      ],
+      "yes": "yes",
+      "no": "no",
+      "unknown": "no data",
+      "note": "Based on the products' official pages, October 2026."
+    },
+    "world": {
+      "h2": [
+        "Already works",
+        "with your world"
+      ],
+      "reviewsLabel": "What users say",
+      "source": "Chat message"
+    },
+    "final": {
+      "h2": "One sentence. Iva is yours.",
+      "text": [
+        "Ask Claude Code or Codex to install Iva.",
+        "In 5 minutes she replies in Telegram."
+      ],
+      "cta": "Start for free",
+      "copy": "Copy",
+      "other": "Other ways to install",
+      "command": "One command",
+      "script": "View the script",
+      "guide": "Installation guide",
+      "oneCommand": "Any Ubuntu or Debian server with 512 MB of RAM will do. If the connection drops, the install picks up where it left off.",
+      "mac": "The same command in Terminal. Iva works while your Mac is on.",
+      "steps": [
+        "Create a bot with @BotFather and copy the token.",
+        "Run the install and paste the token.",
+        "Say hi to your bot."
+      ]
+    },
+    "footer": {
+      "mit": "Open source, MIT",
+      "links": [
+        "Docs",
+        "Changelog",
+        "About the team",
+        "Privacy",
+        "Brand"
+      ],
+      "majento": "Custom AI systems for companies:",
+      "analytics": "Analytics settings"
+    },
+    "faq": {
+      "h2": "Frequently asked questions",
+      "items": [
+        {
+          "question": "Is Iva really free?",
+          "answer": "Yes. Iva is free, and the code is open under MIT. If you have a ChatGPT or Claude subscription, Iva runs on it and you pay nothing more."
+        },
+        {
+          "question": "Do I need a server? Will a Mac do?",
+          "answer": "Either works: an Ubuntu or Debian server with 512 MB of RAM, or a Mac that stays on."
+        },
+        {
+          "question": "Which models work?",
+          "answer": "Six options: a ChatGPT subscription, Claude Pro or Max, OpenCode Go, Ollama Cloud, OpenRouter with hundreds of models, or any OpenAI-compatible endpoint of your own. Switch in /menu."
+        },
+        {
+          "question": "Where is my data stored?",
+          "answer": "On your server. Iva's memory sits there as plain files you can open in Obsidian."
+        },
+        {
+          "question": "How is Iva better than ChatGPT in Telegram?",
+          "answer": "Iva remembers you for months and writes first. She keeps notes on people and projects, works with your mail, calendar and documents, and your data stays with you."
+        },
+        {
+          "question": "Does she understand Russian and voice notes?",
+          "answer": "Yes. Iva speaks Russian and English and transcribes voice notes in Russian, Uzbek and English."
+        },
+        {
+          "question": "Do I need a domain or HTTPS?",
+          "answer": "No. Iva pulls messages from Telegram, so she needs no domain, certificate or open ports."
+        },
+        {
+          "question": "Is reading my chats safe?",
+          "answer": "It's off by default and only turns on if you want it. Iva reads chats at a normal human pace, and in read-only mode she never sends anything."
+        },
+        {
+          "question": "How do I update Iva?",
+          "answer": "Tap \"Update\" in the chat. Iva downloads the new version, checks it and restarts. If anything goes wrong, she rolls back."
+        },
+        {
+          "question": "How long does the install take?",
+          "answer": "About 5 minutes. Paste one sentence into Claude Code or Codex and the agent installs Iva for you, or run a single command."
+        }
+      ]
+    }
+  }
+}

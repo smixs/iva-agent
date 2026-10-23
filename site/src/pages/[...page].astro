@@ -156,7 +156,7 @@ const schema =
     {staticPage && staticPage !== "privacy" && (
       <>
         <a class="back" href={lang === "ru" ? "/ru/" : "/"}>
-          {lang === "ru" ? "← Вернуться к Иве" : "← Back to Iva"}
+          {lang === "ru" ? "Вернуться к Иве" : "Back to Iva"}
         </a>
         <div class="actions about-links">
           <a href={lang === "ru" ? "/ru/docs/" : "/docs/"}>
@@ -184,7 +184,7 @@ const schema =
     )}
     {entry && (
       <a class="raw" href={"/" + entry.id + ".md"}>
-        {lang === "ru" ? "Исходный Markdown" : "View original Markdown"} ↗
+        {lang === "ru" ? "Исходный Markdown" : "View original Markdown"}
       </a>
     )}
   </article>

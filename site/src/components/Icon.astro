@@ -1,0 +1,54 @@
+---
+// Interface icons: 24-unit line drawings, stroke follows currentColor.
+import { githubPath } from "../data/facts";
+const { name, size = 24 } = Astro.props as { name: string; size?: number };
+const paths: Record<string, string[]> = {
+  arrow: ["M4 12h15", "M13 6l6 6-6 6"],
+  code: ["M8.5 8 4.5 12l4 4", "M15.5 8l4 4-4 4", "M13.5 5.5l-3 13"],
+  shield: [
+    "M12 3.2 5 6v5.4c0 4.4 2.9 7.9 7 9.4 4.1-1.5 7-5 7-9.4V6z",
+    "M8.8 12.1l2.3 2.3 4.3-4.6",
+  ],
+  lock: [
+    "M6 10.5h12v9.5H6z",
+    "M8.5 10.5V7.8a3.5 3.5 0 0 1 7 0v2.7",
+    "M12 14.2v2.4",
+  ],
+  check: ["M5 12.6l4.3 4.2L19 7.4"],
+  dash: ["M6.5 12h11"],
+  copy: ["M9 9h10v10H9z", "M5 15V5h10"],
+  bars: ["M5 19v-3", "M9 19v-6", "M13 19v-9", "M17 19V7", "M21 19V4"],
+  plus: ["M12 5v14", "M5 12h14"],
+};
+---
+
+{
+  name === "github" ? (
+    <svg
+      class="icon"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+    >
+      <path d={githubPath} fill="currentColor" />
+    </svg>
+  ) : (
+    <svg
+      class="icon"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="1.8"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+    >
+      {paths[name].map((d) => (
+        <path d={d} />
+      ))}
+    </svg>
+  )
+}
