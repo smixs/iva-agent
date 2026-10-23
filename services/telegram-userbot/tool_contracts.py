@@ -12,8 +12,11 @@ label invented for a one-session proxy, a public t.me link in an id field
 (issues 248 and 281). Message text and search queries keep their links.
 """
 import inspect
+import os
 import re
 from functools import wraps
+from pathlib import Path
+from typing import Union
 
 # The parameters upstream's @validate_id accepts as an integer id or a username.
 ENTITY_FIELDS = frozenset({
@@ -32,6 +35,49 @@ SERVICE_PATHS = frozenset({
     "addemoji", "addlist", "addstickers", "addtheme", "boost", "confirmphone", "contact",
     "giftcode", "invoice", "joinchat", "login", "proxy", "setlanguage", "share", "socks",
 })
+SESSION_SIDECARS = ("-journal", "-wal", "-shm")
+
+
+def _is_credential_target(target: Union[str, Path]) -> bool:
+    if isinstance(target, Path):
+        target = str(target)
+    if not isinstance(target, str):
+        return False
+    raw = target.strip()
+    if not raw:
+        return False
+    p = Path(raw)
+    name = p.name.lower()
+    if name.endswith(".session") or any(name.endswith(f".session{s}") for s in SESSION_SIDECARS):
+        return True
+    if name.endswith(".token") or "telegram-userbot.token" in name:
+        return True
+    if name == ".env" or name.startswith(".env.") or name.endswith(".env"):
+        return True
+    if name in {"id_rsa", "id_ed25519", "id_ecdsa"} or name.endswith((".pem", ".key")):
+        return True
+    data_dir_env = os.getenv("ASSISTANT_DATA_DIR")
+    if data_dir_env and os.path.isabs(data_dir_env):
+        data_dir = Path(data_dir_env)
+    else:
+        data_dir = Path(__file__).resolve().parents[2] / "data"
+    try:
+        resolved_data = data_dir.resolve()
+        resolved_target = p.resolve()
+        if resolved_target == resolved_data or resolved_data in resolved_target.parents:
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _check_protected_path(value: Union[str, Path, list]) -> None:
+    if isinstance(value, list):
+        for item in value:
+            _check_protected_path(item)
+        return
+    if _is_credential_target(value):
+        raise ValueError("Access denied: path targets protected credentials")
 
 
 async def install_tool_contracts(mcp, functions, account_lookup):
@@ -68,14 +114,17 @@ async def install_tool_contracts(mcp, functions, account_lookup):
         ]
         entities = [name for name in signature.parameters if name in ENTITY_FIELDS and name in properties]
         check_account = "account" in signature.parameters and "account" in properties
-        if not optional and not entities and not check_account:
+        check_file_paths = any(p in signature.parameters for p in ("file_path", "file_paths"))
+        if not optional and not entities and not check_account and not check_file_paths:
             continue
         repaired = signature.replace(parameters=[
             parameter.replace(annotation=parameter.annotation | None)
             if parameter.name in fields else parameter
             for parameter in signature.parameters.values()
         ])
-        wrapped = _contract_function(fn, repaired, account_lookup, check_account, optional, entities)
+        wrapped = _contract_function(
+            fn, repaired, account_lookup, check_account, optional, entities, check_file_paths
+        )
         mcp.remove_tool(tool.name)
         mcp.add_tool(
             wrapped,
@@ -94,7 +143,9 @@ async def install_tool_contracts(mcp, functions, account_lookup):
     return {"nullable": nullable, "accounts": accounts}
 
 
-def _contract_function(fn, signature, account_lookup, check_account, optional, entities):
+def _contract_function(
+    fn, signature, account_lookup, check_account, optional, entities, check_file_paths=False
+):
     """Preserve the function's guards, context injection and output conversion."""
     @wraps(fn)
     async def call(*args, **kwargs):
@@ -106,6 +157,11 @@ def _contract_function(fn, signature, account_lookup, check_account, optional, e
                 kwargs[name] = _entity(kwargs[name])
         if check_account and kwargs.get("account") is not None:
             kwargs["account"] = _known_account(kwargs["account"], account_lookup)
+        if check_file_paths:
+            for param in ("file_path", "file_paths"):
+                val = kwargs.get(param)
+                if val is not None:
+                    _check_protected_path(val)
         result = fn(*args, **kwargs)
         return await result if inspect.isawaitable(result) else result
 
