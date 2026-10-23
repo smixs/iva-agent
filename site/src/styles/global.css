@@ -280,7 +280,6 @@ button {
   margin-bottom: 16px;
 }
 .pricing-intro p {
-  color: var(--muted);
   margin: 0;
   max-width: 650px;
 }
