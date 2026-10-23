@@ -52,15 +52,7 @@
           "Ива бесплатная"
         ],
         "Подзаголовок": [
-          "Платить за Иву не нужно ни сейчас, ни потом. Код открыт под лицензией MIT."
-        ],
-        "Три карточки: какую модель подключить": [
-          "**Подписка ChatGPT или Claude.** Если она уже есть, Ива работает на ней и ничего не стоит.",
-          "**OpenCode Go.** Открытые модели за 10 долларов в месяц, на каждый день хватает.",
-          "**Любой провайдер.** OpenRouter, Ollama Cloud или свой адрес API, платите по расходу."
-        ],
-        "Строка под карточками": [
-          "Голос и поиск укладываются в бесплатные лимиты. Сколько потрачено, Ива скажет по команде /usage."
+          "Работает на вашей подписке ChatGPT или Claude."
         ],
         "Кнопка": []
       }
@@ -226,15 +218,7 @@
           "Iva is free"
         ],
         "Подзаголовок": [
-          "You never pay for Iva, now or later. The code is open under the MIT license."
-        ],
-        "Три карточки: какую модель подключить": [
-          "**ChatGPT or Claude subscription.** If you already have one, Iva runs on it and costs you nothing.",
-          "**OpenCode Go.** Open models for 10 dollars a month, plenty for every day.",
-          "**Any provider.** OpenRouter, Ollama Cloud or your own API endpoint, pay as you go."
-        ],
-        "Строка под карточками": [
-          "Voice and search fit in the free tiers. Type /usage and Iva tells you what you've spent."
+          "Runs on your ChatGPT or Claude subscription."
         ],
         "Кнопка": []
       }

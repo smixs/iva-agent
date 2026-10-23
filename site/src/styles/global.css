@@ -398,7 +398,6 @@ button {
   display: flex;
   align-items: center;
   gap: 55px;
-  margin-bottom: 34px;
 }
 .free-display {
   font-size: clamp(70px, 10vw, 140px);
@@ -414,36 +413,6 @@ button {
   color: var(--muted);
   margin: 0;
   max-width: 650px;
-}
-.prices {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 18px;
-  margin-bottom: 25px;
-}
-.prices article {
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  background: white;
-  padding: 28px;
-}
-.prices article:first-child {
-  border-color: var(--leaf);
-}
-.prices p {
-  font-size: 16px;
-  margin: 0;
-}
-.prices strong {
-  display: block;
-  font-size: 28px;
-  letter-spacing: -0.035em;
-  line-height: 1.1;
-  margin-bottom: 18px;
-}
-.pricing > p {
-  font-size: 15px;
-  color: var(--muted);
 }
 .data-symbol {
   background: var(--panel);
@@ -724,9 +693,6 @@ button {
   .final-cta {
     border-radius: 0;
   }
-  .prices article {
-    padding: 22px;
-  }
   .pricing-intro {
     gap: 30px;
   }
@@ -832,16 +798,6 @@ button {
   .free-display {
     display: block;
     margin-bottom: 25px;
-  }
-  .prices {
-    grid-template-columns: 1fr;
-  }
-  .prices strong {
-    font-size: 29px;
-    margin-bottom: 12px;
-  }
-  .pricing .button {
-    width: 100%;
   }
   .data-symbol {
     aspect-ratio: 1.6;
@@ -968,9 +924,6 @@ button {
   border-top: 1px solid var(--line) !important;
   border-bottom: 1px solid var(--line) !important;
   border-radius: 0;
-}
-.prices article {
-  background: white;
 }
 .hero h1 {
   max-width: 680px;
@@ -1217,9 +1170,6 @@ summary:focus-visible {
 .notice-visual > .mosaic {
   width: 65%;
   margin: auto;
-}
-.pricing > .mosaic {
-  margin-top: 35px;
 }
 .install-layout > .mosaic {
   display: block;

@@ -102,17 +102,6 @@ const schema = [
         <p>{t(5, "Подзаголовок")}</p>
       </div>
     </div>
-    <div class="prices">
-      {group(5, "Три карточки: какую модель подключить").map((s) => (
-        <article>
-          <p set:html={rich(s)} />
-        </article>
-      ))}
-    </div>
-    <p>{t(5, "Строка под карточками")}</p>
-    <a class="button" href="#install">
-      {installLabel}
-    </a>
   </section>
   <section id="your-data" class="section split">
     <span id="security" class="legacy-anchor" aria-hidden="true"></span>
