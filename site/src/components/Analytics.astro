@@ -9,34 +9,18 @@ const ru = lang === "ru";
 <aside
   class="consent"
   data-consent-banner
-  aria-labelledby="consent-title"
+  aria-label={ru ? "Статистика посещений" : "Visit statistics"}
   hidden
 >
-  <h2 id="consent-title">{ru ? "Статистика посещений" : "Visit statistics"}</h2>
-  <p class="consent-description">
-    {ru
-      ? "Разрешить Google Analytics для статистики посещений? Счётчик загружается только после согласия."
-      : "Allow Google Analytics to measure visits? The tracker loads only after you agree."}{" "}
-    <a href="/privacy/">{ru ? "Подробнее" : "Details"}</a>
+  <p>
+    {ru ? "Разрешить " : "Allow "}<a href="/privacy/">Google Analytics</a>?
   </p>
-  <p class="consent-question">
-    <a
-      href="/privacy/"
-      aria-label={
-        ru ? "Подробнее о Google Analytics" : "About Google Analytics"
-      }
-    >
-      Google Analytics?
-    </a>
-  </p>
-  <div class="actions">
-    <button class="button secondary" data-consent="denied">
-      {ru ? "Отказаться" : "Decline"}
-    </button>
-    <button class="button" data-consent="granted">
-      {ru ? "Разрешить" : "Allow analytics"}
-    </button>
-  </div>
+  <button class="consent-button" data-consent="denied">
+    {ru ? "Нет" : "No"}
+  </button>
+  <button class="consent-button is-yes" data-consent="granted">
+    {ru ? "Да" : "Yes"}
+  </button>
 </aside>
 <script>
   const key = "iva-analytics-consent-v1",

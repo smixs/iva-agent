@@ -699,13 +699,6 @@ button {
   margin-top: 40px;
   font-size: 14px;
 }
-.iva-consent {
-  font-family: inherit !important;
-}
-.iva-consent h2 {
-  font-size: 22px;
-  line-height: 1.2;
-}
 @media (min-width: 1440px) {
   .hero {
     padding-top: 65px;
@@ -1195,31 +1188,6 @@ summary:focus-visible {
   grid-column: 2;
   min-height: 35px;
 }
-.consent {
-  position: fixed;
-  bottom: 22px;
-  left: 22px;
-  width: min(460px, calc(100% - 44px));
-  z-index: 20;
-  padding: 24px;
-  background: #fff;
-  border: 1px solid var(--ink);
-  border-radius: 16px;
-  font-size: 15px;
-}
-.consent h2 {
-  font-size: 24px;
-  line-height: 1.15;
-  margin-bottom: 15px;
-}
-.consent p {
-  margin-bottom: 18px;
-}
-.consent .button {
-  font-size: 14px;
-  padding: 10px 14px;
-  min-height: 44px;
-}
 
 .script-source {
   display: block;
@@ -1376,56 +1344,6 @@ summary:focus-visible {
   white-space: nowrap;
 }
 /* A single shallow consent strip on every screen size. */
-.consent {
-  left: 0;
-  bottom: 0;
-  width: 100%;
-  border-radius: 0;
-  border-width: 1px 0 0;
-  padding: 9px 24px calc(9px + env(safe-area-inset-bottom));
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 24px;
-}
-.consent h2 {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
-}
-.consent-description {
-  display: none;
-}
-.consent .consent-question {
-  display: block;
-  white-space: nowrap;
-  margin: 0;
-  font-size: 12px;
-}
-.consent .actions {
-  margin: 0;
-  flex-wrap: nowrap;
-  gap: 6px;
-}
-.consent .button {
-  font-size: 12px;
-  line-height: 16px;
-  min-height: 36px;
-  white-space: nowrap;
-  padding: 8px;
-}
-@media (max-width: 768px) {
-  .consent {
-    justify-content: space-between;
-    gap: 8px;
-    padding-inline: 12px;
-  }
-}
 
 /* Flat phone enclosure: the existing Telegram animation remains inside. */
 @media (min-width: 769px) {
@@ -2107,4 +2025,50 @@ summary:focus-visible {
 .tg-voice .tg-wave rect {
   transform-box: fill-box;
   transform-origin: 50% 100%;
+}
+
+/* Analytics consent: one line and two small buttons at the bottom edge. */
+.consent {
+  position: fixed;
+  inset: auto 0 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 16px calc(8px + env(safe-area-inset-bottom));
+  background: rgba(255, 255, 255, 0.96);
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+  line-height: 1.3;
+}
+.consent[hidden] {
+  display: none;
+}
+.consent p {
+  margin: 0 8px 0 0;
+  min-width: 0;
+}
+.consent-button {
+  flex: none;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.consent-button.is-yes {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: #fff;
+}
+@media (max-width: 480px) {
+  .consent {
+    justify-content: space-between;
+    font-size: 12px;
+  }
 }
