@@ -23,6 +23,12 @@ const copyLabel = ru ? "Копировать" : "Copy";
 const headingTerm = ru ? "AI‑ассистент" : "AI assistant";
 const headingParts = t(1, "H1").split(headingTerm);
 const faq = c[10].faq!;
+// Line icons for the three security points: open code, visible actions, allowed people.
+const securityIcons = [
+  ["M8.5 8 4.5 12l4 4", "M15.5 8l4 4-4 4", "M13.5 5.5l-3 13"],
+  ["M12 3.2 5 6v5.4c0 4.4 2.9 7.9 7 9.4 4.1-1.5 7-5 7-9.4V6z", "M8.8 12.1l2.3 2.3 4.3-4.6"],
+  ["M6 10.5h12v9.5H6z", "M8.5 10.5V7.8a3.5 3.5 0 0 1 7 0v2.7", "M12 14.2v2.4"],
+];
 const schema = [
   {
     "@context": "https://schema.org",
@@ -103,18 +109,32 @@ const schema = [
       </div>
     </div>
   </section>
-  <section id="your-data" class="section split">
-    <span id="security" class="legacy-anchor" aria-hidden="true"></span>
+  <section id="security" class="section security">
     <span id="works" class="legacy-anchor" aria-hidden="true"></span>
-    <Mosaic scene="privacy" />
-    <div>
-      <h2>{title(8)}</h2>
-      <ul class="plain-list">
-        {group(8, "Пункты").map((s) => (
-          <li>{s}</li>
-        ))}
-      </ul>
-    </div>
+    <h2>{title(8)}</h2>
+    <p class="lead">{t(8, "Подзаголовок")}</p>
+    <ul class="security-points">
+      {group(8, "Пункты").map((s, i) => (
+        <li>
+          <svg
+            viewBox="0 0 24 24"
+            width="28"
+            height="28"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            {securityIcons[i].map((d) => (
+              <path d={d} />
+            ))}
+          </svg>
+          {s}
+        </li>
+      ))}
+    </ul>
   </section>
   <section id="install" class="section">
     <div class="section-intro">

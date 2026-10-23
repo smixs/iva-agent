@@ -61,13 +61,15 @@
       "number": 8,
       "groups": {
         "H2": [
-          "Всё хранится у вас"
+          "Ваши данные. Ваши правила."
+        ],
+        "Подзаголовок": [
+          "Ива живёт на вашем сервере или Mac, данные остаются у вас."
         ],
         "Пункты": [
-          "Ива отвечает только тем, кого вы разрешили.",
-          "Ключи лежат на вашем сервере, и в ответы они не попадают.",
-          "Подозрительные ссылки и пересланные сообщения Ива помечает и не выполняет из них команды.",
-          "Память лежит в отдельном git-репозитории на сервере."
+          "Открытый код MIT",
+          "Вы видите каждое действие",
+          "С ботом говорят только ваши люди"
         ]
       }
     },
@@ -216,13 +218,15 @@
       "number": 8,
       "groups": {
         "H2": [
-          "Everything stays with you"
+          "Your data. Your rules."
+        ],
+        "Подзаголовок": [
+          "Iva lives on your server or Mac, and your data stays with you."
         ],
         "Пункты": [
-          "Iva answers only the people you allow.",
-          "Your keys stay on your server and never end up in replies.",
-          "Iva flags suspicious links and forwards and never takes orders from them.",
-          "Memory lives in its own git repository on your server."
+          "Open source, MIT",
+          "You see every action",
+          "Only your people can talk to the bot"
         ]
       }
     },

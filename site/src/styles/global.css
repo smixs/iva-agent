@@ -1971,3 +1971,44 @@ summary:focus-visible {
     font-size: 12px;
   }
 }
+
+/* Security: heading, one line, three points with line icons. */
+.security {
+  text-align: center;
+}
+.security h2,
+.security .lead {
+  margin-inline: auto;
+}
+.security .lead {
+  max-width: 720px;
+  margin-bottom: 0;
+}
+.security-points {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 32px;
+  max-width: 960px;
+  margin: 48px auto 0;
+  padding: 0;
+  list-style: none;
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+.security-points li {
+  display: grid;
+  justify-items: center;
+  align-content: start;
+  gap: 14px;
+}
+.security-points svg {
+  color: var(--blue);
+}
+@media (max-width: 768px) {
+  .security-points {
+    grid-template-columns: 1fr;
+    gap: 24px;
+    margin-top: 32px;
+  }
+}
