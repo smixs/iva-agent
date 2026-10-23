@@ -1396,8 +1396,9 @@ summary:focus-visible {
     width: 40px;
     height: 40px;
   }
-  .mobile-toggle:not([hidden]) {
-    display: block;
+  .mobile-toggle:not([hidden]),
+  .js .mobile-toggle {
+    display: block !important;
     border: 1px solid var(--line);
     padding: 8px 12px;
     border-radius: 6px;
@@ -1419,6 +1420,9 @@ summary:focus-visible {
     padding: 22px;
     border-bottom: 1px solid var(--line);
     font-size: 16px;
+  }
+  .js .mobile-nav:not(.is-open) {
+    display: none;
   }
   .section {
     scroll-margin-top: 100px;

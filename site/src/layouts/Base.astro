@@ -70,6 +70,9 @@ const footerLinks = [
 <!doctype html>
 <html lang={lang}>
   <head>
+    <script is:inline>
+      document.documentElement.classList.add("js");
+    </script>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width" />
     <title>{title}</title>
@@ -210,12 +213,14 @@ const footerLinks = [
       toggle.hidden = false;
       function close() {
         menu.hidden = true;
+        menu.classList.remove("is-open");
         toggle.setAttribute("aria-expanded", "false");
         toggle.focus();
       }
       toggle.addEventListener("click", () => {
         const open = toggle.getAttribute("aria-expanded") === "true";
         menu.hidden = open;
+        menu.classList.toggle("is-open", !open);
         toggle.setAttribute("aria-expanded", String(!open));
       });
       document.addEventListener("keydown", (event) => {
