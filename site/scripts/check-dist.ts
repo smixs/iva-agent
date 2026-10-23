@@ -6,7 +6,7 @@ import { files } from "../src/lib/build.ts";
 import { extras } from "../src/data/home-extras.ts";
 const dist = path.resolve("dist");
 const copy = JSON.parse(readFileSync("src/data/copy.json", "utf8"));
-const scenes = JSON.parse(readFileSync("src/data/scenes.json", "utf8"));
+const usecases = JSON.parse(readFileSync("src/data/usecases.json", "utf8"));
 const plain = (s: string) =>
   s
     .replace(/<[^>]*>/g, " ")
@@ -171,8 +171,6 @@ for (const home of ["dist/index.html", "dist/ru/index.html"]) {
   });
   assert.equal((visible.match(/class="review"/g) || []).length, 11);
   const lang = home.includes("/ru/") ? "ru" : "en";
-  assert.equal((visible.match(/data-topic="/g) || []).length, 12);
-  assert.equal((visible.match(/data-topic-panel="/g) || []).length, 12);
   const final = visible.match(
     /<section class="section final-cta"[\s\S]*?<\/section>/,
   )![0];
@@ -181,41 +179,34 @@ for (const home of ["dist/index.html", "dist/ru/index.html"]) {
     /id="panel-0"[\s\S]*?<code>([\s\S]*?)<\/code>/,
   )![1];
   assert.ok(final.includes(`<code>${installPhrase}</code>`));
-  assert.equal((visible.match(/class="scene-card"/g) || []).length, 12);
+  assert.equal((visible.match(/class="usecase-row"/g) || []).length, 8);
   const main = visible.match(/<main\b[^>]*>([\s\S]*?)<\/main>/)![1];
   const headings = [...main.matchAll(/<h2[^>]*>([\s\S]*?)<\/h2>/g)].map((m) =>
     plain(m[1]),
   );
-  assert.deepEqual(headings, [
-    copy[lang][2].groups.H2[0],
-    extras[lang].overnight,
-    ...copy[lang].slice(3).map((section: any) => section.groups.H2[0]),
-  ]);
+  assert.deepEqual(
+    headings,
+    copy[lang].slice(2).map((section: any) => section.groups.H2[0]),
+  );
   const content = plain(visible);
-  for (const story of extras[lang].stories) {
-    for (const value of Object.values(story))
-      assert.ok(
-        content.includes(plain(value)),
-        `${home}: missing addition: ${value}`,
-      );
-  }
-  for (const value of [...extras[lang].morning, ...extras[lang].verbs])
+  for (const value of extras[lang].verbs)
     assert.ok(
       content.includes(plain(value)),
       `${home}: missing addition: ${value}`,
     );
-  for (const scene of scenes[lang]) {
-    for (const value of [
-      scene.caption,
-      ...scene.messages.map((m: any) => m.text),
-      ...scene.buttons,
-    ]) {
+  for (const row of usecases[lang].rows) {
+    for (const value of [row.title, row.text]) {
       assert.ok(
         content.includes(plain(value)),
-        `${home}: missing scene copy: ${value}`,
+        `${home}: missing usecase copy: ${value}`,
       );
     }
   }
+  for (const value of usecases[lang].more)
+    assert.ok(
+      content.includes(plain(value)),
+      `${home}: missing usecase copy: ${value}`,
+    );
   for (const section of copy[lang].slice(1)) {
     for (const [key, values] of Object.entries(section.groups)) {
       if (
