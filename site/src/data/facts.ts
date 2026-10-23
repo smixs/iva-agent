@@ -16,14 +16,47 @@ export const integrations = [
 export const githubPath =
   "M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12";
 
-export type Cell = "yes" | "no" | "unknown";
-// Columns after Iva. Values follow design-5 until the fact sheet
-// (.scratch blocks-security-compare.md) lands; sources go next to each column.
+export type Mark = "yes" | "no" | "unknown";
+export type Cell = { v: Mark; note?: Record<Lang, string> };
+const yes: Cell = { v: "yes" };
+const unknown: Cell = { v: "unknown" };
+const note = (v: Mark, ru: string, en: string): Cell => ({ v, note: { ru, en } });
+// Rows: free, own server, Telegram, memory, open source. A tick only where a source says
+// yes, a dash only where it says no, «no data» otherwise (d5-copy.md, appendix A).
+export const iva: Cell[] = [yes, yes, yes, yes, yes];
 export const competitors: { name: string; values: Cell[] }[] = [
-  { name: "ChatGPT\nDots", values: ["no", "no", "yes", "no", "no"] },
-  { name: "Claude\nDuet", values: ["no", "no", "yes", "yes", "no"] },
-  { name: "Meta\nMuse", values: ["no", "no", "yes", "no", "no"] },
-  { name: "Grok\nBot", values: ["no", "no", "yes", "no", "no"] },
+  // refs/research-duet-dots.md:101 (runs in the vendor's cloud)
+  {
+    name: "Dots\n(OpenAI)",
+    values: [unknown, note("no", "облако вендора", "vendor cloud"), unknown, unknown, unknown],
+  },
+  // refs/research-duet-dots.md:21-22 (Pro and Max plans)
+  {
+    name: "Duet\n(Claude)",
+    values: [note("unknown", "по планам Pro и Max", "on Pro and Max plans"), unknown, unknown, unknown, unknown],
+  },
+  // refs/research-muse-grokbot.md:26-27, :35
+  {
+    name: "Muse\n(Meta)",
+    values: [
+      note("yes", "с лимитом", "with a usage limit"),
+      note("no", "облако вендора", "vendor cloud"),
+      unknown,
+      note("yes", "учится на разговорах", "learns from conversations"),
+      unknown,
+    ],
+  },
+  // refs/research-muse-grokbot.md:55, :60-61
+  {
+    name: "Grok\nBot",
+    values: [
+      note("unknown", "старт бесплатно, тарифы от $30", "free to start, tiers from $30"),
+      unknown,
+      unknown,
+      note("yes", "память обновляется", "memory updates over time"),
+      unknown,
+    ],
+  },
 ];
 
 // Two real reviews from @aimasters_chat (src: t.me links), shortened to one sentence each.
@@ -34,7 +67,7 @@ export const reviews: {
   quote: Record<Lang, string>;
 }[] = [
   {
-    name: { ru: "Михаил Шварц", en: "Mikhail Shvarts" },
+    name: { ru: "Михаил Шварц", en: "Mikhail Schwarz" },
     handle: "@mihailschwarz",
     url: "https://t.me/aimasters_chat/8525",
     quote: {

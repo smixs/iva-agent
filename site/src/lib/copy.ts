@@ -21,7 +21,7 @@ export const homeCopy = Object.fromEntries(
 ) as typeof home;
 export const phrase = (lang: Lang) =>
   lang === "ru"
-    ? "Установи Иву, инструкции: https://iva-agent.com/install.txt"
+    ? "Установи мне Иву, инструкция: https://iva-agent.com/install.txt"
     : "Install Iva for me, instructions: https://iva-agent.com/install.txt";
 export const command =
   "curl -fsSL https://raw.githubusercontent.com/smixs/iva-agent/main/install.sh | bash";

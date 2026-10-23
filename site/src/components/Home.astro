@@ -5,7 +5,7 @@ import Pixels from "./Pixels.astro";
 import Veil from "./Veil.astro";
 import Icon from "./Icon.astro";
 import { homeCopy, rich, phrase, command, type Lang } from "../lib/copy";
-import { integrations, competitors, reviews, type Cell } from "../data/facts";
+import { integrations, competitors, reviews, iva } from "../data/facts";
 import { initials } from "../lib/pixels";
 import { stats } from "../lib/stats";
 const { lang = "en" } = Astro.props as { lang: Lang };
@@ -19,7 +19,6 @@ const arrow = [
   [0, 3], [1, 3], [2, 3], [3, 3], [4, 3], [5, 3], [6, 3],
   [5, 2], [4, 1], [3, 0], [5, 4], [4, 5], [3, 6],
 ];
-const iva: Cell[] = c.compare.rows.map(() => "yes");
 const columns = [{ name: ru ? "Ива" : "Iva", values: iva }, ...competitors];
 // Reviewers' initials drawn as a 5 x 7 pixel font: real people get no generated faces.
 const monogram = (name: string) => initials(name.split(" ").map((w) => w[0]).join(""));
@@ -234,7 +233,7 @@ const schema = [
   <section class="compare wrap" aria-labelledby="compare-title">
     <span id="pricing" class="legacy-anchor"></span>
     <h2 id="compare-title">{c.compare.h2}</h2>
-    <div class="table-wrap" data-reveal>
+    <div class="table-wrap" data-reveal role="region" tabindex="0" aria-label={c.compare.caption}>
       <table>
         <caption class="sr-only">{c.compare.caption}</caption>
         <colgroup>
@@ -265,17 +264,18 @@ const schema = [
               <tr>
                 <th scope="row">{row}</th>
                 {columns.map((col, i) => {
-                  const v = col.values[r];
+                  const cell = col.values[r];
                   return (
-                    <td class:list={[`is-${v}`, { "is-iva": i === 0 }]}>
-                      {v === "unknown" ? (
-                        <span class="cell-unknown">{c.compare.unknown}</span>
+                    <td class:list={[`is-${cell.v}`, { "is-iva": i === 0 }]}>
+                      {cell.v === "unknown" ? (
+                        !cell.note && <span class="cell-unknown">{c.compare.unknown}</span>
                       ) : (
                         <>
-                          <Icon name={v === "yes" ? "check" : "dash"} />
-                          <span class="sr-only">{c.compare[v]}</span>
+                          <Icon name={cell.v === "yes" ? "check" : "dash"} />
+                          <span class="sr-only">{c.compare[cell.v]}</span>
                         </>
                       )}
+                      {cell.note && <span class="cell-note">{cell.note[lang]}</span>}
                     </td>
                   );
                 })}
@@ -308,6 +308,7 @@ const schema = [
           ))
         }
       </ul>
+      <p class="world-line">{c.world.line}</p>
     </div>
     <div id="reviews" class="world-reviews">
       <span id="asks" class="legacy-anchor"></span>

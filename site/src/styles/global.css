@@ -868,9 +868,18 @@ td.is-iva .icon {
   color: var(--cta);
   stroke-width: 3.2;
 }
-.cell-unknown {
+.cell-unknown,
+.cell-note {
   font-size: 13px;
+  line-height: 1.25;
   color: var(--muted);
+}
+.cell-note {
+  display: block;
+  padding: 2px 8px 0;
+}
+tbody td {
+  padding-block: 8px;
 }
 .compare-note {
   margin-top: 8px;
@@ -896,7 +905,12 @@ td.is-iva .icon {
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  gap: 28px;
+  gap: 24px;
+}
+.world-line {
+  margin-top: -6px;
+  font-size: clamp(15px, 1.2vw, 17px);
+  color: var(--ink-2);
 }
 .world h2 {
   font-size: clamp(28px, 3.6vw, 52px);
@@ -2243,14 +2257,24 @@ td.is-iva .icon {
   .plate-lead span {
     display: inline;
   }
+  .table-wrap {
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+  }
   table {
+    min-width: 620px;
     font-size: 14px;
   }
   .col-label {
-    width: 28%;
+    width: 20%;
   }
-  .col-iva {
-    width: 15%;
+  tbody th,
+  thead td {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background: #fdfcf7;
+    box-shadow: 1px 0 0 var(--line);
   }
   thead th,
   thead td {
@@ -2276,10 +2300,12 @@ td.is-iva .icon {
     width: 18px;
     height: 18px;
   }
-  .cell-unknown {
-    font-size: 10.5px;
-    line-height: 1.1;
+  .cell-unknown,
+  .cell-note {
+    font-size: 12px;
+    line-height: 1.2;
     display: block;
+    padding-inline: 4px;
   }
   .review-list {
     grid-template-columns: 1fr;

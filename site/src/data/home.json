@@ -59,7 +59,7 @@
           ],
           [
             "✉️",
-            "2 письма ждут ответа"
+            "В почте 2 письма ждут ответа"
           ]
         ],
         "time": "08:24"
@@ -102,7 +102,7 @@
         {
           "id": "family",
           "title": "Своя Ива у каждого",
-          "text": "Помощник для всей семьи.",
+          "text": "Отдельный помощник каждому в семье.",
           "alt": "Мама, сын и бабушка за столом, у каждого свой телефон"
         }
       ]
@@ -125,7 +125,7 @@
         ],
         [
           "lock",
-          "Отправка и оплата с вашего подтверждения"
+          "С ботом говорят только ваши люди"
         ]
       ]
     },
@@ -142,7 +142,7 @@
       "yes": "есть",
       "no": "нет",
       "unknown": "нет данных",
-      "note": "Сравнение по официальным страницам продуктов на октябрь 2026."
+      "note": "«Нет данных» значит, что в открытых источниках этого не нашли. Сверено в октябре 2026."
     },
     "world": {
       "h2": [
@@ -150,7 +150,8 @@
         "с вашим миром"
       ],
       "reviewsLabel": "Отзывы пользователей",
-      "source": "Сообщение в чате"
+      "source": "Сообщение в чате",
+      "line": "Почта, календарь и файлы — прямо из чата с Ивой."
     },
     "final": {
       "h2": "Одна фраза. Ива у вас.",
@@ -160,7 +161,7 @@
       ],
       "cta": "Начать бесплатно",
       "copy": "Копировать",
-      "other": "Другие способы установки",
+      "other": "Или сами одной командой на сервере или Mac",
       "command": "Одной командой",
       "script": "Посмотреть скрипт",
       "guide": "Инструкция по установке",
@@ -256,7 +257,7 @@
         "in Telegram"
       ],
       "lead": [
-        "Remembers what matters. Handles your errands.",
+        "Remembers what matters. Handles the work.",
         "Always there in your Telegram."
       ],
       "cta": "Install with an AI agent",
@@ -278,11 +279,11 @@
       "input": "Message",
       "brief": {
         "title": "☀️ Good morning, Sergey!",
-        "intro": "3 meetings today:",
+        "intro": "You have 3 meetings today:",
         "items": [
           [
             "👥",
-            "10:00 — team sync"
+            "10:00 — team"
           ],
           [
             "🤝",
@@ -290,13 +291,13 @@
           ],
           [
             "✉️",
-            "2 emails need a reply"
+            "2 emails are waiting for a reply"
           ]
         ],
         "time": "08:24"
       },
       "birthday": {
-        "text": "🎂 Mom's birthday is on Friday. Shall I find a gift?",
+        "text": "🎂 Your mom's birthday is on Friday. Want gift ideas?",
         "time": "08:24"
       },
       "voice": {
@@ -314,26 +315,26 @@
       "items": [
         {
           "id": "morning",
-          "title": "Your morning, sorted",
-          "text": "Meetings, weather and email in one message.",
+          "title": "Your morning, already sorted",
+          "text": "Meetings, weather and mail in one message.",
           "alt": "A woman by the window with a cup of tea looks at her phone"
         },
         {
           "id": "voice",
-          "title": "Say it, she saves it",
-          "text": "From a voice note to tasks and reminders.",
+          "title": "You say it, she writes it down",
+          "text": "Voice notes become tasks and reminders.",
           "alt": "A man in a taxi dictates a voice message"
         },
         {
           "id": "birthday",
-          "title": "Remembers for you",
-          "text": "Dates, promises and that talk six months ago.",
+          "title": "She remembers so you do not have to",
+          "text": "Dates, promises and a talk from six months ago.",
           "alt": "A daughter gives her father a birthday present"
         },
         {
           "id": "family",
-          "title": "An Iva for everyone",
-          "text": "An assistant for the whole family.",
+          "title": "An Iva of your own for everyone",
+          "text": "A separate assistant for each person in the family.",
           "alt": "A mother, her son and grandmother at the table, each with a phone"
         }
       ]
@@ -341,7 +342,7 @@
     "data": {
       "h2": "Your data. Your rules.",
       "lead": [
-        "Iva lives on your server or Mac.",
+        "Iva lives on your server or your Mac.",
         "Your data stays with you."
       ],
       "alt": "A Mac mini and a laptop among Iva's leaves",
@@ -356,7 +357,7 @@
         ],
         [
           "lock",
-          "Sending and paying only with your approval"
+          "Only your people can talk to the bot"
         ]
       ]
     },
@@ -373,7 +374,7 @@
       "yes": "yes",
       "no": "no",
       "unknown": "no data",
-      "note": "Based on the products' official pages, October 2026."
+      "note": "“No data” means public sources do not confirm it. Checked in October 2026."
     },
     "world": {
       "h2": [
@@ -381,17 +382,18 @@
         "with your world"
       ],
       "reviewsLabel": "What users say",
-      "source": "Chat message"
+      "source": "Chat message",
+      "line": "Mail, calendar and files, right from your chat with Iva."
     },
     "final": {
-      "h2": "One sentence. Iva is yours.",
+      "h2": "One phrase. Iva is yours.",
       "text": [
         "Ask Claude Code or Codex to install Iva.",
         "In 5 minutes she replies in Telegram."
       ],
       "cta": "Start for free",
       "copy": "Copy",
-      "other": "Other ways to install",
+      "other": "Or run one command yourself on a server or a Mac",
       "command": "One command",
       "script": "View the script",
       "guide": "Installation guide",
