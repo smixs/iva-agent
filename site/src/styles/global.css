@@ -1656,9 +1656,9 @@ summary:focus-visible {
 }
 .connection-grid .connection-any {
   grid-column: span 2;
-  align-self: center;
+  align-content: center;
+  height: 32px;
   color: var(--ink);
-  font-size: 16px;
   font-weight: 600;
 }
 @media (max-width: 768px) {
@@ -1679,7 +1679,4 @@ summary:focus-visible {
   overflow: hidden;
   clip-path: inset(50%);
   white-space: nowrap;
-}
-.connection-grid li:has(> .sr-only) {
-  align-content: center;
 }
