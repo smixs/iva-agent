@@ -1575,7 +1575,12 @@ summary:focus-visible {
   }
 }
 
-/* Install: heading, one line, the button and a quiet link for the manual way. */
+/* Install: the heading and the button; on phones the button is full width as in the hero. */
+@media (max-width: 768px) {
+  .install .button {
+    width: 100%;
+  }
+}
 
 /* Reviews: three short quotes, name and a link to the message. */
 .reviews {
