@@ -3,7 +3,6 @@ import Base from "../layouts/Base.astro";
 import UseCases from "./UseCases.astro";
 import usecases from "../data/usecases.json";
 import HeroChat from "./HeroChat.astro";
-import RotatingLine from "./RotatingLine.astro";
 import { extras } from "../data/home-extras";
 import Mosaic from "./Mosaic.astro";
 import Reviews from "./Reviews.astro";
@@ -78,16 +77,11 @@ const schema = [
 >
   <section class="hero section">
     <div class="hero-copy">
-      <p class="eyebrow">
-        <span class="free-badge">FREE</span>
-        {t(1, "Бейдж").replace("`FREE` ", "")}
-      </p>
       <h1>
         {headingParts[0]}
         <span class="keep-words">{headingTerm}</span>
         {headingParts[1]}
       </h1>
-      <RotatingLine lang={lang} />
       <p class="lead">{t(1, "Подзаголовок")}</p>
       <div class="actions">
         <button class="button" data-copy={phrase(lang)}>
@@ -255,7 +249,6 @@ const schema = [
     </div>
   </section>
   <section class="section final-cta">
-    <span class="free-badge">FREE</span>
     <h2>{title(12)}</h2>
     <div class="actions">
       <button class="button" data-copy={phrase(lang)}>

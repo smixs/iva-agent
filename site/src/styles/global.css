@@ -210,24 +210,6 @@ button {
 .hero-copy {
   padding: 25px 0;
 }
-.eyebrow {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  color: var(--muted);
-  font-size: 14px;
-  margin-bottom: 24px;
-}
-.free-badge {
-  display: inline-block;
-  background: var(--leaf);
-  color: var(--ink);
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  font-size: 14px;
-  padding: 3px 10px;
-  border-radius: 4px;
-}
 .hero-visual {
   position: relative;
   padding: 0 30px;
@@ -918,11 +900,6 @@ button {
   }
   .hero-copy {
     padding: 5px 0;
-  }
-  .eyebrow {
-    font-size: 12px;
-    gap: 10px;
-    margin-bottom: 22px;
   }
   .hero h1 {
     font-size: 46px;
@@ -2094,43 +2071,7 @@ summary:focus-visible {
 }
 
 /* Small additions to the shared Telegram stories, with no animation libraries. */
-.rotating-line {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  color: #276fa9;
-  font-size: 18px;
-  line-height: 1.4;
-  margin: -4px 0 22px;
-}
-.rotating-line > svg {
-  flex-shrink: 0;
-  margin-top: 2px;
-}
-.rotating-line > div {
-  display: grid;
-}
-.rotating-line [data-verb] {
-  grid-area: 1 / 1;
-}
 /* Hidden variants still reserve the longest line, preventing text or hero shifts. */
-.rotating-line [data-verb][hidden] {
-  display: block !important;
-  visibility: hidden;
-}
-.rotating-line.is-playing [data-verb]:not([hidden]) {
-  animation: verb-arrive 0.25s ease-out;
-}
-@keyframes verb-arrive {
-  from {
-    opacity: 0;
-    transform: translateY(5px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
 .telegram-activity {
   position: relative;
   z-index: 1;
@@ -2159,18 +2100,6 @@ summary:focus-visible {
   font-weight: 600;
 }
 .telegram-window:not(.is-playing) .bubble-arrive { animation-play-state: paused; }
-@media (max-width: 768px) {
-  .rotating-line {
-    font-size: 16px;
-    margin-top: -8px;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .rotating-line * {
-    animation: none !important;
-    transform: none;
-  }
-}
 /* Toast after copying: one line at the bottom, leaves by itself. */
 .toast {
   position: fixed;

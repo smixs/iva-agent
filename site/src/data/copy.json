@@ -17,14 +17,11 @@
     {
       "number": 1,
       "groups": {
-        "Бейдж": [
-          "`FREE` Бесплатно, открытый код"
-        ],
         "H1": [
           "Лучший AI‑ассистент в Telegram"
         ],
         "Подзаголовок": [
-          "Наговорите голосовое, и Ива разложит его по задачам. Она помнит, о чём вы договорились полгода назад, и сама напоминает. Живёт на вашем сервере или Mac."
+          "Помнит, о чём вы договорились, и сама напоминает."
         ],
         "Кнопки": [
           "[Установить с ИИ-агентом]"
@@ -223,14 +220,11 @@
     {
       "number": 1,
       "groups": {
-        "Бейдж": [
-          "`FREE` Free and open source"
-        ],
         "H1": [
           "The best AI assistant in Telegram"
         ],
         "Подзаголовок": [
-          "Send a voice note and Iva sorts it into tasks. She remembers what you agreed on six months ago and reminds you herself. She runs on your own server or Mac."
+          "Remembers what you agreed on and reminds you herself."
         ],
         "Кнопки": [
           "[Install with an AI agent]"

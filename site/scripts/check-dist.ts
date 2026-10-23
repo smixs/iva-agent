@@ -185,11 +185,6 @@ for (const home of ["dist/index.html", "dist/ru/index.html"]) {
     copy[lang].slice(2).map((section: any) => section.groups.H2[0]),
   );
   const content = plain(visible);
-  for (const value of extras[lang].verbs)
-    assert.ok(
-      content.includes(plain(value)),
-      `${home}: missing addition: ${value}`,
-    );
   for (const row of usecases[lang].rows) {
     for (const value of [row.title, row.text]) {
       assert.ok(
