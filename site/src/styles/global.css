@@ -104,6 +104,7 @@ h3 {
 }
 p {
   margin-bottom: 22px;
+  text-wrap: pretty;
 }
 code,
 pre {
