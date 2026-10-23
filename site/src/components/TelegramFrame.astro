@@ -1,13 +1,20 @@
 ---
-const { lang = "en", compact = false } = Astro.props;
+import { extras } from "../data/home-extras";
+import type { Lang } from "../lib/copy";
+const {
+  lang = "en",
+  compact = false,
+  hero = !compact,
+} = Astro.props as { lang?: Lang; compact?: boolean; hero?: boolean };
 const ru = lang === "ru";
+const copy = extras[lang];
 ---
 
 <div
   class:list={["telegram-window", { "telegram-compact": compact }]}
-  data-compact={compact ? "true" : undefined}
+  data-compact={!hero ? "true" : undefined}
   data-telegram-chat
-  data-hero-chat={compact ? undefined : ""}
+  data-hero-chat={hero ? "" : undefined}
   role="group"
   aria-label={ru ? "Пример разговора с Ивой" : "Example conversation with Iva"}
 >
@@ -34,8 +41,20 @@ const ru = lang === "ru";
       decoding="async"
     />
   </div>
+  {hero && (
+    <div
+      class="telegram-activity"
+      data-activity
+      data-activities={JSON.stringify(copy.activities)}
+      data-saved={copy.saved}
+      data-briefing={copy.briefing}
+    >
+      {copy.saved}
+    </div>
+  )}
   <div
     class="telegram-history"
+    role="group"
     tabindex="0"
     aria-label={ru ? "История переписки" : "Conversation history"}
   >
@@ -89,6 +108,15 @@ const ru = lang === "ru";
       const status = chat.querySelector<HTMLElement>("[data-peer-status]")!;
       const thinking = chat.querySelector<HTMLElement>("[data-thinking]")!;
       const steps = [...chat.querySelectorAll<HTMLElement>("[data-chat-step]")];
+      const activity = chat.querySelector<HTMLElement>("[data-activity]");
+      const activities: string[] = JSON.parse(
+        activity?.dataset.activities || "[]",
+      );
+      function setActivity(index: number) {
+        if (activity)
+          activity.textContent =
+            index < 0 ? activity.dataset.saved! : activities[index];
+      }
       // V5 beats at 60 fps: typing 50f, voice -> thinking 50f -> answer 90f;
       // follow-up 150f later, typing 40f, answer 60f. Scene transitions are omitted.
       const heroBeats: [number, string][] = [
@@ -100,6 +128,7 @@ const ru = lang === "ru";
         [6833, "question"],
         [7500, "thinking"],
         [8500, "answer"],
+        [9200, "memory"],
       ];
       const beats: [number, string][] = chat.dataset.compact
         ? steps
@@ -130,6 +159,7 @@ const ru = lang === "ru";
         cancelAnimationFrame(raf);
         steps.forEach((s) => (s.hidden = false));
         typing(false);
+        setActivity(-1);
         chat.classList.remove("is-playing");
         requestAnimationFrame(scroll);
       }
@@ -139,6 +169,7 @@ const ru = lang === "ru";
           s.classList.remove("bubble-arrive", "voice-playing");
         });
         typing(true);
+        if (activity) activity.textContent = activity.dataset.briefing!;
         chat.classList.add("is-playing");
         history.scrollTop = 0;
         index = 0;
@@ -161,6 +192,10 @@ const ru = lang === "ru";
         }
         while (index < beats.length && elapsed >= beats[index][0]) {
           const name = beats[index++][1];
+          if (name === "voice") setActivity(0);
+          if (name === "tasks") setActivity(1);
+          if (name === "question") setActivity(2);
+          if (name === "answer") setActivity(-1);
           if (name === "thinking") typing(true);
           else {
             typing(false);
@@ -200,6 +235,6 @@ const ru = lang === "ru";
         },
         { threshold: 0.1 },
       ).observe(chat);
-      update();
+      if (reduce.matches) final();
     });
 </script>

@@ -1,0 +1,98 @@
+---
+import scenes from "../data/scenes.json";
+import { extras } from "../data/home-extras";
+import type { Lang } from "../lib/copy";
+const { lang, index } = Astro.props as { lang: Lang; index: number };
+const scene = scenes[lang][index];
+const copy = extras[lang];
+const story = copy.stories[index];
+---
+
+<div class="telegram-date">{lang === "ru" ? "Сегодня" : "Today"}</div>
+{scene.messages.map((message, i) => (
+  <div
+    class:list={[
+      "telegram-bubble",
+      message.out ? "telegram-out" : "telegram-in",
+    ]}
+    data-chat-step={`scene-${index}-${i}`}
+    data-at={message.out ? 600 : i === 0 ? 1500 : 2600}
+  >
+    {message.voice ? (
+      <div class="scene-voice">
+        <span class="voice-control" aria-hidden="true">
+          ▶
+        </span>
+        <span class="telegram-wave" aria-hidden="true">
+          {Array.from({ length: 28 }, (_, n) => (
+            <i
+              style={`--bar:${6 + Math.round(21 * Math.abs(Math.sin(n * 1.7) * Math.cos(n * 0.6)))}px;--delay:${-n * 0.09}s`}
+            />
+          ))}
+        </span>
+        <span class="voice-label">{message.text}</span>
+      </div>
+    ) : (
+      message.text
+    )}
+    {!message.out && (
+      <span class="scene-effect" aria-hidden="true">
+        {index === 3 ? (
+          <span class="scene-confetti">
+            {Array.from({ length: 6 }, (_, n) => (
+              <i style={`--n:${n}`} />
+            ))}
+          </span>
+        ) : (
+          <svg
+            class="scene-check"
+            width="18"
+            height="18"
+            viewBox="0 0 20 20"
+            fill="none"
+          >
+            <path
+              d="m4 10 4 4 8-8"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+        )}
+      </span>
+    )}
+    <span class="telegram-time">
+      {index === 3 && !message.out ? "10:00" : "09:12"}
+      {message.out && <span> ✓✓</span>}
+    </span>
+  </div>
+))}
+<div
+  class="telegram-memory"
+  data-chat-step={`scene-${index}-memory`}
+  data-at="3000"
+>
+  <span>{copy.memoryLabel}</span> {story.memory}
+</div>
+{scene.buttons.length > 0 && (
+  <div
+    class="telegram-actions"
+    data-chat-step={`scene-${index}-buttons`}
+    data-at="3400"
+  >
+    {scene.buttons.map((label) => (
+      <span>{label}</span>
+    ))}
+  </div>
+)}
+<div
+  class="telegram-bubble telegram-out"
+  data-chat-step={`scene-${index}-reaction`}
+  data-at="4400"
+>
+  {story.reaction}
+  <span class="telegram-time">
+    09:13 <span> ✓✓</span>
+  </span>
+</div>

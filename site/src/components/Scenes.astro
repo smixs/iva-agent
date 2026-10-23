@@ -1,62 +1,63 @@
 ---
+import Phone from "./Phone.astro";
+import SceneConversation from "./SceneConversation.astro";
+import { extras } from "../data/home-extras";
 import TelegramFrame from "./TelegramFrame.astro";
 import scenes from "../data/scenes.json";
 import type { Lang } from "../lib/copy";
 const { lang, title } = Astro.props as { lang: Lang; title: string };
+const copy = extras[lang];
 ---
 
 <section id="features" class="section use-cases">
   <span id="asks" class="legacy-anchor" aria-hidden="true"></span>
   <span id="scenarios" class="legacy-anchor" aria-hidden="true"></span>
   <h2>{title}</h2>
-  <div class="scene-grid" tabindex="0" aria-label={title}>
+  <div class="scene-topics" role="group" aria-label={copy.topicsLabel}>
+    {copy.stories.map((story, i) => (
+      <button
+        type="button"
+        data-topic={i}
+        aria-pressed={i === 0 ? "true" : "false"}
+        aria-controls="topic-phone"
+      >
+        {story.topic}
+      </button>
+    ))}
+  </div>
+  <div class="topic-preview">
+    <div class="topic-benefit">
+      <p class="eyebrow">{copy.benefitLabel}</p>
+      <p
+        class="topic-caption"
+        data-topic-benefit
+        aria-live="polite"
+        aria-atomic="true"
+      >
+        {scenes[lang][0].caption}
+      </p>
+    </div>
+    <div id="topic-phone">
+      <Phone>
+        {scenes[lang].map((scene, index) => (
+          <div
+            data-topic-panel={index}
+            data-caption={scene.caption}
+            hidden={index !== 0}
+          >
+            <TelegramFrame lang={lang} hero={false}>
+              <SceneConversation lang={lang} index={index} />
+            </TelegramFrame>
+          </div>
+        ))}
+      </Phone>
+    </div>
+  </div>
+  <div class="scene-grid" role="group" tabindex="0" aria-label={title}>
     {scenes[lang].map((scene, index) => (
       <figure class="scene-card">
         <TelegramFrame lang={lang} compact>
-          <div class="telegram-date">{lang === "ru" ? "Сегодня" : "Today"}</div>
-          {scene.messages.map((message, i) => (
-            <div
-              class:list={[
-                "telegram-bubble",
-                message.out ? "telegram-out" : "telegram-in",
-              ]}
-              data-chat-step={`scene-${index}-${i}`}
-              data-at={message.out ? 600 : i === 0 ? 1500 : 2600}
-            >
-              {message.voice ? (
-                <div class="scene-voice">
-                  <span class="voice-control" aria-hidden="true">
-                    ▶
-                  </span>
-                  <span class="telegram-wave" aria-hidden="true">
-                    {Array.from({ length: 28 }, (_, n) => (
-                      <i
-                        style={`--bar:${6 + Math.round(21 * Math.abs(Math.sin(n * 1.7) * Math.cos(n * 0.6)))}px;--delay:${-n * 0.09}s`}
-                      />
-                    ))}
-                  </span>
-                  <span class="voice-label">{message.text}</span>
-                </div>
-              ) : (
-                message.text
-              )}
-              <span class="telegram-time">
-                {index === 3 && !message.out ? "10:00" : "09:12"}
-                {message.out && <span> ✓✓</span>}
-              </span>
-            </div>
-          ))}
-          {scene.buttons.length > 0 && (
-            <div
-              class="telegram-actions"
-              data-chat-step={`scene-${index}-buttons`}
-              data-at="3200"
-            >
-              {scene.buttons.map((label) => (
-                <span>{label}</span>
-              ))}
-            </div>
-          )}
+          <SceneConversation lang={lang} index={index} />
         </TelegramFrame>
         <figcaption>
           <span>{scene.caption}</span>
@@ -83,6 +84,40 @@ const { lang, title } = Astro.props as { lang: Lang; title: string };
   </div>
 </section>
 <script>
+  const topics = [
+    ...document.querySelectorAll<HTMLButtonElement>("[data-topic]"),
+  ];
+  const panels = [
+    ...document.querySelectorAll<HTMLElement>("[data-topic-panel]"),
+  ];
+  const benefit = document.querySelector<HTMLElement>("[data-topic-benefit]")!;
+  function selectTopic(index: number) {
+    topics.forEach((button, i) =>
+      button.setAttribute("aria-pressed", String(i === index)),
+    );
+    panels.forEach((panel, i) => (panel.hidden = i !== index));
+    benefit.textContent = panels[index].dataset.caption!;
+    topics[index].scrollIntoView({
+      block: "nearest",
+      inline: "nearest",
+      behavior: "instant",
+    });
+  }
+  topics.forEach((button, i) => {
+    button.addEventListener("click", () => selectTopic(i));
+    button.addEventListener("keydown", (event) => {
+      let next = i;
+      if (event.key === "ArrowRight") next = (i + 1) % topics.length;
+      else if (event.key === "ArrowLeft")
+        next = (i + topics.length - 1) % topics.length;
+      else if (event.key === "Home") next = 0;
+      else if (event.key === "End") next = topics.length - 1;
+      else return;
+      event.preventDefault();
+      selectTopic(next);
+      topics[next].focus({ preventScroll: true });
+    });
+  });
   const grid = document.querySelector<HTMLElement>(".scene-grid")!;
   const cards = [...grid.querySelectorAll<HTMLElement>(".scene-card")];
   const navigation = document.querySelector<HTMLElement>(".scene-navigation")!;
@@ -123,9 +158,10 @@ const { lang, title } = Astro.props as { lang: Lang; title: string };
         });
       }),
     );
-  document
-    .querySelectorAll<HTMLElement>(".scene-card figcaption")
-    .forEach((caption) => {
-      if (caption.scrollWidth > caption.clientWidth) caption.tabIndex = 0;
+  const captions = [...grid.querySelectorAll<HTMLElement>("figcaption")];
+  new ResizeObserver(() => {
+    captions.forEach((caption) => {
+      caption.tabIndex = caption.scrollWidth > caption.clientWidth ? 0 : -1;
     });
+  }).observe(grid);
 </script>

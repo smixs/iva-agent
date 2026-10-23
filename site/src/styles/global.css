@@ -1943,7 +1943,7 @@ summary:focus-visible {
 }
 .scene-card .telegram-window {
   max-width: none;
-  height: 340px;
+  height: 430px;
   border-radius: 18px;
 }
 .scene-card .telegram-toolbar {
@@ -2031,7 +2031,7 @@ summary:focus-visible {
     scroll-snap-align: start;
   }
   .scene-card .telegram-window {
-    height: 390px;
+    height: 490px;
   }
   .scene-card .telegram-history {
     padding: 10px;
@@ -2074,76 +2074,55 @@ summary:focus-visible {
 .keep-words {
   white-space: nowrap;
 }
+/* A single shallow consent strip on every screen size. */
 .consent {
-  width: min(360px, calc(100% - 36px));
-  padding: 18px;
-  bottom: 18px;
-  left: 18px;
-  border-radius: 12px;
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  border-radius: 0;
+  border-width: 1px 0 0;
+  padding: 9px 24px calc(9px + env(safe-area-inset-bottom));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
 }
 .consent h2 {
-  font-size: 20px;
-  margin-bottom: 10px;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
-.consent p {
-  font-size: 14px;
-  line-height: 1.45;
-  margin-bottom: 14px;
+.consent-description {
+  display: none;
 }
-.consent .button {
-  font-size: 13px;
-  min-height: 38px;
-  padding: 8px 12px;
+.consent .consent-question {
+  display: block;
+  white-space: nowrap;
+  margin: 0;
+  font-size: 12px;
 }
 .consent .actions {
   margin: 0;
-  gap: 10px;
+  flex-wrap: nowrap;
+  gap: 6px;
 }
-.consent-question {
-  display: none;
+.consent .button {
+  font-size: 12px;
+  line-height: 16px;
+  min-height: 36px;
+  white-space: nowrap;
+  padding: 8px;
 }
 @media (max-width: 768px) {
   .consent {
-    left: 0;
-    bottom: 0;
-    width: 100%;
-    border-radius: 0;
-    border-width: 1px 0 0;
-    padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
-    display: flex;
-    align-items: center;
     justify-content: space-between;
-    gap: 10px;
-  }
-  .consent h2 {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    padding: 0;
-    margin: -1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
-  }
-  .consent-description {
-    display: none;
-  }
-  .consent .consent-question {
-    display: block;
-    white-space: nowrap;
-    margin: 0;
-    font-size: 12px;
-  }
-  .consent .actions {
-    flex-wrap: nowrap;
-    gap: 6px;
-  }
-  .consent .button {
-    font-size: 12px;
-    line-height: 16px;
-    min-height: 36px;
-    white-space: nowrap;
-    padding: 8px;
+    gap: 8px;
+    padding-inline: 12px;
   }
 }
 
@@ -2271,5 +2250,233 @@ summary:focus-visible {
 @media (max-width: 768px) {
   .hero-phone {
     width: min(304px, calc((100svh - 150px) * 9 / 19.5));
+  }
+}
+
+/* Small additions to the shared Telegram stories, with no animation libraries. */
+.rotating-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  color: #276fa9;
+  font-size: 18px;
+  line-height: 1.4;
+  margin: -4px 0 22px;
+}
+.rotating-line > svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.rotating-line > div {
+  display: grid;
+}
+.rotating-line [data-verb] {
+  grid-area: 1 / 1;
+}
+/* Hidden variants still reserve the longest line, preventing text or hero shifts. */
+.rotating-line [data-verb][hidden] {
+  display: block !important;
+  visibility: hidden;
+}
+.rotating-line.is-playing [data-verb]:not([hidden]) {
+  animation: verb-arrive 0.25s ease-out;
+}
+@keyframes verb-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.telegram-activity {
+  position: relative;
+  z-index: 1;
+  padding: 7px 10px;
+  background: #fff;
+  border-top: 1px solid #e3e8ec;
+  color: #24669b;
+  font-size: 11px;
+  line-height: 1.4;
+  min-height: 31px;
+  flex-shrink: 0;
+}
+.scene-topics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 26px 0 32px;
+}
+.scene-topics button {
+  flex-shrink: 0;
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: #fff;
+  color: var(--text);
+  font: inherit;
+  font-size: 15px;
+  padding: 11px 17px;
+  cursor: pointer;
+}
+.scene-topics button[aria-pressed="true"] {
+  background: #edf5fc;
+  border-color: #368ad2;
+  color: #24669b;
+}
+.topic-preview {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 40px;
+  align-items: center;
+  padding: 12px 40px 42px;
+  border-bottom: 1px solid var(--line);
+}
+.topic-caption {
+  font-size: clamp(24px, 3vw, 36px);
+  line-height: 1.2;
+  letter-spacing: -0.025em;
+  max-width: 480px;
+  min-height: 4.8em;
+  margin-bottom: 0;
+}
+#topic-phone {
+  justify-self: center;
+  min-width: 0;
+}
+.hero-phone-screen > [data-topic-panel] {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.telegram-memory {
+  position: relative;
+  align-self: flex-start;
+  max-width: 94%;
+  padding: 6px 9px;
+  border-radius: 8px;
+  background: #f0f7fc;
+  color: #245c86;
+  font-size: 11px;
+  line-height: 1.35;
+  flex-shrink: 0;
+}
+.telegram-memory > span {
+  font-weight: 600;
+}
+.scene-effect {
+  display: inline-flex;
+  vertical-align: middle;
+  color: #368ad2;
+  margin-left: 5px;
+}
+.scene-check path {
+  stroke-dasharray: 22;
+  stroke-dashoffset: 0;
+}
+.is-playing .bubble-arrive .scene-check path {
+  animation: task-check 0.5s 0.2s both;
+}
+@keyframes task-check {
+  from {
+    stroke-dashoffset: 22;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+.scene-confetti {
+  position: relative;
+  display: inline-block;
+  width: 24px;
+  height: 18px;
+}
+.scene-confetti i {
+  position: absolute;
+  width: 3px;
+  height: 5px;
+  top: 7px;
+  left: calc(var(--n) * 4px);
+  background: #368ad2;
+  transform: rotate(calc(var(--n) * 37deg));
+}
+.scene-confetti i:last-child {
+  background: #a4dc55;
+}
+.is-playing .bubble-arrive .scene-confetti i {
+  animation: birthday-confetti 0.8s calc(var(--n) * 0.06s) both;
+}
+@keyframes birthday-confetti {
+  from {
+    opacity: 0;
+    transform: translateY(-13px) rotate(0deg);
+  }
+  40% {
+    opacity: 1;
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) rotate(calc(var(--n) * 37deg));
+  }
+}
+.telegram-window:not(.is-playing) .bubble-arrive,
+.telegram-window:not(.is-playing) .scene-effect * {
+  animation-play-state: paused;
+}
+.overnight .telegram-window {
+  height: 420px;
+  max-width: 520px;
+}
+.final-cta > p {
+  margin: 24px 0 12px;
+}
+.final-prompt {
+  text-align: left;
+  max-width: 760px;
+  margin: 0 auto;
+}
+@media (max-width: 768px) {
+  .rotating-line {
+    font-size: 16px;
+    margin-top: -8px;
+  }
+  .scene-topics {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding: 4px 2px 12px;
+    scroll-padding-inline: 2px;
+  }
+  .topic-preview {
+    grid-template-columns: 1fr;
+    gap: 22px;
+    padding: 0 0 30px;
+  }
+  .topic-caption {
+    min-height: 3.6em;
+    font-size: 26px;
+    max-width: 100%;
+  }
+  .topic-benefit .eyebrow {
+    margin-bottom: 10px;
+  }
+  .overnight .telegram-window {
+    height: 460px;
+    width: 100%;
+  }
+  .final-prompt {
+    flex-wrap: wrap;
+  }
+  .final-prompt code {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rotating-line *,
+  .scene-effect * {
+    animation: none !important;
+    transform: none;
   }
 }

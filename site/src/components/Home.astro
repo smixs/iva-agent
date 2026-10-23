@@ -2,6 +2,9 @@
 import Base from "../layouts/Base.astro";
 import Scenes from "./Scenes.astro";
 import HeroChat from "./HeroChat.astro";
+import Overnight from "./Overnight.astro";
+import RotatingLine from "./RotatingLine.astro";
+import { extras } from "../data/home-extras";
 import Mosaic from "./Mosaic.astro";
 import Reviews from "./Reviews.astro";
 import { homeCopy, rich, phrase, command, type Lang } from "../lib/copy";
@@ -93,6 +96,7 @@ const schema = [
         <span class="keep-words">{headingTerm}</span>
         {headingParts[1]}
       </h1>
+      <RotatingLine lang={lang} />
       <p class="lead">{t(1, "Подзаголовок")}</p>
       <div class="actions">
         <button class="button" data-copy={phrase(lang)}>
@@ -110,6 +114,7 @@ const schema = [
     <p class="trust">{trust(t(1, "Строка доверия"))}</p>
   </section>
   <Scenes lang={lang} title={title(2)} />
+  <Overnight lang={lang} />
   <Reviews lang={lang} />
   <section id="pricing" class="section pricing">
     <div class="pricing-intro">
@@ -271,13 +276,19 @@ const schema = [
     <span class="free-badge">FREE</span>
     <h2>{title(12)}</h2>
     <div class="actions">
-      <a class="button" href="#install">
-        {installLabel}
-      </a>
+      <button class="button" data-copy={phrase(lang)}>
+        {extras[lang].start}
+      </button>
       <a class="button secondary" href="https://github.com/smixs/iva-agent">
         GitHub ↗
       </a>
     </div>
+    <p>{extras[lang].paste}</p>
+    <div class="command final-prompt">
+      <code>{phrase(lang)}</code>
+      <button data-copy={phrase(lang)}>{copyLabel}</button>
+    </div>
+    <p class="copy-feedback" aria-live="polite" data-copy-status></p>
   </section>
 </Base>
 <script>
