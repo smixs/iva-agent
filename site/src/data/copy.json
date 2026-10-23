@@ -37,6 +37,17 @@
       }
     },
     {
+      "number": 3,
+      "groups": {
+        "H2": [
+          "Работает с вашими сервисами"
+        ],
+        "Подзаголовок": [
+          "Google из коробки, остальное через MCP одним файлом или плагином."
+        ]
+      }
+    },
+    {
       "number": 4,
       "groups": {
         "H2": [
@@ -169,6 +180,17 @@
       "groups": {
         "H2": [
           "What Iva does every day"
+        ]
+      }
+    },
+    {
+      "number": 3,
+      "groups": {
+        "H2": [
+          "Works with your tools"
+        ],
+        "Подзаголовок": [
+          "Google out of the box, the rest through MCP with one file or a plugin."
         ]
       }
     },

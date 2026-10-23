@@ -1,6 +1,7 @@
 ---
 import Base from "../layouts/Base.astro";
 import UseCases from "./UseCases.astro";
+import Connections from "./Connections.astro";
 import HeroChat from "./HeroChat.astro";
 import Reviews from "./Reviews.astro";
 import { homeCopy, rich, phrase, type Lang } from "../lib/copy";
@@ -86,6 +87,7 @@ const schema = [
     </div>
   </section>
   <UseCases lang={lang} title={title(2)} />
+  <Connections lang={lang} title={title(3)} line={t(3, "Подзаголовок")} />
   <Reviews lang={lang} title={title(4)} />
   <section id="pricing" class="section pricing">
     <div class="pricing-intro">

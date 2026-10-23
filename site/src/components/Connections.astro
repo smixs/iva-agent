@@ -1,0 +1,56 @@
+---
+// Services Iva connects to, only those verified in connections-verified (23.10.2026):
+// Google through the built-in google-workspace skill, the rest through MCP servers
+// (docs/extending.md, docs/plugins.md). Marks: Simple Icons 13.21.0 (CC0) and the
+// official Slack, Bitrix24, amoCRM and 1C files, all drawn in one colour.
+import type { Lang } from "../lib/copy";
+const { lang, title, line } = Astro.props as {
+  lang: Lang;
+  title: string;
+  line: string;
+};
+const svg = import.meta.glob<string>("../assets/logos/*.svg", {
+  query: "?raw",
+  import: "default",
+  eager: true,
+});
+const mark = (id: string) => svg[`../assets/logos/${id}.svg`];
+const ru = lang === "ru";
+// The fourth value is the height of a wide wordmark, tuned so the marks look even.
+const items: [string, string, number?][] = [
+  ["gmail", "Gmail"],
+  ["googlecalendar", ru ? "Google Календарь" : "Google Calendar"],
+  ["googledrive", "Google Drive"],
+  ["googlesheets", ru ? "Google Таблицы" : "Google Sheets"],
+  ["googledocs", ru ? "Google Документы" : "Google Docs"],
+  ["googletasks", ru ? "Google Задачи" : "Google Tasks"],
+  ["notion", "Notion"],
+  ["linear", "Linear"],
+  ["slack", "Slack"],
+  ["github", "GitHub"],
+  ["todoist", "Todoist"],
+  ["zoom", "Zoom", 15],
+  ["bitrix24", "Bitrix24", 18],
+  ["obsidian", "Obsidian"],
+  ["1c", ru ? "1С" : "1C", 26],
+  ["amocrm", "amoCRM", 20],
+];
+---
+
+<section id="connections" class="section connections">
+  <h2>{title}</h2>
+  <p class="lead">{line}</p>
+  <ul class="connection-grid">
+    {items.map(([id, name, height]) => (
+      <li>
+        <span
+          class="connection-mark"
+          style={height ? `--h:${height}px` : undefined}
+          set:html={mark(id)}
+        />
+        <span>{name}</span>
+      </li>
+    ))}
+    <li class="connection-any">{ru ? "и любой MCP-сервер" : "and any MCP server"}</li>
+  </ul>
+</section>
