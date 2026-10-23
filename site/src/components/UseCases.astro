@@ -3,22 +3,22 @@ import usecases from "../data/usecases.json";
 import type { Lang } from "../lib/copy";
 const { lang, title } = Astro.props as { lang: Lang; title: string };
 
-// Glitch squares sit on the image edge that faces away from the text, where the
-// generated pixels already are. Fixed positions keep every load identical.
-// [left %, top %, size px]; the last one is the single lime square.
-const EDGE: [number, number, number][] = [
-  [3, 24, 7], [8, 46, 5], [2, 63, 8], [12, 82, 5], [15, 14, 5], [6, 54, 6],
+// Glitch squares live only in the picture's outer corners, which the elliptical mask
+// leaves empty, so they never touch the scene or the text. They flash for 300 ms when
+// the row enters and on hover, and are invisible at rest. [left %, top %, size px].
+const CORNER: [number, number, number][] = [
+  [3, 6, 7], [9, 3, 5], [2, 15, 5], [4, 88, 6], [11, 95, 5], [2, 79, 8],
 ];
 const pixelsFor = (index: number) =>
-  EDGE.map(([x, y, s], n) => ({
-    // Odd rows put the image on the right, so the free edge is the right one.
+  CORNER.map(([x, y, s], n) => ({
+    // Odd rows put the image on the right, so the free corners are on the right.
     x: index % 2 === 0 ? x : 100 - x - 2,
-    y: (y + index * 7) % 92 + 3,
+    y: index % 4 >= 2 ? 100 - y - 2 : y,
     s,
-    lime: n === EDGE.length - 1,
-    dx: (index % 2 === 0 ? -1 : 1) * (24 + (n % 3) * 8),
-    dy: (n % 2 === 0 ? -1 : 1) * (10 + (n % 4) * 6),
-    delay: 0.18 + n * 0.035,
+    lime: n === CORNER.length - 1,
+    dx: (index % 2 === 0 ? -1 : 1) * (6 + (n % 3) * 3),
+    dy: (y < 50 ? -1 : 1) * (4 + (n % 2) * 4),
+    delay: n * 0.012,
   }));
 ---
 
@@ -83,21 +83,23 @@ const pixelsFor = (index: number) =>
   .case-pixels i { position: absolute; width: var(--s); height: var(--s); background: #368ad2; }
   .case-pixels i.lime { background: #a4dc55; }
 
-  /* Motion runs only when scripting marks the page ready, so without JS everything is visible. */
-  .js-motion .usecase-row .case-art,
-  .js-motion .usecase-row .case-copy { opacity: 0; transform: translateY(24px); }
-  .js-motion .usecase-row .case-pixels i { opacity: 0; transform: translate(var(--dx), var(--dy)); }
-  .js-motion .usecase-row.is-entered .case-art,
-  .js-motion .usecase-row.is-entered .case-copy {
-    opacity: 1; transform: none;
-    transition: opacity .6s cubic-bezier(.2,.7,.2,1), transform .6s cubic-bezier(.2,.7,.2,1);
+  .case-pixels i { opacity: 0; }
+  /* Motion runs only when scripting marks the page ready, so without JS everything is
+     visible. The picture fades in; the text stays put. */
+  .js-motion .usecase-row .case-art { opacity: 0; }
+  .js-motion .usecase-row.is-entered .case-art { opacity: 1; transition: opacity .3s ease-out; }
+  .js-motion .usecase-row.is-entered .case-pixels i { animation: case-glitch-in .23s var(--d) steps(4, jump-end) both; }
+  .can-hover .usecase-row.is-entered:hover .case-pixels i { animation: case-glitch-hover .23s var(--d) steps(4, jump-end) both; }
+  @keyframes case-glitch-in {
+    0% { opacity: 0; transform: translate(var(--dx), var(--dy)); }
+    35% { opacity: 1; transform: none; }
+    100% { opacity: 0; transform: none; }
   }
-  .js-motion .usecase-row.is-entered .case-copy { transition-delay: .12s; }
-  .js-motion .usecase-row.is-entered .case-pixels i {
-    animation: case-pixel-in .45s var(--d) cubic-bezier(.2,.7,.2,1) both, case-pixel-blink .4s calc(var(--d) + .45s) steps(2, jump-none) 2;
+  @keyframes case-glitch-hover {
+    0% { opacity: 0; transform: translate(var(--dx), var(--dy)); }
+    35% { opacity: 1; transform: none; }
+    100% { opacity: 0; transform: none; }
   }
-  @keyframes case-pixel-in { from { opacity: 0; transform: translate(var(--dx), var(--dy)); } to { opacity: 1; transform: none; } }
-  @keyframes case-pixel-blink { 0% { opacity: 1; } 50% { opacity: .15; } 100% { opacity: 1; } }
 
   @media (max-width: 959px) {
     .usecase-rows { margin-top: 32px; gap: 72px; }
@@ -108,8 +110,8 @@ const pixelsFor = (index: number) =>
     .case-motion { transform: none; will-change: auto; }
   }
   @media (prefers-reduced-motion: reduce) {
-    .js-motion .usecase-row .case-art, .js-motion .usecase-row .case-copy,
-    .js-motion .usecase-row .case-pixels i { opacity: 1; transform: none; animation: none; transition: none; }
+    .js-motion .usecase-row .case-art { opacity: 1; transition: none; }
+    .case-pixels { display: none; }
     .case-motion { transform: none; }
   }
 </style>
@@ -122,6 +124,8 @@ const pixelsFor = (index: number) =>
   let frame = 0;
 
   if (!reduced.matches) document.documentElement.classList.add("js-motion");
+  // Hover glitches only where a real pointer hovers (no sticky hover on touch).
+  if (matchMedia("(hover: hover) and (pointer: fine)").matches) document.documentElement.classList.add("can-hover");
 
   // Parallax: ±12 px around the viewport centre, desktop only, visible rows only.
   function paint() {
