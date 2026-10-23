@@ -1,109 +1,175 @@
 ---
+import hero from "../data/mosaics/hero.json";
+import heroMobile from "../data/mosaics/hero-mobile.json";
+import memory from "../data/mosaics/memory.json";
+import memoryMobile from "../data/mosaics/memory-mobile.json";
+import writes from "../data/mosaics/writes-first.json";
+import userbot from "../data/mosaics/userbot.json";
+import privacy from "../data/mosaics/privacy.json";
+import install from "../data/mosaics/install.json";
+import price from "../data/mosaics/price.json";
+const scenes: Record<string, any> = {
+  hero,
+  "hero-mobile": heroMobile,
+  memory,
+  "memory-mobile": memoryMobile,
+  "writes-first": writes,
+  userbot,
+  privacy,
+  install,
+  price,
+};
 const { scene = "hero", alt = "", eager = false } = Astro.props;
-import parameters from "../data/mosaic.json";
+const desktop = scenes[scene],
+  mobile = scenes[scene + "-mobile"] || desktop;
+const portrait = mobile !== desktop;
 ---
 
-<div class="mosaic" data-mosaic={JSON.stringify(parameters)}>
-  <img
-    src={`/media/${scene}.webp`}
-    alt={alt}
-    width="960"
-    height="960"
-    loading={eager ? "eager" : "lazy"}
-    decoding="async"
-  />
-  <canvas width="480" height="480" aria-hidden="true"></canvas>
+<div
+  class="mosaic"
+  data-mosaic={JSON.stringify({ desktop, mobile })}
+  style={`--ratio:${desktop.size[0]}/${desktop.size[1]};--mobile-ratio:${mobile.size[0]}/${mobile.size[1]}`}
+>
+  <picture>
+    {portrait && (
+      <source
+        media="(max-width: 768px)"
+        srcset={`/media/${scene}-mobile-540.webp 540w, /media/${scene}-mobile-1080.webp 1080w`}
+        sizes="(max-width: 768px) calc(100vw - 44px), 540px"
+        width={mobile.size[0]}
+        height={mobile.size[1]}
+      />
+    )}
+    <img
+      src={`/media/${scene}-800.webp`}
+      srcset={`/media/${scene}-800.webp 800w, /media/${scene}-1600.webp 1600w`}
+      sizes="(max-width: 768px) calc(100vw - 44px), 560px"
+      alt={alt}
+      width={desktop.size[0]}
+      height={desktop.size[1]}
+      loading={eager ? "eager" : "lazy"}
+      decoding="async"
+    />
+  </picture>
+  <canvas
+    hidden
+    aria-hidden="true"
+    width={desktop.size[0]}
+    height={desktop.size[1]}
+  ></canvas>
 </div>
 <script>
-  const reduce = matchMedia("(prefers-reduced-motion: reduce)");
+  import { renderScene, type Scene } from "../lib/mosaic";
+  const reduced = matchMedia("(prefers-reduced-motion: reduce)"),
+    mobile = matchMedia("(max-width: 768px)");
   document.querySelectorAll<HTMLElement>("[data-mosaic]").forEach((el) => {
-    const image = el.querySelector("img")!;
+    const definitions = JSON.parse(el.dataset.mosaic!);
     const canvas = el.querySelector("canvas")!;
-    const p = JSON.parse(el.dataset.mosaic!);
     let visible = false,
       raf = 0,
       start = 0,
-      last = 0;
-    let ctx: CanvasRenderingContext2D | null = null;
-    let cells: { x: number; y: number; color: string; noise: number }[] = [];
-    function prepare() {
-      if (ctx || !image.naturalWidth) return;
-      ctx = canvas.getContext("2d");
-      const sample = document.createElement("canvas");
-      sample.width = sample.height = 24;
-      const sc = sample.getContext("2d", { willReadFrequently: true })!;
-      sc.drawImage(image, 0, 0, 24, 24);
-      const pixels = sc.getImageData(0, 0, 24, 24).data;
-      let greens = 0;
-      for (let y = 240; y < 480; y += p.cell)
-        for (let x = 0; x < 480; x += p.cell) {
-          const noise =
-            (Math.sin(x * 12.9898 + y * 78.233 + p.seed) * 43758.5453) % 1;
-          if (Math.abs(noise) > p.density) continue;
-          const index = (Math.floor(y / 20) * 24 + Math.floor(x / 20)) * 4;
-          const color = p.palette.reduce((best: number[], next: number[]) => {
-            const distance = (c: number[]) =>
-              c.reduce((sum, v, i) => sum + (v - pixels[index + i]) ** 2, 0);
-            return distance(next) < distance(best) ? next : best;
-          });
-          cells.push({
-            x,
-            y,
-            noise,
-            color:
-              Math.abs(noise) < 0.002 && greens++ < p.greenPoints
-                ? "#A4DC55"
-                : `rgb(${color.join(",")})`,
-          });
-        }
-    }
+      last = 0,
+      ctx: CanvasRenderingContext2D | null = null;
+    let scene: Scene,
+      ready = false,
+      generation = 0;
+    const images = new Map<string, CanvasImageSource>();
+    const size = () => {
+      if (!scene) return;
+      canvas.width = Math.min(
+        1200,
+        Math.ceil(el.clientWidth * devicePixelRatio),
+      );
+      canvas.height = Math.ceil((canvas.width * scene.size[1]) / scene.size[0]);
+    };
     function frame(time: number) {
-      if (!visible || reduce.matches || document.hidden || !ctx) return;
+      if (!visible || reduced.matches || document.hidden || !ctx || !ready)
+        return;
       raf = requestAnimationFrame(frame);
       if (time - last < 40) return;
       last = time;
       if (!start) start = time;
-      const progress = Math.min((time - start) / p.assembleMs, 1);
-      ctx.clearRect(0, 0, 480, 480);
-      ctx.globalAlpha = 0.85;
-      for (const cell of cells) {
-        ctx.fillStyle = cell.color;
-        ctx.fillRect(
-          cell.x + (1 - progress) * 80 * cell.noise,
-          cell.y + (1 - progress) * 50,
-          p.cell - 1,
-          p.cell - 1,
+      const age = (time - start) / 1000;
+      renderScene(
+        ctx,
+        scene,
+        (age / scene.loop_seconds) % 1,
+        images,
+        Math.min(1, age),
+      );
+    }
+    async function load() {
+      const current = ++generation;
+      ready = false;
+      canvas.hidden = true;
+      images.clear();
+      scene = definitions[mobile.matches ? "mobile" : "desktop"];
+      size();
+      const sources = [
+        ...new Set(
+          scene.layers
+            .filter((l) => l.type === "photo" || l.type === "glitch")
+            .map((l) => (l as { src: string }).src),
+        ),
+      ];
+      try {
+        await Promise.all(
+          sources.map(
+            (src) =>
+              new Promise<void>((resolve, reject) => {
+                const image = new Image();
+                image.onload = () => {
+                  if (current === generation) images.set(src, image);
+                  resolve();
+                };
+                image.onerror = reject;
+                image.src = `/media/${src}-${el.clientWidth * devicePixelRatio > 800 ? 1600 : 800}.webp`;
+              }),
+          ),
         );
+      } catch {
+        return;
       }
-      ctx.globalAlpha = 1;
-      for (let i = 0; i < p.rows; i++)
-        ctx.drawImage(
-          image,
-          0,
-          ((780 + i * 24) * image.naturalHeight) / 960,
-          image.naturalWidth,
-          (18 * image.naturalHeight) / 960,
-          p.scan * Math.sin(time / 3500 + i * 1.3),
-          390 + i * 12,
-          480,
-          9,
-        );
+      if (current !== generation) return;
+      ctx = canvas.getContext("2d");
+      ready = true;
+      start = 0;
+      update();
     }
     function update() {
       cancelAnimationFrame(raf);
-      if (!visible || reduce.matches || document.hidden) {
-        ctx?.clearRect(0, 0, 480, 480);
+      if (!visible || reduced.matches || document.hidden) {
+        canvas.hidden = true;
         return;
       }
-      prepare();
-      if (ctx) raf = requestAnimationFrame(frame);
+      if (!scene) {
+        void load();
+        return;
+      }
+      if (ready && ctx) {
+        canvas.hidden = false;
+        raf = requestAnimationFrame(frame);
+      }
     }
     new IntersectionObserver((entries) => {
       visible = entries[0].isIntersecting;
       update();
     }).observe(el);
-    image.addEventListener("load", update, { once: true });
-    reduce.addEventListener("change", update);
+    new ResizeObserver(() => {
+      size();
+      if (ready && visible) update();
+    }).observe(el);
+    mobile.addEventListener("change", () => {
+      cancelAnimationFrame(raf);
+      if (visible && !reduced.matches) void load();
+      else {
+        generation++;
+        ready = false;
+        scene = undefined!;
+        canvas.hidden = true;
+      }
+    });
+    reduced.addEventListener("change", update);
     document.addEventListener("visibilitychange", update);
   });
 </script>

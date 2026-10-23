@@ -26,7 +26,7 @@ const home = isRu ? "/ru/" : "/";
 const canonical = new URL(Astro.url.pathname, Astro.site);
 const enPath = en || Astro.url.pathname.replace(/^\/ru\//, "/");
 const ruPath = ru || (enPath === "/privacy/" ? "/privacy/" : "/ru" + enPath);
-const og = `/brand/og-dark${isRu ? "-ru" : ""}.png`;
+const og = `/media/og-${lang}.png`;
 const nav = isRu
   ? ["Возможности", "Память", "Цена", "Установка", "Вопросы"]
   : ["Features", "Memory", "Pricing", "Install", "FAQ"];

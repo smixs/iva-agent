@@ -208,7 +208,7 @@ const schema = [
   <section id="writes-first" class="section split reverse">
     <div class="notice-visual">
       <Chat lang={lang} variant="notices" />
-      <Mosaic scene="hero" />
+      <Mosaic scene="writes-first" />
     </div>
     <div>
       <h2>{title(5)}</h2>
@@ -281,18 +281,12 @@ const schema = [
     <a class="button" href="#install">
       {installLabel}
     </a>
+    <Mosaic scene="price" />
   </section>
   <section id="your-data" class="section split">
     <span id="security" class="legacy-anchor" aria-hidden="true"></span>
     <span id="works" class="legacy-anchor" aria-hidden="true"></span>
-    <div class="data-symbol" aria-hidden="true">
-      <img src="/brand/mark.svg" width="144" height="144" alt="" />
-      <span>
-        {ru ? "Ваш сервер." : "Your server."}
-        <br />
-        {ru ? "Ваши данные." : "Your data."}
-      </span>
-    </div>
+    <Mosaic scene="privacy" />
     <div>
       <h2>{title(9)}</h2>
       <ul class="plain-list">
@@ -370,7 +364,7 @@ const schema = [
           ))}
         </ol>
       </div>
-      <Mosaic scene="userbot" />
+      <Mosaic scene="install" />
     </div>
   </section>
   <section id="faq" class="section faq">
@@ -511,17 +505,15 @@ const schema = [
       else button.removeAttribute("aria-current");
     });
   });
-  document
-    .querySelectorAll("[data-install-guide]")
-    .forEach((link) =>
-      link.addEventListener("click", () =>
-        window.dispatchEvent(
-          new CustomEvent("iva:analytics", {
-            detail: { name: "open_install_guide" },
-          }),
-        ),
+  document.querySelectorAll("[data-install-guide]").forEach((link) =>
+    link.addEventListener("click", () =>
+      window.dispatchEvent(
+        new CustomEvent("iva:analytics", {
+          detail: { name: "open_install_guide" },
+        }),
       ),
-    );
+    ),
+  );
   document
     .querySelectorAll<HTMLButtonElement>("[data-seek]")
     .forEach((button) =>

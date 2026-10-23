@@ -1507,3 +1507,72 @@ summary:focus-visible {
   font-size: 16px;
   margin-bottom: 10px;
 }
+.mosaic,
+.hero-visual > .mosaic,
+.notice-visual > .mosaic {
+  position: relative;
+  inset: auto;
+  opacity: 1;
+  width: 100%;
+  height: auto;
+  max-height: none;
+  aspect-ratio: var(--ratio);
+  min-width: 0;
+}
+.mosaic picture,
+.mosaic img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.mosaic canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.hero-visual {
+  grid-template-columns: 1fr;
+  gap: 20px;
+}
+.hero-visual > .mosaic {
+  max-width: 100%;
+  order: 2;
+}
+.notice-visual {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 20px;
+}
+.notice-visual > .mosaic {
+  width: 65%;
+  margin: auto;
+}
+.pricing > .mosaic {
+  margin-top: 35px;
+}
+.install-layout > .mosaic {
+  display: block;
+}
+.memory-flow span {
+  font-size: 14px;
+}
+.section > div > p {
+  position: relative;
+}
+@media (max-width: 768px) {
+  .mosaic,
+  .hero-visual > .mosaic,
+  .notice-visual > .mosaic {
+    aspect-ratio: var(--mobile-ratio);
+  }
+  .notice-visual > .mosaic {
+    width: 80%;
+  }
+  .install-layout > .mosaic {
+    display: block;
+    width: 100%;
+  }
+}
