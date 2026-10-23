@@ -1223,9 +1223,6 @@ summary:focus-visible {
   position: absolute;
   inset: 0 0 auto;
   height: calc(176 * var(--pt));
-  backdrop-filter: blur(calc(22 * var(--pt))) saturate(1.2) brightness(0.96);
-  -webkit-backdrop-filter: blur(calc(22 * var(--pt))) saturate(1.2)
-    brightness(0.96);
   background: linear-gradient(
     180deg,
     rgba(232, 242, 206, 0.98) 0%,
