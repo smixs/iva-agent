@@ -4,33 +4,33 @@
       "number": 0,
       "groups": {
         "Title": [
-          "Ива: лучший личный ИИ-ассистент в Telegram. Бесплатно"
+          "Ива: лучший AI-ассистент в Telegram. Бесплатно"
         ],
         "Description": [
-          "Ива живёт в вашем Telegram: голосовые в задачи, память на месяцы, напоминания и обзор дня. Бесплатно, открытый код, на вашем сервере или Mac."
+          "Ива живёт в вашем Telegram. Превращает голосовые в задачи, помнит договорённости месяцами, сама напоминает и присылает план дня. Бесплатно."
         ],
         "Шапка": [
-          "Возможности · Память · Цена · Установка · Вопросы · EN · GitHub ★ 265 · [Установить]"
+          "Что умеет · Цена · Установка · Вопросы · EN · GitHub ★ 265 · [Установить]"
         ]
       }
     },
     {
       "number": 1,
       "groups": {
-        "Бейдж над заголовком": [
-          "`FREE` Бесплатно · открытый код MIT"
+        "Бейдж": [
+          "`FREE` Бесплатно, открытый код"
         ],
         "H1": [
           "Лучший AI-ассистент в Telegram"
         ],
         "Подзаголовок": [
-          "Говорите голосом или пишите как другу. Ива записывает задачи, помнит, о чём вы договорились месяцы назад, и сама напоминает. Работает на вашем сервере или Mac, данные остаются у вас."
+          "Наговорите голосовое, и Ива разложит его по задачам. Она помнит, о чём вы договорились полгода назад, и сама напоминает. Живёт на вашем сервере или Mac."
         ],
         "Кнопки": [
-          "[Установить с ИИ-агентом] [▶ Что умеет Ива, 78 с]"
+          "[Установить с ИИ-агентом] [▶ Ива за 78 секунд]"
         ],
-        "Под кнопками, мелко": [
-          "Бесплатно. Одна фраза для Claude Code или Codex, и через 5 минут Ива уже отвечает."
+        "Под кнопками": [
+          "Бесплатно. Вставьте одну фразу в Claude Code или Codex, через 5 минут Ива ответит."
         ],
         "Строка доверия": [
           "Открытый код MIT · ★ 265 на GitHub · 70 выпусков за 4 месяца · Ubuntu, Debian, Mac"
@@ -41,18 +41,7 @@
       "number": 2,
       "groups": {
         "H2": [
-          "Один день с Ивой за 78 секунд"
-        ],
-        "Текст": [
-          "Утренний обзор, голосовое из машины, счёт клиенту, список покупок, цель «добейся, чтобы починили интернет». Всё в обычном Telegram, без нового приложения."
-        ],
-        "Главы рядом с роликом": [
-          "0:03 Утренний обзор",
-          "0:11 Почта, календарь и другие сервисы",
-          "0:20 Голосовое и «что мне писали?»",
-          "0:33 Задача в Bitrix24 и такси",
-          "0:48 Счёт, адрес, покупки",
-          "1:05 Цель, которую Ива доводит до конца"
+          "Что Ива делает каждый день"
         ]
       }
     },
@@ -60,18 +49,18 @@
       "number": 3,
       "groups": {
         "H2": [
-          "Что Ива делает за вас"
+          "Ива за 78 секунд"
         ],
-        "Шесть карточек": [
-          "**Голосовое из машины.** Пять минут голосом превращаются в задачи, черновик письма и карточку встречи.",
-          "**«Что мы решили с клиентом?»** Ива находит договорённость, даже если ей три месяца, и называет дату.",
-          "**Обзор дня сам.** В 08:30 и 14:00 (время можно поменять): задачи, встречи, почта, чаты.",
-          "**Документы.** «Собери КП из прайса, скидку на 2,5% ниже». Готовый Google Doc со ссылкой прямо в чате.",
-          "**Доводит до конца.** «Скажи, когда авиакомпания ответит про возврат». Ива следит сама и пишет, когда ответ пришёл.",
-          "**Ресёрч со ссылками.** Ответ с источниками, без подписки на Perplexity."
+        "Текст": [
+          "Один день в обычном Telegram: утренний план, голосовое, счёт, покупки и цель, которую Ива доводит до конца."
         ],
-        "Ссылка под сеткой": [
-          "Ещё 25 сценариев: для бизнеса, работы и жизни →"
+        "Главы": [
+          "0:03 План на утро",
+          "0:11 Почта, календарь и другие сервисы",
+          "0:20 Голосовое и «кто мне писал»",
+          "0:33 Задача в Битрикс24 и такси",
+          "0:48 Счёт, адрес, покупки",
+          "1:05 Цель до результата"
         ]
       }
     },
@@ -79,55 +68,46 @@
       "number": 4,
       "groups": {
         "H2": [
-          "Помнит месяцами, а не до конца чата"
-        ],
-        "Текст": [
-          "Каждый разговор ложится в дневник. Ночью (по умолчанию в 04:00) Ива сводит день в неделю, неделю в месяц, месяц в год и обновляет карточки людей, проектов и решений. Короткий профиль о вас, до 3600 знаков, она держит в голове всегда."
-        ],
-        "Три пункта рядом со схемой": [
-          "**День.** Всё, что вы сказали и прислали, дословно.",
-          "**Ночь.** Выжимки недели, месяца и года, карточки людей и проектов.",
-          "**Ваше.** Обычные markdown-файлы в вашем git: откройте в Obsidian, ищите, заберите с собой."
+          "Что говорят те, у кого Ива уже работает"
         ]
       }
     },
     {
       "number": 5,
       "groups": {
+        "Крупно": [],
         "H2": [
-          "Сама пишет, когда нужно"
+          "Ива бесплатная"
         ],
         "Подзаголовок": [
-          "Ива не ждёт, пока вы спросите. Но и не шумит: пишет только по делу и молчит ночью."
+          "Платить за Иву не нужно ни сейчас, ни потом. Код открыт под лицензией MIT."
         ],
-        "Пять пунктов": [
-          "**Обзор дня.** Дважды в день, в ваше время.",
-          "**Присмотр.** Раз в час проверяет Telegram и почту и пишет, только если что-то ждёт вас.",
-          "**Цели.** «Добейся, чтобы починили интернет». Ива держит цель и напоминает, пока не решится.",
-          "**Помощники.** Долгую работу, например разбор договора, Ива отдаёт помощнику и продолжает говорить с вами.",
-          "**Напоминания.** «В пятницу напомни поздравить Сергея», разовые и повторяющиеся."
-        ]
+        "Три карточки: какую модель подключить": [
+          "**Подписка ChatGPT или Claude.** Если она уже есть, Ива работает на ней и ничего не стоит.",
+          "**OpenCode Go.** Открытые модели за 10 долларов в месяц, на каждый день хватает.",
+          "**Любой провайдер.** OpenRouter, Ollama Cloud или свой адрес API, платите по расходу."
+        ],
+        "Строка под карточками": [
+          "Голос и поиск укладываются в бесплатные лимиты. Сколько потрачено, Ива скажет по команде /usage."
+        ],
+        "Кнопка": []
       }
     },
     {
       "number": 6,
       "groups": {
         "H2": [
-          "Полноценный ассистент в одном чате"
-        ],
-        "12 ячеек": [
-          "**Голос.** Голосовые, аудио и кружки в текст: русский, узбекский, английский.",
-          "**Фото и сканы.** Чеки, визитки, скриншоты.",
-          "**Документы.** PDF, DOCX, XLSX: правка и сверка таблиц.",
-          "**Google.** Gmail, Календарь, Документы, Таблицы.",
-          "**Поиск в интернете.** Четыре поисковых провайдера, ответы со ссылками.",
-          "**Браузер.** Заполняет формы и читает страницы за логином.",
-          "**Личная CRM.** Кто что обещал и когда напомнить.",
-          "**Ваша модель.** Шесть вариантов, включая подписку ChatGPT или Claude, которая у вас уже есть.",
-          "**Ответ на глазах.** Текст появляется по мере написания, кнопка ■ останавливает.",
-          "**Настройки в /menu.** Модель, голос, память, уведомления, Google и ещё 8 экранов. Без единого токена.",
-          "**Растёт под вас.** Скиллы, MCP-подключения, плагины. По желанию Ива сама предлагает новые инструменты.",
-          "**Обновляется сама.** Кнопка «Обновить» в чате и откат, если что-то пошло не так."
+          "Что ещё умеет Ива",
+          "Читает фото, чеки, визитки и скриншоты.",
+          "Правит PDF, DOCX и таблицы XLSX.",
+          "Ищет в интернете и даёт ссылки на источники.",
+          "Ходит по сайтам и заполняет формы.",
+          "Работает с Gmail, Календарём, Документами и Таблицами Google.",
+          "Пишет ответ на глазах, кнопка ■ его останавливает.",
+          "Шесть способов подключить модель, сменить можно в /menu.",
+          "По желанию читает ваши чаты в Telegram и говорит, что вы пропустили.",
+          "Обновляется кнопкой в чате и откатывается, если что-то пошло не так.",
+          "Ей можно добавить новые умения и подключить ваши сервисы."
         ]
       }
     },
@@ -135,36 +115,24 @@
       "number": 7,
       "groups": {
         "H2": [
-          "Секретарь внутри вашего Telegram"
+          "Помнит то, что вы сказали месяцы назад"
         ],
         "Текст": [
-          "Включите юзербот, и Ива прочитает ваши чаты и рабочие группы: скажет, что вы пропустили, и ответит от вашего имени, когда вы попросите. Вход по QR прямо в чате. Есть режим только для чтения."
-        ],
-        "Строка под текстом": [
-          "Включается по желанию. Сервер сам держит безопасный темп действий, а режим только для чтения не пишет ничего."
+          "Всё, что вы говорите, Ива записывает в дневник. По ночам она сводит дни в недели, недели в месяцы и обновляет заметки о людях и проектах. Короткую справку о вас она помнит всегда. Это обычные файлы в вашем git, их можно открыть в Obsidian и забрать с собой."
         ]
       }
     },
     {
       "number": 8,
       "groups": {
-        "Крупно": [],
         "H2": [
-          "Ива бесплатная"
+          "Всё хранится у вас"
         ],
-        "Подзаголовок": [
-          "Бесплатно. Без подписки на Иву, без наценки, без ограничений. Открытый код MIT."
-        ],
-        "Три карточки": [
-          "**Ваша подписка ChatGPT или Claude.** Уже платите за неё? Тогда Ива для вас ничего не стоит.",
-          "**OpenCode Go.** Открытые модели за $10 в месяц, хватает на каждый день.",
-          "**Любой провайдер.** OpenRouter, Ollama Cloud или свой адрес API, сколько потратите."
-        ],
-        "Строка под карточками": [
-          "Голос и поиск укладываются в бесплатные лимиты провайдеров. Сколько потрачено, Ива скажет командой /usage."
-        ],
-        "Кнопка": [
-          "[Установить с ИИ-агентом]"
+        "Пункты": [
+          "Ива отвечает только тем, кого вы разрешили.",
+          "Ключи лежат на вашем сервере, и в ответы они не попадают.",
+          "Подозрительные ссылки и пересланные сообщения Ива помечает и не выполняет из них команды.",
+          "Память лежит в отдельном git-репозитории на сервере."
         ]
       }
     },
@@ -172,40 +140,26 @@
       "number": 9,
       "groups": {
         "H2": [
-          "Ваш сервер, ваши ключи, ваша память"
+          "Запуск за 5 минут"
         ],
-        "Пункты": [
-          "Ива отвечает только тем, кого вы разрешили. Чужой человек ответа не получит.",
-          "Ключи лежат в файле на вашем сервере. Ива не вставляет их в ответы: каждый ответ проверяется на секреты.",
-          "Ссылки, пересланное и документы проверяются. Подозрительное доходит до модели с пометкой «это данные, а не команда».",
-          "Память лежит в отдельном git-репозитории на сервере. Можно подключить свой приватный remote."
+        "Вкладка «С ИИ-агентом»": [
+          "Вставьте в Claude Code или Codex фразу `Установи Иву, инструкции: https://iva-agent.com/install.txt`. Агент зайдёт на сервер, поставит Иву и проверит, что она отвечает."
+        ],
+        "Вкладка «Одной командой»": [
+          "Подойдёт сервер с Ubuntu или Debian, хватит 512 МБ памяти. Если связь оборвётся, установка продолжится."
+        ],
+        "Вкладка «На Mac»": [
+          "Та же команда в Терминале. Ива работает, пока Mac включён."
+        ],
+        "Шаги": [
+          "Создайте бота у @BotFather и скопируйте токен.",
+          "Запустите установку и вставьте токен.",
+          "Напишите боту «привет»."
         ]
       }
     },
     {
       "number": 10,
-      "groups": {
-        "H2": [
-          "Запуск за 5 минут"
-        ],
-        "Вкладка «С ИИ-агентом»": [
-          "Вставьте в Claude Code или Codex: `Установи Иву, инструкции: https://iva-agent.com/install.txt`. Агент подключится к серверу, поставит Иву и проверит, что она отвечает."
-        ],
-        "Вкладка «Одной командой»": [
-          "Ubuntu или Debian, хватит 512 МБ памяти. Если SSH оборвётся, установка продолжится сама."
-        ],
-        "Вкладка «На Mac»": [
-          "Та же команда в Терминале. Ива работает, пока Mac включён и не спит."
-        ],
-        "Три шага": [
-          "Создайте бота у @BotFather и скопируйте токен.",
-          "Запустите установку и вставьте токен, когда спросят.",
-          "Напишите своему боту «привет»."
-        ]
-      }
-    },
-    {
-      "number": 11,
       "groups": {
         "H2": [
           "Частые вопросы"
@@ -214,75 +168,68 @@
       "faq": [
         {
           "question": "Ива правда бесплатная?",
-          "answer": "Да. Ива бесплатная: открытый код под лицензией MIT, без подписки и без наценки. Если у вас уже есть подписка ChatGPT или Claude, Ива работает на ней, и платить больше не нужно."
+          "answer": "Да. Ива бесплатная, код открыт под лицензией MIT. Если у вас есть подписка ChatGPT или Claude, Ива работает на ней, и больше платить не нужно."
         },
         {
-          "question": "Нужен ли сервер? Подойдёт ли мой Mac?",
-          "answer": "Подойдёт любой из двух. Ива ставится на сервер с Ubuntu или Debian (хватит 512 МБ памяти) или на Mac. На Mac она работает, пока он включён и не спит."
+          "question": "Нужен ли сервер? Подойдёт ли Mac?",
+          "answer": "Подойдёт и то и другое. Сервер с Ubuntu или Debian и 512 МБ памяти или ваш Mac, который не выключается."
         },
         {
           "question": "Какие модели можно подключить?",
-          "answer": "Шесть вариантов: подписка ChatGPT, подписка Claude Pro/Max, OpenCode Go, Ollama Cloud, OpenRouter (сотни моделей) и любой свой OpenAI-совместимый адрес. Модель меняется в /menu без переустановки."
+          "answer": "Шесть вариантов. Подписка ChatGPT, подписка Claude Pro или Max, OpenCode Go, Ollama Cloud, OpenRouter с сотнями моделей и любой свой OpenAI-совместимый адрес. Модель меняется в /menu."
         },
         {
           "question": "Где хранятся мои данные?",
-          "answer": "На вашем сервере. Память это markdown-файлы в отдельном git-репозитории, их можно открыть в Obsidian. В облако уходят только запросы к модели и расшифровка голоса у выбранных вами провайдеров."
+          "answer": "На вашем сервере. Память Ивы лежит там обычными файлами, их можно открыть в Obsidian."
         },
         {
-          "question": "Чем Ива отличается от ChatGPT в Telegram?",
-          "answer": "Ива помнит вас месяцами, пишет первой и работает на вашем сервере. Она ведёт карточки людей и проектов, сама присылает обзор дня, ставит напоминания, работает с почтой, календарём и документами, а данные остаются у вас."
+          "question": "Чем Ива лучше ChatGPT в Telegram?",
+          "answer": "Ива помнит вас месяцами и пишет первой. Она ведёт заметки о людях и проектах, работает с почтой, календарём и документами, а данные остаются у вас."
         },
         {
-          "question": "Понимает ли Ива русский и голосовые?",
-          "answer": "Да. Ива общается по-русски и по-английски, а голосовые, аудио и кружки расшифровывает на русском, узбекском и английском с автоопределением языка."
+          "question": "Понимает ли русский и голосовые?",
+          "answer": "Да. Ива говорит по-русски и по-английски, а голосовые расшифровывает на русском, узбекском и английском."
         },
         {
           "question": "Нужен ли домен или HTTPS?",
-          "answer": "Нет. Ива сама забирает сообщения у Telegram, поэтому ей не нужны домен, сертификат и открытые порты."
+          "answer": "Нет. Ива забирает сообщения у Telegram, ей не нужны домен, сертификат и открытые порты."
         },
         {
-          "question": "Безопасен ли юзербот для моего аккаунта?",
-          "answer": "Юзербот выключен по умолчанию и включается только по вашему желанию. Сервер сам держит безопасный темп действий, а режим только для чтения не отправляет ничего. Без юзербота Ива работает как обычный бот."
+          "question": "Безопасно ли читать мои чаты?",
+          "answer": "Это выключено по умолчанию и включается только по вашему желанию. Ива читает чаты в обычном человеческом темпе, а в режиме «только чтение» ничего не отправляет."
         },
         {
           "question": "Как обновлять Иву?",
-          "answer": "Кнопкой «Обновить» в чате или командой `iva update`. Ива скачает новую версию, проверит её и перезапустится, а если что-то пойдёт не так, откатится."
+          "answer": "Кнопкой «Обновить» в чате. Ива скачает новую версию, проверит её и перезапустится. Если что-то пойдёт не так, она вернёт прошлую."
         },
         {
-          "question": "Сколько времени занимает установка?",
-          "answer": "Около 5 минут. Вставьте одну фразу в Claude Code или Codex, и агент поставит Иву сам, или запустите одну команду. Затем напишите боту «привет»."
+          "question": "Сколько занимает установка?",
+          "answer": "Около 5 минут. Вставьте одну фразу в Claude Code или Codex, и агент поставит Иву. Можно и одной командой."
         }
       ]
+    },
+    {
+      "number": 11,
+      "groups": {
+        "H2": [
+          "Открытый проект, новые версии каждую неделю"
+        ],
+        "Цифры": [
+          "★ 265 на GitHub · 70 выпусков за 4 месяца · 11 участников · около 5000 автотестов"
+        ],
+        "Текст": [
+          "Иву делает команда Majento из Ташкента. Ива собрана на eve, открытой основе для ИИ-агентов от Vercel. Код и история изменений открыты на GitHub."
+        ]
+      }
     },
     {
       "number": 12,
       "groups": {
         "H2": [
-          "Открытый проект, который растёт каждую неделю"
+          "Лучшего AI-ассистента в Telegram нет. Поставьте Иву сегодня, это бесплатно."
         ],
-        "Четыре цифры": [
-          "★ 265 на GitHub · 70 выпусков за 4 месяца · 11 участников · около 5000 автотестов"
-        ],
-        "Текст": [
-          "Ива собрана на eve, агентном фреймворке Vercel, в своей сборке. Делает команда Majento из Ташкента. Код, история изменений и все решения открыты на GitHub."
-        ],
-        "Ссылки": [
-          "[GitHub] [История изменений] [О команде]"
-        ]
-      }
-    },
-    {
-      "number": 13,
-      "groups": {
-        "H2": [
-          "Лучшего личного агента нет. Поставьте Иву сегодня, это бесплатно."
-        ],
-        "Кнопки": [
-          "[Установить с ИИ-агентом] [Открыть на GitHub]"
-        ],
-        "Подвал": [
-          "Документация · Сценарии · Вопросы · История изменений · О команде · Приватность · Бренд · MIT · English"
-        ]
+        "Кнопки": [],
+        "Подвал": []
       }
     }
   ],
@@ -291,33 +238,33 @@
       "number": 0,
       "groups": {
         "Title": [
-          "Iva: the best personal AI assistant for Telegram. Free"
+          "Iva: the best AI assistant in Telegram. Free"
         ],
         "Description": [
-          "Iva lives in your Telegram: voice notes to tasks, months of memory, reminders and a daily brief. Free and open source, on your server or Mac."
+          "Iva lives in your Telegram. She turns voice notes into tasks, remembers what you agreed on for months, reminds you and sends your plan for the day. Free."
         ],
         "Шапка": [
-          "Features · Memory · Pricing · Install · FAQ · RU · GitHub ★ 265 · [Install]"
+          "What she does · Pricing · Install · FAQ · RU · GitHub ★ 265 · [Install]"
         ]
       }
     },
     {
       "number": 1,
       "groups": {
-        "Бейдж над заголовком": [
-          "`FREE` Free · open source, MIT"
+        "Бейдж": [
+          "`FREE` Free and open source"
         ],
         "H1": [
           "The best AI assistant in Telegram"
         ],
         "Подзаголовок": [
-          "Talk or type like you would to a friend. Iva turns it into tasks, remembers what you agreed on months ago and reminds you on her own. She runs on your server or Mac, so your data stays yours."
+          "Send a voice note and Iva sorts it into tasks. She remembers what you agreed on six months ago and reminds you herself. She runs on your own server or Mac."
         ],
         "Кнопки": [
-          "[Install with an AI agent] [▶ See it in 78 seconds]"
+          "[Install with an AI agent] [▶ Iva in 78 seconds]"
         ],
-        "Под кнопками, мелко": [
-          "Free. One sentence to Claude Code or Codex, and in 5 minutes Iva is answering you."
+        "Под кнопками": [
+          "Free. Paste one sentence into Claude Code or Codex, and in 5 minutes Iva replies."
         ],
         "Строка доверия": [
           "Open source, MIT · ★ 265 on GitHub · 70 releases in 4 months · Ubuntu, Debian, Mac"
@@ -328,18 +275,7 @@
       "number": 2,
       "groups": {
         "H2": [
-          "A day with Iva in 78 seconds"
-        ],
-        "Текст": [
-          "A morning brief, a voice note from the car, an invoice for a client, a shopping list, a goal like \"make sure they fix the internet\". All in plain Telegram, no new app."
-        ],
-        "Главы рядом с роликом": [
-          "0:03 Morning brief",
-          "0:11 Mail, calendar and other services",
-          "0:20 A voice note and \"who wrote to me?\"",
-          "0:33 A Bitrix24 task and a taxi",
-          "0:48 An invoice, an address, groceries",
-          "1:05 A goal Iva sees through"
+          "What Iva does every day"
         ]
       }
     },
@@ -347,18 +283,18 @@
       "number": 3,
       "groups": {
         "H2": [
-          "What Iva does for you"
+          "Iva in 78 seconds"
         ],
-        "Шесть карточек": [
-          "**A voice note from the car.** Five minutes of talking become tasks, a draft email and a meeting card.",
-          "**\"What did we agree with the client?\"** Iva finds it, even three months later, and tells you the date.",
-          "**The day's brief, unasked.** At 08:30 and 14:00 (you can change it): tasks, meetings, mail, chats.",
-          "**Documents.** \"Make a quote from this price list, 2.5% less discount.\" A finished Google Doc, linked in the chat.",
-          "**Sees it through.** \"Tell me when the airline answers about the refund.\" Iva keeps watching and tells you when it lands.",
-          "**Research with sources.** Answers with links, no Perplexity subscription."
+        "Текст": [
+          "One day in plain Telegram: the morning plan, a voice note, an invoice, groceries and a goal Iva sees through."
         ],
-        "Ссылка под сеткой": [
-          "25 more scenarios for business, work and life →"
+        "Главы": [
+          "0:03 Morning plan",
+          "0:11 Mail, calendar and other services",
+          "0:20 A voice note and \"who wrote to me\"",
+          "0:33 A Bitrix24 task and a taxi",
+          "0:48 An invoice, an address, groceries",
+          "1:05 A goal, all the way"
         ]
       }
     },
@@ -366,55 +302,46 @@
       "number": 4,
       "groups": {
         "H2": [
-          "Remembers for months, not until the chat ends"
-        ],
-        "Текст": [
-          "Every conversation goes into a daily log. Each night (04:00 by default) Iva rolls days into weeks, weeks into months, months into years, and updates the cards for people, projects and decisions. A short profile of you, up to 3,600 characters, is always on her mind."
-        ],
-        "Три пункта рядом со схемой": [
-          "**Day.** Everything you said and sent, word for word.",
-          "**Night.** Weekly, monthly and yearly summaries, cards for people and projects.",
-          "**Yours.** Plain markdown files in your own git: open them in Obsidian, search them, take them with you."
+          "What people who use Iva say"
         ]
       }
     },
     {
       "number": 5,
       "groups": {
+        "Крупно": [],
         "H2": [
-          "Writes first when it matters"
+          "Iva is free"
         ],
         "Подзаголовок": [
-          "Iva doesn't wait to be asked. She doesn't spam either: she writes only when it matters and stays quiet at night."
+          "You never pay for Iva, now or later. The code is open under the MIT license."
         ],
-        "Пять пунктов": [
-          "**Daily brief.** Twice a day, on your schedule.",
-          "**Watch.** Hourly checks of Telegram and mail; she writes only when something is waiting for you.",
-          "**Goals.** \"Make sure they fix the internet.\" Iva keeps the goal and follows up until it's done.",
-          "**Helpers.** Long work, like reviewing a contract, goes to a background helper while Iva keeps talking with you.",
-          "**Reminders.** \"Remind me on Friday to congratulate Sergey\", one-off or repeating."
-        ]
+        "Три карточки: какую модель подключить": [
+          "**ChatGPT or Claude subscription.** If you already have one, Iva runs on it and costs you nothing.",
+          "**OpenCode Go.** Open models for 10 dollars a month, plenty for every day.",
+          "**Any provider.** OpenRouter, Ollama Cloud or your own API endpoint, pay as you go."
+        ],
+        "Строка под карточками": [
+          "Voice and search fit in the free tiers. Type /usage and Iva tells you what you've spent."
+        ],
+        "Кнопка": []
       }
     },
     {
       "number": 6,
       "groups": {
         "H2": [
-          "A full assistant in one chat"
-        ],
-        "12 ячеек": [
-          "**Voice.** Voice notes, audio and video circles to text: Russian, Uzbek, English.",
-          "**Photos and scans.** Receipts, business cards, screenshots.",
-          "**Documents.** PDF, DOCX, XLSX: edits and table reconciliation.",
-          "**Google.** Gmail, Calendar, Docs, Sheets.",
-          "**Web search.** Four search providers, answers with links.",
-          "**Browser.** Fills in forms and reads pages behind a login.",
-          "**Personal CRM.** Who promised what, and when to follow up.",
-          "**Your model.** Six options, including the ChatGPT or Claude subscription you already pay for.",
-          "**Live replies.** Text appears as it's written; ■ stops it.",
-          "**Settings in /menu.** Model, voice, memory, notices, Google and 8 more screens. Zero tokens.",
-          "**Grows with you.** Skills, MCP connections, plugins. Optionally, Iva suggests new tools herself.",
-          "**Updates herself.** An \"Update\" button in the chat, and a rollback if something goes wrong."
+          "What else Iva can do",
+          "Reads photos, receipts, business cards and screenshots.",
+          "Edits PDFs, DOCX files and XLSX spreadsheets.",
+          "Searches the web and links to her sources.",
+          "Browses sites and fills in forms herself.",
+          "Works with Gmail, Google Calendar, Docs and Sheets.",
+          "Writes her reply as you watch, and ■ stops it.",
+          "Six ways to connect a model, switchable in /menu.",
+          "If you want, reads your Telegram chats and tells you what you missed.",
+          "Updates with a button in the chat and rolls back if something goes wrong.",
+          "You can teach her new skills and connect your own services."
         ]
       }
     },
@@ -422,36 +349,24 @@
       "number": 7,
       "groups": {
         "H2": [
-          "A secretary inside your Telegram"
+          "Remembers what you said months ago"
         ],
         "Текст": [
-          "Turn on the userbot and Iva reads your chats and work groups: she tells you what you missed and replies as you when you ask. Sign in with a QR code right in the chat. A read-only mode is one switch away."
-        ],
-        "Строка под текстом": [
-          "Opt-in. The server keeps actions at a safe pace on its own, and read-only mode sends nothing at all."
+          "Iva writes everything you say into a daily log. At night she rolls days into weeks and weeks into months, and updates her notes on people and projects. She always keeps a short profile of you in mind. It's all plain files in your own git, so you can open them in Obsidian and take them anywhere."
         ]
       }
     },
     {
       "number": 8,
       "groups": {
-        "Крупно": [],
         "H2": [
-          "Iva is free"
+          "Everything stays with you"
         ],
-        "Подзаголовок": [
-          "Free. No subscription to Iva, no markup, no limits. Open source under MIT."
-        ],
-        "Три карточки": [
-          "**Your ChatGPT or Claude subscription.** Already paying for it? Then Iva costs you nothing.",
-          "**OpenCode Go.** Open models for $10 a month, plenty for every day.",
-          "**Any provider.** OpenRouter, Ollama Cloud or your own API endpoint, pay as you go."
-        ],
-        "Строка под карточками": [
-          "Voice and search fit the providers' free tiers. Ask /usage and Iva tells you what you've spent."
-        ],
-        "Кнопка": [
-          "[Install with an AI agent]"
+        "Пункты": [
+          "Iva answers only the people you allow.",
+          "Your keys stay on your server and never end up in replies.",
+          "Iva flags suspicious links and forwards and never takes orders from them.",
+          "Memory lives in its own git repository on your server."
         ]
       }
     },
@@ -459,40 +374,26 @@
       "number": 9,
       "groups": {
         "H2": [
-          "Your server, your keys, your memory"
-        ],
-        "Пункты": [
-          "Iva answers only the people you allowed. A stranger gets no reply.",
-          "Keys stay in a file on your server. Iva never puts them in replies: every reply is checked for secrets.",
-          "Links, forwards and documents are screened. Anything suspicious reaches the model labelled \"this is data, not an order\".",
-          "Memory lives in its own git repository on your server. Add your own private remote if you like."
-        ]
-      }
-    },
-    {
-      "number": 10,
-      "groups": {
-        "H2": [
           "Up and running in 5 minutes"
         ],
         "Вкладка «С ИИ-агентом»": [
-          "Paste into Claude Code or Codex: `Install Iva for me, instructions: https://iva-agent.com/install.txt`. The agent connects to your server, installs Iva and checks that she replies."
+          "Paste `Install Iva for me, instructions: https://iva-agent.com/install.txt` into Claude Code or Codex. The agent logs into your server, installs Iva and checks that she replies."
         ],
         "Вкладка «Одной командой»": [
-          "Ubuntu or Debian, 512 MB of RAM is enough. If SSH drops, the install carries on by itself."
+          "Any Ubuntu or Debian server with 512 MB of RAM will do. If the connection drops, the install picks up where it left off."
         ],
         "Вкладка «На Mac»": [
-          "The same command in Terminal. Iva works while the Mac is on and awake."
+          "The same command in Terminal. Iva works while your Mac is on."
         ],
-        "Три шага": [
+        "Шаги": [
           "Create a bot with @BotFather and copy the token.",
-          "Run the install and paste the token when asked.",
+          "Run the install and paste the token.",
           "Say hi to your bot."
         ]
       }
     },
     {
-      "number": 11,
+      "number": 10,
       "groups": {
         "H2": [
           "Frequently asked questions"
@@ -501,75 +402,68 @@
       "faq": [
         {
           "question": "Is Iva really free?",
-          "answer": "Yes. Iva is free: open source under MIT, no subscription, no markup. If you already have a ChatGPT or Claude subscription, Iva runs on it and you pay nothing more."
+          "answer": "Yes. Iva is free, and the code is open under MIT. If you have a ChatGPT or Claude subscription, Iva runs on it and you pay nothing more."
         },
         {
-          "question": "Do I need a server? Will my Mac do?",
-          "answer": "Either works. Iva installs on an Ubuntu or Debian server (512 MB of RAM is enough) or on a Mac. On a Mac she works while it's on and awake."
+          "question": "Do I need a server? Will a Mac do?",
+          "answer": "Either works: an Ubuntu or Debian server with 512 MB of RAM, or a Mac that stays on."
         },
         {
-          "question": "Which models can I use?",
-          "answer": "Six options: your ChatGPT subscription, a Claude Pro/Max subscription, OpenCode Go, Ollama Cloud, OpenRouter (hundreds of models) and any OpenAI-compatible endpoint of your own. Switch models in /menu without reinstalling."
+          "question": "Which models work?",
+          "answer": "Six options: a ChatGPT subscription, Claude Pro or Max, OpenCode Go, Ollama Cloud, OpenRouter with hundreds of models, or any OpenAI-compatible endpoint of your own. Switch in /menu."
         },
         {
           "question": "Where is my data stored?",
-          "answer": "On your server. Memory is markdown files in their own git repository, and you can open them in Obsidian. Only the model calls and voice transcription go to the cloud providers you choose."
+          "answer": "On your server. Iva's memory sits there as plain files you can open in Obsidian."
         },
         {
-          "question": "How is Iva different from ChatGPT in Telegram?",
-          "answer": "Iva remembers you for months, writes first and runs on your server. She keeps cards for people and projects, sends you a daily brief on her own, sets reminders, works with your mail, calendar and documents, and your data stays with you."
+          "question": "How is Iva better than ChatGPT in Telegram?",
+          "answer": "Iva remembers you for months and writes first. She keeps notes on people and projects, works with your mail, calendar and documents, and your data stays with you."
         },
         {
-          "question": "Does Iva understand Russian and voice notes?",
-          "answer": "Yes. Iva talks in Russian or English and transcribes voice notes, audio and video circles in Russian, Uzbek and English, detecting the language automatically."
+          "question": "Does she understand Russian and voice notes?",
+          "answer": "Yes. Iva speaks Russian and English and transcribes voice notes in Russian, Uzbek and English."
         },
         {
           "question": "Do I need a domain or HTTPS?",
-          "answer": "No. Iva pulls messages from Telegram herself, so she needs no domain, no certificate and no open ports."
+          "answer": "No. Iva pulls messages from Telegram, so she needs no domain, certificate or open ports."
         },
         {
-          "question": "Is the userbot safe for my account?",
-          "answer": "The userbot is off by default and opt-in only. The server keeps actions at a safe pace on its own, and read-only mode sends nothing. Without the userbot Iva is a regular bot."
+          "question": "Is reading my chats safe?",
+          "answer": "It's off by default and only turns on if you want it. Iva reads chats at a normal human pace, and in read-only mode she never sends anything."
         },
         {
           "question": "How do I update Iva?",
-          "answer": "With the \"Update\" button in the chat or `iva update`. Iva downloads the new version, checks it and restarts, and rolls back if something goes wrong."
+          "answer": "Tap \"Update\" in the chat. Iva downloads the new version, checks it and restarts. If anything goes wrong, she rolls back."
         },
         {
           "question": "How long does the install take?",
-          "answer": "About 5 minutes. Paste one sentence into Claude Code or Codex and the agent installs Iva for you, or run one command. Then say hi to your bot."
+          "answer": "About 5 minutes. Paste one sentence into Claude Code or Codex and the agent installs Iva for you, or run a single command."
         }
       ]
+    },
+    {
+      "number": 11,
+      "groups": {
+        "H2": [
+          "Open source, with new releases every week"
+        ],
+        "Цифры": [
+          "★ 265 on GitHub · 70 releases in 4 months · 11 contributors · about 5,000 tests"
+        ],
+        "Текст": [
+          "Iva is made by the Majento team in Tashkent and built on eve, Vercel's open foundation for AI agents. The code and changelog are open on GitHub."
+        ]
+      }
     },
     {
       "number": 12,
       "groups": {
         "H2": [
-          "An open project that ships every week"
+          "There's no better AI assistant in Telegram. Get Iva today, it's free."
         ],
-        "Четыре цифры": [
-          "★ 265 on GitHub · 70 releases in 4 months · 11 contributors · about 5,000 automated tests"
-        ],
-        "Текст": [
-          "Iva is built on eve, Vercel's agent framework, in our own build. Made by the Majento team in Tashkent. The code, the changelog and every design decision are open on GitHub."
-        ],
-        "Ссылки": [
-          "[GitHub] [Changelog] [About the team]"
-        ]
-      }
-    },
-    {
-      "number": 13,
-      "groups": {
-        "H2": [
-          "There's no better personal agent. Get Iva today, it's free."
-        ],
-        "Кнопки": [
-          "[Install with an AI agent] [Open on GitHub]"
-        ],
-        "Подвал": [
-          "Docs · Use cases · FAQ · Changelog · About the team · Privacy · Brand · MIT · Русский"
-        ]
+        "Кнопки": [],
+        "Подвал": []
       }
     }
   ]

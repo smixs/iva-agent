@@ -1,0 +1,131 @@
+---
+import TelegramFrame from "./TelegramFrame.astro";
+import scenes from "../data/scenes.json";
+import type { Lang } from "../lib/copy";
+const { lang, title } = Astro.props as { lang: Lang; title: string };
+---
+
+<section id="features" class="section use-cases">
+  <span id="asks" class="legacy-anchor" aria-hidden="true"></span>
+  <span id="scenarios" class="legacy-anchor" aria-hidden="true"></span>
+  <h2>{title}</h2>
+  <div class="scene-grid" tabindex="0" aria-label={title}>
+    {scenes[lang].map((scene, index) => (
+      <figure class="scene-card">
+        <TelegramFrame lang={lang} compact>
+          <div class="telegram-date">{lang === "ru" ? "Сегодня" : "Today"}</div>
+          {scene.messages.map((message, i) => (
+            <div
+              class:list={[
+                "telegram-bubble",
+                message.out ? "telegram-out" : "telegram-in",
+              ]}
+              data-chat-step={`scene-${index}-${i}`}
+              data-at={message.out ? 600 : i === 0 ? 1500 : 2600}
+            >
+              {message.voice ? (
+                <div class="scene-voice">
+                  <span class="voice-control" aria-hidden="true">
+                    ▶
+                  </span>
+                  <span class="telegram-wave" aria-hidden="true">
+                    {Array.from({ length: 28 }, (_, n) => (
+                      <i
+                        style={`--bar:${6 + Math.round(21 * Math.abs(Math.sin(n * 1.7) * Math.cos(n * 0.6)))}px;--delay:${-n * 0.09}s`}
+                      />
+                    ))}
+                  </span>
+                  <span class="voice-label">{message.text}</span>
+                </div>
+              ) : (
+                message.text
+              )}
+              <span class="telegram-time">
+                {index === 3 && !message.out ? "10:00" : "09:12"}
+                {message.out && <span> ✓✓</span>}
+              </span>
+            </div>
+          ))}
+          {scene.buttons.length > 0 && (
+            <div
+              class="telegram-actions"
+              data-chat-step={`scene-${index}-buttons`}
+              data-at="3200"
+            >
+              {scene.buttons.map((label) => (
+                <span>{label}</span>
+              ))}
+            </div>
+          )}
+        </TelegramFrame>
+        <figcaption>
+          <span>{scene.caption}</span>
+        </figcaption>
+      </figure>
+    ))}
+  </div>
+  <div class="scene-navigation" hidden>
+    <button
+      data-scene-direction="-1"
+      aria-label={lang === "ru" ? "Предыдущая сцена" : "Previous scene"}
+    >
+      ←
+    </button>
+    <span data-scene-position aria-live="polite">
+      1 / 12
+    </span>
+    <button
+      data-scene-direction="1"
+      aria-label={lang === "ru" ? "Следующая сцена" : "Next scene"}
+    >
+      →
+    </button>
+  </div>
+</section>
+<script>
+  const grid = document.querySelector<HTMLElement>(".scene-grid")!;
+  const cards = [...grid.querySelectorAll<HTMLElement>(".scene-card")];
+  const navigation = document.querySelector<HTMLElement>(".scene-navigation")!;
+  const position = navigation.querySelector<HTMLElement>(
+    "[data-scene-position]",
+  )!;
+  let current = 0;
+  navigation.hidden = false;
+  grid.addEventListener(
+    "scroll",
+    () => {
+      current = Math.min(
+        cards.length - 1,
+        Math.max(
+          0,
+          Math.round(
+            grid.scrollLeft / (cards[1].offsetLeft - cards[0].offsetLeft),
+          ),
+        ),
+      );
+      position.textContent = `${current + 1} / ${cards.length}`;
+    },
+    { passive: true },
+  );
+  navigation
+    .querySelectorAll<HTMLButtonElement>("[data-scene-direction]")
+    .forEach((button) =>
+      button.addEventListener("click", () => {
+        const index = Math.min(
+          cards.length - 1,
+          Math.max(0, current + Number(button.dataset.sceneDirection)),
+        );
+        grid.scrollTo({
+          left: cards[index].offsetLeft - cards[0].offsetLeft,
+          behavior: matchMedia("(prefers-reduced-motion: reduce)").matches
+            ? "instant"
+            : "smooth",
+        });
+      }),
+    );
+  document
+    .querySelectorAll<HTMLElement>(".scene-card figcaption")
+    .forEach((caption) => {
+      if (caption.scrollWidth > caption.clientWidth) caption.tabIndex = 0;
+    });
+</script>

@@ -1,0 +1,396 @@
+{
+  "ru": [
+    {
+      "caption": "Утром Ива сама присылает план дня.",
+      "messages": [
+        {
+          "out": false,
+          "text": "Доброе утро! В 11:00 созвон с Анной, до 18:00 надо оплатить счёт поставщику. Анна просила смету, черновик я уже сделала.",
+          "voice": false
+        }
+      ],
+      "buttons": [
+        "Показать черновик"
+      ]
+    },
+    {
+      "caption": "Наговорили на ходу, а задачи уже записаны.",
+      "messages": [
+        {
+          "out": true,
+          "text": "🎙 голосовое 0:23",
+          "voice": true
+        },
+        {
+          "out": false,
+          "text": "Записала три задачи. Смета для Анны к 11:00, оплатить хостинг в пятницу, купить корм коту. Про созвон напомню за 15 минут.",
+          "voice": false
+        }
+      ],
+      "buttons": [
+        "Открыть задачи",
+        "Перенести"
+      ]
+    },
+    {
+      "caption": "Помнит договорённости, даже старые.",
+      "messages": [
+        {
+          "out": true,
+          "text": "Что мы решили с Анной по срокам?",
+          "voice": false
+        },
+        {
+          "out": false,
+          "text": "14 октября договорились: первая версия к 1 ноября, потом неделя на правки.",
+          "voice": false
+        }
+      ],
+      "buttons": []
+    },
+    {
+      "caption": "Напомнит в нужный день, просить второй раз не придётся.",
+      "messages": [
+        {
+          "out": true,
+          "text": "Напомни в пятницу поздравить Сергея.",
+          "voice": false
+        },
+        {
+          "out": false,
+          "text": "Сегодня день рождения у Сергея. Набросать поздравление?",
+          "voice": false
+        }
+      ],
+      "buttons": []
+    },
+    {
+      "caption": "Счёт и документы готовит прямо в чате.",
+      "messages": [
+        {
+          "out": true,
+          "text": "Выставь Тимуру счёт за октябрь, 40 часов по 50 долларов.",
+          "voice": false
+        },
+        {
+          "out": false,
+          "text": "Готово, счёт на 2000 долларов. PDF во вложении. Отправить Тимуру?",
+          "voice": false
+        }
+      ],
+      "buttons": [
+        "Отправить",
+        "Поправить"
+      ]
+    },
+    {
+      "caption": "Список покупок всегда под рукой.",
+      "messages": [
+        {
+          "out": true,
+          "text": "Добавь в покупки молоко, яйца и корм коту.",
+          "voice": false
+        },
+        {
+          "out": false,
+          "text": "Добавила, в списке теперь семь позиций.",
+          "voice": false
+        }
+      ],
+      "buttons": []
+    },
+    {
+      "caption": "Сама доводит дело до конца.",
+      "messages": [
+        {
+          "out": true,
+          "text": "Добейся, чтобы провайдер починил интернет.",
+          "voice": false
+        },
+        {
+          "out": false,
+          "text": "Написала в поддержку, заявка 4471. Через два часа проверю ответ и расскажу.",
+          "voice": false
+        }
+      ],
+      "buttons": []
+    },
+    {
+      "caption": "Разбирает почту и подсказывает, кому ответить.",
+      "messages": [
+        {
+          "out": true,
+          "text": "Что важного в почте?",
+          "voice": false
+        },
+        {
+          "out": false,
+          "text": "Ответа ждут трое: бухгалтер про акт, Анна про смету и банк. Остальное рассылки. Начнём с бухгалтера?",
+          "voice": false
+        }
+      ],
+      "buttons": []
+    },
+    {
+      "caption": "Собирает статус из календаря, Битрикс24 и рабочих чатов.",
+      "messages": [
+        {
+          "out": true,
+          "text": "Подготовь статусы к сегодняшним встречам.",
+          "voice": false
+        },
+        {
+          "out": false,
+          "text": "Посмотрела календарь, задачи в Битрикс24 и чаты. По «Авроре» ждут вашего решения по бюджету, Олег вчера сдал макет. Ещё в чате дизайна висит вопрос к вам с понедельника.",
+          "voice": false
+        }
+      ],
+      "buttons": []
+    },
+    {
+      "caption": "У каждого в семье может быть своя Ива.",
+      "messages": [
+        {
+          "out": true,
+          "text": "Запиши Сашу к стоматологу на четверг в 16:00 и напомни накануне.",
+          "voice": false
+        },
+        {
+          "out": false,
+          "text": "Записала в календарь. Напомню в среду вечером.",
+          "voice": false
+        }
+      ],
+      "buttons": []
+    },
+    {
+      "caption": "Найдёт всё, что вы ей когда-то говорили.",
+      "messages": [
+        {
+          "out": true,
+          "text": "Где рецепт плова, который я диктовал летом?",
+          "voice": false
+        },
+        {
+          "out": false,
+          "text": "Нашла запись от 14 июля, «плов по-ташкентски». Прислать целиком?",
+          "voice": false
+        }
+      ],
+      "buttons": []
+    },
+    {
+      "caption": "Расшифрует голосовое или запись встречи и выделит главное.",
+      "messages": [
+        {
+          "out": true,
+          "text": "🎧 запись встречи 42:10",
+          "voice": true
+        },
+        {
+          "out": false,
+          "text": "Расшифровала. Решили три вопроса, на вас два поручения: смета до пятницы и звонок юристу. Прислать полный текст?",
+          "voice": false
+        }
+      ],
+      "buttons": []
+    }
+  ],
+  "en": [
+    {
+      "caption": "Every morning Iva sends your plan for the day.",
+      "messages": [
+        {
+          "out": false,
+          "text": "Good morning! Call with Anna at 11:00, the supplier invoice is due by 18:00. Anna asked for an estimate, I've drafted it already.",
+          "voice": false
+        }
+      ],
+      "buttons": [
+        "Show the draft"
+      ]
+    },
+    {
+      "caption": "You talk on the go, and the tasks are already written down.",
+      "messages": [
+        {
+          "out": true,
+          "text": "🎙 voice note 0:23",
+          "voice": true
+        },
+        {
+          "out": false,
+          "text": "Got three tasks. Estimate for Anna by 11:00, pay for hosting on Friday, buy cat food. I'll remind you about the call 15 minutes before.",
+          "voice": false
+        }
+      ],
+      "buttons": [
+        "Open tasks",
+        "Reschedule"
+      ]
+    },
+    {
+      "caption": "She remembers what you agreed on, even months ago.",
+      "messages": [
+        {
+          "out": true,
+          "text": "What did we decide with Anna about deadlines?",
+          "voice": false
+        },
+        {
+          "out": false,
+          "text": "On October 14 you agreed on the first version by November 1, then a week for edits.",
+          "voice": false
+        }
+      ],
+      "buttons": []
+    },
+    {
+      "caption": "She reminds you on the right day, no need to ask twice.",
+      "messages": [
+        {
+          "out": true,
+          "text": "Remind me on Friday to congratulate Sergey.",
+          "voice": false
+        },
+        {
+          "out": false,
+          "text": "It's Sergey's birthday today. Want me to draft a message?",
+          "voice": false
+        }
+      ],
+      "buttons": []
+    },
+    {
+      "caption": "Invoices and documents, right in the chat.",
+      "messages": [
+        {
+          "out": true,
+          "text": "Invoice Timur for October, 40 hours at 50 dollars.",
+          "voice": false
+        },
+        {
+          "out": false,
+          "text": "Done, an invoice for 2,000 dollars. The PDF is attached. Send it to Timur?",
+          "voice": false
+        }
+      ],
+      "buttons": [
+        "Send",
+        "Edit"
+      ]
+    },
+    {
+      "caption": "Your shopping list, always at hand.",
+      "messages": [
+        {
+          "out": true,
+          "text": "Add milk, eggs and cat food to the shopping list.",
+          "voice": false
+        },
+        {
+          "out": false,
+          "text": "Added. There are seven items on the list now.",
+          "voice": false
+        }
+      ],
+      "buttons": []
+    },
+    {
+      "caption": "She sees things through on her own.",
+      "messages": [
+        {
+          "out": true,
+          "text": "Get the provider to fix my internet.",
+          "voice": false
+        },
+        {
+          "out": false,
+          "text": "I've written to support, ticket 4471. I'll check for a reply in two hours and let you know.",
+          "voice": false
+        }
+      ],
+      "buttons": []
+    },
+    {
+      "caption": "She goes through your mail and tells you who needs a reply.",
+      "messages": [
+        {
+          "out": true,
+          "text": "Anything important in my mail?",
+          "voice": false
+        },
+        {
+          "out": false,
+          "text": "Three people are waiting for a reply: the accountant about the statement, Anna about the estimate, and the bank. The rest is newsletters. Start with the accountant?",
+          "voice": false
+        }
+      ],
+      "buttons": []
+    },
+    {
+      "caption": "She pulls a status from your calendar, Bitrix24 and work chats.",
+      "messages": [
+        {
+          "out": true,
+          "text": "Prepare a status for today's meetings.",
+          "voice": false
+        },
+        {
+          "out": false,
+          "text": "I checked your calendar, Bitrix24 tasks and chats. On Aurora they need your call on the budget, Oleg delivered the mockup yesterday. And a question for you has been waiting in the design chat since Monday.",
+          "voice": false
+        }
+      ],
+      "buttons": []
+    },
+    {
+      "caption": "Everyone in the family can have their own Iva.",
+      "messages": [
+        {
+          "out": true,
+          "text": "Book Sasha at the dentist on Thursday at 16:00 and remind me the day before.",
+          "voice": false
+        },
+        {
+          "out": false,
+          "text": "Added to the calendar. I'll remind you on Wednesday evening.",
+          "voice": false
+        }
+      ],
+      "buttons": []
+    },
+    {
+      "caption": "She finds anything you've ever told her.",
+      "messages": [
+        {
+          "out": true,
+          "text": "Where's that plov recipe I dictated in the summer?",
+          "voice": false
+        },
+        {
+          "out": false,
+          "text": "Found it, July 14, \"Tashkent-style plov\". Send the whole thing?",
+          "voice": false
+        }
+      ],
+      "buttons": []
+    },
+    {
+      "caption": "She transcribes a voice note or a meeting and pulls out what matters.",
+      "messages": [
+        {
+          "out": true,
+          "text": "🎧 meeting recording 42:10",
+          "voice": true
+        },
+        {
+          "out": false,
+          "text": "Transcribed. You settled three issues, and two action items are yours: the estimate by Friday and a call to the lawyer. Want the full text?",
+          "voice": false
+        }
+      ],
+      "buttons": []
+    }
+  ]
+}

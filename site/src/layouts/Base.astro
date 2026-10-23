@@ -30,13 +30,12 @@ const enPath = en || Astro.url.pathname.replace(/^\/ru\//, "/");
 const ruPath = ru || (enPath === "/privacy/" ? "/privacy/" : "/ru" + enPath);
 const og = `/media/og-${lang}.png`;
 const nav = isRu
-  ? ["Возможности", "Память", "Цена", "Установка", "Вопросы"]
-  : ["Features", "Memory", "Pricing", "Install", "FAQ"];
-const links = ["features", "memory", "pricing", "install", "faq"];
+  ? ["Что умеет", "Цена", "Установка", "Вопросы"]
+  : ["What she does", "Pricing", "Install", "FAQ"];
+const links = ["features", "pricing", "install", "faq"];
 const footer = isRu
   ? [
       "Документация",
-      "Сценарии",
       "Вопросы",
       "История изменений",
       "О команде",
@@ -47,7 +46,6 @@ const footer = isRu
     ]
   : [
       "Docs",
-      "Use cases",
       "FAQ",
       "Changelog",
       "About the team",
@@ -59,7 +57,6 @@ const footer = isRu
 const prefix = isRu ? "/ru" : "";
 const footerLinks = [
   prefix + "/docs/",
-  prefix + "/docs/use-cases/",
   home + "#faq",
   "https://github.com/smixs/iva-agent/blob/main/CHANGELOG.md",
   prefix + "/about/",
@@ -180,7 +177,14 @@ const footerLinks = [
     </main>
     <footer class="footer">
       <a href={home}>
-        <img src="/brand/logo-light.svg" alt="IVA" width="96" height="44" />
+        <img
+          src="/brand/logo-light.svg"
+          alt="IVA"
+          width="96"
+          height="44"
+          loading="lazy"
+          decoding="async"
+        />
       </a>
       <nav aria-label={isRu ? "Ссылки в подвале" : "Footer links"}>
         {footer.map((n, i) => (
