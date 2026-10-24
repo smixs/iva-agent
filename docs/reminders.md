@@ -29,7 +29,9 @@ Everything is read in your timezone — the one Iva is configured with, not the 
 
 A simple reminder (`content: "text"`) is ready text. Code sends it directly to the chat and topic where you asked, without a model turn. The next tick is within one second of the stored due time; the isolated smoke test allows 15 seconds including child startup and local transport. Network failures and a busy dispatcher can add delay. The existing dispatcher runs every second; it also picks up reminders created between minute boundaries.
 
-A scheduled task (`content: "task"`) is a self-contained instruction for Iva. At the due time she starts one fresh session, uses her tools and returns a final answer; code sends that answer to your chat. This can take as long as the task and model need. Existing reminders without `content` retain this task behavior. Repeating reminders use the same two choices and keep their existing schedule calculation.
+A scheduled task (`content: "task"`) is a self-contained instruction for Iva. At the due time she starts one fresh session on the helper and background model selected in `/menu` (`HELPER_MODEL`; empty means the chat model), uses her tools and returns a final answer; code sends that answer to your chat. This can take as long as the task and model need. Only task reminders need a model: a simple reminder goes out without one. Existing reminders without `content` retain this task behavior. Repeating reminders use the same two choices and keep their existing schedule calculation.
+
+Because the session is fresh, the instruction has to stand on its own: «collect yesterday's tasks and list what is still open» works, but «do that thing we discussed» will not — by then the discussion is gone.
 
 If the task fails or returns no usable text, code sends the original instruction. If `/new` resets the conversation while the task is running, code sends that text with a short note in your language explaining that the reset interrupted execution. An explicit `/stop` addressed to that turn closes it without sending the text.
 
