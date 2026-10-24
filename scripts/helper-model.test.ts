@@ -131,7 +131,9 @@ test("F14: concurrent chat and helper use separate wire models and image verdict
   ]) {
     const start = wire.length;
     const turn = await run(kind);
-    const expectedModel = ["watch", "brief", "insight"].includes(kind)
+    const expectedModel = ["watch", "brief", "insight", "reminder"].includes(
+      kind,
+    )
       ? "deepseek-v4-pro"
       : "text-fixture";
     assert.ok(
