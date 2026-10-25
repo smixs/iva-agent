@@ -62,11 +62,11 @@ function mountDemo(root: HTMLElement) {
   const abort = new AbortController();
   const on = { signal: abort.signal };
   const playing = () => !disposed && !suspended && interaction.menu === null && !reduced && !userPaused && !focusPaused && !document.hidden && inView && state.frame < DEMO_FRAMES;
-  const style = (el: HTMLElement, property: string, value: string) => {
-    if (el.style.getPropertyValue(property) !== value) el.style.setProperty(property, value);
-  };
   const setText = (el: Element, value: string) => {
     if (el.textContent !== value) el.textContent = value;
+  };
+  const style = (el: HTMLElement, property: string, value: string) => {
+    if (el.style.getPropertyValue(property) !== value) el.style.setProperty(property, value);
   };
   function arrival(el: HTMLElement, f: number, at: number) {
     const visible = f >= at;
@@ -224,6 +224,13 @@ function mountDemo(root: HTMLElement) {
     const language = interaction.language;
     const text = demoMenuCopy[language];
     const opened = interaction.menu !== null;
+    const readOnly = interaction.menu !== null && (Object.hasOwn(demoMenuInfo, interaction.menu) || interaction.menu === "status");
+    const hint = interaction.menu === null ? copy.hint
+      : interaction.menu === "restart" ? text.restartNote
+      : interaction.restarted ? text.restarted
+      : interaction.menu === "language" ? text.languageNote
+      : readOnly ? text.preview : text.demo;
+    setText(get("[data-demo-hint]"), hint);
     menuEntry.hidden = !menuShown;
     root.dataset.menu = interaction.menu ?? "closed";
     root.dataset.menuSeen = String(interaction.menuSeen);
@@ -241,12 +248,10 @@ function mountDemo(root: HTMLElement) {
     const title = get("[data-menu-title]");
     const description = get("[data-menu-description]");
     const keyboard = get("[data-menu-keyboard]");
-    const disclosure = get("[data-menu-disclosure]");
-    description.replaceChildren();
+     description.replaceChildren();
     keyboard.replaceChildren();
     keyboard.classList.toggle("is-root", interaction.menu === "root");
-    disclosure.textContent = text.demo;
-    const line = (value: string) => {
+     const line = (value: string) => {
       const p = document.createElement("p"); p.textContent = value; description.append(p);
     };
     const button = (label: string, action: string, selected?: boolean) => {
@@ -257,20 +262,19 @@ function mountDemo(root: HTMLElement) {
     };
     const current = `${text.now}: ${demoProviders[interaction.provider][language]} · ${interaction.model}`;
     if (interaction.menu === null) {
-      title.textContent = text.closed;
+      setText(title, text.closed);
       line(current);
       return;
     }
     const page = interaction.menu;
-    title.textContent = page === "root" ? text.settings
+    setText(title, page === "root" ? text.settings
       : page === "models" || page === "restart" ? demoMenuEntries.model[language]
-      : demoMenuEntries[page][language];
+      : demoMenuEntries[page][language]);
     if (page === "root") {
       for (const id of Object.keys(demoMenuEntries) as DemoMenuEntry[]) button(demoMenuEntries[id][language], `root:${id}`);
     } else if (page === "model") {
       line(current);
-      if (interaction.restarted) line(text.restarted);
-      line(text.provider);
+       line(text.provider);
       for (const id of Object.keys(demoProviders) as DemoProvider[]) {
         const selected = interaction.provider === id;
         button(`${selected ? "✓ " : ""}${demoProviders[id][language]}`, `provider:${id}`, selected);
@@ -285,25 +289,21 @@ function mountDemo(root: HTMLElement) {
     } else if (page === "restart") {
       line(interaction.pending?.model ?? interaction.model);
       line(text.restart);
-      line(text.restartNote);
-      button(text.restartButton, "restart:yes");
+       button(text.restartButton, "restart:yes");
     } else if (page === "notices") {
       line(text.notices);
       button(`${interaction.writes ? "✓" : "○"} ${text.writes} · ${interaction.writes ? text.on : text.off}`, `notices:${interaction.writes ? "0" : "1"}`, interaction.writes);
     } else if (page === "language") {
-      line(text.languageNote);
-      button(`Русский${language === "ru" ? " ✓" : ""}`, "language:ru", language === "ru");
+       button(`Русский${language === "ru" ? " ✓" : ""}`, "language:ru", language === "ru");
       button(`English${language === "en" ? " ✓" : ""}`, "language:en", language === "en");
     } else if (page === "status") {
       line(current);
       line(`${text.writes}: ${interaction.writes ? text.on : text.off}`);
       line(`${text.language}: ${language === "ru" ? "Русский" : "English"}`);
-      line(text.preview);
-    } else {
+     } else {
       const info = demoMenuInfo[page];
       if (info) line(info[language]);
-      line(text.preview);
-    }
+     }
     if (page !== "root") button(text.back, "back");
     button(text.close, "close");
   }
@@ -432,7 +432,7 @@ function mountDemo(root: HTMLElement) {
     copiedPhrase = result.text;
     sync();
     if (target.closest("button[data-menu-install]")) view.scrollTop = view.scrollHeight;
-    announcement.textContent = demoMenuCopy[interaction.language].installNext;
+    setText(announcement, demoMenuCopy[interaction.language].installNext);
     if (!result.ok) get(target.closest("button[data-menu-install]") ? "[data-menu-copy-phrase]" : "[data-install-phrase]").focus({ preventScroll: true });
   }, on);
   root.addEventListener("keydown", event => {
@@ -456,9 +456,9 @@ function mountDemo(root: HTMLElement) {
     if (!choose(state, id, button.dataset.choice === "yes")) return;
     focusPaused = false;
     const decision = state.decisions[id]!;
-    announcement.textContent = decision.value
+    setText(announcement, decision.value
       ? id === "shopping" ? copy.shopping.map(item => item.text).join(", ") : copy.choices[id].accepted
-      : copy.choices[id].declined;
+      : copy.choices[id].declined);
     if (reduced && id === "restaurant" && decision.value) advance(state, demoFrame(decision.at + 80), false);
     sync();
   }, on);
@@ -494,7 +494,7 @@ function mountDemo(root: HTMLElement) {
     userPaused = false;
     focusPaused = false;
     delete root.dataset.announcedComplete;
-    announcement.textContent = copy.scenes[0];
+    setText(announcement, copy.scenes[0]);
     sync();
   }, on);
   document.addEventListener("visibilitychange", sync, on);

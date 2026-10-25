@@ -127,7 +127,6 @@ const prepared = messages.map(message => {
                     <div class="v7-menu-title" data-menu-title></div>
                     <div class="v7-menu-description" data-menu-description></div>
                     <div class="v7-menu-keyboard" data-menu-keyboard></div>
-                    <p class="v7-menu-disclosure" data-menu-disclosure>{m.demo}</p>
                     <div class="v7-menu-install-footer" data-menu-install-footer>
                       <button type="button" class="v7-menu-install-button" data-menu-install data-copy={phrase(lang)}>{m.installIva}</button>
                       <div class="v7-result" data-menu-copy-response data-copy-response hidden></div>
@@ -158,7 +157,7 @@ const prepared = messages.map(message => {
     ))}
     <span class="v7-tap" data-tap aria-hidden="true" hidden></span>
   </Phone>
-  <svg class="v7-menu-cue" data-menu-cue viewBox="0 0 42 82" aria-hidden="true"><path d="M8 76C4 56 10 31 35 9M23 13Q29 10 35 9Q33 16 32 24" vector-effect="non-scaling-stroke" /></svg>
+  <svg class="v7-menu-cue" data-menu-cue viewBox="0 0 42 82" preserveAspectRatio="none" aria-hidden="true"><path d="M8 76C4 56 10 31 35 9M23 13Q29 10 35 9Q33 16 32 24" vector-effect="non-scaling-stroke" /></svg>
   </div>
   <figcaption class="v7-caption">
     <div class="v7-control-row">
@@ -168,7 +167,7 @@ const prepared = messages.map(message => {
       <button type="button" data-replay><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 5A5.5 5.5 0 1 1 2.7 9M3.5 1.7V5H.3" /></svg>{c.replay}</button>
       </div>
     </div>
-    <p class="v7-hint">{c.hint}</p>
+    <p class="v7-hint" data-demo-hint>{c.hint}</p>
     <span class="v7-sr" data-scene>{c.scenes[0]}</span>
     <span class="v7-sr">{c.note}</span>
     <span class="v7-sr" data-announcement role="status" aria-live="polite"></span>
@@ -283,7 +282,6 @@ const prepared = messages.map(message => {
   .v7-menu-keyboard :global(button[aria-pressed="true"]) { background:#c9e5ff; }
   .v7-menu-keyboard :global(button[data-menu-action="close"]) { background:#e7e6e9; color:#17211d; }
   .v7-menu-keyboard :global(button:focus-visible) { outline:2px solid #17211d; outline-offset:-3px; }
-  .v7-menu-disclosure { font-size:calc(12 * var(--vp)); line-height:calc(16 * var(--vp)); color:#395549; margin:calc(9 * var(--vp)) 0 0; }
   .v7-install { padding-top:calc(10 * var(--vp)); flex-shrink:0; }
   .v7-install-copy-status { font-size:calc(14 * var(--vp)); line-height:calc(19 * var(--vp)); margin:calc(8 * var(--vp)) 0 0; color:#395549; }
   .v7-install-phrase { margin:calc(8 * var(--vp)) 0 0; padding:calc(8 * var(--vp)); border-radius:calc(8 * var(--vp)); background:#e4f3ff; user-select:text; overflow-wrap:anywhere; }
