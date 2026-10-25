@@ -6,11 +6,21 @@ import { files } from "../src/lib/build.ts";
 const dist = path.resolve(process.argv[2] || "dist");
 const copy = JSON.parse(readFileSync("src/data/copy.json", "utf8"));
 const usecases = JSON.parse(readFileSync("src/data/usecases.json", "utf8"));
-// Emoji are allowed only inside the Telegram chat (data-tg-content), where they are
+// Emoji are allowed only inside the Telegram demo (data-ui), where they are
 // part of how Telegram looks. Everything else on the site uses SVG icons.
 const emoji = /\p{Extended_Pictographic}|\uFE0F/u;
 // Text symbols that are pictographic only with U+FE0F: ©, ®, ™ and arrows like ↗.
-const notEmoji = new Set(["\u00A9", "\u00AE", "\u2122", "\u2194", "\u2195", "\u2196", "\u2197", "\u2198", "\u2199"]);
+const notEmoji = new Set([
+  "\u00A9",
+  "\u00AE",
+  "\u2122",
+  "\u2194",
+  "\u2195",
+  "\u2196",
+  "\u2197",
+  "\u2198",
+  "\u2199",
+]);
 const findEmoji = (html: string) =>
   [...html.matchAll(new RegExp(emoji, "gu"))]
     .map((m) => m[0])
@@ -158,7 +168,7 @@ for (const home of [path.join(dist, "index.html"), path.join(dist, "ru/index.htm
     html.match(/<meta name="description" content="([^"]*)"/)![1],
   );
   const faq = schemas.find((s) => s["@type"] === "FAQPage");
-  assert.equal(faq.mainEntity.length, 10);
+  assert.equal(faq.mainEntity.length, 6);
   const visible = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/g, "");
   assert.doesNotMatch(
     html,
@@ -183,27 +193,66 @@ for (const home of [path.join(dist, "index.html"), path.join(dist, "ru/index.htm
   const faqHTML = visible.match(/<section id="faq"[\s\S]*?<\/section>/)![0];
   const actualFAQ = [
     ...faqHTML.matchAll(
-      /<details[^>]*>\s*<summary[^>]*>([\s\S]*?)<\/summary>\s*<p[^>]*>([\s\S]*?)<\/p>/g,
+      /<summary class="faq-question"[^>]*>([\s\S]*?)<\/summary>\s*<p[^>]*>([\s\S]*?)<\/p>/g,
     ),
   ].map((m) => ({
-    question: m[1].trim(),
-    answer: m[2].replace(/<[^>]*>/g, "").trim(),
+    question: plain(m[1]),
+    answer: plain(m[2]),
   }));
-  assert.equal(actualFAQ.length, 10);
+  assert.equal(actualFAQ.length, 6);
+  assert.match(faqHTML, /<details class="faq-group"\s*>/);
   faq.mainEntity.forEach((question: any, index: number) => {
-    assert.equal(actualFAQ[index].question, question.name);
-    assert.equal(actualFAQ[index].answer, question.acceptedAnswer.text);
+    assert.equal(actualFAQ[index].question, plain(question.name));
+    assert.equal(actualFAQ[index].answer, plain(question.acceptedAnswer.text));
   });
   assert.equal((visible.match(/class="review"/g) || []).length, 3);
   const lang = home.includes("/ru/") ? "ru" : "en";
-  assert.equal((visible.match(/class="usecase-row"/g) || []).length, 8);
+  const publishedReviews = JSON.parse(
+    readFileSync("src/data/reviews.json", "utf8"),
+  );
+  const localeReviews = publishedReviews.filter(
+    (review: any) => review.lang === lang,
+  );
+  assert.equal(localeReviews.length, 3);
+  for (const review of localeReviews) {
+    assert.ok(visible.includes(review.url), `${home}: review source link`);
+    assert.ok(
+      plain(visible).includes(plain(review.short)),
+      `${home}: published review text`,
+    );
+  }
+
+  assert.equal((visible.match(/class="usecase-row"/g) || []).length, 4);
+  const casesHTML = visible.match(
+    /<section id="features"[\s\S]*?<\/section>/,
+  )![0];
+  assert.match(casesHTML, /aria-label="/);
+  assert.ok(
+    !casesHTML.includes('id="usecases-title"'),
+    `${home}: redundant scenario heading`,
+  );
+  for (const row of casesHTML.matchAll(/<article\b[\s\S]*?<\/article>/g)) {
+    assert.ok(
+      row[0].indexOf("<h2") < row[0].indexOf("<picture"),
+      `${home}: scenario copy precedes picture`,
+    );
+  }
+
   const main = visible.match(/<main\b[^>]*>([\s\S]*?)<\/main>/)![1];
   const headings = [...main.matchAll(/<h2[^>]*>([\s\S]*?)<\/h2>/g)].map((m) =>
     plain(m[1]),
   );
-  assert.deepEqual(
-    headings,
-    copy[lang].slice(2).map((section: any) => section.groups.H2[0]),
+  assert.deepEqual(headings, [
+    ...usecases[lang].rows.map((row: any) => row.title),
+    ...copy[lang]
+      .filter((section: any) => [3, 4, 5, 9, 10].includes(section.number))
+      .map((section: any) => section.groups.H2[0]),
+  ]);
+  assert.ok(
+    ![...main.matchAll(/<h[1-3][^>]*>([\s\S]*?)<\/h[1-3]>/g)].some((m) =>
+      plain(m[1]).includes("."),
+    ),
+    `${home}: full stop in heading`,
   );
   const content = plain(visible);
   for (const row of usecases[lang].rows) {
@@ -214,7 +263,9 @@ for (const home of [path.join(dist, "index.html"), path.join(dist, "ru/index.htm
       );
     }
   }
-  for (const section of copy[lang].slice(1)) {
+  for (const section of copy[lang].filter((section: any) =>
+    [1, 3, 4, 5, 9, 10].includes(section.number),
+  )) {
     for (const [key, values] of Object.entries(section.groups)) {
       if (
         [
@@ -229,7 +280,7 @@ for (const home of [path.join(dist, "index.html"), path.join(dist, "ru/index.htm
       )
         continue;
       for (const value of values as string[])
-        assert.ok(content.includes(plain(value)), `${home}: v2 copy: ${value}`);
+        assert.ok(content.includes(plain(value)), `${home}: V7 copy: ${value}`);
     }
   }
 }
@@ -251,7 +302,7 @@ for (const page of pages) {
   );
 }
 console.log(
-  `HTML: ${pages.length} pages; ${json} JSON-LD blocks parsed; 10 FAQ entries per locale; ${links} internal references checked.`,
+  `HTML: ${pages.length} pages; ${json} JSON-LD blocks parsed; 6 FAQ entries per locale; ${links} internal references checked.`,
 );
 if (failures.length) {
   console.error(failures.join("\n"));

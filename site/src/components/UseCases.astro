@@ -1,171 +1,24 @@
 ---
 import usecases from "../data/usecases.json";
 import { glue, type Lang } from "../lib/copy";
-const { lang, title } = Astro.props as { lang: Lang; title: string };
-
-// Glitch squares live only in the picture's outer corners, which the art leaves
-// pure white, so they never touch the scene or the text. They flash for 300 ms when
-// the row enters and on hover, and are invisible at rest. [left %, top %, size px].
-const CORNER: [number, number, number][] = [
-  [3, 6, 7], [9, 3, 5], [2, 15, 5], [4, 88, 6], [11, 95, 5], [2, 79, 8],
-];
-const pixelsFor = (index: number) =>
-  CORNER.map(([x, y, s], n) => ({
-    // Odd rows put the image on the right, so the free corners are on the right.
-    x: index % 2 === 0 ? x : 100 - x - 2,
-    y: index % 4 >= 2 ? 100 - y - 2 : y,
-    s,
-    lime: n === CORNER.length - 1,
-    dx: (index % 2 === 0 ? -1 : 1) * (6 + (n % 3) * 3),
-    dy: (y < 50 ? -1 : 1) * (4 + (n % 2) * 4),
-    delay: n * 0.012,
-  }));
+const { lang } = Astro.props as { lang: Lang };
+const legacy = ["asks", "scenarios", "userbot", "memory", "invoice", "goal", "family"];
 ---
 
-<section id="features" class="section use-cases">
-  <span id="asks" class="legacy-anchor" aria-hidden="true"></span>
-  <span id="scenarios" class="legacy-anchor" aria-hidden="true"></span>
-  <span id="userbot" class="legacy-anchor" aria-hidden="true"></span>
-  <span id="menu" class="legacy-anchor" aria-hidden="true"></span>
-  <h2>{title}</h2>
+<section id="features" class="section use-cases" aria-label={usecases[lang].label}>
+  {legacy.map((id) => <span id={id} class="legacy-anchor" aria-hidden="true"></span>)}
   <div class="usecase-rows">
-    {usecases[lang].rows.map((row, index) => (
-      <article id={row.id} class="usecase-row" data-usecase-row aria-labelledby={`case-${row.id}`}>
-        <div class="case-art">
-          <div class="case-motion" data-case-motion>
-            <picture class="case-picture">
-              <source type="image/avif" srcset={`/media/usecases/${row.id}-800.avif 800w, /media/usecases/${row.id}-1600.avif 1600w`} sizes="(max-width: 959px) 100vw, 58vw" />
-              <img src={`/media/usecases/${row.id}-800.webp`} srcset={`/media/usecases/${row.id}-800.webp 800w, /media/usecases/${row.id}-1600.webp 1600w`} sizes="(max-width: 959px) 100vw, 58vw" width="1600" height="1200" alt={row.alt} loading="lazy" decoding="async" />
-            </picture>
-            <span class="case-pixels" aria-hidden="true">
-              {pixelsFor(index).map((p) => (
-                <i class={p.lime ? "lime" : undefined} style={`left:${p.x}%;top:${p.y}%;--s:${p.s}px;--dx:${p.dx}px;--dy:${p.dy}px;--d:${p.delay}s`} />
-              ))}
-            </span>
-          </div>
-        </div>
+    {usecases[lang].rows.map((row) => (
+      <article id={row.id} class="usecase-row" aria-labelledby={`case-${row.id}`}>
         <div class="case-copy">
-          <h3 id={`case-${row.id}`}>{glue(row.title)}</h3>
+          <h2 id={`case-${row.id}`}>{glue(row.title)}</h2>
           <p>{glue(row.text)}</p>
         </div>
+        <picture class="case-art">
+          <source type="image/avif" srcset={`/media/usecases/${row.id}-800.avif 800w, /media/usecases/${row.id}-1600.avif 1600w`} sizes="(max-width: 760px) calc(100vw - 44px), 52vw" />
+          <img src={`/media/usecases/${row.id}-800.webp`} srcset={`/media/usecases/${row.id}-800.webp 800w, /media/usecases/${row.id}-1600.webp 1600w`} sizes="(max-width: 760px) calc(100vw - 44px), 52vw" width="1600" height="1200" alt={row.alt} loading="lazy" decoding="async" />
+        </picture>
       </article>
     ))}
   </div>
 </section>
-
-<style is:global>
-  .usecase-rows { margin-top: 56px; display: grid; gap: 120px; }
-  .usecase-row {
-    display: grid; grid-template-columns: repeat(12, minmax(0, 1fr));
-    column-gap: 64px; align-items: center;
-  }
-  .usecase-row .case-art { grid-column: 1 / span 7; grid-row: 1; }
-  .usecase-row .case-copy { grid-column: 8 / span 5; grid-row: 1; }
-  .usecase-row:nth-child(even) .case-art { grid-column: 6 / span 7; }
-  .usecase-row:nth-child(even) .case-copy { grid-column: 1 / span 5; }
-
-  .case-art { min-width: 0; aspect-ratio: 4 / 3; }
-  .case-motion { position: relative; transform: translate3d(0, var(--case-y, 0px), 0); will-change: transform; }
-  .case-picture, .case-picture img { display: block; width: 100%; height: auto; }
-  /* Some scenes keep a pale backdrop with straight edges; every picture fades out over
-     its outer 22 % on all four sides, so none shows a rectangle. */
-  .case-picture img {
-    -webkit-mask-image: linear-gradient(90deg, transparent, #000 22%, #000 78%, transparent), linear-gradient(180deg, transparent, #000 22%, #000 78%, transparent);
-    -webkit-mask-composite: source-in;
-    mask-image: linear-gradient(90deg, transparent, #000 22%, #000 78%, transparent), linear-gradient(180deg, transparent, #000 22%, #000 78%, transparent);
-    mask-composite: intersect;
-  }
-
-  .case-copy { min-width: 0; max-width: 34ch; }
-  .case-copy h3 {
-    margin: 0 0 14px; font-size: clamp(32px, 3.2vw, 44px); line-height: 1.08;
-    letter-spacing: -.03em; font-weight: 700; color: #1a2327;
-  }
-  .case-copy p { margin: 0; font-size: 19px; line-height: 1.5; color: #5b6770; }
-
-  .case-pixels { position: absolute; inset: 0; pointer-events: none; }
-  .case-pixels i { position: absolute; width: var(--s); height: var(--s); background: #368ad2; }
-  .case-pixels i.lime { background: #a4dc55; }
-
-  .case-pixels i { opacity: 0; }
-  /* Motion runs only when scripting marks the page ready, so without JS everything is
-     visible. The picture fades in; the text stays put. */
-  .js-motion .usecase-row .case-art { opacity: 0; }
-  .js-motion .usecase-row.is-entered .case-art { opacity: 1; transition: opacity .3s ease-out; }
-  .js-motion .usecase-row.is-entered .case-pixels i { animation: case-glitch-in .23s var(--d) steps(4, jump-end) both; }
-  .can-hover .usecase-row.is-entered:hover .case-pixels i { animation: case-glitch-hover .23s var(--d) steps(4, jump-end) both; }
-  @keyframes case-glitch-in {
-    0% { opacity: 0; transform: translate(var(--dx), var(--dy)); }
-    35% { opacity: 1; transform: none; }
-    100% { opacity: 0; transform: none; }
-  }
-  @keyframes case-glitch-hover {
-    0% { opacity: 0; transform: translate(var(--dx), var(--dy)); }
-    35% { opacity: 1; transform: none; }
-    100% { opacity: 0; transform: none; }
-  }
-
-  @media (max-width: 959px) {
-    .usecase-rows { margin-top: 32px; gap: 72px; }
-    .usecase-row { display: block; }
-    .case-copy { max-width: none; margin-top: 24px; }
-    .case-copy h3 { font-size: clamp(28px, 7.4vw, 32px); margin-bottom: 12px; }
-    .case-copy p { font-size: 18px; }
-    .case-motion { transform: none; will-change: auto; }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .js-motion .usecase-row .case-art { opacity: 1; transition: none; }
-    .case-pixels { display: none; }
-    .case-motion { transform: none; }
-  }
-</style>
-
-<script>
-  const rows = [...document.querySelectorAll<HTMLElement>("[data-usecase-row]")];
-  const reduced = matchMedia("(prefers-reduced-motion: reduce)");
-  const wide = matchMedia("(min-width: 960px)");
-  const visible = new Set<HTMLElement>();
-  let frame = 0;
-
-  if (!reduced.matches) document.documentElement.classList.add("js-motion");
-  // Hover glitches only where a real pointer hovers (no sticky hover on touch).
-  if (matchMedia("(hover: hover) and (pointer: fine)").matches) document.documentElement.classList.add("can-hover");
-
-  // Parallax: ±12 px around the viewport centre, desktop only, visible rows only.
-  function paint() {
-    frame = 0;
-    for (const row of visible) {
-      const motion = row.querySelector<HTMLElement>("[data-case-motion]");
-      if (!motion) continue;
-      const rect = row.getBoundingClientRect();
-      const y = Math.max(-12, Math.min(12, ((innerHeight / 2 - rect.top - rect.height / 2) / innerHeight) * 24));
-      motion.style.setProperty("--case-y", `${y.toFixed(1)}px`);
-    }
-  }
-  function requestPaint() {
-    if (!frame && visible.size && wide.matches && !reduced.matches && !document.hidden) frame = requestAnimationFrame(paint);
-  }
-
-  const enter = new IntersectionObserver((entries) => {
-    for (const entry of entries) {
-      if (!entry.isIntersecting) continue;
-      entry.target.classList.add("is-entered");
-      enter.unobserve(entry.target);
-    }
-  }, { threshold: 0.25 });
-  const track = new IntersectionObserver((entries) => {
-    for (const entry of entries) {
-      const row = entry.target as HTMLElement;
-      if (entry.isIntersecting) visible.add(row);
-      else visible.delete(row);
-    }
-    requestPaint();
-  });
-  rows.forEach((row) => { enter.observe(row); track.observe(row); });
-  addEventListener("scroll", requestPaint, { passive: true });
-  addEventListener("resize", requestPaint);
-  reduced.addEventListener("change", () => {
-    document.documentElement.classList.toggle("js-motion", !reduced.matches);
-    rows.forEach((row) => row.querySelector<HTMLElement>("[data-case-motion]")?.style.removeProperty("--case-y"));
-  });
-</script>

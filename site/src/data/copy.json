@@ -4,13 +4,10 @@
       "number": 0,
       "groups": {
         "Title": [
-          "Ива: лучший AI-ассистент в Telegram. Бесплатно"
+          "Ива — личный AI помощник в телеграм"
         ],
         "Description": [
-          "Ива живёт в вашем Telegram. Превращает голосовые в задачи, помнит договорённости месяцами, сама напоминает и присылает план дня. Бесплатно."
-        ],
-        "Шапка": [
-          "Что умеет · Цена · Установка · Вопросы · EN · GitHub ★ 265 · [Установить]"
+          "Ива помнит вас и ваши задачи, читает подключённую почту и переписку в Telegram, готовит ответы и сама напоминает о делах. Бесплатно, на вашем сервере или Mac."
         ]
       }
     },
@@ -18,21 +15,22 @@
       "number": 1,
       "groups": {
         "H1": [
-          "Лучший AI‑ассистент в Telegram"
+          "Личный AI помощник в телеграм"
         ],
         "Подзаголовок": [
-          "Помнит, о чём вы договорились, и сама напоминает."
+          "Ива помнит вас и ваши задачи, готовит ответы и сама напоминает о важном."
         ],
         "Кнопки": [
-          "[Установить с ИИ-агентом]"
-        ]
-      }
-    },
-    {
-      "number": 2,
-      "groups": {
-        "H2": [
-          "Что Ива делает каждый день"
+          "Установить Иву"
+        ],
+        "Примечание": [
+          "Бесплатно"
+        ],
+        "Условия": [
+          "Для работы нужен ваш сервер или Mac и подписка Claude, Codex или OpenCode Go."
+        ],
+        "Подсказка": [
+          "Через Codex или Claude"
         ]
       }
     },
@@ -40,10 +38,13 @@
       "number": 3,
       "groups": {
         "H2": [
-          "Работает с вашими сервисами"
+          "Gmail, календарь и ваши сервисы"
         ],
         "Подзаголовок": [
-          "Google из коробки, остальное через MCP одним файлом или плагином."
+          "Подключите почту, календарь, документы и рабочие сервисы. Ива сможет помогать с ними в одном чате."
+        ],
+        "Ссылка": [
+          "Все подключения"
         ]
       }
     },
@@ -51,36 +52,44 @@
       "number": 4,
       "groups": {
         "H2": [
-          "Что говорят пользователи"
+          "Модель и настройки — в Telegram"
+        ],
+        "Подзаголовок": [
+          "Выберите Claude, Codex или Ollama, смените язык ответов и уведомления. Всё — в меню Ивы в Telegram."
+        ],
+        "Кнопки": [
+          "Открыть меню в демо"
         ]
       }
     },
     {
       "number": 5,
       "groups": {
-        "Крупно": [],
         "H2": [
-          "Ива бесплатная"
+          "Память хранится у вас"
         ],
-        "Подзаголовок": [
-          "Работает на вашей подписке ChatGPT или Claude."
+        "Факты": [
+          "Память и история хранятся обычными файлами на вашем сервере или Mac. Вы можете читать, копировать и удалять их.",
+          "Бот отвечает только разрешённым Telegram-аккаунтам. Вы выбираете, какие сервисы подключить.",
+          "Переписка проходит через Telegram. Запросы получает выбранный AI-провайдер, а голосовые — сервис расшифровки, если он подключён.",
+          "Исходный код открыт на GitHub под лицензией MIT — его можно проверить и изменить."
         ],
-        "Кнопка": []
+        "Ссылка": [
+          "Как устроена защита"
+        ],
+        "Термины": [
+          "Ваши файлы",
+          "Ваш круг",
+          "Внешние запросы",
+          "Открытый код"
+        ]
       }
     },
     {
-      "number": 8,
+      "number": 6,
       "groups": {
-        "H2": [
-          "Ваши данные. Ваши правила."
-        ],
-        "Подзаголовок": [
-          "Ива живёт на вашем сервере или Mac, данные остаются у вас."
-        ],
-        "Пункты": [
-          "Открытый код MIT",
-          "Вы видите каждое действие",
-          "С ботом говорят только ваши люди"
+        "Label": [
+          "Отзывы пользователей"
         ]
       }
     },
@@ -88,7 +97,16 @@
       "number": 9,
       "groups": {
         "H2": [
-          "Запуск за 5 минут"
+          "Установите Иву через Codex или Claude"
+        ],
+        "Подзаголовок": [
+          "Скопируйте инструкцию и отправьте её своему агенту на сервере или Mac. Он установит Иву и поможет подключить Telegram и выбранную модель."
+        ],
+        "Ссылка": [
+          "Установить самостоятельно"
+        ],
+        "Кнопки": [
+          "Скопировать инструкцию"
         ]
       }
     },
@@ -96,49 +114,33 @@
       "number": 10,
       "groups": {
         "H2": [
-          "Частые вопросы"
+          "Вопросы об Иве"
         ]
       },
       "faq": [
         {
-          "question": "Ива правда бесплатная?",
-          "answer": "Да. Ива бесплатная, код открыт под лицензией MIT. Если у вас есть подписка ChatGPT или Claude, Ива работает на ней, и больше платить не нужно."
+          "question": "Сколько стоит Ива?",
+          "answer": "Ива бесплатная, с открытым кодом MIT. Для работы нужна подписка ChatGPT или Claude либо оплата выбранного провайдера моделей. Если арендуете сервер, он оплачивается отдельно."
         },
         {
-          "question": "Нужен ли сервер? Подойдёт ли Mac?",
-          "answer": "Подойдёт и то и другое. Сервер с Ubuntu или Debian и 512 МБ памяти или ваш Mac, который не выключается."
-        },
-        {
-          "question": "Какие модели можно подключить?",
-          "answer": "Шесть вариантов. Подписка ChatGPT, подписка Claude Pro или Max, OpenCode Go, Ollama Cloud, OpenRouter с сотнями моделей и любой свой OpenAI-совместимый адрес. Модель меняется в /menu."
+          "question": "Где она будет работать?",
+          "answer": "На вашем сервере с Ubuntu или Debian либо на Mac, который остаётся включённым. Общение с Ивой идёт через Telegram."
         },
         {
           "question": "Где хранятся мои данные?",
-          "answer": "На вашем сервере. Память Ивы лежит там обычными файлами, их можно открыть в Obsidian."
+          "answer": "Память и история лежат обычными файлами на вашем сервере или Mac. Запросы к модели получает выбранный вами провайдер. Вы сами решаете, какие сервисы подключить."
         },
         {
-          "question": "Чем Ива лучше ChatGPT в Telegram?",
-          "answer": "Ива помнит вас месяцами и пишет первой. Она ведёт заметки о людях и проектах, работает с почтой, календарём и документами, а данные остаются у вас."
+          "question": "Может ли Ива читать мои чаты?",
+          "answer": "Только после подключения юзербота по вашему желанию. По умолчанию эта возможность выключена. В режиме «только чтение» Ива получает сообщения, а отправка остаётся за вами."
         },
         {
-          "question": "Понимает ли русский и голосовые?",
-          "answer": "Да. Ива говорит по-русски и по-английски, а голосовые расшифровывает на русском, узбекском и английском."
+          "question": "Какие модели можно использовать?",
+          "answer": "Подписки ChatGPT и Claude Pro или Max, OpenCode Go, Ollama Cloud, OpenRouter и совместимые с OpenAI сервисы. Модель можно сменить прямо в `/menu`."
         },
         {
-          "question": "Нужен ли домен или HTTPS?",
-          "answer": "Нет. Ива забирает сообщения у Telegram, ей не нужны домен, сертификат и открытые порты."
-        },
-        {
-          "question": "Безопасно ли читать мои чаты?",
-          "answer": "Это выключено по умолчанию и включается только по вашему желанию. Ива читает чаты в обычном человеческом темпе, а в режиме «только чтение» ничего не отправляет."
-        },
-        {
-          "question": "Как обновлять Иву?",
-          "answer": "Кнопкой «Обновить» в чате. Ива скачает новую версию, проверит её и перезапустится. Если что-то пойдёт не так, она вернёт прошлую."
-        },
-        {
-          "question": "Сколько занимает установка?",
-          "answer": "Около 5 минут. Вставьте одну фразу в Claude Code или Codex, и агент поставит Иву. Можно и одной командой."
+          "question": "Как проходит установка?",
+          "answer": "Кнопка копирует фразу с адресом инструкции. Отправьте её Claude Code или Codex на своём сервере или Mac. Агент проведёт установку, а вы подключите своего Telegram-бота и выбранную модель."
         }
       ]
     }
@@ -148,13 +150,10 @@
       "number": 0,
       "groups": {
         "Title": [
-          "Iva: the best AI assistant in Telegram. Free"
+          "Iva — your personal AI assistant in Telegram"
         ],
         "Description": [
-          "Iva lives in your Telegram. She turns voice notes into tasks, remembers what you agreed on for months, reminds you and sends your plan for the day. Free."
-        ],
-        "Шапка": [
-          "What she does · Pricing · Install · FAQ · RU · GitHub ★ 265 · [Install]"
+          "Iva remembers you and your tasks, reads connected email and Telegram chats, prepares replies and sends reminders. Free, on your server or Mac."
         ]
       }
     },
@@ -162,21 +161,22 @@
       "number": 1,
       "groups": {
         "H1": [
-          "The best AI assistant in Telegram"
+          "Your personal AI assistant in Telegram"
         ],
         "Подзаголовок": [
-          "Remembers what you agreed on and reminds you herself."
+          "Iva remembers you and your tasks, prepares replies and reminds you about what matters."
         ],
         "Кнопки": [
-          "[Install with an AI agent]"
-        ]
-      }
-    },
-    {
-      "number": 2,
-      "groups": {
-        "H2": [
-          "What Iva does every day"
+          "Install Iva"
+        ],
+        "Примечание": [
+          "Free"
+        ],
+        "Условия": [
+          "You need your own server or Mac and a Claude, Codex or OpenCode Go subscription."
+        ],
+        "Подсказка": [
+          "With Codex or Claude"
         ]
       }
     },
@@ -184,10 +184,13 @@
       "number": 3,
       "groups": {
         "H2": [
-          "Works with your tools"
+          "Gmail, calendar and your work tools"
         ],
         "Подзаголовок": [
-          "Google out of the box, the rest through MCP with one file or a plugin."
+          "Connect mail, calendar, documents and work tools. Iva can help with them in one chat."
+        ],
+        "Ссылка": [
+          "All connections"
         ]
       }
     },
@@ -195,36 +198,44 @@
       "number": 4,
       "groups": {
         "H2": [
-          "What people say"
+          "Models and settings in Telegram"
+        ],
+        "Подзаголовок": [
+          "Choose Claude, Codex or Ollama, change your reply language and notifications. It is all in Iva’s Telegram menu."
+        ],
+        "Кнопки": [
+          "Open the demo menu"
         ]
       }
     },
     {
       "number": 5,
       "groups": {
-        "Крупно": [],
         "H2": [
-          "Iva is free"
+          "Your memory stays with you"
         ],
-        "Подзаголовок": [
-          "Runs on your ChatGPT or Claude subscription."
+        "Факты": [
+          "Memory and history are plain files on your server or Mac. You can read, copy and delete them.",
+          "The bot only responds to allowed Telegram accounts. You choose which services to connect.",
+          "Messages pass through Telegram. Your chosen AI provider receives model requests; a connected transcription service receives voice messages.",
+          "The source code is on GitHub under the MIT licence. You can inspect and modify it."
         ],
-        "Кнопка": []
+        "Ссылка": [
+          "How the safeguards work"
+        ],
+        "Термины": [
+          "Your files",
+          "Your people",
+          "External requests",
+          "Open source"
+        ]
       }
     },
     {
-      "number": 8,
+      "number": 6,
       "groups": {
-        "H2": [
-          "Your data. Your rules."
-        ],
-        "Подзаголовок": [
-          "Iva lives on your server or Mac, and your data stays with you."
-        ],
-        "Пункты": [
-          "Open source, MIT",
-          "You see every action",
-          "Only your people can talk to the bot"
+        "Label": [
+          "User reviews"
         ]
       }
     },
@@ -232,7 +243,16 @@
       "number": 9,
       "groups": {
         "H2": [
-          "Up and running in 5 minutes"
+          "Install Iva with Codex or Claude"
+        ],
+        "Подзаголовок": [
+          "Copy the instructions and send them to your agent on a server or Mac. It will install Iva and help connect Telegram and your chosen model."
+        ],
+        "Ссылка": [
+          "Install it yourself"
+        ],
+        "Кнопки": [
+          "Copy installation instructions"
         ]
       }
     },
@@ -240,49 +260,33 @@
       "number": 10,
       "groups": {
         "H2": [
-          "Frequently asked questions"
+          "Questions about Iva"
         ]
       },
       "faq": [
         {
-          "question": "Is Iva really free?",
-          "answer": "Yes. Iva is free, and the code is open under MIT. If you have a ChatGPT or Claude subscription, Iva runs on it and you pay nothing more."
+          "question": "How much does Iva cost?",
+          "answer": "Iva is free and open source under MIT. You need a ChatGPT or Claude subscription, or a paid model provider. If you rent a server, that is a separate cost."
         },
         {
-          "question": "Do I need a server? Will a Mac do?",
-          "answer": "Either works: an Ubuntu or Debian server with 512 MB of RAM, or a Mac that stays on."
-        },
-        {
-          "question": "Which models work?",
-          "answer": "Six options: a ChatGPT subscription, Claude Pro or Max, OpenCode Go, Ollama Cloud, OpenRouter with hundreds of models, or any OpenAI-compatible endpoint of your own. Switch in /menu."
+          "question": "Where does she run?",
+          "answer": "On your own Ubuntu or Debian server, or a Mac that stays on. You talk to Iva through Telegram."
         },
         {
           "question": "Where is my data stored?",
-          "answer": "On your server. Iva's memory sits there as plain files you can open in Obsidian."
+          "answer": "Memory and history are plain files on your server or Mac. Your chosen model provider receives requests to the model. You decide which services to connect."
         },
         {
-          "question": "How is Iva better than ChatGPT in Telegram?",
-          "answer": "Iva remembers you for months and writes first. She keeps notes on people and projects, works with your mail, calendar and documents, and your data stays with you."
+          "question": "Can Iva read my chats?",
+          "answer": "Only if you choose to connect the userbot. This is off by default. In read-only mode Iva receives messages, and sending stays in your hands."
         },
         {
-          "question": "Does she understand Russian and voice notes?",
-          "answer": "Yes. Iva speaks Russian and English and transcribes voice notes in Russian, Uzbek and English."
+          "question": "Which models can I use?",
+          "answer": "ChatGPT and Claude Pro or Max subscriptions, OpenCode Go, Ollama Cloud, OpenRouter and OpenAI-compatible services. Switch the model in `/menu`."
         },
         {
-          "question": "Do I need a domain or HTTPS?",
-          "answer": "No. Iva pulls messages from Telegram, so she needs no domain, certificate or open ports."
-        },
-        {
-          "question": "Is reading my chats safe?",
-          "answer": "It's off by default and only turns on if you want it. Iva reads chats at a normal human pace, and in read-only mode she never sends anything."
-        },
-        {
-          "question": "How do I update Iva?",
-          "answer": "Tap \"Update\" in the chat. Iva downloads the new version, checks it and restarts. If anything goes wrong, she rolls back."
-        },
-        {
-          "question": "How long does the install take?",
-          "answer": "About 5 minutes. Paste one sentence into Claude Code or Codex and the agent installs Iva for you, or run a single command."
+          "question": "How does installation work?",
+          "answer": "The button copies a phrase with the instruction link. Send it to Claude Code or Codex on your server or Mac. The agent handles installation, and you connect your Telegram bot and chosen model."
         }
       ]
     }

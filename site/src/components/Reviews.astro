@@ -1,20 +1,18 @@
 ---
 import reviews from "../data/reviews.json";
-import { glue } from "../lib/copy";
-const { lang, title } = Astro.props;
-// Three short quotes, each a verbatim excerpt of the full message it links to.
-const quotes = reviews.filter((r) => r.lang === lang && "short" in r);
+import type { Lang } from "../lib/copy";
+const { lang, label } = Astro.props as { lang: Lang; label: string };
+const quotes = reviews.filter((review) => review.lang === lang);
 ---
 
-<section id="reviews" class="section">
-  <h2>{title}</h2>
+<section id="reviews" class="section testimonials" aria-label={label}>
   <div class="reviews">
-    {quotes.map((r) => (
+    {quotes.map((review) => (
       <figure class="review">
-        <blockquote>{lang === "ru" ? `«${glue(r.short)}»` : `“${r.short}”`}</blockquote>
+        <blockquote>{lang === "ru" ? `«${review.short}»` : `“${review.short}”`}</blockquote>
         <figcaption>
-          <strong>{r.name}</strong>
-          <a href={r.url}>{r.handle}</a>
+          <strong>{review.name}</strong>
+          <a href={review.url}>Telegram</a>
         </figcaption>
       </figure>
     ))}
