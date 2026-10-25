@@ -1,201 +1,312 @@
 ---
-// The hero conversation, rebuilt from the demo film's Chat.tsx (header capsules, wallpaper,
-// rich card, bubbles with tails, outgoing voice, «Думаю…» draft, composer). Messages arrive
-// one by one when the phone scrolls into view; without JS or with reduced motion the
-// finished conversation is shown as is.
 import Phone from "./Phone.astro";
-import { extras } from "../data/home-extras";
-import type { Lang } from "../lib/copy";
+import { demoCopy, demoMessages, demoMenuCopy } from "../data/demo";
+import { phrase, type Lang } from "../lib/copy";
 const { lang = "en" } = Astro.props as { lang?: Lang };
-const c = extras[lang].chat;
-// mulberry32 with the film's seed, so the voice wave matches the film bar for bar.
-let seed = 704;
-const rnd = () => {
+const c = demoCopy[lang];
+const m = demoMenuCopy[lang];
+const messages = demoMessages(lang);
+const checks = "M1 5.4 4 8.4 10.2 1.6M6.6 8.1 7 8.4 13.2 1.6";
+const tail = "M0 -16.5C0 -7.5 -1.6 -2.6 -6.4 -0.35C-6.9 -0.1 -6.75 0.25 -6.25 0.3C-2.6 0.75 1.6 -0.1 4.6 -2.2L4.6 0L0 0Z";
+let seed = 1204; // VoiceOut seed from Film5, not the earlier decorative hero's seed.
+const random = () => {
   seed = (seed + 0x6d2b79f5) | 0;
   let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
   t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
   return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
 };
-const bars = 36;
-const wave = Array.from({ length: bars }, (_, i) => {
-  const env = Math.pow(Math.sin((Math.PI * (i + 0.5)) / bars), 0.55);
-  return Math.max(2.2, (0.16 + 0.84 * env * (0.3 + 0.7 * rnd())) * 20);
+const wave = Array.from({ length: 36 }, (_, i) => Math.max(2.2, (0.16 + 0.84 * Math.pow(Math.sin(Math.PI * (i + .5) / 36), .55) * (.3 + .7 * random())) * 20));
+const escape = (text: string) => text.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+const typed = (text: string, counter: { i: number }) => text.split(/( +)/).map(part => !part || /^ +$/.test(part) ? part : `<span data-word="${counter.i++}">${part === "11:00" ? "<b>11:00</b>" : escape(part)}</span>`).join("");
+const prepared = messages.map(message => {
+  const counter = { i: 0 };
+  const blocks = message.blocks?.map(block => ({
+    ...block,
+    emojiHtml: block.emoji ? typed(block.emoji, counter) : "",
+    html: typed(block.text, counter),
+  }));
+  return { ...message, blocks, after: counter.i };
 });
-const tail =
-  "M0 -16.5C0 -7.5 -1.6 -2.6 -6.4 -0.35C-6.9 -0.1 -6.75 0.25 -6.25 0.3C-2.6 0.75 1.6 -0.1 4.6 -2.2L4.6 0L0 0Z";
-const checks = "M1 5.4 4 8.4 10.2 1.6M6.6 8.1 7 8.4 13.2 1.6";
 ---
-
-<Phone time={c.voice.time.replace(/^0/, "")}>
-  <div class="tg" data-chat role="img" aria-label={c.label}>
-    <img
-      class="tg-wall"
-      src="/media/tg-wall.webp"
-      alt=""
-      width="402"
-      height="858"
-      decoding="async"
-      aria-hidden="true"
-    />
-    <div class="tg-list" data-tg-content aria-hidden="true">
-      <div class="tg-step is-static">
-        <div class="tg-date">{c.today}</div>
+<figure class="v7-demo" data-demo data-ui="telegram-demo" data-lang={lang} aria-label={c.label}>
+  <div class="v7-device-wrap">
+  <Phone>
+    {["iva", "maria"].map(peer => (
+      <div class:list={["v7-screen", peer === "maria" && "v7-maria"]} data-screen={peer} aria-hidden={peer === "maria" ? "true" : undefined} inert={peer === "maria"}>
+        <img class="v7-wall" src="/media/tg-wall.webp" width="402" height="858" alt="" decoding="async" aria-hidden="true" />
+        <div class="v7-viewport" data-viewport={peer} role="log" aria-live="off" aria-label={peer === "iva" ? c.iva : c.maria} tabindex="0">
+          <div class="v7-feed">
+            <div class="v7-date">{peer === "iva" ? c.today : c.yesterday}</div>
+            {peer === "iva" ? prepared.map(message => (
+              <>
+                {message.think !== undefined && (
+                  <div class="v7-arrival" data-think={message.id} hidden>
+                    <div class="v7-collapse"><div class="v7-arrival-body"><div class="v7-thinking">{c.thinking}</div></div></div>
+                  </div>
+                )}
+                <div class="v7-arrival" data-message={message.id} hidden={message.id !== "morning"}>
+                  <div class="v7-collapse"><div class="v7-arrival-body" data-arrival-body>
+                    {message.kind === "card" && (
+                      <div class="v7-card">
+                        {message.blocks?.map(block => (
+                          <div class:list={["v7-text-block", `v7-${block.kind}`]}>
+                            {block.emoji && <span class="v7-emoji" set:html={block.emojiHtml} />}
+                            <span set:html={block.html} />
+                          </div>
+                        ))}
+                        {message.action && (
+                          <div data-after-index={message.after}>
+                            {message.action === "invoice" && <div class="v7-document"><span class="v7-document-icon">PDF</span><span><b>{c.invoice}</b><small>84 KB</small></span></div>}
+                            <div class="v7-swap" data-action={message.action}>
+                              <div class="v7-swap-before" data-before><div class="v7-collapse">
+                                <div class="v7-buttons">
+                                  <button type="button" class="v7-choice is-primary" data-choice="yes" disabled>{c.choices[message.action].yes}</button>
+                                  <button type="button" class="v7-choice is-secondary" data-choice="no" disabled>{c.choices[message.action].no}</button>
+                                </div>
+                              </div></div>
+                              <div class="v7-swap-after" data-after hidden><div class="v7-collapse">
+                                <div class="v7-result" data-result>
+                                  <div data-accepted>{message.action === "shopping" ? c.shopping.map(block => <div class="v7-item"><span class="v7-emoji">{block.emoji}</span><span>{block.text}</span></div>) : c.choices[message.action].accepted}</div>
+                                  <div data-declined hidden>{c.choices[message.action].declined}</div>
+                                </div>
+                              </div></div>
+                            </div>
+                          </div>
+                        )}
+                        <div class="v7-time is-block" data-message-time={message.id}>{message.time}</div>
+                      </div>
+                    )}
+                    {message.kind === "out" && <div class="v7-bubble is-out"><svg class="v7-tail" viewBox="-7 -17 14 17" aria-hidden="true"><path d={tail} /></svg><span>{message.text}</span><span class="v7-time">{message.time}<svg viewBox="0 0 17 10" aria-hidden="true"><path d={checks} /></svg></span></div>}
+                    {message.kind === "voice" && (
+                      <div class="v7-voice" aria-label={c.voice}>
+                        <svg class="v7-tail" viewBox="-7 -17 14 17" aria-hidden="true"><path d={tail} /></svg>
+                        <span class="v7-voice-play" aria-hidden="true"><svg viewBox="0 0 16 18"><path d="M2 2.2C2 1.1 3.2.5 4.1 1.1l10 6.6c.8.6.8 1.8 0 2.4l-10 6.6C3.2 17.3 2 16.7 2 15.6z" /></svg></span>
+                        <span class="v7-voice-body">
+                          <svg class="v7-wave" viewBox="0 0 133.2 20" aria-hidden="true">{wave.map((h, i) => <rect x={i * 3.7} y={20 - h} width="2.2" height={h} rx="1.1" />)}</svg>
+                          <span class="v7-voice-meta"><span>0:12</span><span class="v7-time">12:04<svg viewBox="0 0 17 10" aria-hidden="true"><path d={checks} /></svg></span></span>
+                        </span>
+                      </div>
+                    )}
+                    {message.kind === "date" && <div class="v7-date">{message.text}</div>}
+                  </div></div>
+                </div>
+              </>
+            )) : (
+              <>
+                <div class="v7-bubble"><svg class="v7-tail" viewBox="-7 -17 14 17" aria-hidden="true"><path d={tail} /></svg>{c.mariaMessages[0]}<span class="v7-time">21:14</span></div>
+                <div class="v7-bubble is-out"><svg class="v7-tail" viewBox="-7 -17 14 17" aria-hidden="true"><path d={tail} /></svg>{c.mariaMessages[1]}<span class="v7-time">21:20<svg viewBox="0 0 17 10" aria-hidden="true"><path d={checks} /></svg></span></div>
+                <div class="v7-date">{c.today}</div>
+                <div class="v7-bubble"><svg class="v7-tail" viewBox="-7 -17 14 17" aria-hidden="true"><path d={tail} /></svg>{c.mariaMessages[2]}<span class="v7-time">17:38</span></div>
+                <div class="v7-arrival" data-venue hidden><div class="v7-collapse"><div class="v7-arrival-body">
+                  <div class="v7-venue is-out">
+                    <svg class="v7-tail" viewBox="-7 -17 14 17" aria-hidden="true"><path d={tail} /></svg>
+                    <div class="v7-map"><img src="/media/demo-map.png" alt={c.map} width="524" height="300" loading="lazy" decoding="async" /><svg viewBox="-15 -36 30 38" aria-hidden="true"><ellipse cx="0" cy="1" rx="5" ry="2" fill="#00000038" /><path d="M0 0 C-3 -9 -11 -13 -11 -22 A11 11 0 1 1 11 -22 C11 -13 3 -9 0 0Z" fill="#F0453A" stroke="#fff" stroke-width="1.6" /><circle cx="0" cy="-22" r="4.2" fill="#fff" /></svg></div>
+                    <div class="v7-venue-info"><b>{c.restaurant}</b><div><span>{c.address}</span><span class="v7-time">17:42<svg viewBox="0 0 17 10" aria-hidden="true"><path d={checks} /></svg></span></div></div>
+                  </div>
+                </div></div></div>
+              </>
+            )}
+            {peer === "iva" && (
+              <>
+                <div class="v7-install" data-end-cta data-copy-ru={phrase("ru")} data-copy-en={phrase("en")} hidden>
+                  <div class="v7-card">
+                    <div class="v7-p" data-install-question>{m.install}</div>
+                    <div class="v7-buttons" data-install-buttons>
+                      <button type="button" class="v7-choice is-primary" data-install-choice="yes" data-copy={phrase(lang)}>{m.yes}</button>
+                      <button type="button" class="v7-choice is-secondary" data-install-choice="no">{m.no}</button>
+                    </div>
+                    <div class="v7-result" data-install-response data-copy-response hidden></div>
+                    <p class="v7-install-copy-status" data-install-copy-status data-copy-status hidden></p>
+                    <p class="v7-install-phrase" data-install-phrase data-copy-phrase tabindex="0" hidden>{phrase(lang)}</p>
+                    <div class="v7-time is-block">14:31</div>
+                  </div>
+                </div>
+                <div class="v7-menu-entry" data-demo-menu hidden>
+                  <div class="v7-bubble is-out v7-menu-command">/menu</div>
+                  <div class="v7-card v7-menu-card" id={`v7-settings-${lang}`} data-menu-card tabindex="-1">
+                    <div class="v7-menu-title" data-menu-title></div>
+                    <div class="v7-menu-description" data-menu-description></div>
+                    <div class="v7-menu-keyboard" data-menu-keyboard></div>
+                    <p class="v7-menu-disclosure" data-menu-disclosure>{m.demo}</p>
+                    <div class="v7-menu-install-footer" data-menu-install-footer>
+                      <button type="button" class="v7-menu-install-button" data-menu-install data-copy={phrase(lang)}>{m.installIva}</button>
+                      <div class="v7-result" data-menu-copy-response data-copy-response hidden></div>
+                      <p class="v7-install-copy-status" data-menu-copy-status data-copy-status hidden></p>
+                      <p class="v7-install-phrase" data-menu-copy-phrase data-copy-phrase tabindex="0" hidden>{phrase(lang)}</p>
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+        <div class="v7-edge-top" aria-hidden="true"></div>
+        <div class="v7-edge-bottom" aria-hidden="true"></div>
+        <div class="v7-header" aria-hidden="true">
+          <span class="v7-glass v7-back"><svg viewBox="0 0 24 24"><path d="M15 4.5 7.5 12 15 19.5" /></svg><b>3</b></span>
+          <span class="v7-glass v7-peer"><strong>{peer === "iva" ? c.iva : c.maria}</strong><span class="v7-sub"><span data-bot>{peer === "iva" ? c.bot : c.online}</span><span class="v7-typing" data-typing hidden><i></i><i></i><i></i>{c.typing}</span></span></span>
+          <span class="v7-glass v7-avatar">{peer === "iva" ? <span class="v7-iva-avatar"><img src="/brand/mark.svg" alt="" width="40" height="40" /></span> : <span class="v7-maria-avatar">{lang === "ru" ? "М" : "M"}</span>}</span>
+        </div>
+        <div class="v7-composer">
+          <button type="button" class="v7-menu" data-demo-menu-open aria-label={m.open} aria-controls={`v7-settings-${lang}`} aria-expanded="false"><svg viewBox="0 0 17 17" aria-hidden="true"><path d="M3.5 5h10M3.5 8.5h10M3.5 12h10" /></svg></button>
+          <span class="v7-glass v7-clip" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M20 11.2 12.4 18.8a5 5 0 0 1-7.1-7.1l8-8a3.4 3.4 0 0 1 4.8 4.8l-8 8a1.7 1.7 0 0 1-2.4-2.4l7.3-7.3" /></svg></span>
+          <span class="v7-glass v7-field" aria-hidden="true"><span>{c.message}</span><svg viewBox="0 0 24 24"><path d="M12 20.5A8.5 8.5 0 1 1 20.5 12M20.5 12c-4.6 0-8.5 3.8-8.5 8.5" /></svg></span>
+          <span class="v7-glass v7-mic" aria-hidden="true"><svg viewBox="0 0 24 24" data-mic><path d="M9 6a3 3 0 0 1 6 0v5.5a3 3 0 0 1-6 0zM5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3" /></svg><span class="v7-stop" data-stop hidden></span></span>
+        </div>
+        {peer === "iva" && <span class="v7-dim" data-dim aria-hidden="true"></span>}
       </div>
-      <div class="tg-step" data-step="1">
-        <div class="tg-slot">
-        <div class="tg-card">
-          <div class="tg-h1">{c.brief.title}</div>
-          <div class="tg-p">{c.brief.intro}</div>
-          {
-            c.brief.items.map(([emoji, text]) => (
-              <div class="tg-item">
-                <span>{emoji}</span>
-                <span>{text}</span>
-              </div>
-            ))
-          }
-          <div class="tg-time is-block">{c.brief.time}</div>
-        </div>
-        </div>
-      </div>
-      <div class="tg-step" data-step="2">
-        <div class="tg-slot">
-        <div class="tg-in">
-          <svg class="tg-tail" viewBox="-7 -17 14 17"><path d={tail}></path></svg>
-          <span>{c.birthday.text}</span>
-          <span class="tg-time">{c.birthday.time}</span>
-        </div>
-        </div>
-      </div>
-      <div class="tg-step" data-step="3">
-        <div class="tg-slot">
-        <div class="tg-voice">
-          <svg class="tg-tail" viewBox="-7 -17 14 17"><path d={tail}></path></svg>
-          <span class="tg-play">
-            <svg viewBox="0 0 16 18"
-              ><path
-                d="M2 2.2C2 1.1 3.2.5 4.1 1.1l10 6.6c.8.6.8 1.8 0 2.4l-10 6.6C3.2 17.3 2 16.7 2 15.6z"
-              ></path></svg
-            >
-          </span>
-          <span class="tg-voice-body">
-            <svg class="tg-wave" viewBox={`0 0 ${bars * 3.7} 20`}>
-              {
-                wave.map((h, i) => (
-                  <rect
-                    x={(i * 3.7).toFixed(2)}
-                    y={(20 - h).toFixed(2)}
-                    width="2.2"
-                    height={h.toFixed(2)}
-                    rx="1.1"
-                  />
-                ))
-              }
-            </svg>
-            <span class="tg-voice-meta">
-              <span>{c.voice.duration}</span>
-              <span class="tg-out-time">
-                {c.voice.time}
-                <svg viewBox="0 0 17 10"><path d={checks}></path></svg>
-              </span>
-            </span>
-          </span>
-        </div>
-        </div>
-      </div>
-      <div class="tg-step" data-step="4">
-        <div class="tg-slot">
-        <div class="tg-thinking">{c.thinking}</div>
-        </div>
-      </div>
-      <div class="tg-step" data-step="5">
-        <div class="tg-slot">
-        <div class="tg-in">
-          <svg class="tg-tail" viewBox="-7 -17 14 17"><path d={tail}></path></svg>
-          <span>{c.reply.text}</span>
-          <span class="tg-time">{c.reply.time}</span>
-        </div>
-        </div>
-      </div>
-    </div>
-    <div class="tg-edge-top" aria-hidden="true"></div>
-    <div class="tg-edge-bottom" aria-hidden="true"></div>
-    <div class="tg-head" aria-hidden="true">
-      <span class="tg-glass tg-back">
-        <svg viewBox="0 0 24 24"><path d="M15 4.5 7.5 12 15 19.5"></path></svg>
-        <b>3</b>
-      </span>
-      <span class="tg-glass tg-peer">
-        <strong>{c.title}</strong>
-        <span class="tg-sub">
-          <span class="tg-bot">{c.bot}</span>
-          <span class="tg-typing"><i></i><i></i><i></i>{c.typing}</span>
-        </span>
-      </span>
-      <span class="tg-glass tg-avatar">
-        <span
-          ><img
-            src="/brand/mark.svg"
-            alt=""
-            width="40"
-            height="40"
-            decoding="async"
-          /></span
-        >
-      </span>
-    </div>
-    <div class="tg-compose" aria-hidden="true">
-      <span class="tg-menu">
-        <svg viewBox="0 0 17 17"
-          ><path d="M3.5 5h10M3.5 8.5h10M3.5 12h10"></path></svg
-        >
-      </span>
-      <span class="tg-glass tg-clip">
-        <svg viewBox="0 0 24 24"
-          ><path
-            d="M20 11.2 12.4 18.8a5 5 0 0 1-7.1-7.1l8-8a3.4 3.4 0 0 1 4.8 4.8l-8 8a1.7 1.7 0 0 1-2.4-2.4l7.3-7.3"
-          ></path></svg
-        >
-      </span>
-      <span class="tg-glass tg-field">
-        <span>{c.input}</span>
-        <svg viewBox="0 0 24 24"
-          ><path d="M12 20.5A8.5 8.5 0 1 1 20.5 12"></path><path
-            d="M20.5 12c-4.6 0-8.5 3.8-8.5 8.5"></path></svg
-        >
-      </span>
-      <span class="tg-glass tg-mic">
-        <svg viewBox="0 0 24 24"
-          ><path d="M9 6a3 3 0 0 1 6 0v5.5a3 3 0 0 1-6 0z"></path><path
-            d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3"></path></svg
-        >
-      </span>
-    </div>
+    ))}
+    <span class="v7-tap" data-tap aria-hidden="true" hidden></span>
+  </Phone>
+  <svg class="v7-menu-cue" data-menu-cue viewBox="0 0 42 82" aria-hidden="true"><path d="M8 76C4 56 10 31 35 9M23 13Q29 10 35 9Q33 16 32 24" vector-effect="non-scaling-stroke" /></svg>
   </div>
-</Phone>
-
+  <figcaption class="v7-caption">
+    <div class="v7-control-row">
+      <span class="v7-sr">{c.demo}</span>
+      <div class="v7-controls" data-controls hidden>
+      <button type="button" data-play hidden><svg viewBox="0 0 16 16" aria-hidden="true" data-play-icon><path d="M5 3v10M11 3v10" /></svg><span data-play-label>{c.pause}</span></button>
+      <button type="button" data-replay><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 5A5.5 5.5 0 1 1 2.7 9M3.5 1.7V5H.3" /></svg>{c.replay}</button>
+      </div>
+    </div>
+    <p class="v7-hint">{c.hint}</p>
+    <span class="v7-sr" data-scene>{c.scenes[0]}</span>
+    <span class="v7-sr">{c.note}</span>
+    <span class="v7-sr" data-announcement role="status" aria-live="polite"></span>
+  </figcaption>
+</figure>
 <script>
-  // The film's order (STYLE.md §10): each step arrives on the "arrive" spring; the header
-  // shows «печатает» while the draft «Думаю…» is up, then the reply replaces it.
-  const chat = document.querySelector<HTMLElement>("[data-chat]");
-  if (chat && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
-    const step = (n: number) =>
-      chat.querySelector<HTMLElement>(`[data-step="${n}"]`)!;
-    chat.classList.add("is-playing");
-    // A message every 0.7–0.8 s; the whole scene settles in under 5 s.
-    const plan: [number, () => void][] = [
-      [300, () => step(1).classList.add("is-in")],
-      [1050, () => step(2).classList.add("is-in")],
-      [1800, () => step(3).classList.add("is-in")],
-      [2500, () => (chat.classList.add("is-typing"), step(4).classList.add("is-in"))],
-      [3300, () => step(4).classList.remove("is-in")],
-      [3350, () => (step(5).classList.add("is-in"), chat.classList.remove("is-typing"))],
-    ];
-    const io = new IntersectionObserver((entries) => {
-      if (!entries[0].isIntersecting) return;
-      io.disconnect();
-      plan.forEach(([at, fn]) => setTimeout(fn, at));
-    });
-    io.observe(chat);
-  }
+  import { mountDemos } from "../lib/demo";
+  mountDemos();
 </script>
+<style>
+  .v7-demo { width:100%; margin:0; }
+  .v7-demo [hidden] { display:none !important; }
+  .v7-screen { position:absolute; inset:0; overflow:hidden; font-size:calc(17 * var(--vp)); line-height:calc(22.5 * var(--vp)); letter-spacing:calc(-.15 * var(--vp)); }
+  .v7-maria { transform:translateX(100%); z-index:2; }
+  .v7-wall { position:absolute; inset:0; width:100%; height:100%; object-fit:fill; pointer-events:none; }
+  .v7-viewport { position:absolute; inset:calc(116 * var(--vp)) 0 calc(104 * var(--vp)); overflow:auto; scrollbar-width:none; overscroll-behavior:contain; scroll-behavior:auto; outline-offset:calc(-3 * var(--vp)); }
+  .v7-viewport::-webkit-scrollbar { display:none; }
+  .v7-feed { min-height:100%; display:flex; flex-direction:column; justify-content:flex-end; padding:0 0 calc(2 * var(--vp)); }
+  .v7-arrival { display:grid; grid-template-rows:1fr; flex-shrink:0; }
+  .v7-collapse { min-height:0; overflow:hidden; display:flex; flex-direction:column; }
+  .v7-arrival-body { padding-top:calc(10 * var(--vp)); display:flex; flex-direction:column; }
+  [data-message="morning"] .v7-arrival-body { padding-top:0; }
+  .v7-card { margin:0 calc(12 * var(--vp)); background:#fff; border-radius:calc(18 * var(--vp)); box-shadow:0 calc(.6 * var(--vp)) calc(1.2 * var(--vp)) #17211d1a; padding:calc(12 * var(--vp)) calc(15 * var(--vp)) calc(7 * var(--vp)); }
+  .v7-text-block { margin:calc(2 * var(--vp)) 0; }
+  .v7-title { font-family:"V7IvaSerif","Apple Color Emoji",serif; font-size:calc(26 * var(--vp)); line-height:calc(31 * var(--vp)); letter-spacing:calc(-.2 * var(--vp)); margin:calc(1 * var(--vp)) 0 calc(5 * var(--vp)); }
+  .v7-item { display:flex; gap:calc(8 * var(--vp)); margin:calc(5 * var(--vp)) 0; }
+  .v7-emoji { width:calc(22 * var(--vp)); flex:none; text-align:center; }
+  .v7-bubble,.v7-voice,.v7-venue { position:relative; align-self:flex-start; margin:calc(8 * var(--vp)) calc(12 * var(--vp)) 0; max-width:calc(300 * var(--vp)); padding:calc(8 * var(--vp)) calc(13 * var(--vp)); background:#fff; border-radius:calc(18 * var(--vp)) calc(18 * var(--vp)) calc(18 * var(--vp)) 0; box-shadow:0 calc(.6 * var(--vp)) calc(1 * var(--vp)) #17211d1a; }
+  .v7-arrival-body > .v7-bubble,.v7-arrival-body > .v7-voice { margin-top:0; }
+  .is-out { align-self:flex-end; background:#e1fec7; border-radius:calc(18 * var(--vp)) calc(18 * var(--vp)) 0 calc(18 * var(--vp)); }
+  .v7-tail { position:absolute; left:calc(-7 * var(--vp)); bottom:0; width:calc(14 * var(--vp)); height:calc(17 * var(--vp)); fill:#fff; overflow:visible; }
+  .is-out > .v7-tail,.v7-voice > .v7-tail { left:auto; right:calc(-7 * var(--vp)); transform:scaleX(-1); fill:#e1fec7; }
+  .v7-time { float:right; display:inline-flex; align-items:center; gap:calc(3 * var(--vp)); margin:calc(8 * var(--vp)) 0 calc(-4 * var(--vp)) calc(12 * var(--vp)); font-size:calc(12 * var(--vp)); line-height:calc(15 * var(--vp)); color:rgba(23,33,29,.64); font-variant-numeric:tabular-nums; letter-spacing:0; }
+  .v7-time.is-block { float:none; display:flex; justify-content:flex-end; margin:calc(4 * var(--vp)) 0 0; }
+  .is-out .v7-time,.v7-voice .v7-time { color:#4fa84c; }
+  .v7-time svg { width:calc(17 * var(--vp)); height:calc(10 * var(--vp)); fill:none; stroke:currentColor; stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round; }
+  .v7-date { align-self:center; background:rgba(23,50,42,.66); color:#fff; padding:calc(3 * var(--vp)) calc(10 * var(--vp)); border-radius:calc(12 * var(--vp)); font-size:calc(14 * var(--vp)); line-height:calc(18 * var(--vp)); font-weight:600; margin:calc(4 * var(--vp)) 0 calc(10 * var(--vp)); }
+  .v7-voice { align-self:flex-end; display:flex; align-items:center; gap:calc(9 * var(--vp)); background:#e1fec7; border-radius:calc(18 * var(--vp)) calc(18 * var(--vp)) 0 calc(18 * var(--vp)); padding:calc(7 * var(--vp)) calc(11 * var(--vp)) calc(6 * var(--vp)) calc(7 * var(--vp)); }
+  .v7-voice-play { display:grid; place-items:center; width:calc(40 * var(--vp)); height:calc(40 * var(--vp)); border-radius:50%; background:#4fa84c; }
+  .v7-voice-play svg { width:calc(16 * var(--vp)); height:calc(18 * var(--vp)); margin-left:calc(2 * var(--vp)); fill:#fff; }
+  .v7-voice-body { display:flex; flex-direction:column; }
+  .v7-wave { width:calc(133.2 * var(--vp)); height:calc(20 * var(--vp)); fill:#4fa84c99; }
+  .v7-voice-meta { display:flex; justify-content:space-between; gap:calc(14 * var(--vp)); margin-top:calc(3 * var(--vp)); font-size:calc(12 * var(--vp)); line-height:calc(15 * var(--vp)); color:#4fa84c; font-variant-numeric:tabular-nums; }
+  .v7-voice-meta .v7-time { margin:0; }
+  .v7-thinking { align-self:flex-start; margin-left:calc(12 * var(--vp)); border-radius:calc(12 * var(--vp)); background:rgba(226,225,229,.98); padding:calc(6 * var(--vp)) calc(12 * var(--vp)); color:rgba(23,33,29,.82); font-size:calc(16 * var(--vp)); line-height:calc(21 * var(--vp)); }
+  .v7-document { display:flex; align-items:center; gap:calc(10 * var(--vp)); margin:calc(10 * var(--vp)) 0 calc(2 * var(--vp)); }
+  .v7-document-icon { flex:none; display:grid; place-items:center; width:calc(44 * var(--vp)); height:calc(44 * var(--vp)); border-radius:50%; background:#0589ff; color:#fff; font-size:calc(12 * var(--vp)); font-weight:700; letter-spacing:calc(.2 * var(--vp)); }
+  .v7-document b { display:block; font-size:calc(16.5 * var(--vp)); line-height:calc(21 * var(--vp)); font-weight:600; }
+  .v7-document small { display:block; font-size:calc(14 * var(--vp)); line-height:calc(18 * var(--vp)); color:#17211da3; }
+  .v7-swap-before,.v7-swap-after { display:grid; grid-template-rows:1fr; }
+  .v7-buttons { display:flex; gap:calc(7 * var(--vp)); padding-top:calc(10 * var(--vp)); padding-bottom:calc(2 * var(--vp)); }
+  .v7-choice { appearance:none; flex:1; height:calc(38 * var(--vp)); padding:0 calc(5 * var(--vp)); border:0; border-radius:calc(19 * var(--vp)); font:inherit; font-size:calc(16.5 * var(--vp)); font-weight:600; letter-spacing:calc(-.2 * var(--vp)); white-space:nowrap; cursor:pointer; }
+  .v7-choice.is-primary { background:#0589ff; color:#fff; }
+  .v7-choice.is-secondary { background:#e7e6e9; color:#17211d; }
+  .v7-choice:disabled { cursor:default; }
+  .v7-choice:focus-visible { outline:calc(2 * var(--vp)) solid #17211d; outline-offset:calc(-4 * var(--vp)); }
+  .v7-result { padding-top:calc(8 * var(--vp)); }
+  .v7-venue { max-width:none; width:calc(268 * var(--vp)); padding:calc(3 * var(--vp)); margin-top:0; }
+  .v7-map { position:relative; width:100%; height:calc(150 * var(--vp)); overflow:hidden; border-radius:calc(15 * var(--vp)); }
+  .v7-map img { display:block; width:100%; height:100%; object-fit:cover; }
+  .v7-map svg { position:absolute; width:calc(30 * var(--vp)); height:calc(38 * var(--vp)); left:calc(116 * var(--vp)); top:calc(39 * var(--vp)); }
+  .v7-venue-info { padding:calc(6 * var(--vp)) calc(9 * var(--vp)) calc(5 * var(--vp)); }
+  .v7-venue-info b { font-size:calc(16.5 * var(--vp)); font-weight:600; }
+  .v7-venue-info > div { display:flex; align-items:flex-end; justify-content:space-between; gap:calc(8 * var(--vp)); font-size:calc(14.5 * var(--vp)); line-height:calc(19 * var(--vp)); color:#17211da8; }
+  .v7-venue-info .v7-time { flex:none; margin:0; }
+  .v7-edge-top { position:absolute; inset:0 0 auto; height:calc(140 * var(--vp)); backdrop-filter:blur(calc(22 * var(--vp))) saturate(1.2) brightness(.96); background:linear-gradient(180deg,rgba(232,242,206,.98),rgba(232,242,206,.97) 84%,rgba(232,242,206,.85) 94%,transparent); mask-image:linear-gradient(#000 92%,transparent); pointer-events:none; }
+  .v7-edge-bottom { position:absolute; left:0; right:0; top:calc(752 * var(--vp)); height:calc(120 * var(--vp)); backdrop-filter:blur(calc(5 * var(--vp))); background:linear-gradient(0deg,#ecf2ec8c,#ecf2ec33 50%,transparent); mask-image:linear-gradient(0deg,#000 60%,transparent); pointer-events:none; }
+  .v7-glass { display:flex; align-items:center; justify-content:center; border-radius:calc(20 * var(--vp)); background:linear-gradient(180deg,#ffffffcc,#ffffff9e); backdrop-filter:blur(calc(7 * var(--vp))) saturate(1.6); box-shadow:inset 0 calc(.6 * var(--vp)) 0 #fffffff2,inset 0 calc(-.5 * var(--vp)) 0 #ffffff73,inset 0 0 0 calc(.33 * var(--vp)) #ffffff8c,0 calc(1 * var(--vp)) calc(2 * var(--vp)) #17211d12,0 calc(5 * var(--vp)) calc(16 * var(--vp)) #17211d17; }
+  .v7-header > span { position:absolute; top:calc(66 * var(--vp)); height:calc(40 * var(--vp)); }
+  .v7-back { left:calc(15 * var(--vp)); width:calc(54 * var(--vp)); gap:calc(3 * var(--vp)); }
+  .v7-back svg { width:calc(22 * var(--vp)); height:calc(22 * var(--vp)); margin-left:calc(-3 * var(--vp)); stroke:#17211d; stroke-width:2.1; fill:none; stroke-linecap:round; stroke-linejoin:round; }
+  .v7-back b { display:block; min-width:calc(17 * var(--vp)); height:calc(17 * var(--vp)); border-radius:50%; text-align:center; background:#0589ff; color:#fff; font-size:calc(11.5 * var(--vp)); line-height:calc(17 * var(--vp)); }
+  .v7-peer { left:50%; transform:translateX(-50%); min-width:calc(92 * var(--vp)); padding:0 calc(22 * var(--vp)); flex-direction:column; white-space:nowrap; }
+  .v7-peer strong { font-size:calc(17 * var(--vp)); line-height:calc(20 * var(--vp)); font-weight:600; letter-spacing:calc(-.25 * var(--vp)); }
+  .v7-sub { font-size:calc(13 * var(--vp)); line-height:calc(16 * var(--vp)); color:#17211da3; }
+  .v7-maria .v7-sub { color:#0589ff; }
+  .v7-typing { display:flex; align-items:center; gap:calc(4 * var(--vp)); color:#0589ff; }
+  .v7-typing i { width:calc(4 * var(--vp)); height:calc(4 * var(--vp)); border-radius:50%; background:currentColor; margin-right:calc(-1.8 * var(--vp)); }
+  .v7-typing i:last-of-type { margin-right:calc(2 * var(--vp)); }
+  .v7-avatar { left:calc(347 * var(--vp)); width:calc(40 * var(--vp)); padding:calc(2 * var(--vp)); }
+  .v7-avatar > span { display:grid; place-items:center; width:100%; height:100%; border-radius:50%; overflow:hidden; }
+  .v7-iva-avatar { background:#0b1218; }
+  .v7-avatar img { width:77%; height:77%; object-fit:contain; }
+  .v7-maria-avatar { background:linear-gradient(#ff8aa8,#e0507a); color:#fff; font-size:calc(16 * var(--vp)); font-weight:600; }
+  .v7-composer > :is(span,button) { position:absolute; top:calc(768 * var(--vp)); height:calc(36 * var(--vp)); display:flex; align-items:center; justify-content:center; }
+  .v7-composer svg { fill:none; stroke:#17211d; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; }
+  .v7-menu { appearance:none; border:0; padding:0; color:inherit; cursor:pointer; left:calc(8 * var(--vp)); width:calc(36 * var(--vp)); border-radius:50%; background:#0589ff; box-shadow:0 calc(1.5 * var(--vp)) calc(6 * var(--vp)) #0589ff4d; }
+  .v7-menu svg { width:calc(17 * var(--vp)); height:calc(17 * var(--vp)); stroke:#fff; stroke-width:1.9; }
+  .v7-clip { left:calc(52 * var(--vp)); width:calc(36 * var(--vp)); }
+  .v7-mic { left:calc(358 * var(--vp)); width:calc(36 * var(--vp)); }
+  .v7-clip svg,.v7-mic svg { width:calc(20 * var(--vp)); height:calc(20 * var(--vp)); }
+  .v7-field { left:calc(92 * var(--vp)); width:calc(258 * var(--vp)); padding:0 calc(10 * var(--vp)) 0 calc(14 * var(--vp)); justify-content:space-between !important; color:#17211da3; border-radius:calc(18 * var(--vp)); }
+  .v7-field svg { width:calc(21 * var(--vp)); height:calc(21 * var(--vp)); stroke:currentColor; stroke-width:1.6; }
+  .v7-mic [data-mic][hidden] { display:none !important; }
+  .v7-mic [data-stop]:not([hidden]) { display:block; flex:none; }
+  .v7-stop { width:calc(13 * var(--vp)); height:calc(13 * var(--vp)); border-radius:calc(3 * var(--vp)); background:#fff; }
+  .v7-screen.is-thinking .v7-mic { background:#17211dd1; }
+  .v7-dim { position:absolute; inset:0; background:#0a1410; opacity:0; pointer-events:none; }
+  .v7-tap { position:absolute; z-index:5; border-radius:50%; pointer-events:none; background:radial-gradient(circle closest-side,#ffffff4d,#ffffff38 80%,#ffffff73 97%,transparent); box-shadow:0 calc(2 * var(--vp)) calc(6 * var(--vp)) #1028211a; }
+  .v7-composer > [aria-hidden="true"] { pointer-events:none; }
+  .v7-menu::before { content:""; position:absolute; left:calc(-8 * var(--vp)); top:50%; transform:translateY(-50%); width:44px; height:44px; }
+  .v7-menu:focus-visible { outline:2px solid #17211d; outline-offset:3px; }
+  .v7-menu-entry { display:flex; flex-direction:column; gap:calc(10 * var(--vp)); padding-top:calc(10 * var(--vp)); flex-shrink:0; }
+  .v7-menu-command { margin-top:0; }
+  .v7-menu-card { flex-shrink:0; outline:none; }
+  .v7-menu-title { font-size:calc(21 * var(--vp)); line-height:calc(27 * var(--vp)); font-weight:600; margin-bottom:calc(7 * var(--vp)); }
+  .v7-menu-description { margin:calc(4 * var(--vp)) 0 calc(10 * var(--vp)); overflow-wrap:anywhere; }
+  .v7-menu-description :global(p) { margin:calc(5 * var(--vp)) 0; }
+  .v7-menu-keyboard { display:grid; grid-template-columns:1fr; gap:calc(6 * var(--vp)); }
+  .v7-menu-keyboard.is-root { grid-template-columns:1fr 1fr; }
+  .v7-menu-keyboard :global(button) { appearance:none; border:0; border-radius:calc(12 * var(--vp)); padding:calc(7 * var(--vp)) calc(5 * var(--vp)); min-height:32px; background:#e4f3ff; color:#075a9c; font:inherit; font-size:calc(15 * var(--vp)); line-height:1.2; font-weight:600; cursor:pointer; overflow-wrap:anywhere; }
+  .v7-menu-keyboard :global(button[aria-pressed="true"]) { background:#c9e5ff; }
+  .v7-menu-keyboard :global(button[data-menu-action="close"]) { background:#e7e6e9; color:#17211d; }
+  .v7-menu-keyboard :global(button:focus-visible) { outline:2px solid #17211d; outline-offset:-3px; }
+  .v7-menu-disclosure { font-size:calc(12 * var(--vp)); line-height:calc(16 * var(--vp)); color:#395549; margin:calc(9 * var(--vp)) 0 0; }
+  .v7-install { padding-top:calc(10 * var(--vp)); flex-shrink:0; }
+  .v7-install-copy-status { font-size:calc(14 * var(--vp)); line-height:calc(19 * var(--vp)); margin:calc(8 * var(--vp)) 0 0; color:#395549; }
+  .v7-install-phrase { margin:calc(8 * var(--vp)) 0 0; padding:calc(8 * var(--vp)); border-radius:calc(8 * var(--vp)); background:#e4f3ff; user-select:text; overflow-wrap:anywhere; }
+  .v7-device-wrap { position:relative; width:100%; container-type:inline-size; }
+  .v7-menu-cue { --outer-vp:calc(100cqw / 434); position:absolute; z-index:1; left:calc(-42 * var(--outer-vp)); bottom:calc(15 * var(--outer-vp)); width:calc(42 * var(--outer-vp)); height:calc(82 * var(--outer-vp)); overflow:visible; pointer-events:none; fill:none; stroke:#17211d; stroke-width:1.8px; stroke-linecap:round; stroke-linejoin:round; }
+  .v7-demo[data-menu-seen="false"] .v7-menu { animation:v7-menu-pulse 1.8s ease-in-out .6s 3; }
+  .v7-menu-install-footer { margin-top:calc(9 * var(--vp)); }
+  .v7-menu-install-button { appearance:none; width:100%; border:0; border-radius:calc(12 * var(--vp)); min-height:38px; padding:calc(8 * var(--vp)); background:#a4dc55; color:#17211d; font:inherit; font-weight:600; cursor:pointer; animation:v7-install-pulse 1.8s ease-in-out .4s 2; }
+  .v7-menu-install-button:focus-visible { outline:2px solid #17211d; outline-offset:-4px; }
+  .v7-menu-install-button:disabled { cursor:wait; animation:none; }
+  @keyframes v7-menu-pulse { 0%,100% { transform:scale(1); } 50% { transform:scale(1.07); } }
+  @keyframes v7-install-pulse { 0%,100% { transform:scale(1); } 50% { transform:scale(1.02); } }
+  .v7-caption { margin-top:10px; text-align:center; color:var(--ink,#17211d); font-family:inherit; font-size:12px; line-height:1.5; }
+  .v7-caption p { margin:0; }
+  .v7-control-row { display:flex; align-items:center; justify-content:center; gap:14px; min-height:32px; }
+  .v7-controls { display:flex; align-items:center; justify-content:center; gap:12px; }
+  .v7-controls button { display:inline-flex; gap:5px; align-items:center; padding:5px 2px; min-height:32px; border:0; background:transparent; color:inherit; font:inherit; font-weight:600; cursor:pointer; border-radius:5px; }
+  .v7-controls button:focus-visible,.v7-viewport:focus-visible { outline:2px solid #167a63; outline-offset:3px; }
+  .v7-controls button svg { width:14px; height:14px; stroke:currentColor; stroke-width:1.6; fill:none; stroke-linecap:round; stroke-linejoin:round; }
+  .v7-controls button:disabled { cursor:default; color:#395549; }
+  .v7-hint { font-size:11px; line-height:16px; color:#395549; }
+  .v7-sr { position:absolute; width:1px; height:1px; padding:0; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
+  .v7-demo ::selection { background:#c9e5ff; color:#17211d; }
+  @media (hover:hover) { .v7-choice.is-primary:enabled:hover { background:#0473d6; } .v7-choice.is-secondary:enabled:hover { background:#d5d4d8; } .v7-controls button:enabled:hover { color:#167a63; } }
+  @media (prefers-reduced-motion:reduce) { .v7-demo *, .v7-demo *::before,.v7-demo *::after { animation:none !important; transition:none !important; scroll-behavior:auto !important; } }
+</style>

@@ -16,14 +16,21 @@ const findEmoji = (html: string) =>
     .map((m) => m[0])
     .filter((ch) => !notEmoji.has(ch));
 const outsideChat = (html: string) => {
-  let out = "",
-    i = 0;
-  for (const m of html.matchAll(/<div class="tg-list" data-tg-content[^>]*>/g)) {
-    out += html.slice(i, m.index);
-    // The chat list ends where the scroll edge starts.
-    i = html.indexOf('<div class="tg-edge-top"', m.index);
+  // Match the demo's enclosing element, preserving siblings and nested markup.
+  const root = /<([a-z][a-z0-9-]*)\b[^>]*\bdata-ui="telegram-demo"[^>]*>/i.exec(
+    html,
+  );
+  assert.ok(root, "Home must identify the interactive Telegram demo");
+  const tag = root[1];
+  const start = root.index;
+  const tokens = new RegExp(`<\\/?${tag}\\b[^>]*>`, "gi");
+  tokens.lastIndex = start + root[0].length;
+  let depth = 1;
+  for (let match; (match = tokens.exec(html));) {
+    depth += match[0].startsWith("</") ? -1 : 1;
+    if (depth === 0) return html.slice(0, start) + html.slice(tokens.lastIndex);
   }
-  return out + html.slice(i);
+  throw new Error("Unclosed Telegram demo root");
 };
 const plain = (s: string) =>
   s

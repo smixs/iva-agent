@@ -159,25 +159,19 @@ const schema = [
     window.clearTimeout(toastTimer);
     toastTimer = window.setTimeout(() => toast.classList.remove("is-on"), ms);
   }
-  document
-    .querySelectorAll<HTMLButtonElement>("[data-copy]")
-    .forEach((button) =>
-      button.addEventListener("click", async () => {
-        const text = button.dataset.copy!;
-        try {
-          await navigator.clipboard.writeText(text);
-          say(
-            ru
-              ? "Фраза скопирована — отправьте её Claude Code или Codex"
-              : "Phrase copied — send it to Claude Code or Codex",
-            3200,
-          );
-          window.dispatchEvent(
-            new CustomEvent("iva:analytics", { detail: { name: "copy_prompt" } }),
-          );
-        } catch {
-          say((ru ? "Скопируйте вручную: " : "Copy by hand: ") + text, 9000, true);
-        }
-      }),
-    );
+  document.addEventListener("click", async (event) => {
+    const button = (event.target as Element).closest<HTMLButtonElement>("button[data-copy]");
+    if (!button) return;
+    const text = button.dataset.copy!;
+    const inDemo = Boolean(button.closest("[data-demo]"));
+    try {
+      await navigator.clipboard.writeText(text);
+      if (!inDemo) say(ru ? "Фраза скопирована — отправьте её Claude Code или Codex" : "Phrase copied — send it to Claude Code or Codex", 3200);
+      button.dispatchEvent(new CustomEvent("iva:copy-result", { bubbles: true, detail: { ok: true, text } }));
+      window.dispatchEvent(new CustomEvent("iva:analytics", { detail: { name: "copy_prompt" } }));
+    } catch {
+      if (!inDemo) say((ru ? "Скопируйте вручную: " : "Copy by hand: ") + text, 9000, true);
+      button.dispatchEvent(new CustomEvent("iva:copy-result", { bubbles: true, detail: { ok: false, text } }));
+    }
+  });
 </script>
