@@ -3,7 +3,7 @@ import { readFileSync, existsSync, statSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { files } from "../src/lib/build.ts";
-const dist = path.resolve("dist");
+const dist = path.resolve(process.argv[2] || "dist");
 const copy = JSON.parse(readFileSync("src/data/copy.json", "utf8"));
 const usecases = JSON.parse(readFileSync("src/data/usecases.json", "utf8"));
 // Emoji are allowed only inside the Telegram chat (data-tg-content), where they are
@@ -66,11 +66,11 @@ for (const file of old)
     `Legacy address missing: ${file}`,
   );
 assert.deepEqual(
-  readFileSync("dist/install.txt"),
+  readFileSync(path.join(dist, "install.txt")),
   readFileSync("../docs/install.txt"),
 );
 assert.deepEqual(
-  readFileSync("dist/install.sh"),
+  readFileSync(path.join(dist, "install.sh")),
   readFileSync("../install.sh"),
 );
 console.log(
@@ -120,14 +120,14 @@ for (const page of pages) {
       `${page}: missing dimensions`,
     );
 }
-for (const file of ["dist/404.html", "dist/ru/404.html"])
+for (const file of [path.join(dist, "404.html"), path.join(dist, "ru/404.html")])
   assert.ok(
     readFileSync(file, "utf8").includes('name="robots" content="noindex"'),
   );
 assert.ok(
-  readFileSync("dist/privacy/index.html", "utf8").includes('lang="ru"'),
+  readFileSync(path.join(dist, "privacy/index.html"), "utf8").includes('lang="ru"'),
 );
-for (const home of ["dist/index.html", "dist/ru/index.html"]) {
+for (const home of [path.join(dist, "index.html"), path.join(dist, "ru/index.html")]) {
   const html = readFileSync(home, "utf8")
     .replaceAll("&#39;", "'")
     .replaceAll("&#x27;", "'")
