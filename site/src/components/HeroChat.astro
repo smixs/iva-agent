@@ -186,6 +186,7 @@ const prepared = messages.map(message => {
   .v7-viewport { position:absolute; inset:calc(116 * var(--vp)) 0 calc(104 * var(--vp)); overflow:auto; scrollbar-width:none; overscroll-behavior:contain; scroll-behavior:auto; outline-offset:calc(-3 * var(--vp)); }
   .v7-viewport::-webkit-scrollbar { display:none; }
   .v7-feed { min-height:100%; display:flex; flex-direction:column; justify-content:flex-end; padding:0 0 calc(2 * var(--vp)); }
+  [data-screen="iva"] .v7-feed { justify-content:flex-start; }
   .v7-arrival { display:grid; grid-template-rows:1fr; flex-shrink:0; }
   .v7-collapse { min-height:0; overflow:hidden; display:flex; flex-direction:column; }
   .v7-arrival-body { padding-top:calc(10 * var(--vp)); display:flex; flex-direction:column; }
