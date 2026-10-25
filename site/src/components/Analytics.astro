@@ -97,7 +97,7 @@ const ru = lang === "ru";
           banner.dataset.persistence = "current-page";
         }
         banner.hidden = true;
-        settings.focus();
+        settings.focus({ preventScroll: true });
         if (choice === "denied") {
           global["ga-disable-" + id] = true;
           global.gtag?.("consent", "update", { analytics_storage: "denied" });
