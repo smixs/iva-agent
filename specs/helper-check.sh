@@ -79,6 +79,7 @@ check HelperCompletion-safety none || exit 2
 check HelperCompletion-result-first ResultBeforeFinalize || exit 2
 check HelperCompletion-duplicate OutcomeOnce || exit 2
 check HelperCompletion-wait-tail CompletedObserved || exit 2
+check HelperCompletion-drop-prefix PartialBeforeFinalize || exit 2
 check HelperRun-v72-run none || exit 2
 check HelperRun-v72-silent none || exit 2
 check HelperRun-v72-restart none || exit 2

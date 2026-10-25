@@ -154,10 +154,8 @@ await test("молчание модели: в чат доезжает факт �
     sent[0],
     /Причина задержки неизвестна|The cause of the delay is unknown/u,
   );
-  assert.doesNotMatch(
-    sent[0],
-    /tg-button|\/new|long conversation|длинный разговор/u,
-  );
+  assert.doesNotMatch(sent[0], /\/new|long conversation|длинный разговор/u);
+  assert.doesNotMatch(sent[0], /tg-button/u);
 });
 
 // Служебная реплика канала не идёт через Outbox, но текст провайдера в ней —

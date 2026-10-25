@@ -120,7 +120,7 @@ export type HelperExpected =
 export type HelperFinish = Pick<
   HelperRow,
   "summary" | "reason" | "model" | "steps" | "tokens"
-> & { outcome: HelperOutcome };
+> & { outcome: HelperOutcome; resultText?: string };
 export type HelperShow = { row: HelperRow };
 export type HelperClose = {
   row: HelperRow;
@@ -381,7 +381,7 @@ export const stopHelper = (id: string, firedAt: number, stop: HelperStop) =>
   });
 function finishRow(
   r: HelperRow,
-  f: HelperFinish,
+  f: Omit<HelperFinish, "resultText">,
   now: number,
   s: HelpersState,
 ) {
@@ -398,7 +398,6 @@ export const finalizeHelper = (
   expected: HelperExpected,
   finish: HelperFinish,
   now: number,
-  resultText?: string,
 ) =>
   locked(async (s) => {
     const r = s.rows.find((r) => r.id === id);
@@ -411,12 +410,13 @@ export const finalizeHelper = (
         : r.run !== null || r.createdAt !== expected.createdAt)
     )
       return null;
+    const { resultText, ...fields } = finish;
     if (resultText !== undefined) {
       const path = helperResultPath(id);
       await mkdir(dirname(path), { recursive: true, mode: 0o700 });
       await writeFileAtomic(path, resultText, { mode: 0o600 });
     }
-    const rule = finishRow(r, finish, now, s);
+    const rule = finishRow(r, fields, now, s);
     await save(s);
     return { ...r, rule };
   });

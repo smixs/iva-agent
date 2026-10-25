@@ -37,12 +37,14 @@ test("real eve completed stream crosses HTTP snapshot, deadline/restart and dupl
   assert.equal(folded.steps, 51);
   assert.equal(folded.tokens, 112);
   const calls: string[] = [];
+  const requestedPaths: string[] = [];
   let stalledTail = false;
   let wireEvents = events;
   let tailScans = 0;
   const server = createServer((request, response) => {
     const url = new URL(request.url!, "http://fixture.invalid");
     calls.push(url.pathname.split("/").at(-1)!);
+    requestedPaths.push(url.pathname);
     if (url.pathname.endsWith("/stream")) {
       assert.ok([null, "1"].includes(url.searchParams.get("includeTailIndex")));
       if (url.searchParams.has("includeTailIndex")) tailScans++;
@@ -176,16 +178,90 @@ test("real eve completed stream crosses HTTP snapshot, deadline/restart and dupl
     { ownerStartedAt: OWNER_STARTED_AT },
     2000,
   );
-  await s.recordHelperSession(unfinished.row.id, 2000, "fixture");
+  await s.recordHelperSession(unfinished.row.id, 2000, unfinished.row.id);
   wireEvents = events.filter((event) => !isHelperTerminalEvent(event.type));
   await runHelperTick({ nowMs: 3000, log: () => {} });
   assert.ok((await s.getHelper(unfinished.row.id))?.run);
   assert.equal((await s.getHelper(unfinished.row.id))?.outcome, null);
+  await runHelperTick({ nowMs: 2000 + s.HELPER_DEADLINE_MS, log: () => {} });
+  assert.equal((await s.getHelper(unfinished.row.id))?.stop, "deadline");
+  assert.ok(
+    requestedPaths.some(
+      (path) =>
+        path.includes(`/${unfinished.row.id}/`) && path.endsWith("/cancel"),
+    ),
+  );
   await runHelperTick({
     nowMs: 2000 + s.HELPER_DEADLINE_MS + s.HELPER_GRACE_MS,
     log: () => {},
   });
   assert.equal((await s.getHelper(unfinished.row.id))?.outcome, "deadline");
+  assert.equal((await s.getHelper(unfinished.row.id))?.summary, folded.text);
+  assert.equal((await s.getHelper(unfinished.row.id))?.steps, folded.steps);
+  assert.equal((await s.getHelper(unfinished.row.id))?.tokens, folded.tokens);
+  assert.equal(
+    await readFile(s.helperResultPath(unfinished.row.id), "utf8"),
+    folded.text,
+  );
+  for (const stop of ["restart", "closed", "ceiling"] as const) {
+    const added = await s.addHelper({ task: stop, may: "draft", chat }, 1000);
+    assert.ok(added.ok);
+    await s.claimHelper(
+      added.row.id,
+      { ownerStartedAt: OWNER_STARTED_AT - Number(stop === "restart") },
+      2000,
+    );
+    await s.recordHelperSession(added.row.id, 2000, added.row.id);
+    if (stop === "closed") await s.closeHelper(added.row.id, chat, 2100);
+    if (stop === "ceiling") await s.stopHelper(added.row.id, 2000, "ceiling");
+    await runHelperTick({
+      nowMs: 2000 + s.HELPER_DEADLINE_MS + s.HELPER_GRACE_MS,
+      log: () => {},
+    });
+    const row = await s.getHelper(added.row.id);
+    assert.equal(
+      row?.outcome,
+      stop === "restart"
+        ? "interrupted"
+        : stop === "closed"
+          ? "stopped"
+          : "ceiling",
+    );
+    assert.equal(row?.steps, folded.steps);
+    assert.equal(row?.tokens, folded.tokens);
+    assert.equal(
+      await readFile(s.helperResultPath(added.row.id), "utf8"),
+      folded.text,
+    );
+  }
+  wireEvents = [];
+  const empty = await s.addHelper(
+    { task: "empty abort", may: "draft", chat },
+    1000,
+  );
+  assert.ok(empty.ok);
+  await s.claimHelper(empty.row.id, { ownerStartedAt: OWNER_STARTED_AT }, 2000);
+  await s.recordHelperSession(empty.row.id, 2000, empty.row.id);
+  await runHelperTick({ nowMs: 2000 + s.HELPER_DEADLINE_MS, log: () => {} });
+  assert.equal((await s.getHelper(empty.row.id))?.stop, null);
+  assert.equal((await s.getHelper(empty.row.id))?.outcome, null);
+  assert.ok(
+    !requestedPaths.some(
+      (path) => path.includes(`/${empty.row.id}/`) && path.endsWith("/cancel"),
+    ),
+  );
+  await runHelperTick({
+    nowMs: 2000 + s.HELPER_DEADLINE_MS + s.HELPER_GRACE_MS,
+    log: () => {},
+  });
+  const emptyRow = await s.getHelper(empty.row.id);
+  assert.equal(emptyRow?.outcome, "deadline");
+  assert.equal(emptyRow?.summary, null);
+  assert.equal(emptyRow?.steps, 0);
+  assert.equal(emptyRow?.tokens, 0);
+  await assert.rejects(readFile(s.helperResultPath(empty.row.id), "utf8"), {
+    code: "ENOENT",
+  });
   assert.equal(
     tailScans,
     1,

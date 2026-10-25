@@ -151,6 +151,7 @@ test("show prints the effective settings and today's counters", async (t) => {
     "briefTimes: 08:30,14:00",
     "insightTimes: ",
     "urgentSenders: wife",
+    "excludedSources: ",
     "wakes today: 2",
     "model wakes today: 0",
   ]);

@@ -19,6 +19,25 @@ const stopReasons = {
   ceiling: "предел работы помощника",
   deadline: "истёк срок помощника",
 };
+async function readHelperState(session: Session) {
+  const options = { signal: AbortSignal.timeout(s.HELPER_CHECK_MS) },
+    events = [];
+  try {
+    for await (const event of session.stream({
+      startIndex: 0,
+      ...options,
+      streamReconnectPolicy: { reconnect: false },
+    })) {
+      events.push(event);
+      if (isHelperTerminalEvent(event.type)) break;
+    }
+  } catch (error) {
+    if (!options.signal.aborted || events.length === 0) throw error;
+  }
+  const observed = foldHelperSnapshot(events);
+  if (events.length === 0) options.signal.throwIfAborted();
+  return observed;
+}
 export async function runHelperTick(
   options: { nowMs?: number; log?: (...args: unknown[]) => void } = {},
 ): Promise<void> {
@@ -59,9 +78,9 @@ export async function runHelperTick(
         outcome,
         summary: usable ? helperSummary(text!) : null,
         reason: row.stop ? stopReasons[row.stop] : reason,
+        resultText: usable ? text! : undefined,
       },
       now,
-      usable ? text! : undefined,
     );
     if (!finished) return;
     const { outcome: result, reason: cause } = finished;
@@ -103,19 +122,7 @@ export async function runHelperTick(
             delivered = false;
           if (session)
             try {
-              const options = call(),
-                events = [];
-              for await (const event of session.stream({
-                startIndex: 0,
-                ...options,
-                streamReconnectPolicy: { reconnect: false },
-              })) {
-                events.push(event);
-                if (isHelperTerminalEvent(event.type)) break;
-              }
-              const observed = foldHelperSnapshot(events);
-              if (!observed.ended) options.signal.throwIfAborted();
-              state = observed;
+              state = await readHelperState(session);
               readable = true;
             } catch (error) {
               log("helper snapshot:", row.id, error);
