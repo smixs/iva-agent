@@ -460,13 +460,16 @@ function mountDemo(root: HTMLElement) {
     sync();
   }, on);
   root.addEventListener("focusin", event => {
-    if (!(event.target as Element).closest("[data-choice]")) return;
+    if (!(event.target as Element).closest("[data-choice]") || focusPaused) return;
     focusPaused = true;
     sync();
   }, on);
-  root.addEventListener("focusout", () => {
+  root.addEventListener("focusout", event => {
+    if (!(event.target as Element).closest("[data-choice]") || !focusPaused) return;
     queueMicrotask(() => {
-      focusPaused = !!root.querySelector("[data-choice]:enabled:focus");
+      const nextPaused = !!root.querySelector("[data-choice]:enabled:focus");
+      if (nextPaused === focusPaused) return;
+      focusPaused = nextPaused;
       sync();
     });
   }, on);
