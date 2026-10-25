@@ -1,6 +1,4 @@
 import { Client, ClientError } from "eve/client";
-import { mkdir } from "node:fs/promises";
-import { dirname } from "node:path";
 import { OWNER_STARTED_AT } from "./schedule-runner.ts";
 import * as s from "./helper-store.ts";
 import { traceHelper } from "./trace.ts";
@@ -9,9 +7,9 @@ import { tr } from "./i18n.ts";
 import {
   foldHelperSnapshot,
   helperSummary,
+  isHelperTerminalEvent,
   isQuietReply,
 } from "./helper-snapshot.ts";
-import { writeFileAtomic } from "./fs-atomic.ts";
 import { ownerTimeZone } from "./reminder-time.ts";
 import { formatZoned } from "./zoned-time.ts";
 import { dueGoals } from "./goal-store.ts";
@@ -63,20 +61,9 @@ export async function runHelperTick(
         reason: row.stop ? stopReasons[row.stop] : reason,
       },
       now,
+      usable ? text! : undefined,
     );
     if (!finished) return;
-    if (usable)
-      try {
-        await mkdir(dirname(s.helperResultPath(row.id)), {
-          recursive: true,
-          mode: 0o700,
-        });
-        await writeFileAtomic(s.helperResultPath(row.id), text!, {
-          mode: 0o600,
-        });
-      } catch (error) {
-        log("helper result:", row.id, error);
-      }
     const { outcome: result, reason: cause } = finished;
     traceHelper("finished", row.id, {
       session: row.run!.sessionId ?? undefined,
@@ -116,9 +103,19 @@ export async function runHelperTick(
             delivered = false;
           if (session)
             try {
-              state = foldHelperSnapshot(
-                (await session.snapshot(call())).events,
-              );
+              const options = call(),
+                events = [];
+              for await (const event of session.stream({
+                startIndex: 0,
+                ...options,
+                streamReconnectPolicy: { reconnect: false },
+              })) {
+                events.push(event);
+                if (isHelperTerminalEvent(event.type)) break;
+              }
+              const observed = foldHelperSnapshot(events);
+              if (!observed.ended) options.signal.throwIfAborted();
+              state = observed;
               readable = true;
             } catch (error) {
               log("helper snapshot:", row.id, error);
@@ -172,7 +169,7 @@ export async function runHelperTick(
           try {
             ({ session } = await client(row.id).sessions.create({
               ...call(),
-              message: `Helper ${row.id}. Now: ${formatZoned(now, ownerTimeZone())}. Allowed: ${row.may || "nothing, look and draft only"}. Task: ${row.task}`,
+              message: `Helper ${row.id}. Now: ${formatZoned(now, ownerTimeZone())}. Return an outcome before ${formatZoned(claimed.run.deadlineAtMs, ownerTimeZone())}; if external work continues, name the next check's owner and time in the handoff. Allowed: ${row.may || "nothing, look and draft only"}. Task: ${row.task}`,
             }));
           } catch (error) {
             log("helper create:", row.id, error);

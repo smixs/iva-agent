@@ -7,6 +7,7 @@
 // Signal — отказ: зациклившийся плагин не заваливает таблицу напоминаний. Импорты authored
 // tree — ленивые (scripts/authored-tree-guard.test.ts).
 import { randomBytes } from "node:crypto";
+import { join } from "node:path";
 import { ownerChat } from "../lib/notification-chat.ts";
 import type { createCliRuntime } from "./runtime.ts";
 
@@ -55,6 +56,18 @@ export function createSignalCommand(
     const env = readEnv();
     // Таблица напоминаний считает путь от ASSISTANT_DATA_DIR на каждом вызове.
     process.env.ASSISTANT_DATA_DIR = dataDirAbs(env);
+    const { parseProactive, isExcludedSource } =
+      await import("#lib/proactive-config.ts");
+    const { readSettings } = await import("#lib/settings.ts");
+    if (
+      isExcludedSource(
+        parseProactive(readSettings(join(dataDirAbs(env), "settings.json"))),
+        `signal:${source}`,
+      )
+    ) {
+      ok("signal excluded by owner rules");
+      return;
+    }
     const { hasInboundAttackSignal, sanitizeInbound } =
       await import("#lib/security-gate.ts");
     const surface = { surface: "web" } as const;

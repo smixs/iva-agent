@@ -309,6 +309,42 @@ test("an answer exactly at the limit is logged", async () => {
   assert.deepEqual(logs, ["proactive: telegram user chats hit the limit 500"]);
 });
 
+test("excluded group skips metadata and Watch items; a family chat remains", async () => {
+  const dir = mkdtempSync(join(DATA, "excluded-"));
+  writeFileSync(
+    join(dir, "settings.json"),
+    JSON.stringify({
+      proactive: { excludedSources: ["tg:-42"] },
+    }),
+  );
+  const calls: string[] = [];
+  const source = telegramSource({}, dir, (name, args) => {
+    calls.push(name);
+    assert.equal(name, "list_chats");
+    return Promise.resolve(
+      results(
+        args.chat_type === "user"
+          ? [{ chat_id: 7, type: "User", name: "Family", unread: 1 }]
+          : [
+              {
+                chat_id: -42,
+                type: "Group",
+                title: "Excluded",
+                unread_mentions: 1,
+              },
+            ],
+      ),
+    );
+  });
+  const result = await source.check();
+  assert.equal(result.error, null);
+  assert.deepEqual(
+    result.items.map((item) => item.key),
+    ["tg:7"],
+  );
+  assert.deepEqual(calls, ["list_chats", "list_chats"]);
+});
+
 test(`parseChats never throws anything but an Error and keeps only objects (seed ${SEED})`, () => {
   fc.assert(
     fc.property(fc.oneof(fc.string(), fc.json()), (text) => {

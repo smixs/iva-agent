@@ -324,18 +324,17 @@ test("a silent model gets its own text, not a provider failure", () => {
     });
     assert.equal(
       text.ru,
-      "Anthropic долго не отвечает, повторила 2 раза, не получилось. Напиши ещё раз через пару минут или смени модель: /model. Если в этом разговоре так уже было, /new начнёт заново: длинный разговор мог стать модели не по силам.",
+      "Anthropic долго не отвечает, повторила 2 раза, не получилось. Причина задержки неизвестна. Напиши ещё раз через пару минут или смени модель: /model.",
     );
     assert.equal(
       text.en,
-      "Anthropic takes too long to answer. I tried again 2 times, it did not work. Write again in a couple of minutes or switch models: /model. If this already happened in this conversation, /new starts over: a long conversation may have become too much for the model.",
+      "Anthropic takes too long to answer. I tried again 2 times, it did not work. The cause of the delay is unknown. Write again in a couple of minutes or switch models: /model.",
     );
   }
 });
 
-// #284: OpenCode Go в длинной сессии молчит 90 с из хода в ход, помогает только /new.
-// Ошибка дословно из provider.ts (MODEL_FIRST_CHUNK_TIMEOUT), повторов не было.
-test("a first-chunk timeout without repeats names /new for a long conversation", () => {
+// Ошибка дословно из provider.ts. Таймаут не устанавливает причину молчания.
+test("a first-chunk timeout without repeats states the symptom and an unknown cause", () => {
   for (const details of [
     { code: "MODEL_FIRST_CHUNK_TIMEOUT", attempts: 1 },
     { code: "MODEL_FIRST_CHUNK_TIMEOUT" },
@@ -348,20 +347,19 @@ test("a first-chunk timeout without repeats names /new for a long conversation",
         provider: "opencode",
       }),
       {
-        en: "OpenCode takes too long to answer. Write again in a couple of minutes or switch models: /model. If this already happened in this conversation, /new starts over: a long conversation may have become too much for the model.",
-        ru: "OpenCode долго не отвечает. Напиши ещё раз через пару минут или смени модель: /model. Если в этом разговоре так уже было, /new начнёт заново: длинный разговор мог стать модели не по силам.",
+        en: "OpenCode takes too long to answer. The cause of the delay is unknown. Write again in a couple of minutes or switch models: /model.",
+        ru: "OpenCode долго не отвечает. Причина задержки неизвестна. Напиши ещё раз через пару минут или смени модель: /model.",
       },
     );
   }
 });
 
-// Подсказка про /new — только текст: кнопки «Повторить» нет, мост не примет это сообщение
-// за обрыв посреди ответа и не подставит вопрос (scripts/poller/control.ts, turn-question.ts).
-test("every silent-model notice ends with the /new hint and never looks like a break", () => {
+// Мост не принимает таймаут первого ответа за обрыв уже начатого ответа.
+test("silent-model notices avoid a speculative cause or session reset", () => {
   const RU_HINT =
-    " Если в этом разговоре так уже было, /new начнёт заново: длинный разговор мог стать модели не по силам.";
+    " Причина задержки неизвестна. Напиши ещё раз через пару минут или смени модель: /model.";
   const EN_HINT =
-    " If this already happened in this conversation, /new starts over: a long conversation may have become too much for the model.";
+    " The cause of the delay is unknown. Write again in a couple of minutes or switch models: /model.";
   fc.assert(
     fc.property(
       fc.constantFrom(
@@ -399,7 +397,10 @@ test("every silent-model notice ends with the /new hint and never looks like a b
           assert.equal(isBreakNotice(said), false);
           assert.equal(isRetryTap(said), false);
           assert.doesNotMatch(said, /tg-button/u);
-          assert.equal(said.split("/new").length, 2);
+          assert.doesNotMatch(
+            said,
+            /\/new|long conversation|длинный разговор/u,
+          );
         }
       },
     ),

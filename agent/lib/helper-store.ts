@@ -1,11 +1,12 @@
 import { randomBytes } from "node:crypto";
 import { mkdir, readFile, rm } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { z } from "zod";
 import { dataDir } from "./data-dir.ts";
 import { quarantineDamagedRecord } from "./damaged-record.ts";
 import { acquireLock, releaseLock, saveJsonAtomic } from "./json-store.ts";
 import { goalSchema, helperIdSchema, settleGoal } from "./goal-rules.ts";
+import { writeFileAtomic } from "./fs-atomic.ts";
 
 export const HELPER_MAX_OPEN = 3,
   HELPER_MAX_ROWS = 20;
@@ -397,8 +398,9 @@ export const finalizeHelper = (
   expected: HelperExpected,
   finish: HelperFinish,
   now: number,
+  resultText?: string,
 ) =>
-  mutateHelpers((s) => {
+  locked(async (s) => {
     const r = s.rows.find((r) => r.id === id);
     if (
       !r ||
@@ -408,9 +410,15 @@ export const finalizeHelper = (
         ? !running(r, expected.firedAt)
         : r.run !== null || r.createdAt !== expected.createdAt)
     )
-      return { save: false, value: null };
+      return null;
+    if (resultText !== undefined) {
+      const path = helperResultPath(id);
+      await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+      await writeFileAtomic(path, resultText, { mode: 0o600 });
+    }
     const rule = finishRow(r, finish, now, s);
-    return { save: true, value: { ...r, rule } };
+    await save(s);
+    return { ...r, rule };
   });
 export function closeRow(s: HelpersState, row: HelperRow, now: number) {
   const branch = row.run ? "running" : row.outcome ? "finished" : "pending";

@@ -24,6 +24,8 @@ export type ProactiveConfig = {
   readonly briefTimes: readonly string[];
   readonly insightTimes: readonly string[];
   readonly urgentSenders: readonly string[];
+  /** Owner exclusions by existing source key: tg:<chat id> or signal:<plugin>. */
+  readonly excludedSources?: readonly string[];
 };
 
 export const PROACTIVE_DEFAULTS: ProactiveConfig = {
@@ -37,6 +39,7 @@ export const PROACTIVE_DEFAULTS: ProactiveConfig = {
   briefTimes: ["08:30", "14:00"],
   insightTimes: [],
   urgentSenders: [],
+  excludedSources: [],
 };
 
 /** Варианты кнопок Insight и время включения; действующее время — только в settings.json. */
@@ -64,7 +67,7 @@ function listOf(max: number, item: (value: unknown) => boolean) {
 }
 
 /** Правило каждого поля: что допустимо. Одно место для разбора и для `iva proactive set`. */
-const VALID: { readonly [K in ProactiveKey]: (value: unknown) => boolean } = {
+const VALID: { readonly [K in ProactiveKey]-?: (value: unknown) => boolean } = {
   enabled: (value) => typeof value === "boolean",
   quietFromHour: integerIn(0, 23),
   quietToHour: integerIn(0, 23),
@@ -89,6 +92,13 @@ const VALID: { readonly [K in ProactiveKey]: (value: unknown) => boolean } = {
       name !== "" &&
       name.trim() === name &&
       name.length <= 100,
+  ),
+  excludedSources: listOf(
+    100,
+    (key) =>
+      typeof key === "string" &&
+      /^(?:tg:-?\d+|signal:[^\r\n]{1,40})$/u.test(key) &&
+      key.trim() === key,
   ),
 };
 
@@ -166,6 +176,31 @@ export function isQuietHour(config: ProactiveConfig, hour: number): boolean {
   const { quietFromHour: from, quietToHour: to } = config;
   if (from === to) return false;
   return from < to ? hour >= from && hour < to : hour >= from || hour < to;
+}
+
+export function isExcludedSource(
+  config: ProactiveConfig,
+  key: string,
+): boolean {
+  return config.excludedSources?.includes(key) ?? false;
+}
+
+/** Existing Signal rows keep their original, localized envelope on rollback. */
+export function isExcludedSignal(
+  config: ProactiveConfig,
+  text: string,
+): boolean {
+  const body = text.startsWith("⚠️ ")
+    ? text.slice(text.indexOf("\n\n") + 2)
+    : text;
+  return (config.excludedSources ?? []).some((key) => {
+    if (!key.startsWith("signal:")) return false;
+    const source = key.slice("signal:".length);
+    return (
+      body.startsWith(`Signal from plugin ${source}: "`) ||
+      body.startsWith(`Сигнал от плагина ${source}: «`)
+    );
+  });
 }
 
 /**

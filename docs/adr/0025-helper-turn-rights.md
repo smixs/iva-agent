@@ -89,7 +89,7 @@ the same session/turn completes. Numeric work counters remain in Trace.
 
 ## End of a helper (2026-10-14)
 
-The helper Schedule creates sessions and folds finite durable snapshots. It alone
+The helper Schedule creates sessions and folds their durable event stream. It alone
 finalizes outcomes. Cancel confirms delivery; reset is cleanup. A terminal event,
 delivered cancellation after restart, or the deadline plus grace frees the slot.
 
@@ -104,3 +104,10 @@ The owner accepted these consequences:
 4. A lost session id leaves an orphan helper up to 80 steps, alongside later work.
 5. A session with no events holds the slot until the 47-minute hard ceiling.
 6. Failed reset leaves a parked core session; the outcome and slot are independent.
+
+On 2026-10-25, the Schedule reads from index zero and stops at the first canonical
+terminal event within the existing check deadline. It does not request a stream
+tail scan or wait for EOF after completion. A prefix without a terminal event
+retains the bounded deadline behavior above. The full result is written under the
+existing helper lock before committing the finished row; a write failure retains
+the run and stream for the next tick. This replaces the post-finalize result write.

@@ -121,7 +121,7 @@ async function setup(t: test.TestContext) {
       });
     }
     if (path === "stream") {
-      assert.equal(u.searchParams.get("includeTailIndex"), "1");
+      assert.equal(u.searchParams.get("includeTailIndex"), null);
       assert.equal(u.searchParams.get("startIndex"), null);
       if (state.snapshot === "error")
         return Response.json({ error: "not found" }, { status: 404 });
@@ -336,6 +336,17 @@ test("v7 create is not a stream subscription; core headers and 15s signal are pr
   assert.equal(headers.get("x-iva-turn"), "helper");
   assert.equal(headers.get("x-iva-helper"), a.id);
   assert.equal(f.state.signals.length, 1);
+  const body = f.state.requests[0].body;
+  assert.equal(typeof body, "string");
+  assert.ok(typeof body === "string");
+  const input = JSON.parse(body) as {
+    message: string;
+  };
+  assert.match(
+    input.message,
+    /Return an outcome before .+; if external work continues, name the next check's owner and time/u,
+  );
+  assert.match(input.message, /Allowed: draft\. Task: task/u);
 });
 test("overlapping ticks start three distinct helpers once and retain their sessions", async (t) => {
   const f = await setup(t);
@@ -532,4 +543,86 @@ test("r339 helper step ceiling records a localized failure outcome", async (t) =
       : "Остановилась на 40 шагах и не успела подвести итог.",
   );
   assert.equal(result?.deliveredAt, null);
+});
+
+test("completion result is durable before the finished row becomes visible", async (t) => {
+  const f = await setup(t),
+    a = await f.running();
+  f.state.events = [
+    { type: "message.completed", data: { message: "durable result" } },
+    { type: "turn.completed", data: { sequence: 1, turnId: "turn" } },
+  ];
+  const rename = fs.rename.bind(fs);
+  t.mock.method(fs, "rename", async (from: string, to: string) => {
+    if (to.endsWith("result.md"))
+      assert.ok((await s.getHelper(a.id))?.run, "result precedes finalize");
+    return rename(from, to);
+  });
+  syncBuiltinESMExports();
+  await f.tick();
+  assert.equal(
+    await readFile(s.helperResultPath(a.id), "utf8"),
+    "durable result",
+  );
+  assert.equal((await s.getHelper(a.id))?.outcome, "done");
+});
+
+test("result write failure retains the run and stream for a repeated tick", async (t) => {
+  const f = await setup(t),
+    a = await f.running();
+  f.state.events = [
+    { type: "message.completed", data: { message: "retry result" } },
+    { type: "turn.completed", data: { sequence: 1, turnId: "turn" } },
+  ];
+  const rename = fs.rename.bind(fs);
+  let fail = true;
+  t.mock.method(fs, "rename", (from: string, to: string) => {
+    if (fail && to.endsWith("result.md")) {
+      fail = false;
+      return Promise.reject(Error("result disk failure"));
+    }
+    return rename(from, to);
+  });
+  syncBuiltinESMExports();
+  await f.tick();
+  assert.ok((await s.getHelper(a.id))?.run);
+  assert.deepEqual(f.state.calls, ["stream"]);
+  await f.tick();
+  assert.equal((await s.getHelper(a.id))?.outcome, "done");
+  assert.equal(
+    await readFile(s.helperResultPath(a.id), "utf8"),
+    "retry result",
+  );
+});
+
+test("row save failure after result publication recovers from the durable stream", async (t) => {
+  const f = await setup(t),
+    a = await f.running();
+  f.state.events = [
+    { type: "message.completed", data: { message: "saved before restart" } },
+    { type: "turn.completed", data: { sequence: 1, turnId: "turn" } },
+  ];
+  const rename = fs.rename.bind(fs);
+  let fail = true;
+  t.mock.method(fs, "rename", (from: string, to: string) => {
+    if (fail && to.endsWith("helpers.json")) {
+      fail = false;
+      return Promise.reject(Error("row disk failure"));
+    }
+    return rename(from, to);
+  });
+  syncBuiltinESMExports();
+  await f.tick();
+  assert.ok((await s.getHelper(a.id))?.run);
+  assert.equal(
+    await readFile(s.helperResultPath(a.id), "utf8"),
+    "saved before restart",
+  );
+  assert.deepEqual(f.state.calls, ["stream"]);
+  await f.tick();
+  assert.equal((await s.getHelper(a.id))?.outcome, "done");
+  assert.equal(
+    await readFile(s.helperResultPath(a.id), "utf8"),
+    "saved before restart",
+  );
 });

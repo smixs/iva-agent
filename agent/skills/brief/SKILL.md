@@ -25,6 +25,9 @@ For changes, cover the time since the previous Brief, whose time is in the promp
 (`Previous Brief`). Without that line, find the previous overview in the daily file.
 
 Walk everything the owner has connected, with your own tools, read only:
+Apply Owner rules and personal source skills before choosing a transport. Record
+which of tasks, calendar, mail, personal Telegram and weather was actually read,
+and the concrete failure for an unavailable source. A missing read means unknown.
 
 1. Tasks: load `task-management`, call `tasks` with `action="list"`. Overdue and due
    today first, then high priority, then the rest. Read old relative deadlines from
@@ -35,7 +38,10 @@ Walk everything the owner has connected, with your own tools, read only:
 3. Every Connection and plugin: `connection_search` lists them; look at each one for
    what is new or due today.
 4. CORE goals: the shared procedure chooses a concrete step for today.
-   Call `goal list`; if any goal is proposed, paused or has an untold Outcome, add one line "goal: N идут, K ждут ответа", counting current statuses yourself.
+   Call `goal list`; name each relevant active or waiting goal, its subject and
+   next date. Recheck newer facts before calling an old task outstanding. Omit
+   closed and explicitly marked test records. Use the owner's current weekend
+   rules when deciding whether work belongs in today's plan.
 5. Weather for the owner's city (from memory, `memory_search`). No city known — ask
    once and save the answer with `write_card`.
 6. Habits — only the ones the owner named; never invent a routine.
@@ -89,6 +95,9 @@ existing overview or action message.
   Brief with one plain line naming the unread sources, for example «Почту прочитать
   не удалось». Treat that source as unknown; silence gives no evidence of an empty
   inbox. Keep error codes in your own reading.
+- Before sending, compare the source coverage with Gather and the latest owner
+  rules. Include weather or its confirmed unavailable step. State partial coverage
+  plainly, including the checked mailbox scope, instead of implying a full review.
 
 Never send anything yourself in a scheduled turn: no Telegram tools, no `iva post`,
 no mail. Code sends your final text to the owner's private chat. Never write to

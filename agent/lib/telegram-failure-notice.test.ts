@@ -134,9 +134,8 @@ await test("обрыв посреди ответа: в чат идёт вопр�
   assert.doesNotMatch(text, /err-78|Error id/u);
 });
 
-// #284: молчание модели повторяется в длинном разговоре — в чат доезжает подсказка про /new,
-// и Gate её не режет. Ошибка дословно из provider.ts.
-await test("молчание модели: в чат доезжает подсказка про /new без кнопки", async () => {
+// Ошибка дословно из provider.ts: причина таймаута остаётся неизвестной.
+await test("молчание модели: в чат доезжает факт таймаута без сброса разговора", async () => {
   const { sent, send } = collector();
 
   await notifyTelegramFailure(
@@ -153,9 +152,12 @@ await test("молчание модели: в чат доезжает подск
   assert.equal(sent.length, 1);
   assert.match(
     sent[0],
-    /(Если в этом разговоре так уже было, \/new начнёт заново: длинный разговор мог стать модели не по силам\.|If this already happened in this conversation, \/new starts over: a long conversation may have become too much for the model\.)$/u,
+    /Причина задержки неизвестна|The cause of the delay is unknown/u,
   );
-  assert.doesNotMatch(sent[0], /tg-button/u);
+  assert.doesNotMatch(
+    sent[0],
+    /tg-button|\/new|long conversation|длинный разговор/u,
+  );
 });
 
 // Служебная реплика канала не идёт через Outbox, но текст провайдера в ней —

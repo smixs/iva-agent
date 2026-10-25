@@ -50,6 +50,17 @@ async function ready(now = 1000) {
   );
   return r;
 }
+test("stale finalize cannot replace the committed full result", async (t) => {
+  await data(t);
+  const row = await added();
+  const expected = { kind: "pending" as const, createdAt: row.createdAt };
+  assert.ok(await s.finalizeHelper(row.id, expected, finish, 2000, "winner"));
+  assert.equal(
+    await s.finalizeHelper(row.id, expected, finish, 3000, "stale"),
+    null,
+  );
+  assert.equal(await readFile(s.helperResultPath(row.id), "utf8"), "winner");
+});
 test("missing reader and schema corruption preserve bytes and reject foreign fields/types/duplicates/version", async (t) => {
   const dir = await data(t);
   assert.deepEqual(await s.readHelpers(), {

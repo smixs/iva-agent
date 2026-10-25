@@ -84,6 +84,21 @@ test("--key: a second pending Signal with the same key preserves the row and exi
   );
 });
 
+test("an excluded plugin never reaches the Reminder table, family Signals still queue", async () => {
+  const h = harness();
+  writeFileSync(
+    join(h.dir, "settings.json"),
+    JSON.stringify({
+      proactive: { excludedSources: ["signal:excluded-group"] },
+    }),
+  );
+  await h.cmd(["excluded-group", "synthetic excluded message"]);
+  assert.deepEqual(h.rows(), []);
+  assert.equal(h.ok.at(-1), "signal excluded by owner rules");
+  await h.cmd(["family", "urgent synthetic message"]);
+  assert.equal(h.rows().length, 1);
+});
+
 test("--key: different keys and omitted keys each create separate Signals", async () => {
   for (const keyed of [true, false]) {
     const h = harness();

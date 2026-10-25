@@ -49,4 +49,9 @@ Restart produces an interrupted outcome and never restarts the task automaticall
 
 Give the task a scope, time range and expected form of the result.
 Read docs/helpers.md for the enforced ceilings.
+Keep the return estimate separate from the next status time. Before the helper's
+deadline, save a final outcome or a bounded RUNNING handoff with the next check's
+owner and time. A terminal helper status describes this turn; a separately running
+external job needs its own fresh evidence. Read the preserved completed message
+before treating deadline or interruption as absence of a result.
 For failed, interrupted, deadline or ceiling outcomes, say what was completed and ask whether to repeat.

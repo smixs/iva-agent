@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- 🔧 **Итог помощника сохраняется до завершения**: готовый ответ принимается по событию завершения, полный текст сохраняется перед освобождением места. A completed helper reply is accepted at its terminal event and saved before releasing its slot.
+- 🔧 **Исключения для сигналов и присмотра**: подтверждённые исключения источников проверяются до отправки; осознанный QUIET сигнала сохраняет тишину. Confirmed source exclusions are checked before delivery; an explicit Signal QUIET stays silent.
+- 🔧 **Честная причина таймаута**: подсказка сообщает о молчании провайдера без предположений о длине разговора и сбросе истории. A timeout notice reports provider silence without a speculative cause or history reset.
+
 ## [0.5.7] - 2026-10-25
 
 - 🔧 **Цитаты при отказе rich-сообщений**: запасная HTML-отправка сохраняет текст цитат и подписи кнопок с символами разметки. HTML fallback preserves quoted text and button labels containing markup characters when rich messages are rejected.

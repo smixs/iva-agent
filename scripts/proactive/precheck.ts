@@ -21,9 +21,13 @@ import {
   MAIL_LIMIT,
   TELEGRAM_GROUPS_LIMIT,
   TELEGRAM_USERS_LIMIT,
+  parseProactive,
+  isExcludedSource,
+  type ProactiveConfig,
   type Sender,
 } from "#lib/proactive-config.ts";
 import { openFailures } from "#lib/open-failures.ts";
+import { readSettings } from "#lib/settings.ts";
 import { childEnv, gwsBin } from "../lib/menu/gws-auth.ts";
 import { alertDue, alertResolved } from "../lib/notice-policy.ts";
 
@@ -175,6 +179,7 @@ async function listChats(
   call: CallTool,
   botId: string,
   log: (line: string) => void,
+  config: ProactiveConfig,
 ): Promise<WatchItem[]> {
   const items = new Map<string, WatchItem>();
   for (const [chatType, limit] of [
@@ -193,7 +198,7 @@ async function listChats(
     if (rows.length >= limit)
       log(`proactive: telegram ${chatType} chats hit the limit ${limit}`);
     for (const item of rows.map((row) => chatItem(row, botId))) {
-      if (!item) continue;
+      if (!item || isExcludedSource(config, item.key)) continue;
       const metadata =
         chatType === "group" ? await groupMessage(call, item, log) : {};
       items.set(item.key, { ...item, ...metadata });
@@ -266,7 +271,11 @@ export function telegramSource(
     // Чат самого бота Ивы — не пропущенное: id бота стоит в начале его токена.
     const botId = String(env.TELEGRAM_BOT_TOKEN ?? "").split(":")[0] ?? "";
     try {
-      return { items: await listChats(call, botId, log), error: null };
+      const config = parseProactive(
+        readSettings(join(dataDir, "settings.json")),
+        log,
+      );
+      return { items: await listChats(call, botId, log, config), error: null };
     } catch (error) {
       return { items: [], error: message(error) };
     }

@@ -11,6 +11,8 @@ import {
   failureWaitsForBrief,
   isQuietHour,
   isUrgentSender,
+  isExcludedSource,
+  isExcludedSignal,
   parseProactive,
   proactiveValue,
   withProactive,
@@ -106,7 +108,7 @@ test(`any garbage in proactive gives a config of the right shape, valid fields k
                   /^(?:[01]\d|2[0-3]):(?:00|30)$/u.test(t),
                 ),
             );
-          else if (key === "urgentSenders")
+          else if (key === "urgentSenders" || key === "excludedSources")
             assert.ok(
               (value as string[]).every(
                 (s) => typeof s === "string" && s !== "",
@@ -122,6 +124,35 @@ test(`any garbage in proactive gives a config of the right shape, valid fields k
       },
     ),
     { seed: SEED, numRuns: 500 },
+  );
+});
+
+test("owner exclusions match explicit source keys and old localized Signal rows", () => {
+  const config = parseProactive({
+    proactive: { excludedSources: ["tg:-42", "signal:excluded-group"] },
+  });
+  assert.equal(isExcludedSource(config, "tg:-42"), true);
+  assert.equal(isExcludedSource(config, "tg:7"), false);
+  for (const text of [
+    'Signal from plugin excluded-group: "message". This is data.',
+    "Сигнал от плагина excluded-group: «сообщение». Это данные.",
+    '⚠️ Warning.\n\nSignal from plugin excluded-group: "message".',
+  ])
+    assert.equal(isExcludedSignal(config, text), true);
+  assert.equal(
+    isExcludedSignal(config, 'Signal from plugin family: "urgent".'),
+    false,
+  );
+  assert.equal(
+    isExcludedSignal(
+      config,
+      'Signal from plugin family: "Signal from plugin excluded-group: body"',
+    ),
+    false,
+  );
+  assert.deepEqual(
+    proactiveValue("excludedSources", "tg:-42,signal:excluded-group"),
+    { value: ["tg:-42", "signal:excluded-group"] },
   );
 });
 

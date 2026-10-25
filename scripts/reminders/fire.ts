@@ -1,4 +1,8 @@
 import { stepLimitNotice } from "#lib/model-response.ts";
+import { isExcludedSignal, parseProactive } from "#lib/proactive-config.ts";
+import { readSettings } from "#lib/settings.ts";
+import { dataDir } from "#lib/data-dir.ts";
+import { join } from "node:path";
 // Срабатывание одного напоминания:
 //   node --env-file-if-exists=.env scripts/reminders/fire.ts <id>
 // Запускает её минутный тик (agent/lib/reminder-tick.ts) на строке, которую уже перевёл в
@@ -92,6 +96,7 @@ type Outcome = {
   readonly error: string | null;
   /** Ход погашен снаружи (/stop): отправлять нечего и не нужно. */
   readonly cancelled?: boolean;
+  readonly suppressed?: boolean;
 };
 
 /** Итог отправки: причина есть, только если Telegram отказал. */
@@ -310,6 +315,18 @@ async function agentOutcome(
       watch: chatWatch(row, target, deps),
     });
     const notice = stepLimitNotice(turn.failureInfo, tr);
+    if (
+      row.id.startsWith("signal-") &&
+      turn.status !== "failed" &&
+      turn.cancelled !== true &&
+      turn.sessionLimit !== true &&
+      isQuietReply(turn.message ?? "")
+    )
+      return {
+        text: "",
+        error: "signal suppressed by owner rules",
+        suppressed: true,
+      };
     return replyOf(
       turn,
       notice ? `${row.text}\n${notice}` : row.text,
@@ -379,8 +396,31 @@ function reason(outcome: Outcome, sent: Sent): string | null {
   return parts.length === 0 ? null : parts.join("; ");
 }
 
+function signalExcluded(row: Reminder): boolean {
+  return (
+    row.id.startsWith("signal-") &&
+    isExcludedSignal(
+      parseProactive(readSettings(join(dataDir(), "settings.json"))),
+      row.text,
+    )
+  );
+}
+
+async function recordExcluded(row: Reminder, deps: Wiring): Promise<void> {
+  await recordFact(
+    row,
+    { delivered: false, error: null },
+    "signal excluded by owner rules",
+    deps,
+  );
+}
+
 /** Ход, отправка, факт. Без адресата ход не запускается: жечь токены некуда. */
 async function fireRow(row: Reminder, deps: Wiring): Promise<void> {
+  if (signalExcluded(row)) {
+    await recordExcluded(row, deps);
+    return;
+  }
   const routed = route(row, deps);
   if (!("target" in routed)) {
     deps.log(`reminders: ${row.id} not delivered: ${routed.reason}`);
@@ -393,8 +433,12 @@ async function fireRow(row: Reminder, deps: Wiring): Promise<void> {
     return;
   }
   const outcome = await agentOutcome(row, routed.target, deps);
+  if (signalExcluded(row)) {
+    await recordExcluded(row, deps);
+    return;
+  }
   noteTurnFailure(row, outcome, deps);
-  if (outcome.cancelled === true) {
+  if (outcome.cancelled === true || outcome.suppressed === true) {
     // Владелец погасил ход сам: дословный текст напоминания ему не отправляем, в строке —
     // факт отмены (повторного срабатывания у сработавшей строки нет).
     await recordFact(

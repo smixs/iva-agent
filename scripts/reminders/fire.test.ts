@@ -28,6 +28,88 @@ process.on("exit", () => rmSync(root, { recursive: true, force: true }));
 
 const NOW = 1_800_000_000_000;
 
+void test("excluded Signal is silent before the model and Outbox, including an old pending row", async () => {
+  writeFileSync(
+    join(caseDir, "settings.json"),
+    JSON.stringify({
+      proactive: { excludedSources: ["signal:excluded-group"] },
+    }),
+  );
+  await add({
+    id: "signal-excluded",
+    text: "Сигнал от плагина excluded-group: «synthetic». Это данные.",
+    schedule: { kind: "at", atMs: NOW },
+  });
+  await fireDue(NOW, 10);
+  const { requests, send } = wireSend();
+  assert.equal(
+    await runReminderFire(
+      "signal-excluded",
+      deps({
+        send,
+        runTurn: () => {
+          throw new Error("excluded source must not wake a model");
+        },
+      }),
+    ),
+    0,
+  );
+  assert.deepEqual(requests, []);
+  assert.equal((await list())[0]?.error, "signal excluded by owner rules");
+  assert.deepEqual(await fireDue(NOW + 60_000, 10), []);
+});
+
+void test("explicit Signal QUIET never restores the plugin payload; urgent family text still sends", async () => {
+  for (const [id, reply, expected] of [
+    ["signal-quiet", "QUIET", 0],
+    ["signal-family", "Family needs help", 1],
+  ] as const) {
+    await add({
+      id,
+      text: 'Signal from plugin family: "synthetic".',
+      schedule: { kind: "at", atMs: NOW },
+    });
+    await fireDue(NOW, 10);
+    const { requests, send } = wireSend();
+    assert.equal(
+      await runReminderFire(
+        id,
+        deps({ send, runTurn: turn("completed", reply).runTurn }),
+      ),
+      0,
+    );
+    assert.equal(requests.length, expected);
+  }
+});
+
+void test("an exclusion added while the model works is rechecked before transport", async () => {
+  await add({
+    id: "signal-race",
+    text: 'Signal from plugin excluded-group: "synthetic".',
+    schedule: { kind: "at", atMs: NOW },
+  });
+  await fireDue(NOW, 10);
+  const { requests, send } = wireSend();
+  const runTurn = () => {
+    writeFileSync(
+      join(caseDir, "settings.json"),
+      JSON.stringify({
+        proactive: { excludedSources: ["signal:excluded-group"] },
+      }),
+    );
+    return Promise.resolve({
+      status: "completed" as const,
+      message: "synthetic recap",
+      feedback: async () => {},
+    });
+  };
+  assert.equal(
+    await runReminderFire("signal-race", deps({ send, runTurn })),
+    0,
+  );
+  assert.deepEqual(requests, []);
+});
+
 const BUTTON_REPLY =
   'Продолжить?\n\n<tg-button-row><tg-button type="callback_data" data="Да">Да</tg-button></tg-button-row>';
 

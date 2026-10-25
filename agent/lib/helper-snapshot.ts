@@ -24,6 +24,8 @@ const ends: Record<string, HelperOutcome> = {
   "authorization.required": "failed",
   "turn.cancelled": "interrupted",
 };
+export const isHelperTerminalEvent = (type: string): boolean =>
+  Object.hasOwn(ends, type);
 export function foldHelperSnapshot(
   events: readonly { type: string; data?: unknown }[],
 ) {

@@ -215,6 +215,36 @@ test("custom accepts a typed model when the endpoint has no catalog", async () =
   }
 });
 
+test("a contributor missing from a local menu stays unverified when its service catalog is unavailable", async () => {
+  const calls: string[] = [];
+  const selected = await validateModelSelection(
+    {
+      provider: "custom",
+      model: "muse-wonder-full-1.0-contributor",
+      base: "https://catalog.fixture/v1",
+    },
+    {
+      fetchFn: (url) => {
+        calls.push(
+          typeof url === "string"
+            ? url
+            : url instanceof URL
+              ? url.href
+              : url.url,
+        );
+        return Promise.resolve(response({}, 404));
+      },
+    },
+  );
+  assert.equal(selected.id, "muse-wonder-full-1.0-contributor");
+  assert.equal(
+    selected.answered,
+    undefined,
+    "catalog absence proves neither service support nor rejection",
+  );
+  assert.deepEqual(calls, ["https://catalog.fixture/v1/models"]);
+});
+
 test("custom still fails on a rejected key and on a model the live catalog denies", async () => {
   for (const status of [401, 403]) {
     await assert.rejects(
