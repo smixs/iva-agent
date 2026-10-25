@@ -65,6 +65,9 @@ function mountDemo(root: HTMLElement) {
   const style = (el: HTMLElement, property: string, value: string) => {
     if (el.style.getPropertyValue(property) !== value) el.style.setProperty(property, value);
   };
+  const setText = (el: Element, value: string) => {
+    if (el.textContent !== value) el.textContent = value;
+  };
   function arrival(el: HTMLElement, f: number, at: number) {
     const visible = f >= at;
     el.hidden = !visible;
@@ -148,7 +151,7 @@ function mountDemo(root: HTMLElement) {
     const share = state.decisions.restaurant;
     // No restaurant choice means no delivery, including in the hidden transcript.
     arrival(venue, f, share?.value ? share.at + 78 : Infinity);
-    get('[data-message-time="restaurant"]').textContent = pushed.confirmed ? "17:42" : "17:41";
+    setText(get('[data-message-time="restaurant"]'), pushed.confirmed ? "17:42" : "17:41");
     iva.classList.toggle("is-thinking", !!thinking);
     get("[data-bot]").hidden = !!thinking;
     get("[data-typing]").hidden = !thinking;
@@ -165,7 +168,7 @@ function mountDemo(root: HTMLElement) {
     // Commit them before measuring the bottom, including the final reduced-motion step.
     renderMenu();
     renderInstall();
-    clock.textContent = clockAt(f);
+    setText(clock, clockAt(f));
     // Match List's bottom anchoring: growing message height moves earlier messages upward.
     // Pausing gives the reader a normal, keyboard-accessible scrollable transcript.
     if (interaction.menu === null && (!userPaused && !focusPaused || reduced)) {
@@ -199,17 +202,17 @@ function mountDemo(root: HTMLElement) {
     const scene = mariaActive ? 7 : filmScene === 7 ? 6 : filmScene;
     root.dataset.sceneNumber = String(scene);
     if (scene !== previousScene) {
-      sceneLabel.textContent = copy.scenes[scene];
+      setText(sceneLabel, copy.scenes[scene]);
       previousScene = scene;
     }
     const controlLabel = complete ? copy.viewed : reduced ? copy.next : isPlaying ? copy.pause : copy.play;
-    playLabel.textContent = controlLabel;
+    setText(playLabel, controlLabel);
     play.hidden = !reduced || complete;
     play.disabled = complete || interaction.menu !== null;
     play.setAttribute("aria-label", controlLabel);
     icon.setAttribute("d", complete ? "M2 8l4 4 8-8" : reduced ? "M3 3l7 5-7 5M12 3v10" : isPlaying ? "M5 3v10M11 3v10" : "M4 2.5l9 5.5L4 13.5Z");
     if (complete && root.dataset.announcedComplete !== "true") {
-      announcement.textContent = copy.end;
+      setText(announcement, copy.end);
       root.dataset.announcedComplete = "true";
     }
   }
@@ -309,13 +312,13 @@ function mountDemo(root: HTMLElement) {
     const text = demoMenuCopy[interaction.language];
     const response = container.querySelector<HTMLElement>("[data-copy-response]")!;
     response.hidden = interaction.install === null || interaction.copy === "pending" || !includeDecline && interaction.install === false;
-    response.textContent = interaction.install ? text.installNext : text.installLater;
+    setText(response, interaction.install ? text.installNext : text.installLater);
     const status = container.querySelector<HTMLElement>("[data-copy-status]")!;
     status.hidden = interaction.install !== true;
-    status.textContent = interaction.copy === "pending" ? text.copyPending : interaction.copy === "copied" ? text.copied : text.copyDenied;
+    setText(status, interaction.copy === "pending" ? text.copyPending : interaction.copy === "copied" ? text.copied : text.copyDenied);
     const fallback = container.querySelector<HTMLElement>("[data-copy-phrase]")!;
     fallback.hidden = interaction.copy !== "denied";
-    fallback.textContent = copiedPhrase || (interaction.language === "ru" ? endCta.dataset.copyRu! : endCta.dataset.copyEn!);
+    setText(fallback, copiedPhrase || (interaction.language === "ru" ? endCta.dataset.copyRu! : endCta.dataset.copyEn!));
   }
   function renderInstall() {
     const complete = state.frame >= DEMO_FRAMES;
@@ -324,7 +327,7 @@ function mountDemo(root: HTMLElement) {
     const text = demoMenuCopy[interaction.language];
     const installPhrase = interaction.language === "ru" ? endCta.dataset.copyRu! : endCta.dataset.copyEn!;
     const menuInstall = get<HTMLButtonElement>("button[data-menu-install]");
-    menuInstall.textContent = text.installIva;
+    setText(menuInstall, text.installIva);
     menuInstall.dataset.copy = installPhrase;
     menuInstall.disabled = interaction.copy === "pending";
     renderCopyFeedback(menuEntry, false);
@@ -333,9 +336,9 @@ function mountDemo(root: HTMLElement) {
     if (!complete) return;
     const yes = get<HTMLButtonElement>('button[data-install-choice="yes"]');
     const no = get<HTMLButtonElement>('button[data-install-choice="no"]');
-    get("[data-install-question]").textContent = text.install;
-    yes.textContent = text.yes; yes.dataset.copy = installPhrase;
-    no.textContent = text.no;
+    setText(get("[data-install-question]"), text.install);
+    setText(yes, text.yes); yes.dataset.copy = installPhrase;
+    setText(no, text.no);
     get("[data-install-buttons]").hidden = interaction.install !== null;
     renderCopyFeedback(endCta, true);
   }
