@@ -10,6 +10,8 @@ function isTelegramRawMessage(value: unknown): value is TelegramRawMessage {
 export const TELEGRAM_QUEUE_RECEIPT_FIELD = "iva_durable_queue_receipt";
 // Тап по кнопке модели: слив очереди Bridge отдаёт его отдельным ходом (scripts/poller/control.ts).
 export const TELEGRAM_BUTTON_TAP_FIELD = "iva_button_tap";
+// Архивная проекция тапа; text сохраняет полный контекст для хода модели.
+export const TELEGRAM_BUTTON_TAP_DAILY_TEXT_FIELD = "iva_button_tap_daily_text";
 
 // Конверт Bot API `Message`: поля маршрутизации, авторства, времени, ответа и
 // оформления — те, что никогда не несут пользовательского содержимого, — плюс наши
@@ -62,6 +64,7 @@ export const TELEGRAM_MESSAGE_ENVELOPE_KEYS: ReadonlySet<string> = new Set([
   "iva_buffered",
   TELEGRAM_QUEUE_RECEIPT_FIELD,
   TELEGRAM_BUTTON_TAP_FIELD,
+  TELEGRAM_BUTTON_TAP_DAILY_TEXT_FIELD,
 ]);
 
 // Текстовая проекция Message. Конверт её не судит: содержательность текста решает

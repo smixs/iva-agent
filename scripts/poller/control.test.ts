@@ -11,7 +11,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import fc from "fast-check";
-import { TELEGRAM_BUTTON_TAP_FIELD } from "#lib/telegram-parts.ts";
+import {
+  TELEGRAM_BUTTON_TAP_FIELD,
+  TELEGRAM_BUTTON_TAP_DAILY_TEXT_FIELD,
+} from "#lib/telegram-parts.ts";
 
 type Event = string | [string, string, number | undefined, string | undefined];
 type CaptureMessage = { message_id?: number };
@@ -862,6 +865,8 @@ test("тап по кнопке модели уходит дальше обычн
     text: "Отложи на час\n\n(кнопка под сообщением Ивы: «Напомнить?»)",
     // Пометка тапа: слив очереди отдаёт его отдельным ходом, не склеивая с соседями.
     [TELEGRAM_BUTTON_TAP_FIELD]: true,
+    [TELEGRAM_BUTTON_TAP_DAILY_TEXT_FIELD]:
+      "Отложи на час\n\n(кнопка под сообщением Ивы: «Напомнить?»)",
   });
 });
 

@@ -18,6 +18,8 @@ import {
 } from "./telegram-media.ts";
 import {
   contentKeyNames,
+  TELEGRAM_BUTTON_TAP_FIELD,
+  TELEGRAM_BUTTON_TAP_DAILY_TEXT_FIELD,
   mediaFromRaw,
   messageParts,
   TELEGRAM_MESSAGE_ENVELOPE_KEYS as envelope,
@@ -489,17 +491,30 @@ type CarrierTextEntries = {
   readonly flagged: boolean;
 };
 
+function dailyMessageText(text: string, raw: TelegramRawMessage): string {
+  const tapDailyText = raw[TELEGRAM_BUTTON_TAP_DAILY_TEXT_FIELD];
+  return raw[TELEGRAM_BUTTON_TAP_FIELD] === true &&
+    typeof tapDailyText === "string"
+    ? tapDailyText
+    : text;
+}
+
 // Обычный текст и rich-fallback проходят один архивный и security-путь.
 // Метка пересылки идёт первой строкой: так она одинакова в дневнике и в контексте
 // и переживает усечение гейтом.
 function carrierTextEntries(
   text: string,
   label: string | null,
+  raw: TelegramRawMessage,
 ): CarrierTextEntries {
   const userText = text.trim();
   if (!userText) return { entries: [], flagged: false };
   const labelled = label === null ? userText : `${label}\n${userText}`;
-  const dailyPath = appendDaily("[text]", labelled);
+  const dailyText = dailyMessageText(userText, raw);
+  const dailyPath = appendDaily(
+    "[text]",
+    label === null ? dailyText : `${label}\n${dailyText}`,
+  );
   const sanitized = sanitizeInbound(labelled);
   const flagged = logInboundFindings(sanitized);
   return {
@@ -706,7 +721,7 @@ export async function runTelegramInbound(
     const cmd = cmdText.split(/\s+/)[0].replace(/@\w+$/, "").toLowerCase();
     const rest = cmdText.slice(cmdText.split(/\s+/)[0].length).trim();
     if (cmd === "/task") {
-      appendDaily("[text]", cmdText);
+      appendDaily("[text]", dailyMessageText(cmdText, raw));
       await effects.startTyping();
       return withPre({
         auth: buildAuth(message),
@@ -721,7 +736,7 @@ export async function runTelegramInbound(
       });
     }
     if (cmd === "/tasks") {
-      appendDaily("[text]", cmdText);
+      appendDaily("[text]", dailyMessageText(cmdText, raw));
       await effects.startTyping();
       return withPre({
         auth: buildAuth(message),
@@ -734,7 +749,7 @@ export async function runTelegramInbound(
       });
     }
     if (cmd === "/digest") {
-      appendDaily("[text]", cmdText);
+      appendDaily("[text]", dailyMessageText(cmdText, raw));
       await effects.startTyping();
       return withPre({
         auth: buildAuth(message),
@@ -748,7 +763,11 @@ export async function runTelegramInbound(
   // uploadPolicy "disabled" → message.attachments пуст; берём ВСЁ из raw сами.
   if (singleReading?.rich) {
     await effects.startTyping();
-    const carrier = carrierTextEntries(singleReading.text, forwardLabel(raw));
+    const carrier = carrierTextEntries(
+      singleReading.text,
+      forwardLabel(raw),
+      raw,
+    );
     return withPre({
       auth: buildAuth(message),
       context: [
@@ -778,10 +797,10 @@ export async function runTelegramInbound(
     });
   }
 
-  // 3. Текстовая реплика юзера → daily (verbatim) + inbound security-гейт.
+  // 3. Текст → daily (у тапа — короткая цитата) + полный inbound security-гейт.
   if (partsRaw.length === 1) {
     const label = forwardLabel(raw);
-    const carrier = carrierTextEntries(singleReading?.text ?? "", label);
+    const carrier = carrierTextEntries(singleReading?.text ?? "", label, raw);
 
     await effects.startTyping();
 
@@ -800,7 +819,7 @@ export async function runTelegramInbound(
     const reading = readings[partIndex];
     const label = forwardLabel(partRaw);
     if (reading.rich) {
-      context.push(...carrierTextEntries(reading.text, label).entries);
+      context.push(...carrierTextEntries(reading.text, label, partRaw).entries);
       context.push(...(await richMediaEntries(effects, reading.rich)));
       continue;
     }
@@ -822,7 +841,7 @@ export async function runTelegramInbound(
       await unreadableNote(message, effects, [partRaw], [reading]); // как у одиночного
       continue;
     }
-    const carrier = carrierTextEntries(userText, label);
+    const carrier = carrierTextEntries(userText, label, partRaw);
     const carrierText = carrierReading.text.trim();
     // Пересланная часть не «чистый носитель»: eve донесёт её текст без метки,
     // поэтому помеченную запись отдаём контекстом даже на нулевой части.
