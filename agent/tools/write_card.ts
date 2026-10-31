@@ -98,7 +98,10 @@ const wireInput = z.object({
     .describe(
       "fact: выжимка; truth: необязательная выжимка новой правды, иначе первая фраза; до 500 символов",
     ),
-  tags: z.array(z.string()).optional().describe("fact: до 6 тегов"),
+  tags: z
+    .array(z.string())
+    .optional()
+    .describe("fact: новой Card обязательны 2–5 тегов kebab-case; до 6"),
   aliases: z.array(z.string()).optional().describe("fact: другие написания"),
   source: z.string().optional().describe("fact, truth: откуда факт"),
   reason: z.string().optional().describe("truth: почему меняется истина"),
@@ -128,6 +131,7 @@ const callExamples = {
     type: "note",
     title: "Имя Card",
     text: "Факт одной строкой",
+    tags: ["тема-card", "контекст"],
   },
   truth: {
     operation: "truth",
@@ -328,6 +332,12 @@ function selectFactCard(
     return {
       ok: false,
       error: `Card ${card.path} есть, но не читается; поправь её`,
+    };
+  // schema.json vault требует tags у каждого типа Card: новая Card без них не пишется.
+  if (!found[0] && !input.tags.length)
+    return {
+      ok: false,
+      error: `Новой Card ${card.path} нужны tags: 2–5 тегов kebab-case по смыслу Card.\n${callExample("fact")}\n${inputGuidance}`,
     };
   return { ok: true, card, existing: found.length === 1 };
 }

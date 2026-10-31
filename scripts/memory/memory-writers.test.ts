@@ -877,7 +877,7 @@ const fact = (parts: Record<string, unknown>) => ({
   type: "project",
   title: "Аврора",
   text: "Проект закрыт",
-  tags: [],
+  tags: ["проект"],
   aliases: [],
   ...parts,
 });
@@ -1109,4 +1109,35 @@ void test(`write_card status: последовательности операц�
     ),
     { seed: STATUS_SEED, numRuns: 25 },
   );
+});
+
+void test("write_card: новая Card без tags — отказ без записи, с tags создаётся, существующей tags не нужны", async (t) => {
+  const fx = fixture(t);
+  const before = git(fx.vault, "rev-parse", "HEAD");
+  const bare = await run(
+    fact({ type: "contact", title: "Иванов Иван", tags: [] }),
+  );
+  assert.equal(bare.ok, false);
+  assert.match(bare.error ?? "", /нужны tags/u);
+  assert.match(bare.error ?? "", /Пример формы fact.*"tags"/u);
+  assert.equal(
+    existsSync(join(fx.vault, "cards/contacts/иванов-иван.md")),
+    false,
+  );
+  assert.equal(git(fx.vault, "rev-parse", "HEAD"), before);
+  const tagged = await run(
+    fact({
+      type: "contact",
+      title: "Иванов Иван",
+      tags: ["клиент", "ромашка"],
+    }),
+  );
+  assert.equal(tagged.ok, true, JSON.stringify(tagged));
+  const file = join(fx.vault, "cards/contacts/иванов-иван.md");
+  assert.match(readFileSync(file, "utf8"), /tags: \["клиент","ромашка"\]/u);
+  const more = await run(
+    fact({ type: "contact", title: "Иванов Иван", text: "Ещё факт", tags: [] }),
+  );
+  assert.equal(more.ok, true, JSON.stringify(more));
+  assert.match(readFileSync(file, "utf8"), /Ещё факт/u);
 });
