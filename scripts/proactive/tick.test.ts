@@ -349,6 +349,15 @@ test("an unread chat older than staleMinutes wakes the model once and is deliver
   assert.match(h.prompts[0] ?? "", /Follow the watch skill/u);
   assert.match(h.prompts[0] ?? "", /Return QUIET/u);
   assert.match(h.prompts[0] ?? "", /Do not send anything yourself/u);
+  // Запись в Telegram запрещена, чтение разрешено: «no Telegram tools» модель читала как запрет на чтение.
+  assert.match(
+    h.prompts[0] ?? "",
+    /no Telegram tool that writes \(send, reply, forward, edit, delete, react, mark read\)/u,
+  );
+  assert.match(
+    h.prompts[0] ?? "",
+    /Reading Telegram, mail and calendar with read-only tools is allowed/u,
+  );
   // Кнопки пункта о человеке — дословно: «Я в курсе» мост узнаёт по этим же словам.
   assert.match(
     h.prompts[0] ?? "",

@@ -1255,3 +1255,20 @@ void test("tool deadlines preserve random timeouts, duplicate calls and timer ov
     { seed: 20261020, numRuns: 50 },
   );
 });
+
+// Лиза, 03.11.2026: «no Telegram tools» модель прочла как запрет и на чтение, сводка вышла без чатов.
+// Промпт держит обе половины: запись в Telegram запрещена, чтение через telegram-userbot разрешено.
+void test("reminder prompt forbids Telegram writes and allows Telegram reads", async () => {
+  const { reminderPrompt } = await import("./reminder-turn.ts");
+  const prompt = reminderPrompt({ text: "начало дня" }, (en) => en);
+  assert.match(prompt, /Do not send anything yourself/u);
+  assert.match(
+    prompt,
+    /no Telegram tool that writes \(send, reply, forward, edit, delete, react, mark read\)/u,
+  );
+  assert.match(
+    prompt,
+    /Reading Telegram with the read-only tools of telegram-userbot/u,
+  );
+  assert.doesNotMatch(prompt, /no Telegram tools/u);
+});

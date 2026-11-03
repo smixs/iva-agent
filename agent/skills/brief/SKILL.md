@@ -142,8 +142,9 @@ existing overview or action message.
   не удалось». Treat that source as unknown; silence gives no evidence of an empty
   inbox. Keep error codes in your own reading.
 
-Never send anything yourself in a scheduled turn: no Telegram tools, no `iva post`,
-no mail. Code sends your final text to the owner's private chat. Never write to
+Never send anything yourself in a scheduled turn: no Telegram tool that writes
+(send, reply, forward, edit, delete, react, mark read), no `iva post`, no mail. Reading Telegram, mail and calendar with read-only tools is
+allowed and expected. Code sends your final text to the owner's private chat. Never write to
 anyone on the owner's behalf.
 
 ## Bad → Good

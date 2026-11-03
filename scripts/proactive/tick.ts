@@ -277,7 +277,9 @@ function gated(
 
 /** Как доставляется ответ планового хода — одна фраза на все три хода. */
 const delivery = (tr: Translate) =>
-  "Do not send anything yourself: no Telegram tools, no iva post, no mail; the code sends " +
+  "Do not send anything yourself: no Telegram tool that writes (send, reply, forward, edit, delete, react, mark read), " +
+  "no iva post, no mail. Reading Telegram, " +
+  "mail and calendar with read-only tools is allowed. The code sends " +
   "your final text to the owner's private chat, and a line <!-- iva:next --> starts the next message. " +
   `Write it ${writtenInLanguage(tr)}.`;
 

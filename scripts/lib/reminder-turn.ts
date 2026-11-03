@@ -171,7 +171,9 @@ export function reminderPrompt(
     "and return a bounded status snapshot instead of waiting for the job to finish. " +
     "The answer is never empty. " +
     `Write it ${writtenInLanguage(tr)}. ` +
-    "Do not send anything yourself: no rich messages and no Telegram tools. " +
+    "Do not send anything yourself: no rich messages and no Telegram tool that writes " +
+    "(send, reply, forward, edit, delete, react, mark read). " +
+    "Reading Telegram with the read-only tools of telegram-userbot (history, search, chat list) is allowed. " +
     'Do not set new reminders in this turn (remind {action: "add"} is forbidden); ' +
     "list and remove are allowed."
   );

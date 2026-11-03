@@ -2,6 +2,7 @@
 
 ## [Unreleased]
 
+- 🔧 **Сводки и напоминания снова читают Telegram**: плановый ход и сработавшее напоминание читают чаты через юзербот; отправку, ответ, пересылку, правку, удаление, реакции и отметку о прочтении Ива сама не делает, текст отправляет код. Scheduled turns and fired reminders may read Telegram through the userbot read tools; every Telegram write stays forbidden and the code delivers the final text.
 
 - 🔧 **Дни рождения Google Контактов**: Brief сохраняет полный список, а Brief и Watch отмечают упоминание после подтверждённой доставки соответствующей части. Failed or partial birthday delivery remains eligible within the existing Watch bounds; birthday lists retain every valid contact.
 - 🔧 **Плагины разных установок сохраняют свои службы**: имена служб привязаны к каталогу данных; удаление, синхронизация и обновление одной установки сохраняют службы соседней. Подтверждённые старые службы получают метку владельца без перезапуска. Plugin service names are scoped to the canonical data directory; operations preserve other installations, and proven legacy services receive ownership metadata without restarting.

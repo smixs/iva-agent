@@ -575,7 +575,9 @@ const PROMPT_4F56 =
   "Insight: once a day you may bring the owner one new capability. Follow the insight skill. " +
   "Return QUIET if there is nothing you would stand behind. " +
   'Buttons: data="Поставить <name>" and data="Не надо <name>". ' +
-  "Do not send anything yourself: no Telegram tools, no iva post, no mail; the code sends " +
+  "Do not send anything yourself: no Telegram tool that writes (send, reply, forward, edit, delete, react, mark read), " +
+  "no iva post, no mail. Reading Telegram, " +
+  "mail and calendar with read-only tools is allowed. The code sends " +
   "your final text to the owner's private chat, and a line <!-- iva:next --> starts the next message. " +
   "Write it written in Russian.";
 const FAILURE =
