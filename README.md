@@ -198,7 +198,19 @@ Iva carries eve 0.51.1 sources from vercel/eve in `eve/`, with our changes under
 ## What's New
 
 <details>
-<summary><b>v0.5.8 · 31.10.2026 — expand the latest releases</b></summary>
+<summary><b>v0.5.9 · 03.11.2026 — expand the latest releases</b></summary>
+
+### 03.11.2026
+
+#### v0.5.9
+
+- 🔧 **Briefs and reminders read Telegram again**: scheduled turns and fired reminders read chats through the userbot. Iva still never sends, replies, forwards, edits, deletes, reacts or marks as read on her own.
+- 🔧 **Google Contacts birthdays are complete**: Brief keeps the full list, and a birthday counts as mentioned only after its message is delivered.
+- 🔧 **Plugins of different installations keep their services**: service names are tied to the data folder, so removing, syncing or updating one installation leaves the other's services running.
+- 🔧 **Short button quotes in the daily journal**: a tap keeps the button text and the first quoted line, up to 200 characters.
+- 🔧 **Tool search ranks names first**: literal names beat long descriptions, so Telegram history and the chat list are found again.
+- 🔧 **Iva survives a Claude access rotation**: after an early HTTP 401 she waits for the new access and repeats the call once.
+- 🧠 **The night raises its own limits for long days**: within the configured ceilings it keeps going and retries git with a longer wait; `iva night show|set` shows and changes the limits.
 
 ### 31.10.2026
 
@@ -215,26 +227,13 @@ Iva carries eve 0.51.1 sources from vercel/eve in `eve/`, with our changes under
 - 🧠 **Conflicting events stay dated**: contradictory events about a person remain separate dated facts.
 - 🔧 **Long helper commands wait for results**: helpers set the command timeout to cover the expected duration.
 
-### 24.10.2026
-
-#### v0.5.6
-
-- 🧠 **Long days continue across nights**: Iva saves completed portions and resumes after a connection drop or the night's ceiling. Days paused after three earlier ceiling cuts return to the queue. Your edits to daily summaries are preserved. Thanks to Stas (@stan_is_love) for the feedback.
-- ⏰ **Iva manages scheduled tasks**: ask Iva to add, move, remove or run a reminder or a script. Scripts can run for up to 60 minutes, and failures produce an alert.
-- 🔧 **Helpers take long work**: Iva hands off work needing many steps, gives an estimated return time and runs up to three helpers concurrently. Select the helper model in `/menu`; Watch, Brief and Insight use it too.
-- 📲 **The userbot finds all accounts and downloads large files**: saved accounts and files over 20 MB, including voice messages and audio, work without manual patches.
-- 🔎 **Memory search understands Russian word forms**: names match across cases, and ё and е match each other. Permanent memory accepts your own words; superseded facts are searched when you ask about the past.
-- 🧠 **Iva learns from repeated work**: Insight reviews two weeks of turns and offers to save a repeated procedure as a skill. Iva also offers to follow up when you are waiting on someone or a deadline.
-- 🔧 **An interrupted answer offers a Try again button**: after a restart, Iva quotes your question and offers to send it again. Resend attachments yourself.
-- 🧹 **Automatic compaction starts at 110,000 tokens**: `/compact` is temporarily hidden from the command menu and `/help`.
-
 </details>
 
 Full history — [CHANGELOG.md](CHANGELOG.md).
 
 ## Built on
 
-[eve](https://eve.dev/docs/introduction) 0.51.1-iva.3, Vercel's agent framework, runs the agent; Node 24's built-in SQLite runs the search index — no separate database. Iva grew out of [agent-second-brain](https://github.com/smixs/agent-second-brain) and [autograph](https://github.com/smixs/autograph) — that story is in [docs/memory.md](docs/memory.md).
+[eve](https://eve.dev/docs/introduction) 0.51.1-iva.5, Vercel's agent framework, runs the agent; Node 24's built-in SQLite runs the search index — no separate database. Iva grew out of [agent-second-brain](https://github.com/smixs/agent-second-brain) and [autograph](https://github.com/smixs/autograph) — that story is in [docs/memory.md](docs/memory.md).
 
 ## Thanks
 
