@@ -68,7 +68,11 @@ export type Dialog = {
 
 export type Source = {
   /** Fresh read-only history, including chats whose unread count is now zero. */
-  readonly dialog?: (key: string, now: number) => Promise<Dialog>;
+  readonly dialog?: (
+    key: string,
+    now: number,
+    since?: number,
+  ) => Promise<Dialog>;
   readonly name: string;
   /** Префикс ключей источника в `seen`. */
   readonly prefix: string;
@@ -270,33 +274,41 @@ function telegramMessageTime(row: ChatRecord): number {
 const latestMessage = (rows: readonly { at: number }[]) =>
   rows.length ? Math.max(...rows.map((row) => row.at)) : null;
 
-/** Latest owner/peer times. A full recent page cannot prove owner silence. */
+/** get_history uses message_to_dict (out=true); list_messages omits direction upstream. */
 export async function readDialog(
   call: CallTool,
   key: string,
   now: number,
+  since = now - LIVE_DIALOG_MINUTES * 60_000,
 ): Promise<Dialog> {
   if (!/^tg:-?\d+$/u.test(key)) throw new Error("invalid Telegram chat key");
-  const limit = 100;
-  const parsed = parseJson(
-    await call("list_messages", { chat_id: Number(key.slice(3)), limit }),
-  ) as { results?: unknown } | undefined;
-  if (!Array.isArray(parsed?.results))
-    throw new Error("list_messages answered without results");
-  const messages = (parsed.results as ChatRecord[]).map((row) => ({
-    owner: row?.out === true,
-    at: telegramMessageTime(row),
-  }));
-  const lastOwnerMs = latestMessage(messages.filter((row) => row.owner));
-  const lastPeerMs = latestMessage(messages.filter((row) => !row.owner));
-  const oldest = Math.min(now, ...messages.map((row) => row.at));
-  if (
-    lastOwnerMs === null &&
-    parsed.results.length >= limit &&
-    oldest > now - LIVE_DIALOG_MINUTES * 60_000
-  )
-    throw new Error("Telegram history does not cover the live-dialog window");
-  return { lastOwnerMs, lastPeerMs };
+  for (let limit = 100; Number.isSafeInteger(limit); limit *= 2) {
+    const raw = await call("get_history", {
+      chat_id: Number(key.slice(3)),
+      limit,
+    });
+    const parsed = raw.startsWith("No messages found")
+      ? { results: [] }
+      : (parseJson(raw) as { results?: unknown } | undefined);
+    if (!Array.isArray(parsed?.results))
+      throw new Error("get_history answered without results");
+    const messages = (parsed.results as ChatRecord[]).map((row) => ({
+      owner: row?.out === true,
+      at: telegramMessageTime(row),
+    }));
+    const dialog = {
+      lastOwnerMs: latestMessage(messages.filter((row) => row.owner)),
+      lastPeerMs: latestMessage(messages.filter((row) => !row.owner)),
+    };
+    const oldest = Math.min(now, ...messages.map((row) => row.at));
+    if (
+      dialog.lastOwnerMs !== null ||
+      messages.length < limit ||
+      oldest <= since
+    )
+      return dialog;
+  }
+  throw new Error("Telegram history does not cover the required interval");
 }
 
 /** Личные чаты и группы с упоминаниями; нет токена прокси — не подключён. */
@@ -337,10 +349,10 @@ export function telegramSource(
     name: "telegram",
     prefix: "tg:",
     check,
-    dialog: async (key, now) => {
+    dialog: async (key, now, since) => {
       const call = connect();
       if (!call) throw new Error("Telegram history is not connected");
-      return readDialog(call, key, now);
+      return readDialog(call, key, now, since);
     },
   };
 }

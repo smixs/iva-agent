@@ -5,7 +5,8 @@
 // состояние; битый, нечитаемый, чужой формат или версия новее — ошибка без переименования,
 // файл остаётся на месте до починки (loadJsonStrict переименовал бы его, а следующий прогон
 // принял бы всё непрочитанное за новое). Запись — целым объектом через saveJsonAtomic.
-import { readFileSync } from "node:fs";
+import { readFileSync, unlinkSync } from "node:fs";
+import { writeFileAtomicSync } from "#lib/fs-atomic.ts";
 import { saveJsonAtomic } from "#lib/json-store.ts";
 import { zonedParts } from "#lib/zoned-time.ts";
 
@@ -39,11 +40,13 @@ type WatchSignal = {
   readonly messageIds: readonly number[];
   readonly deliveredAtMs: number;
   readonly status: "delivered" | "closing" | "closed";
+  readonly closeText?: string;
 };
 
 export type ProactiveState = {
   /** Optional in v1: older versions ignore this field on rollback. */
   readonly signals?: Readonly<Record<string, WatchSignal>>;
+  readonly receiptCursor?: number;
   readonly schemaVersion: number;
   readonly seen: Readonly<Record<string, SeenEntry>>;
   readonly wakes: DayCount;
@@ -124,6 +127,7 @@ function isSignals(value: unknown): boolean {
       entry.messageIds.every((id) => isCount(id) && id > 0) &&
       typeof entry.deliveredAtMs === "number" &&
       Number.isFinite(entry.deliveredAtMs) &&
+      (entry.closeText === undefined || typeof entry.closeText === "string") &&
       ["delivered", "closing", "closed"].includes(String(entry.status))
     );
   });
@@ -133,6 +137,7 @@ function isState(value: Record<string, unknown>): boolean {
   return (
     isObject(value.seen) &&
     isSignals(value.signals) &&
+    (value.receiptCursor === undefined || isCount(value.receiptCursor)) &&
     isDayCount(value.wakes) &&
     isDayCount(value.modelWakes) &&
     isBriefDone(value.briefDone) &&
@@ -171,7 +176,7 @@ export function readProactiveState(path: string): ProactiveState | null {
       return false;
     }),
   );
-  return { ...state, seen };
+  return recoverSignalReceipts(path, { ...state, seen });
 }
 
 export async function writeProactiveState(
@@ -179,6 +184,85 @@ export async function writeProactiveState(
   state: ProactiveState,
 ): Promise<void> {
   await saveJsonAtomic(path, state, { mode: 0o600 });
+  if (state.receiptCursor === undefined) return;
+  const receipts = readReceipts(path);
+  if (receipts.some((receipt) => receipt.seq > state.receiptCursor!)) return;
+  try {
+    unlinkSync(`${path}.receipts`);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+}
+
+type Receipt = { seq: number; key: string; id: number; at: number };
+function readReceipts(path: string): Receipt[] {
+  let text: string;
+  try {
+    text = readFileSync(`${path}.receipts`, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  }
+  const records: unknown = JSON.parse(text);
+  if (!Array.isArray(records))
+    throw new ProactiveStateError(`${path}: invalid receipt journal`);
+  return records.map((r: Receipt) => {
+    if (
+      !isCount(r.seq) ||
+      !isCount(r.id) ||
+      r.id === 0 ||
+      !/^tg:-?\d+$/u.test(r.key) ||
+      !Number.isFinite(r.at)
+    )
+      throw new ProactiveStateError(`${path}: invalid signal receipt`);
+    return r;
+  });
+}
+
+/** Synchronous durable receipt: success is exposed to Outbox only after atomic write+fsync. */
+export function recordSignalReceipt(
+  path: string,
+  key: string,
+  id: number,
+  at: number,
+): void {
+  const receipts = readReceipts(path);
+  if (receipts.some((receipt) => receipt.key === key && receipt.id === id))
+    return;
+  const stateCursor = readProactiveState(path)?.receiptCursor ?? 0;
+  const seq =
+    Math.max(stateCursor, ...receipts.map((receipt) => receipt.seq)) + 1;
+  writeFileAtomicSync(
+    `${path}.receipts`,
+    JSON.stringify([...receipts, { seq, key, id, at }]),
+    { mode: 0o600 },
+  );
+}
+
+/** Replay receipts newer than the durable projection; old receipts never reopen a signal. */
+export function recoverSignalReceipts(
+  path: string,
+  state: ProactiveState,
+): ProactiveState {
+  let current = state;
+  for (const receipt of readReceipts(path)) {
+    if (receipt.seq <= (current.receiptCursor ?? 0)) continue;
+    const previous = current.signals?.[receipt.key];
+    const ids = previous?.status === "delivered" ? previous.messageIds : [];
+    current = {
+      ...current,
+      receiptCursor: receipt.seq,
+      signals: {
+        ...current.signals,
+        [receipt.key]: {
+          messageIds: [...new Set([...ids, receipt.id])],
+          deliveredAtMs: receipt.at,
+          status: "delivered",
+        },
+      },
+    };
+  }
+  return current;
 }
 
 /** День владельца (`YYYY-MM-DD`), час и минута в его зоне. */

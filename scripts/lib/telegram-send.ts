@@ -37,6 +37,10 @@ type PostAck = OutboxAck & {
 };
 
 export type TelegramSendOptions = {
+  /** Watch checks fresh state before every actual POST, including retries/fallback chunks. */
+  readonly beforeAttempt?: () => Promise<boolean>;
+  /** Persist the received ID before this delivery is acknowledged by Outbox. */
+  readonly onAcknowledged?: (messageId: number) => void;
   readonly caption?: boolean;
   readonly retryTransient?: boolean;
   /** Тема форума (message_thread_id), когда сообщение идёт в тему группы. */
@@ -149,35 +153,60 @@ async function post(
 }
 
 async function postWithTransientRetry(
-  bot: string,
-  method: string,
-  body: TelegramRequest,
-  fetchImpl: FetchImpl,
+  attempt: () => Promise<PostAck>,
   sleep: Sleep,
 ): Promise<PostAck> {
-  for (let attempt = 1; ; attempt++) {
-    const ack = await post(bot, method, body, fetchImpl);
-    if (ack.ok || !ack.retryable || attempt >= MAX_ATTEMPTS) return ack;
-    const retryMs =
-      ack.retryAfterMs ?? Math.min(MAX_RETRY_MS, 1000 * 2 ** (attempt - 1));
-    await sleep(retryMs);
+  for (let number = 1; ; number++) {
+    const ack = await attempt();
+    if (ack.ok || !ack.retryable || number >= MAX_ATTEMPTS) return ack;
+    await sleep(
+      ack.retryAfterMs ?? Math.min(MAX_RETRY_MS, 1000 * 2 ** (number - 1)),
+    );
   }
 }
 
-// Один вызов Bot API для всех методов шва: sendMessage у HTML-пути, sendRichMessage
-// у rich-поста. Повторы транзиентных отказов включает вызывающий.
 type SendPost = (method: string, body: TelegramRequest) => Promise<PostAck>;
-
 function poster(
   bot: string,
   retryTransient: boolean,
-  fetchImpl: FetchImpl,
-  sleep: Sleep,
+  options: {
+    fetchImpl: FetchImpl;
+    sleep: Sleep;
+    beforeAttempt?: TelegramSendOptions["beforeAttempt"];
+    onAcknowledged?: TelegramSendOptions["onAcknowledged"];
+  },
 ): SendPost {
-  return retryTransient
-    ? (method, body) =>
-        postWithTransientRetry(bot, method, body, fetchImpl, sleep)
-    : (method, body) => post(bot, method, body, fetchImpl);
+  let stopError = "";
+  const attempt: SendPost = async (method, body) => {
+    if (stopError)
+      return { ok: false, error: stopError, retryPlain: false, stop: true };
+    if (options.beforeAttempt && !(await options.beforeAttempt()))
+      return {
+        ok: false,
+        error: "delivery admission changed",
+        retryPlain: false,
+        stop: true,
+      };
+    const ack = await post(bot, method, body, options.fetchImpl);
+    if (ack.ok && ack.messageId !== undefined && options.onAcknowledged) {
+      try {
+        options.onAcknowledged(ack.messageId);
+      } catch (error) {
+        stopError = `receipt not durable: ${errorMessage(error)}`;
+        return {
+          ok: false,
+          error: stopError,
+          retryPlain: false,
+          stop: true,
+        };
+      }
+    }
+    return ack;
+  };
+  return (method, body) =>
+    retryTransient
+      ? postWithTransientRetry(() => attempt(method, body), options.sleep)
+      : attempt(method, body);
 }
 
 // Ночной отчёт — цельный документ, а не диалог: если Telegram отказал не по разметке
@@ -244,6 +273,8 @@ export async function sendTelegramHtml(
     fetchImpl = fetch,
     trace,
     rich,
+    beforeAttempt,
+    onAcknowledged,
   }: TelegramSendOptions = {},
 ): Promise<{
   ok: boolean;
@@ -256,7 +287,12 @@ export async function sendTelegramHtml(
       ? parseTelegramDelivery(md)
       : { text: md, silent: false };
   const messageIds: number[] = [];
-  const sendPost = poster(bot, retryTransient, fetchImpl, sleep);
+  const sendPost = poster(bot, retryTransient, {
+    fetchImpl,
+    sleep,
+    beforeAttempt,
+    onAcknowledged,
+  });
   const transport = messageTransport(
     chat,
     async (method, body) => {
@@ -324,7 +360,7 @@ export async function sendTelegramRich(
     trace,
   }: TelegramRichOptions = {},
 ): Promise<{ ok: boolean; fellBack: boolean; error: string }> {
-  const sendPost = poster(bot, retryTransient, fetchImpl, sleep);
+  const sendPost = poster(bot, retryTransient, { fetchImpl, sleep });
   const extra: TelegramRequest = {
     ...(silent ? { disable_notification: true } : {}),
     ...(threadId ? { message_thread_id: threadId } : {}),
@@ -392,10 +428,7 @@ export async function sendTelegramScreen(
   const payload = screenPayload(redactNotice(markdown));
   const method = "rich_message" in payload ? "sendRichMessage" : "sendMessage";
   const ack = await postWithTransientRetry(
-    bot,
-    method,
-    { chat_id: chat, ...payload },
-    fetchImpl,
+    () => post(bot, method, { chat_id: chat, ...payload }, fetchImpl),
     sleep,
   );
   return { ok: ack.ok, error: ack.ok ? "" : ack.error };
@@ -420,7 +453,8 @@ export async function closeTelegramWatchSignal(
       },
       fetchImpl,
     );
-    if (!ack.ok) return { ok: false, error: ack.error };
+    if (!ack.ok && !/message is not modified/iu.test(ack.error))
+      return { ok: false, error: ack.error };
   }
   return { ok: true, error: "" };
 }

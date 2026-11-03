@@ -159,7 +159,7 @@ Older CLI versions lack these ownership checks, including during a rollback.
 
 Watch stays quiet in a Telegram chat for 15 minutes after your latest outgoing message,
 including urgent senders. It checks the conversation before waking the model and again before
-delivery. Waiting time starts at your latest message; an earlier incoming question counts
+each HTTP attempt, including retries and split deliveries. Waiting time starts at your latest message; an earlier incoming question counts
 as answered. After you reply following a Watch notice, the next tick replaces that notice
 with “✅ replied at HH:MM” in your time zone and removes its buttons. The recorded message
 IDs also cover split deliveries. A conversation read that cannot establish the window leaves that chat
@@ -167,5 +167,6 @@ quiet for the tick.
 
 Existing `proactive.json` files upgrade in place: the optional `signals` field keeps schema
 version 1; older Iva versions ignore it on rollback. Notices sent by older versions have no
-recorded IDs and keep their previous behavior. A lost edit acknowledgement is retained as
-`closing` and reported as a failed tick for diagnosis; automatic replay is suppressed.
+recorded IDs and keep their previous behavior. A `closing` entry freezes the exact edit text. The next tick repeats that idempotent edit against the same IDs; Telegram’s “message is not modified” response confirms completion with one external effect.
+
+A received ID is atomically written and fsynced to `proactive.json.receipts` before Outbox acknowledges delivery. The next tick replays the receipt if the main state write failed; `receiptCursor` prevents old receipts from reopening a closed notice. A successful state projection removes the journal. Closing reads enough conversation messages to cover the interval since the notice; 100 is the initial fetch size, followed by larger reads when required.

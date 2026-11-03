@@ -52,6 +52,7 @@ import { resolveStopAt } from "../lib/rollup-turn.ts";
 import {
   closeTelegramWatchSignal,
   sendTelegramHtml,
+  type TelegramSendOptions,
 } from "../lib/telegram-send.ts";
 import { isEntrypoint } from "../lib/version-layout.ts";
 import {
@@ -77,6 +78,8 @@ import {
   initialState,
   localDay,
   readProactiveState,
+  recordSignalReceipt,
+  recoverSignalReceipts,
   updateSeen,
   writeProactiveState,
   type ProactiveState,
@@ -121,6 +124,7 @@ export type TickDeps = {
   readonly send: (
     part: string,
     source: "watch" | "brief" | "insight",
+    options?: Pick<TelegramSendOptions, "beforeAttempt" | "onAcknowledged">,
   ) => Promise<{ ok: boolean; error: string; messageIds?: readonly number[] }>;
   readonly translate: () => Promise<Translate>;
   /** Отметка дросселя Alert для сбоя, доставленного владельцу (T3); false — не записалась. */
@@ -445,6 +449,29 @@ async function liveCandidates(
   return result;
 }
 
+async function closeTextFor(
+  deps: TickDeps,
+  {
+    key,
+    signal,
+    now,
+  }: {
+    key: string;
+    signal: NonNullable<ProactiveState["signals"]>[string];
+    now: number;
+  },
+): Promise<string | null> {
+  if (signal.closeText !== undefined) return signal.closeText;
+  const source = dialogSource(deps, key);
+  if (!source?.dialog) throw new Error("Telegram dialog is not connected");
+  const dialog = await source.dialog(key, now, signal.deliveredAtMs);
+  if (dialog.lastOwnerMs === null || dialog.lastOwnerMs <= signal.deliveredAtMs)
+    return null;
+  const clock = localDay(dialog.lastOwnerMs, deps.timeZone);
+  const time = `${String(clock.hour).padStart(2, "0")}:${String(clock.minute).padStart(2, "0")}`;
+  return watchAnswered(await deps.translate(), time);
+}
+
 async function closeOneSignal(
   deps: TickDeps,
   state: ProactiveState,
@@ -461,25 +488,17 @@ async function closeOneSignal(
 ): Promise<{ state: ProactiveState; failed: boolean }> {
   let current = state;
   let failed = false;
-  const source = dialogSource(deps, key);
-  if (!source?.dialog || !deps.closeSignal) return { state, failed: true };
+  if (!deps.closeSignal) return { state, failed: true };
   try {
-    const dialog = await source.dialog(key, now);
-    if (
-      dialog.lastOwnerMs === null ||
-      dialog.lastOwnerMs <= signal.deliveredAtMs
-    )
-      return { state: current, failed };
-    const clock = localDay(dialog.lastOwnerMs, deps.timeZone);
-    const time = `${String(clock.hour).padStart(2, "0")}:${String(clock.minute).padStart(2, "0")}`;
-    const text = watchAnswered(await deps.translate(), time);
-    // Durable at-most-once claim: crash/unknown outcome stays closing for diagnosis.
+    const text = await closeTextFor(deps, { key, signal, now });
+    if (text === null) return { state: current, failed };
+    // Freeze the exact idempotent edit before HTTP; a lost ack replays this same payload.
     const previous = current;
     current = {
       ...current,
       signals: {
         ...current.signals,
-        [key]: { ...signal, status: "closing" },
+        [key]: { ...signal, closeText: text, status: "closing" },
       },
     };
     if (!(await save(deps, current, "signal close claim", log))) {
@@ -516,11 +535,6 @@ async function closeSignals(
   let failed = false;
   for (const [key, signal] of Object.entries(state.signals ?? {})) {
     if (signal.status === "closed") continue;
-    if (signal.status === "closing") {
-      log(`proactive: ${key} close outcome uncertain`);
-      failed = true;
-      continue;
-    }
     const result = await closeOneSignal(
       deps,
       current,
@@ -756,24 +770,16 @@ function signalDelivery(
     const ids = ack.messageIds;
     if (!validMessageIds(ids)) {
       log(`proactive: ${key} signal delivery has no message_id`);
-      return !ack.ok;
+      return !ack.ok && !ack.error.startsWith("receipt not durable:");
     }
-    const next = {
-      ...current.state,
-      signals: {
-        ...current.state.signals,
-        [key]: {
-          messageIds: [
-            ...(current.state.signals?.[key]?.status === "delivered"
-              ? current.state.signals[key].messageIds
-              : []),
-            ...ids,
-          ],
-          deliveredAtMs: deps.now?.() ?? now,
-          status: "delivered" as const,
-        },
-      },
-    };
+    try {
+      for (const id of ids)
+        recordSignalReceipt(deps.statePath, key, id, deps.now?.() ?? now);
+    } catch (error) {
+      log(`proactive: receipt not durable: ${message(error)}`);
+      return false;
+    }
+    const next = recoverSignalReceipts(deps.statePath, current.state);
     if (!(await save(deps, next, "signal delivery", log))) return false;
     current.state = next;
     return true;
@@ -806,7 +812,18 @@ async function wake(
     const live = await liveCandidates(deps, items, deps.now?.() ?? now, log);
     if (live.length !== items.length)
       return { ok: false, error: "dialog changed before delivery" };
-    return deps.send(text, "watch");
+    const key = part?.itemKey;
+    return deps.send(text, "watch", {
+      beforeAttempt: async () =>
+        (await liveCandidates(deps, items, deps.now?.() ?? now, log)).length ===
+        items.length,
+      ...(key && dialogSource(deps, key)
+        ? {
+            onAcknowledged: (id: number) =>
+              recordSignalReceipt(deps.statePath, key, id, deps.now?.() ?? now),
+          }
+        : {}),
+    });
   };
   const filtered = await unreadParts(
     deps,
@@ -1542,8 +1559,9 @@ export async function main(
       runTurn: async (prompt, kind, signal) =>
         runReminderTurn(prompt, reminderClientOptions(env, kind), { signal }),
       signal: runDeadline(env[JOB_STOP_AT_ENV]),
-      send: (part, source) =>
+      send: (part, source, options) =>
         sendTelegramHtml(token, chat, part, {
+          ...options,
           retryTransient: true,
           rich: true,
           trace: { source },

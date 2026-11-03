@@ -757,19 +757,22 @@ test("live-dialog read recognizes out=true, dates and owner direction", async ()
     lastPeerMs: now - 60_000,
     lastOwnerMs: now - 300_000,
   });
-  assert.deepEqual(calls, [["list_messages", { chat_id: 123, limit: 100 }]]);
+  assert.deepEqual(calls, [["get_history", { chat_id: 123, limit: 100 }]]);
   await assert.rejects(
     readDialog(
-      async () =>
-        results(
+      async (_name, args) => {
+        if (args.limit !== 100)
+          throw new Error("offline during history expansion");
+        return results(
           Array.from({ length: 100 }, () => ({
             date: new Date(now).toISOString(),
           })),
-        ),
+        );
+      },
       "tg:123",
       now,
     ),
-    /does not cover/,
+    /offline during history expansion/,
   );
   await assert.rejects(
     readDialog(async () => results([{ out: true }]), "tg:123", now),

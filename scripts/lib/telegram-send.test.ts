@@ -743,3 +743,29 @@ void test("Watch close uses editMessageText with empty inline keyboard", async (
     reply_markup: { inline_keyboard: [] },
   });
 });
+
+void test("Watch receipt failure stops fallback and exposes delivery failure", async () => {
+  const { sendTelegramHtml } = await import("./telegram-send.ts");
+  let calls = 0;
+  const ack = await sendTelegramHtml(
+    "fixture",
+    "owner",
+    '<tg-button data="ok">ok</tg-button>',
+    {
+      rich: true,
+      retryTransient: true,
+      onAcknowledged: () => {
+        throw new Error("disk full");
+      },
+      fetchImpl: async () => {
+        calls++;
+        return new Response(
+          JSON.stringify({ ok: true, result: { message_id: 91 } }),
+        );
+      },
+    },
+  );
+  assert.equal(ack.ok, false);
+  assert.equal(calls, 1);
+  assert.match(ack.error, /receipt not durable/);
+});

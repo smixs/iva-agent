@@ -1394,7 +1394,7 @@ test("Telegram metadata reaches the Watch turn through precheck and candidate se
                   ]
                 : [],
           });
-        if (name === "list_messages")
+        if (name === "list_messages" || name === "get_history")
           return JSON.stringify({
             results: [
               {
