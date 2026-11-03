@@ -705,3 +705,109 @@ void test("sendTelegramScreen reports a refusal instead of falling back to text 
   assert.equal(result.ok, false);
   assert.match(result.error, /^400/u);
 });
+
+/* eslint-disable @typescript-eslint/require-await -- Async transport fixtures return deterministic acknowledgements. */
+void test("Watch cron Outbox retains every Telegram message_id, including fallback chunks", async () => {
+  const { sendTelegramHtml } = await import("./telegram-send.ts");
+  let id = 10;
+  const ack = await sendTelegramHtml("fixture", "owner", "a".repeat(5000), {
+    fetchImpl: async () =>
+      new Response(JSON.stringify({ ok: true, result: { message_id: ++id } })),
+  });
+  assert.equal(ack.ok, true);
+  assert.deepEqual(ack.messageIds, [11, 12]);
+});
+
+void test("Watch close uses editMessageText with empty inline keyboard", async () => {
+  const { closeTelegramWatchSignal } = await import("./telegram-send.ts");
+  const requests: CapturedRequest[] = [];
+  const ack = await closeTelegramWatchSignal(
+    "fixture",
+    "owner",
+    { messageIds: [123], text: "✅ ответил в 15:02" },
+    {
+      fetchImpl: async (url, options) => {
+        requests.push(captureRequest(url, options));
+        return new Response(
+          JSON.stringify({ ok: true, result: { message_id: 123 } }),
+        );
+      },
+    },
+  );
+  assert.equal(ack.ok, true);
+  assert.ok(requests[0].url.endsWith("/editMessageText"));
+  assert.deepEqual(requests[0].body, {
+    chat_id: "owner",
+    message_id: 123,
+    text: "✅ ответил в 15:02",
+    reply_markup: { inline_keyboard: [] },
+  });
+});
+
+void test("Watch receipt failure stops fallback and exposes delivery failure", async () => {
+  const { sendTelegramHtml } = await import("./telegram-send.ts");
+  let calls = 0;
+  const ack = await sendTelegramHtml(
+    "fixture",
+    "owner",
+    '<tg-button data="ok">ok</tg-button>',
+    {
+      rich: true,
+      retryTransient: true,
+      onAcknowledged: () => {
+        throw new Error("disk full");
+      },
+      fetchImpl: async () => {
+        calls++;
+        return new Response(
+          JSON.stringify({ ok: true, result: { message_id: 91 } }),
+        );
+      },
+    },
+  );
+  assert.equal(ack.ok, false);
+  assert.equal(calls, 1);
+  assert.match(ack.error, /receipt not durable/);
+});
+
+void test("I5 UNKNOWN Watch send never retries or falls back before a durable receipt", async () => {
+  const { sendTelegramHtml } = await import("./telegram-send.ts");
+  for (const mode of ["network", "body", "missing-id", "503", "408"] as const) {
+    for (const rich of [false, true]) {
+      let calls = 0;
+      let receipts = 0;
+      let sleeps = 0;
+      const ack = await sendTelegramHtml(
+        "fixture",
+        "owner",
+        "Question\n".repeat(1000),
+        {
+          rich,
+          retryTransient: true,
+          onAcknowledged: () => {
+            receipts++;
+          },
+          sleep: async () => {
+            sleeps++;
+          },
+          fetchImpl: async () => {
+            calls++;
+            if (mode === "network") throw new Error("response lost after send");
+            if (mode === "body") return new Response("invalid success body");
+            if (mode === "missing-id")
+              return new Response(JSON.stringify({ ok: true, result: {} }));
+            return new Response("ambiguous server outcome", {
+              status: Number(mode),
+            });
+          },
+        },
+      );
+      assert.equal(ack.ok, false, mode);
+      assert.equal(calls, 1, `${mode}: no retry, fallback or next chunk`);
+      assert.equal(sleeps, 0, mode);
+      assert.equal(receipts, 0, mode);
+      assert.match(ack.error, /delivery outcome unknown:/, mode);
+      assert.equal(ack.messageIds, undefined, mode);
+    }
+  }
+});

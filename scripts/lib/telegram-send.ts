@@ -11,6 +11,8 @@
 //     ненулевым кодом, а оставшиеся чанки Telegram не получает;
 //   • retryTransient=true даёт каждому HTML/plain-вызову до трёх попыток при сети,
 //     5xx, 408, 425 и 429; по умолчанию повторов нет;
+//     Watch с onAcknowledged останавливается при UNKNOWN (сеть/5xx/408/нет ID),
+//     до durable receipt повторять неопределённую отправку запрещено;
 //   • пустой отчёт — тоже ok=false: слать нечего, и молчать об этом нельзя;
 //   • НИКОГДА не бросает — на любую ошибку возвращает { ok:false, error }.
 // Возвращает { ok, fellBack, error } — вызывающий cron-скрипт по fellBack даёт агенту
@@ -31,11 +33,17 @@ type FetchImpl = typeof fetch;
 type Sleep = (ms: number) => Promise<void>;
 
 type PostAck = OutboxAck & {
+  readonly messageId?: number;
   readonly retryable?: boolean;
   readonly retryAfterMs?: number;
+  readonly outcomeUnknown?: boolean;
 };
 
 export type TelegramSendOptions = {
+  /** Watch checks fresh state before every actual POST, including retries/fallback chunks. */
+  readonly beforeAttempt?: () => Promise<boolean>;
+  /** Persist the received ID before this delivery is acknowledged by Outbox. */
+  readonly onAcknowledged?: (messageId: number) => void;
   readonly caption?: boolean;
   readonly retryTransient?: boolean;
   /** Тема форума (message_thread_id), когда сообщение идёт в тему группы. */
@@ -115,7 +123,17 @@ async function post(
         body: JSON.stringify(body),
       },
     );
-    if (res.ok) return { ok: true };
+    if (res.ok) {
+      const parsed: unknown = await res.json?.().catch(() => null);
+      const id = (parsed as { result?: { message_id?: unknown } } | null)
+        ?.result?.message_id;
+      return {
+        ok: true,
+        ...(Number.isSafeInteger(id) && (id as number) > 0
+          ? { messageId: id as number }
+          : {}),
+      };
+    }
     const text = await res.text();
     // 400 = Telegram не распарсил HTML: единственный статус, где повтор без тегов помогает.
     return {
@@ -123,6 +141,7 @@ async function post(
       error: `${res.status}: ${text}`,
       retryPlain: res.status === 400,
       retryable: classifyDeliverStatus(res.status) === "retry",
+      outcomeUnknown: res.status >= 500 || res.status === 408,
       ...(res.status === 429
         ? { retryAfterMs: telegramRetryAfterMs(text) }
         : {}),
@@ -133,40 +152,73 @@ async function post(
       error: errorMessage(e),
       retryPlain: false,
       retryable: true,
+      outcomeUnknown: true,
     };
   }
 }
 
 async function postWithTransientRetry(
-  bot: string,
-  method: string,
-  body: TelegramRequest,
-  fetchImpl: FetchImpl,
+  attempt: () => Promise<PostAck>,
   sleep: Sleep,
 ): Promise<PostAck> {
-  for (let attempt = 1; ; attempt++) {
-    const ack = await post(bot, method, body, fetchImpl);
-    if (ack.ok || !ack.retryable || attempt >= MAX_ATTEMPTS) return ack;
-    const retryMs =
-      ack.retryAfterMs ?? Math.min(MAX_RETRY_MS, 1000 * 2 ** (attempt - 1));
-    await sleep(retryMs);
+  for (let number = 1; ; number++) {
+    const ack = await attempt();
+    if (ack.ok || !ack.retryable || number >= MAX_ATTEMPTS) return ack;
+    await sleep(
+      ack.retryAfterMs ?? Math.min(MAX_RETRY_MS, 1000 * 2 ** (number - 1)),
+    );
   }
 }
 
-// Один вызов Bot API для всех методов шва: sendMessage у HTML-пути, sendRichMessage
-// у rich-поста. Повторы транзиентных отказов включает вызывающий.
 type SendPost = (method: string, body: TelegramRequest) => Promise<PostAck>;
-
 function poster(
   bot: string,
   retryTransient: boolean,
-  fetchImpl: FetchImpl,
-  sleep: Sleep,
+  options: {
+    fetchImpl: FetchImpl;
+    sleep: Sleep;
+    beforeAttempt?: TelegramSendOptions["beforeAttempt"];
+    onAcknowledged?: TelegramSendOptions["onAcknowledged"];
+  },
 ): SendPost {
-  return retryTransient
-    ? (method, body) =>
-        postWithTransientRetry(bot, method, body, fetchImpl, sleep)
-    : (method, body) => post(bot, method, body, fetchImpl);
+  let stopError = "";
+  const attempt: SendPost = async (method, body) => {
+    if (stopError)
+      return { ok: false, error: stopError, retryPlain: false, stop: true };
+    if (options.beforeAttempt && !(await options.beforeAttempt()))
+      return {
+        ok: false,
+        error: "delivery admission changed",
+        retryPlain: false,
+        stop: true,
+      };
+    const ack = await post(bot, method, body, options.fetchImpl);
+    if (
+      options.onAcknowledged &&
+      (ack.ok ? ack.messageId === undefined : ack.outcomeUnknown)
+    ) {
+      stopError = `delivery outcome unknown: ${ack.ok ? "missing message_id" : ack.error}`;
+      return { ok: false, error: stopError, retryPlain: false, stop: true };
+    }
+    if (ack.ok && ack.messageId !== undefined && options.onAcknowledged) {
+      try {
+        options.onAcknowledged(ack.messageId);
+      } catch (error) {
+        stopError = `receipt not durable: ${errorMessage(error)}`;
+        return {
+          ok: false,
+          error: stopError,
+          retryPlain: false,
+          stop: true,
+        };
+      }
+    }
+    return ack;
+  };
+  return (method, body) =>
+    retryTransient
+      ? postWithTransientRetry(() => attempt(method, body), options.sleep)
+      : attempt(method, body);
 }
 
 // Ночной отчёт — цельный документ, а не диалог: если Telegram отказал не по разметке
@@ -212,6 +264,9 @@ function messageTransport(
   };
 }
 
+const deliveredIds = (messageIds: readonly number[]) =>
+  messageIds.length ? { messageIds } : {};
+
 /**
  * Delivers a scheduled model result through Telegram, retaining its delivery choice.
  *
@@ -230,15 +285,33 @@ export async function sendTelegramHtml(
     fetchImpl = fetch,
     trace,
     rich,
+    beforeAttempt,
+    onAcknowledged,
   }: TelegramSendOptions = {},
-): Promise<{ ok: boolean; fellBack: boolean; error: string }> {
+): Promise<{
+  ok: boolean;
+  fellBack: boolean;
+  error: string;
+  messageIds?: readonly number[];
+}> {
   const { text, silent } =
     typeof md === "string"
       ? parseTelegramDelivery(md)
       : { text: md, silent: false };
+  const messageIds: number[] = [];
+  const sendPost = poster(bot, retryTransient, {
+    fetchImpl,
+    sleep,
+    beforeAttempt,
+    onAcknowledged,
+  });
   const transport = messageTransport(
     chat,
-    poster(bot, retryTransient, fetchImpl, sleep),
+    async (method, body) => {
+      const ack = await sendPost(method, body);
+      if (ack.ok && ack.messageId !== undefined) messageIds.push(ack.messageId);
+      return ack;
+    },
     {
       ...(silent ? { disable_notification: true } : {}),
       ...(threadId ? { message_thread_id: threadId } : {}),
@@ -256,7 +329,12 @@ export async function sendTelegramHtml(
     );
     // Пустой рендер шов сам вернул провалом (nothing delivered): ночной скрипт падает
     // ненулевым кодом, как падал на 400 «message text is empty».
-    return { ok, fellBack, error };
+    return {
+      ok,
+      fellBack,
+      error,
+      ...deliveredIds(messageIds),
+    };
   } catch (e) {
     // Шов бросает только на нестроковом md (гейт работает по строке) — контракт
     // «никогда не бросает» держим здесь, у самой границы cron-скриптов.
@@ -294,7 +372,7 @@ export async function sendTelegramRich(
     trace,
   }: TelegramRichOptions = {},
 ): Promise<{ ok: boolean; fellBack: boolean; error: string }> {
-  const sendPost = poster(bot, retryTransient, fetchImpl, sleep);
+  const sendPost = poster(bot, retryTransient, { fetchImpl, sleep });
   const extra: TelegramRequest = {
     ...(silent ? { disable_notification: true } : {}),
     ...(threadId ? { message_thread_id: threadId } : {}),
@@ -362,11 +440,33 @@ export async function sendTelegramScreen(
   const payload = screenPayload(redactNotice(markdown));
   const method = "rich_message" in payload ? "sendRichMessage" : "sendMessage";
   const ack = await postWithTransientRetry(
-    bot,
-    method,
-    { chat_id: chat, ...payload },
-    fetchImpl,
+    () => post(bot, method, { chat_id: chat, ...payload }, fetchImpl),
     sleep,
   );
   return { ok: ack.ok, error: ack.ok ? "" : ack.error };
+}
+
+/** Close only the recorded Watch messages; empty markup removes any classic buttons. */
+export async function closeTelegramWatchSignal(
+  bot: string,
+  chat: string,
+  { messageIds, text }: { messageIds: readonly number[]; text: string },
+  { fetchImpl = fetch }: Pick<TelegramSendOptions, "fetchImpl"> = {},
+): Promise<{ ok: boolean; error: string }> {
+  for (const message_id of messageIds) {
+    const ack = await post(
+      bot,
+      "editMessageText",
+      {
+        chat_id: chat,
+        message_id,
+        text: redactNotice(text),
+        reply_markup: { inline_keyboard: [] },
+      },
+      fetchImpl,
+    );
+    if (!ack.ok && !/message is not modified/iu.test(ack.error))
+      return { ok: false, error: ack.error };
+  }
+  return { ok: true, error: "" };
 }

@@ -18,6 +18,7 @@ import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import {
+  LIVE_DIALOG_MINUTES,
   MAIL_LIMIT,
   TELEGRAM_GROUPS_LIMIT,
   TELEGRAM_USERS_LIMIT,
@@ -39,6 +40,7 @@ export type Birthday = {
 export type WatchItem = {
   readonly key: string;
   readonly unread: number;
+  readonly dialog?: Dialog;
   readonly from: Sender;
   readonly note?: string;
   /** Поля ДР до обработки промпта; в seen не сохраняются. */
@@ -59,7 +61,18 @@ export type SourceResult = {
   readonly silent?: boolean;
 };
 
+export type Dialog = {
+  readonly lastOwnerMs: number | null;
+  readonly lastPeerMs: number | null;
+};
+
 export type Source = {
+  /** Fresh read-only history, including chats whose unread count is now zero. */
+  readonly dialog?: (
+    key: string,
+    now: number,
+    since?: number,
+  ) => Promise<Dialog>;
   readonly name: string;
   /** Префикс ключей источника в `seen`. */
   readonly prefix: string;
@@ -252,6 +265,52 @@ function topicOfLink(link: string, item: WatchItem, message_id: number) {
   return count(Number(topic)) || undefined;
 }
 
+function telegramMessageTime(row: ChatRecord): number {
+  const at = typeof row?.date === "string" ? Date.parse(row.date) : NaN;
+  if (!Number.isFinite(at))
+    throw new Error("Telegram history has no valid date");
+  return at;
+}
+const latestMessage = (rows: readonly { at: number }[]) =>
+  rows.length ? Math.max(...rows.map((row) => row.at)) : null;
+
+/** get_history uses message_to_dict (out=true); list_messages omits direction upstream. */
+export async function readDialog(
+  call: CallTool,
+  key: string,
+  now: number,
+  since = now - LIVE_DIALOG_MINUTES * 60_000,
+): Promise<Dialog> {
+  if (!/^tg:-?\d+$/u.test(key)) throw new Error("invalid Telegram chat key");
+  for (let limit = 100; Number.isSafeInteger(limit); limit *= 2) {
+    const raw = await call("get_history", {
+      chat_id: Number(key.slice(3)),
+      limit,
+    });
+    const parsed = raw.startsWith("No messages found")
+      ? { results: [] }
+      : (parseJson(raw) as { results?: unknown } | undefined);
+    if (!Array.isArray(parsed?.results))
+      throw new Error("get_history answered without results");
+    const messages = (parsed.results as ChatRecord[]).map((row) => ({
+      owner: row?.out === true,
+      at: telegramMessageTime(row),
+    }));
+    const dialog = {
+      lastOwnerMs: latestMessage(messages.filter((row) => row.owner)),
+      lastPeerMs: latestMessage(messages.filter((row) => !row.owner)),
+    };
+    const oldest = Math.min(now, ...messages.map((row) => row.at));
+    if (
+      dialog.lastOwnerMs !== null ||
+      messages.length < limit ||
+      oldest <= since
+    )
+      return dialog;
+  }
+  throw new Error("Telegram history does not cover the required interval");
+}
+
 /** Личные чаты и группы с упоминаниями; нет токена прокси — не подключён. */
 export function telegramSource(
   env: NodeJS.ProcessEnv,
@@ -259,7 +318,7 @@ export function telegramSource(
   callTool?: CallTool,
   log: (line: string) => void = console.log,
 ): Source {
-  const check = async (): Promise<SourceResult> => {
+  const connect = (): CallTool | null => {
     // Свой адрес присмотра: у владельца может быть отдельный прокси того же telegram-mcp, которым
     // он пользуется сам. Watch только читает список чатов, а Connection юзербота (отправка от
     // имени владельца) этим адресом не включается.
@@ -268,11 +327,16 @@ export function telegramSource(
       watchUrl === ""
         ? proxyToken(env, dataDir)
         : (env.TELEGRAM_WATCH_TOKEN ?? "").trim();
-    if (token === "" && callTool === undefined) return NOT_CONNECTED;
+    if (token === "" && callTool === undefined) return null;
     const port = env.TELEGRAM_MCP_PORT || "8724";
-    const call =
+    return (
       callTool ??
-      proxyCallTool(watchUrl || `http://127.0.0.1:${port}/mcp`, token);
+      proxyCallTool(watchUrl || `http://127.0.0.1:${port}/mcp`, token)
+    );
+  };
+  const check = async (): Promise<SourceResult> => {
+    const call = connect();
+    if (call === null) return NOT_CONNECTED;
     // Чат самого бота Ивы — не пропущенное: id бота стоит в начале его токена.
     const botId = String(env.TELEGRAM_BOT_TOKEN ?? "").split(":")[0] ?? "";
     try {
@@ -281,7 +345,16 @@ export function telegramSource(
       return { items: [], error: message(error) };
     }
   };
-  return { name: "telegram", prefix: "tg:", check };
+  return {
+    name: "telegram",
+    prefix: "tg:",
+    check,
+    dialog: async (key, now, since) => {
+      const call = connect();
+      if (!call) throw new Error("Telegram history is not connected");
+      return readDialog(call, key, now, since);
+    },
+  };
 }
 
 // ── Почта ────────────────────────────────────────────────────────────────────────────────
