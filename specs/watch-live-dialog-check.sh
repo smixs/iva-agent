@@ -28,4 +28,5 @@ check WatchLiveRecovery-stuck RecoverableClose WatchLiveRecovery &&
 check WatchLiveRecovery-reapply NoDoubleEdit WatchLiveRecovery &&
 check WatchLiveRecovery-truncate HistoryCoversSignal WatchLiveRecovery &&
 check WatchReceiptGap none WatchReceiptGap &&
-check WatchReceiptGap-no-receipt NoLostId WatchReceiptGap
+check WatchReceiptGap-no-receipt NoLostId WatchReceiptGap &&
+check WatchReceiptGap-unknown-retry NoUnknownRetry WatchReceiptGap

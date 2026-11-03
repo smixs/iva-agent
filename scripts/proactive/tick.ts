@@ -767,10 +767,12 @@ function signalDelivery(
   ) => {
     const key = part.itemKey;
     if (!key || !dialogSource(deps, key)) return true;
+    const uncertain =
+      /^(?:receipt not durable|delivery outcome unknown):/u.test(ack.error);
     const ids = ack.messageIds;
     if (!validMessageIds(ids)) {
       log(`proactive: ${key} signal delivery has no message_id`);
-      return !ack.ok && !ack.error.startsWith("receipt not durable:");
+      return !ack.ok && !uncertain;
     }
     try {
       for (const id of ids)
@@ -782,7 +784,7 @@ function signalDelivery(
     const next = recoverSignalReceipts(deps.statePath, current.state);
     if (!(await save(deps, next, "signal delivery", log))) return false;
     current.state = next;
-    return true;
+    return !uncertain;
   };
 }
 

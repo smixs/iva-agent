@@ -769,3 +769,45 @@ void test("Watch receipt failure stops fallback and exposes delivery failure", a
   assert.equal(calls, 1);
   assert.match(ack.error, /receipt not durable/);
 });
+
+void test("I5 UNKNOWN Watch send never retries or falls back before a durable receipt", async () => {
+  const { sendTelegramHtml } = await import("./telegram-send.ts");
+  for (const mode of ["network", "body", "missing-id", "503", "408"] as const) {
+    for (const rich of [false, true]) {
+      let calls = 0;
+      let receipts = 0;
+      let sleeps = 0;
+      const ack = await sendTelegramHtml(
+        "fixture",
+        "owner",
+        "Question\n".repeat(1000),
+        {
+          rich,
+          retryTransient: true,
+          onAcknowledged: () => {
+            receipts++;
+          },
+          sleep: async () => {
+            sleeps++;
+          },
+          fetchImpl: async () => {
+            calls++;
+            if (mode === "network") throw new Error("response lost after send");
+            if (mode === "body") return new Response("invalid success body");
+            if (mode === "missing-id")
+              return new Response(JSON.stringify({ ok: true, result: {} }));
+            return new Response("ambiguous server outcome", {
+              status: Number(mode),
+            });
+          },
+        },
+      );
+      assert.equal(ack.ok, false, mode);
+      assert.equal(calls, 1, `${mode}: no retry, fallback or next chunk`);
+      assert.equal(sleeps, 0, mode);
+      assert.equal(receipts, 0, mode);
+      assert.match(ack.error, /delivery outcome unknown:/, mode);
+      assert.equal(ack.messageIds, undefined, mode);
+    }
+  }
+});

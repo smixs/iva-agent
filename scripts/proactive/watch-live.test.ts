@@ -3,7 +3,13 @@
 import "../fixtures/no-host-anthropic.ts";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -87,6 +93,125 @@ async function seed(h: ReturnType<typeof harness>) {
     },
   });
 }
+
+test("I5 UNKNOWN response and receipt failure return error without another send after restart", async (t) => {
+  const { sendTelegramHtml } = await import("../lib/telegram-send.ts");
+  for (const failure of ["network", "receipt"] as const) {
+    const h = harness(t);
+    await seed(h);
+    let requests = 0;
+    const dir = join(h.statePath, "..");
+    const deps: TickDeps = {
+      ...h.deps,
+      send: (text, _source, options) =>
+        sendTelegramHtml("fixture", "owner", text, {
+          ...options,
+          rich: true,
+          retryTransient: true,
+          sleep: async () => {},
+          fetchImpl: async () => {
+            requests++;
+            if (failure === "network")
+              throw new Error("response lost after delivery");
+            chmodSync(dir, 0o500);
+            return new Response(
+              JSON.stringify({ ok: true, result: { message_id: 91 } }),
+            );
+          },
+        }),
+    };
+    try {
+      assert.equal(await runProactiveTick(h.now, deps), 1, failure);
+    } finally {
+      chmodSync(dir, 0o700);
+    }
+    assert.equal(requests, 1, failure);
+    assert.equal(readProactiveState(h.statePath)?.seen[KEY].reported, true);
+    assert.equal(readProactiveState(h.statePath)?.signals?.[KEY], undefined);
+    h.now += 60 * MIN;
+    assert.equal(await runProactiveTick(h.now, h.deps), 0);
+    assert.equal(h.sends, 0, `${failure}: durable claim prevents replay`);
+  }
+});
+
+test("I5 process exit before receipt preserves the no-repeat claim", async (t) => {
+  const h = harness(t);
+  await seed(h);
+  const tickModule = new URL("./tick.ts", import.meta.url).href;
+  const sendModule = new URL("../lib/telegram-send.ts", import.meta.url).href;
+  const script = `import {runProactiveTick} from ${JSON.stringify(tickModule)};
+    import {sendTelegramHtml} from ${JSON.stringify(sendModule)};
+    import {PROACTIVE_DEFAULTS} from '#lib/proactive-config.ts';
+    await runProactiveTick(${NOW}, {
+      config:()=>({...PROACTIVE_DEFAULTS,staleMinutes:0,quietFromHour:0,quietToHour:0,briefTimes:[]}),
+      timeZone:'Asia/Tashkent',statePath:${JSON.stringify(h.statePath)},now:()=>${NOW},
+      sources:[{name:'telegram',prefix:'tg:',check:async()=>({items:[{key:${JSON.stringify(KEY)},unread:1,from:{username:'person_fixture'}}],error:null}),
+        dialog:async()=>({lastOwnerMs:${h.owner},lastPeerMs:${h.peer}})}],
+      runTurn:async()=>({status:'completed',message:${JSON.stringify(`<!-- iva:item ${KEY} -->\nQuestion`)},feedback:async()=>{}}),
+      send:(text,_source,options)=>sendTelegramHtml('fixture','owner',text,{...options,
+        fetchImpl:async()=>({ok:true,json:async()=>{process.exit(91)}})}),
+      closeSignal:async()=>{throw new Error('unexpected close')},
+      translate:async()=>(_en,ru)=>ru,log:()=>{}
+    });`;
+  const child = spawnSync(
+    process.execPath,
+    ["--input-type=module", "-e", script],
+    {
+      encoding: "utf8",
+      timeout: 10_000,
+    },
+  );
+  assert.equal(child.status, 91, child.stderr);
+  assert.equal(existsSync(`${h.statePath}.receipts`), false);
+  assert.equal(readProactiveState(h.statePath)?.seen[KEY].reported, true);
+  h.now += 60 * MIN;
+  assert.equal(await runProactiveTick(h.now, h.deps), 0);
+  assert.equal(h.sends, 0);
+  assert.equal(h.edits.length, 0);
+});
+
+test("I5 partial send keeps confirmed IDs and stops at an UNKNOWN next chunk", async (t) => {
+  const { sendTelegramHtml } = await import("../lib/telegram-send.ts");
+  const h = harness(t);
+  await seed(h);
+  let requests = 0;
+  const deps: TickDeps = {
+    ...h.deps,
+    runTurn: async () => ({
+      status: "completed",
+      message: `<!-- iva:item ${KEY} -->\n${"Question\n".repeat(1000)}`,
+      feedback: async () => {},
+    }),
+    send: (text, _source, options) =>
+      sendTelegramHtml("fixture", "owner", text, {
+        ...options,
+        retryTransient: true,
+        sleep: async () => {},
+        fetchImpl: async () => {
+          requests++;
+          if (requests > 1) throw new Error("second chunk response lost");
+          return new Response(
+            JSON.stringify({ ok: true, result: { message_id: 91 } }),
+          );
+        },
+      }),
+  };
+  assert.equal(await runProactiveTick(h.now, deps), 1);
+  assert.equal(requests, 2);
+  assert.deepEqual(
+    readProactiveState(h.statePath)?.signals?.[KEY].messageIds,
+    [91],
+  );
+  h.now += 60 * MIN;
+  assert.equal(await runProactiveTick(h.now, h.deps), 0);
+  assert.equal(h.sends, 0);
+  h.owner = NOW + MIN;
+  assert.equal(await runProactiveTick(h.now, h.deps), 0);
+  assert.deepEqual(
+    h.edits.map((edit) => edit.ids),
+    [[91]],
+  );
+});
 
 test("owner wrote five minutes ago: no model wake or signal", async (t) => {
   const h = harness(t);

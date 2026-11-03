@@ -11,6 +11,8 @@
 //     ненулевым кодом, а оставшиеся чанки Telegram не получает;
 //   • retryTransient=true даёт каждому HTML/plain-вызову до трёх попыток при сети,
 //     5xx, 408, 425 и 429; по умолчанию повторов нет;
+//     Watch с onAcknowledged останавливается при UNKNOWN (сеть/5xx/408/нет ID),
+//     до durable receipt повторять неопределённую отправку запрещено;
 //   • пустой отчёт — тоже ok=false: слать нечего, и молчать об этом нельзя;
 //   • НИКОГДА не бросает — на любую ошибку возвращает { ok:false, error }.
 // Возвращает { ok, fellBack, error } — вызывающий cron-скрипт по fellBack даёт агенту
@@ -34,6 +36,7 @@ type PostAck = OutboxAck & {
   readonly messageId?: number;
   readonly retryable?: boolean;
   readonly retryAfterMs?: number;
+  readonly outcomeUnknown?: boolean;
 };
 
 export type TelegramSendOptions = {
@@ -138,6 +141,7 @@ async function post(
       error: `${res.status}: ${text}`,
       retryPlain: res.status === 400,
       retryable: classifyDeliverStatus(res.status) === "retry",
+      outcomeUnknown: res.status >= 500 || res.status === 408,
       ...(res.status === 429
         ? { retryAfterMs: telegramRetryAfterMs(text) }
         : {}),
@@ -148,6 +152,7 @@ async function post(
       error: errorMessage(e),
       retryPlain: false,
       retryable: true,
+      outcomeUnknown: true,
     };
   }
 }
@@ -188,6 +193,13 @@ function poster(
         stop: true,
       };
     const ack = await post(bot, method, body, options.fetchImpl);
+    if (
+      options.onAcknowledged &&
+      (ack.ok ? ack.messageId === undefined : ack.outcomeUnknown)
+    ) {
+      stopError = `delivery outcome unknown: ${ack.ok ? "missing message_id" : ack.error}`;
+      return { ok: false, error: stopError, retryPlain: false, stop: true };
+    }
     if (ack.ok && ack.messageId !== undefined && options.onAcknowledged) {
       try {
         options.onAcknowledged(ack.messageId);

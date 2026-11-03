@@ -1,28 +1,59 @@
 ---- MODULE WatchReceiptGap ----
 EXTENDS Naturals
-CONSTANT DurableAck
-VARIABLES phase, remote, acknowledged, volatileId, receiptId, stateId, crashed
-vars == <<phase, remote, acknowledged, volatileId, receiptId, stateId, crashed>>
-\* An external send can precede the local acknowledgement: its outcome is unknown.
-\* DurableAck exposes success only after the synchronous atomic receipt write+fsync.
-\* Full proactive state is a projection; failed writes recover from that receipt.
+CONSTANTS DurableAck, RetryUnknown
+VARIABLES phase, remote, acknowledged, volatileId, receiptId, stateId, crashed,
+          unknown, sends, retriedUnknown
+vars == <<phase, remote, acknowledged, volatileId, receiptId, stateId, crashed,
+          unknown, sends, retriedUnknown>>
+\* Owner decision 2026-11-03: I5 covers confirmed Outbox delivery.
+\* A visible remote signal before receipt may remain UNKNOWN and unaddressable.
+\* UNKNOWN never authorizes another send. The durable pre-send claim survives crash.
+\* Receive, fsync and Outbox ack are separate; state is a recoverable projection.
 Init == /\ phase = "intent" /\ remote = FALSE /\ acknowledged = FALSE
         /\ volatileId = 0 /\ receiptId = 0 /\ stateId = 0 /\ crashed = FALSE
+        /\ unknown = FALSE /\ sends = 0 /\ retriedUnknown = FALSE
 Send == /\ phase = "intent" /\ phase' = "remote" /\ remote' = TRUE
-        /\ UNCHANGED <<acknowledged, volatileId, receiptId, stateId, crashed>>
-Ack == /\ phase = "remote" /\ phase' = "ack" /\ acknowledged' = TRUE
-       /\ volatileId' = 1 /\ receiptId' = IF DurableAck THEN 1 ELSE 0
-       /\ UNCHANGED <<remote, stateId, crashed>>
-Save == /\ phase = "ack" /\ phase' = "saved" /\ stateId' = volatileId
-        /\ UNCHANGED <<remote, acknowledged, volatileId, receiptId, crashed>>
-Crash == /\ ~crashed /\ phase \in {"remote", "ack", "saved"}
+        /\ sends' = sends + 1
+        /\ UNCHANGED <<acknowledged, volatileId, receiptId, stateId, crashed,
+                       unknown, retriedUnknown>>
+Receive == /\ phase = "remote" /\ phase' = "body" /\ volatileId' = 1
+           /\ UNCHANGED <<remote, acknowledged, receiptId, stateId, crashed,
+                          unknown, sends, retriedUnknown>>
+Persist == /\ phase = "body" /\ phase' = "receipt" /\ receiptId' = volatileId
+           /\ UNCHANGED <<remote, acknowledged, volatileId, stateId, crashed,
+                          unknown, sends, retriedUnknown>>
+\* Missing/lost body, network/ambiguous response or first receipt write failure.
+Failure == /\ phase \in {"remote", "body"} /\ phase' = "unknown"
+           /\ unknown' = TRUE
+           /\ UNCHANGED <<remote, acknowledged, volatileId, receiptId, stateId,
+                          crashed, sends, retriedUnknown>>
+Ack == /\ phase \in {"body", "receipt"}
+       /\ (~DurableAck \/ receiptId > 0)
+       /\ phase' = "ack" /\ acknowledged' = TRUE
+       /\ UNCHANGED <<remote, volatileId, receiptId, stateId, crashed,
+                      unknown, sends, retriedUnknown>>
+Save == /\ phase = "ack" /\ phase' = "saved" /\ stateId' = receiptId
+        /\ UNCHANGED <<remote, acknowledged, volatileId, receiptId, crashed,
+                       unknown, sends, retriedUnknown>>
+Crash == /\ ~crashed /\ phase \in {"remote", "body", "receipt", "ack", "saved", "unknown"}
          /\ phase' = "restart" /\ crashed' = TRUE /\ volatileId' = 0
-         /\ UNCHANGED <<remote, acknowledged, receiptId, stateId>>
-Recover == /\ phase = "restart" /\ receiptId > 0 /\ stateId' = receiptId
-           /\ phase' = "saved"
-           /\ UNCHANGED <<remote, acknowledged, volatileId, receiptId, crashed>>
-Next == Send \/ Ack \/ Save \/ Crash \/ Recover
+         /\ unknown' = (unknown \/ receiptId = 0)
+         /\ UNCHANGED <<remote, acknowledged, receiptId, stateId, sends, retriedUnknown>>
+Recover == /\ phase = "restart"
+           /\ stateId' = receiptId
+           /\ phase' = IF receiptId > 0 THEN "saved" ELSE "unknown"
+           /\ UNCHANGED <<remote, acknowledged, volatileId, receiptId, crashed,
+                          unknown, sends, retriedUnknown>>
+RepeatUnknown == /\ RetryUnknown /\ phase = "unknown" /\ sends < 2
+                 /\ phase' = "remote" /\ sends' = sends + 1
+                 /\ retriedUnknown' = TRUE
+                 /\ UNCHANGED <<remote, acknowledged, volatileId, receiptId,
+                                stateId, crashed, unknown>>
+Next == Send \/ Receive \/ Persist \/ Failure \/ Ack \/ Save \/ Crash \/ Recover \/ RepeatUnknown
 Spec == Init /\ [][Next]_vars
-NoLostId == acknowledged => volatileId > 0 \/ receiptId > 0 \/ stateId > 0
+NoLostId == acknowledged => receiptId > 0 \/ stateId > 0
 Recoverable == phase = "restart" /\ acknowledged => receiptId > 0 \/ stateId > 0
+NoUnknownRetry == ~retriedUnknown
+TypeOK == /\ phase \in {"intent", "remote", "body", "receipt", "ack", "saved", "unknown", "restart"}
+          /\ sends \in 0..2 /\ receiptId \in 0..1 /\ stateId \in 0..1 /\ volatileId \in 0..1
 ====
