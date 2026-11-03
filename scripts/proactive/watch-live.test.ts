@@ -137,7 +137,11 @@ test("property: delivery requires owner silence >=15min and a later peer questio
         h.turns = 0;
         h.sends = 0;
         assert.equal(await runProactiveTick(h.now, h.deps), 0);
-        assert.equal(h.sends > 0, owner <= -15 * MIN && peer > owner);
+        const permitted = owner <= -15 * MIN && peer > owner;
+        if (h.sends > 0) assert.ok(permitted);
+        // Watch's existing half-hour schedule skips minute 30..59.
+        if (new Date(h.now).getUTCMinutes() < 30)
+          assert.equal(h.sends > 0, permitted);
       },
     ),
     { seed: 36693686, numRuns: 200 },
