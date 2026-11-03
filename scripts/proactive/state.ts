@@ -35,7 +35,15 @@ export type InsightState = {
   readonly tree?: string;
 };
 
+type WatchSignal = {
+  readonly messageIds: readonly number[];
+  readonly deliveredAtMs: number;
+  readonly status: "delivered" | "closing" | "closed";
+};
+
 export type ProactiveState = {
+  /** Optional in v1: older versions ignore this field on rollback. */
+  readonly signals?: Readonly<Record<string, WatchSignal>>;
   readonly schemaVersion: number;
   readonly seen: Readonly<Record<string, SeenEntry>>;
   readonly wakes: DayCount;
@@ -105,9 +113,26 @@ function isBriefDone(value: unknown): boolean {
   );
 }
 
+function isSignals(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (!isObject(value)) return false;
+  return Object.entries(value).every(([key, entry]) => {
+    if (!key.startsWith("tg:") || !isObject(entry)) return false;
+    return (
+      Array.isArray(entry.messageIds) &&
+      entry.messageIds.length > 0 &&
+      entry.messageIds.every((id) => isCount(id) && id > 0) &&
+      typeof entry.deliveredAtMs === "number" &&
+      Number.isFinite(entry.deliveredAtMs) &&
+      ["delivered", "closing", "closed"].includes(String(entry.status))
+    );
+  });
+}
+
 function isState(value: Record<string, unknown>): boolean {
   return (
     isObject(value.seen) &&
+    isSignals(value.signals) &&
     isDayCount(value.wakes) &&
     isDayCount(value.modelWakes) &&
     isBriefDone(value.briefDone) &&

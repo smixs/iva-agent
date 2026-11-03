@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- 🔧 **Watch молчит в живом диалоге**: 15 минут тишины после сообщения владельца; после ответа сигнал закрывается с отметкой времени и снятием кнопок. Watch keeps quiet during active Telegram conversations and closes its notice after the owner replies.
+
 ## [0.5.9] - 2026-11-03
 
 - 🔧 **Сводки и напоминания снова читают Telegram**: плановый ход и сработавшее напоминание читают чаты через юзербот; отправку, ответ, пересылку, правку, удаление, реакции и отметку о прочтении Ива сама не делает, текст отправляет код. Scheduled turns and fired reminders may read Telegram through the userbot read tools; every Telegram write stays forbidden and the code delivers the final text.

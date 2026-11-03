@@ -31,6 +31,9 @@ export type ProactiveConfig = {
   readonly urgentSenders: readonly string[];
 };
 
+/** Owner silence before Watch can report a Telegram chat (beside staleMinutes). */
+export const LIVE_DIALOG_MINUTES = 15;
+
 export const PROACTIVE_DEFAULTS: ProactiveConfig = {
   enabled: true,
   quietFromHour: 23,

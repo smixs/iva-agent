@@ -1395,7 +1395,15 @@ test("Telegram metadata reaches the Watch turn through precheck and candidate se
                 : [],
           });
         if (name === "list_messages")
-          return JSON.stringify({ results: [{ id: 40, reply_to: 7 }] });
+          return JSON.stringify({
+            results: [
+              {
+                id: 40,
+                reply_to: 7,
+                date: new Date(NOON - 90 * MIN).toISOString(),
+              },
+            ],
+          });
         return `Link: https://t.me/c/4398169447/${forum ? "12/" : ""}40`;
       }),
     );

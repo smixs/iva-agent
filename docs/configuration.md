@@ -156,3 +156,16 @@ a running process uninterrupted. Ownership checks include the loaded data direct
 foreign content, links and unknown ownership are preserved and reported by `iva doctor`.
 Moving the data directory changes the scope: review preserved old services explicitly.
 Older CLI versions lack these ownership checks, including during a rollback.
+
+Watch stays quiet in a Telegram chat for 15 minutes after your latest outgoing message,
+including urgent senders. It checks the conversation before waking the model and again before
+delivery. Waiting time starts at your latest message; an earlier incoming question counts
+as answered. After you reply following a Watch notice, the next tick replaces that notice
+with “✅ replied at HH:MM” in your time zone and removes its buttons. The recorded message
+IDs also cover split deliveries. A conversation read that cannot establish the window leaves that chat
+quiet for the tick.
+
+Existing `proactive.json` files upgrade in place: the optional `signals` field keeps schema
+version 1; older Iva versions ignore it on rollback. Notices sent by older versions have no
+recorded IDs and keep their previous behavior. A lost edit acknowledgement is retained as
+`closing` and reported as a failed tick for diagnosis; automatic replay is suppressed.

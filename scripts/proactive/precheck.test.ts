@@ -732,3 +732,47 @@ test(`PBT exported topic belongs to the selected chat and latest message (seed=$
     { seed: SEED, numRuns: 80 },
   );
 });
+
+/* eslint-disable @typescript-eslint/require-await -- Async transport fixtures return deterministic acknowledgements. */
+test("live-dialog read recognizes out=true, dates and owner direction", async () => {
+  const { readDialog } = await import("./precheck.ts");
+  const now = Date.UTC(2026, 10, 3, 10);
+  const calls: unknown[] = [];
+  const dialog = await readDialog(
+    async (name, args) => {
+      calls.push([name, args]);
+      return results([
+        { date: new Date(now - 60_000).toISOString(), text: "peer" },
+        {
+          date: new Date(now - 300_000).toISOString(),
+          out: true,
+          text: "owner",
+        },
+      ]);
+    },
+    "tg:123",
+    now,
+  );
+  assert.deepEqual(dialog, {
+    lastPeerMs: now - 60_000,
+    lastOwnerMs: now - 300_000,
+  });
+  assert.deepEqual(calls, [["list_messages", { chat_id: 123, limit: 100 }]]);
+  await assert.rejects(
+    readDialog(
+      async () =>
+        results(
+          Array.from({ length: 100 }, () => ({
+            date: new Date(now).toISOString(),
+          })),
+        ),
+      "tg:123",
+      now,
+    ),
+    /does not cover/,
+  );
+  await assert.rejects(
+    readDialog(async () => results([{ out: true }]), "tg:123", now),
+    /valid date/,
+  );
+});
