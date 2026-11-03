@@ -533,7 +533,7 @@
             "type": "string"
           },
           "tags": {
-            "description": "fact: до 6 тегов",
+            "description": "fact: новой Card обязательны 2–5 тегов kebab-case; до 6",
             "type": "array",
             "items": {
               "type": "string"
@@ -573,7 +573,7 @@
         },
         "required": ["operation"]
       },
-      "description": "Card памяти: fact дописывает факт (и может создать Card после поиска), truth меняет Compiled Truth с архивом, merge склеивает дубль только по явной просьбе владельца. fact и truth меняют status Card, когда владелец сказал о нём (проект закрыт, решение принято).\nПример формы fact (подставь свои данные): {\"operation\":\"fact\",\"type\":\"note\",\"title\":\"Имя Card\",\"text\":\"Факт одной строкой\"}\nПример формы truth (подставь свои данные): {\"operation\":\"truth\",\"type\":\"note\",\"title\":\"Имя существующей Card\",\"text\":\"Новый Compiled Truth целиком\",\"reason\":\"Почему меняется правда\"}\nПример формы merge (подставь свои данные): {\"operation\":\"merge\",\"target\":\"Имя Card, которая остаётся\",\"duplicate\":\"Имя Card-дубля\",\"confirmed_by_owner\":true}\nНе передавай незаданные optional-поля; tags и aliases — массивы строк. confirmed_by_owner=true допустим только после явной просьбы владельца о merge; пример не является подтверждением."
+      "description": "Card памяти: fact дописывает факт (и может создать Card после поиска), truth меняет Compiled Truth с архивом, merge склеивает дубль только по явной просьбе владельца. fact и truth меняют status Card, когда владелец сказал о нём (проект закрыт, решение принято).\nПример формы fact (подставь свои данные): {\"operation\":\"fact\",\"type\":\"note\",\"title\":\"Имя Card\",\"text\":\"Факт одной строкой\",\"tags\":[\"тема-card\",\"контекст\"]}\nПример формы truth (подставь свои данные): {\"operation\":\"truth\",\"type\":\"note\",\"title\":\"Имя существующей Card\",\"text\":\"Новый Compiled Truth целиком\",\"reason\":\"Почему меняется правда\"}\nПример формы merge (подставь свои данные): {\"operation\":\"merge\",\"target\":\"Имя Card, которая остаётся\",\"duplicate\":\"Имя Card-дубля\",\"confirmed_by_owner\":true}\nНе передавай незаданные optional-поля; tags и aliases — массивы строк. confirmed_by_owner=true допустим только после явной просьбы владельца о merge; пример не является подтверждением."
     },
     {
       "type": "function",
