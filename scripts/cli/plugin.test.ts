@@ -234,7 +234,8 @@ function commit(source: Remote, version: string): string {
 }
 
 function home(): string {
-  const root = world("home");
+  // Настоящий путь: юниты пишут путь данных после realpath, а на macOS /var — ссылка на /private/var.
+  const root = realpathSync(world("home"));
   mkdirSync(join(root, "data"), { recursive: true });
   return root;
 }
