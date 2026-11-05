@@ -9,6 +9,7 @@ import {
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { imageMetadata } from "astro/assets/utils";
+import type { AstroIntegration } from "astro";
 import { docUrl } from "./doc-links.ts";
 export function files(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
@@ -26,10 +27,24 @@ export function lastModified(source: string): Date {
   } catch {}
   return statSync(source).mtime;
 }
-export function copyLegacy() {
+export function copyLegacy(): AstroIntegration {
   return {
     name: "iva-legacy-addresses",
     hooks: {
+      // The build copies ../docs into the site; the dev server serves the same files
+      // so the logo, favicons and brand images load while working locally.
+      "astro:server:setup": ({ server }) => {
+        const root = path.resolve("../docs");
+        const types: Record<string, string> = { ".svg": "image/svg+xml", ".png": "image/png", ".webp": "image/webp", ".ico": "image/x-icon", ".css": "text/css", ".js": "text/javascript", ".txt": "text/plain; charset=utf-8" };
+        server.middlewares.use((req, res, next) => {
+          const pathname = decodeURIComponent((req.url || "").split("?")[0]);
+          const type = types[path.extname(pathname)];
+          const file = path.resolve(root, "." + pathname);
+          if (!type || !file.startsWith(root + path.sep) || !existsSync(file) || !statSync(file).isFile()) return next();
+          res.setHeader("Content-Type", type);
+          res.end(readFileSync(file));
+        });
+      },
       "astro:build:done": async ({ dir }: { dir: URL }) => {
         const out = dir.pathname;
         cpSync(
