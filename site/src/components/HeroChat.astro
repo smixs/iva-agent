@@ -157,7 +157,11 @@ const prepared = messages.map(message => {
     ))}
     <span class="v7-tap" data-tap aria-hidden="true" hidden></span>
   </Phone>
-  <svg class="v7-menu-cue" data-menu-cue viewBox="0 0 42 82" preserveAspectRatio="none" aria-hidden="true"><path d="M8 76C4 56 10 31 35 9M23 13Q29 10 35 9Q33 16 32 24" vector-effect="non-scaling-stroke" /></svg>
+  <div class="v7-cue" data-menu-cue aria-hidden="true">
+    <span class="v7-cue-text">{c.cue}</span>
+    <svg class="v7-cue-arrow is-side" viewBox="0 0 96 56"><path pathLength="1" d="M3 9C24 2 49 5 63 18C71 25 80 33 90 37" /><path class="v7-cue-head" pathLength="1" d="M82.5 28.4Q86 32.5 90 37Q84.5 37.4 79 38.4" /></svg>
+    <svg class="v7-cue-arrow is-below" viewBox="0 0 30 40"><path pathLength="1" d="M26 37C16 35 9 28 7.5 18C7 13 6.6 8 6 3" /><path class="v7-cue-head" pathLength="1" d="M3.1 10.5Q4.4 6.6 6 3Q8.2 6.3 10.6 9.6" /></svg>
+  </div>
   </div>
   <figcaption class="v7-caption">
     <div class="v7-control-row">
@@ -288,13 +292,30 @@ const prepared = messages.map(message => {
   .v7-install-copy-status { font-size:max(12px,calc(14 * var(--vp))); line-height:max(16px,calc(19 * var(--vp))); margin:calc(8 * var(--vp)) 0 0; color:#395549; }
   .v7-install-phrase { margin:calc(8 * var(--vp)) 0 0; padding:calc(8 * var(--vp)); border-radius:calc(8 * var(--vp)); background:#e4f3ff; user-select:text; overflow-wrap:anywhere; }
   .v7-device-wrap { position:relative; width:100%; container-type:inline-size; }
-  .v7-menu-cue { --outer-vp:calc(100cqw / 434); position:absolute; z-index:1; left:calc(-42 * var(--outer-vp)); bottom:calc(15 * var(--outer-vp)); width:calc(42 * var(--outer-vp)); height:calc(82 * var(--outer-vp)); overflow:visible; pointer-events:none; fill:none; stroke:#17211d; stroke-width:1.8px; stroke-linecap:round; stroke-linejoin:round; }
-  .v7-demo[data-menu-seen="false"] .v7-menu { animation:v7-menu-pulse 1.8s ease-in-out .6s 3; }
+  /* Menu cue: a handwritten note outside the phone. Beside the phone on desktop, its arrow
+     tip at the left edge level with the menu button (185cqw); below the phone when centred. */
+  .v7-demo { --cue-at:.7s; }
+  .v7-cue { position:absolute; z-index:2; inset:0; pointer-events:none; color:#0b73d9; }
+  .v7-cue-text { position:absolute; right:calc(100% + 100px); top:calc(185cqw - 47px); font-family:var(--font-hand,"Caveat",cursive); font-weight:600; font-size:27px; line-height:1; white-space:nowrap; animation:v7-cue-write 700ms cubic-bezier(.23,1,.32,1) var(--cue-at) both; }
+  .v7-cue-arrow { position:absolute; overflow:visible; fill:none; stroke:currentColor; stroke-width:2.4px; stroke-linecap:round; stroke-linejoin:round; }
+  .v7-cue-arrow path { stroke-dasharray:1; stroke-dashoffset:1; animation:v7-cue-draw 650ms cubic-bezier(.23,1,.32,1) calc(var(--cue-at) + 250ms) forwards; }
+  .v7-cue-arrow .v7-cue-head { animation-duration:260ms; animation-delay:calc(var(--cue-at) + 780ms); }
+  .v7-cue-arrow.is-side { left:-95px; top:calc(185cqw - 37px); width:96px; height:56px; animation:v7-cue-nudge-side 2.4s cubic-bezier(.77,0,.175,1) calc(var(--cue-at) + 1.4s) infinite; }
+  .v7-cue-arrow.is-below { display:none; }
+  @keyframes v7-cue-write { from { clip-path:inset(0 100% 0 0); } to { clip-path:inset(0 0 0 0); } }
+  @keyframes v7-cue-draw { to { stroke-dashoffset:0; } }
+  @keyframes v7-cue-nudge-side { 0%, 40%, 100% { transform:none; } 20% { transform:translate(4px, 1px); } }
+  @keyframes v7-cue-nudge-up { 0%, 40%, 100% { transform:none; } 20% { transform:translate(0, -4px); } }
+  /* The menu button keeps pulsing until it has been opened once. */
+  .v7-menu::after { content:""; position:absolute; inset:0; border-radius:50%; pointer-events:none; opacity:0; }
+  .v7-demo[data-menu-seen="false"] .v7-menu { animation:v7-menu-breathe 2.4s cubic-bezier(.77,0,.175,1) var(--cue-at) infinite; }
+  .v7-demo[data-menu-seen="false"] .v7-menu::after { box-shadow:0 0 0 calc(2.5 * var(--vp)) #0589ff; animation:v7-menu-ring 2.4s cubic-bezier(.23,1,.32,1) var(--cue-at) infinite; }
+  @keyframes v7-menu-breathe { 0%, 34%, 100% { transform:scale(1); } 14% { transform:scale(1.12); } }
+  @keyframes v7-menu-ring { 0% { transform:scale(1); opacity:.7; } 60%, 100% { transform:scale(2); opacity:0; } }
   .v7-menu-install-footer { margin-top:calc(9 * var(--vp)); }
   .v7-menu-install-button { appearance:none; width:100%; border:0; border-radius:calc(12 * var(--vp)); min-height:38px; padding:calc(8 * var(--vp)); background:#a4dc55; color:#17211d; font:inherit; font-weight:600; cursor:pointer; animation:v7-install-pulse 1.8s ease-in-out .4s 2; }
   .v7-menu-install-button:focus-visible { outline:2px solid #17211d; outline-offset:-4px; }
   .v7-menu-install-button:disabled { cursor:wait; animation:none; }
-  @keyframes v7-menu-pulse { 0%,100% { transform:scale(1); } 50% { transform:scale(1.07); } }
   @keyframes v7-install-pulse { 0%,100% { transform:scale(1); } 50% { transform:scale(1.02); } }
   .v7-caption { margin-top:10px; text-align:center; color:var(--ink,#17211d); font-family:inherit; font-size:12px; line-height:1.5; }
   .v7-caption p { margin:0; }
@@ -309,7 +330,11 @@ const prepared = messages.map(message => {
   .v7-demo ::selection { background:#c9e5ff; color:#17211d; }
   @media (hover:hover) { .v7-choice.is-primary:enabled:hover { background:#0473d6; } .v7-choice.is-secondary:enabled:hover { background:#d5d4d8; } .v7-controls button:enabled:hover { color:#167a63; } }
   @media (max-width:960px) {
-    .v7-menu-cue { left:-20px; width:18px; }
+    .v7-cue-text { right:auto; left:calc(9.2cqw + 26px); top:calc(205cqw + 26px); font-size:23px; }
+    .v7-cue-arrow.is-side { display:none; }
+    .v7-cue-arrow.is-below { display:block; left:calc(9.2cqw - 6px); top:205cqw; width:30px; height:40px; animation:v7-cue-nudge-up 2.4s cubic-bezier(.77,0,.175,1) calc(var(--cue-at) + 1.4s) infinite; }
+    .v7-control-row { justify-content:flex-end; }
+    .v7-caption { text-align:right; }
   }
-  @media (prefers-reduced-motion:reduce) { .v7-demo *, .v7-demo *::before,.v7-demo *::after { animation:none !important; transition:none !important; scroll-behavior:auto !important; } }
+  @media (prefers-reduced-motion:reduce) { .v7-demo *, .v7-demo *::before,.v7-demo *::after { animation:none !important; transition:none !important; scroll-behavior:auto !important; } .v7-cue-arrow path { stroke-dashoffset:0; } }
 </style>

@@ -17,7 +17,7 @@ export const actionFrames: Record<ActionId, number> = {
 export const demoCopy = {
   ru: {
     label: "Интерактивная демонстрация Ивы в Telegram",
-    demo: "Демо", hint: "Демо: нажимайте кнопки в чате", viewed: "Просмотрено",
+    demo: "Демо", hint: "Демо: нажимайте кнопки в чате", cue: "нажми меня", viewed: "Просмотрено",
     note: "Все действия происходят внутри демонстрации.",
     play: "Продолжить", pause: "Пауза", replay: "Сначала", next: "Следующая сцена",
     end: "Демонстрация завершена", paused: "На паузе", playing: "Воспроизведение",
@@ -39,7 +39,7 @@ export const demoCopy = {
   },
   en: {
     label: "Interactive Iva demo in Telegram",
-    demo: "Demo", hint: "Demo: try the buttons in the chat", viewed: "Viewed",
+    demo: "Demo", hint: "Demo: try the buttons in the chat", cue: "tap me", viewed: "Viewed",
     note: "Every action takes place inside this demo.",
     play: "Continue", pause: "Pause", replay: "Replay", next: "Next scene",
     end: "Demo complete", paused: "Paused", playing: "Playing",
