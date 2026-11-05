@@ -83,8 +83,8 @@ const schema = [
   </section>
   <Leaves splash />
   <script is:inline>
-    // Opening, once per session: a small Iva mark appears mid-screen, then flies into its place
-    // behind the phone, growing and softening, while the page and the phone come in.
+    // Opening, once per session: one leaf grows mid-screen and the second unfolds from it; the mark
+    // then flies into its place behind the phone, growing and softening, while the page floats in.
     // The flight is measured after the web fonts settle, so the target does not move under it.
     (() => {
       const root = document.documentElement;
@@ -115,16 +115,17 @@ const schema = [
         splash.animate([
           { transform: "none", filter: "blur(0px)", opacity: 1 },
           { transform: `translate(${to.left - from.left}px, ${to.top - from.top}px) scale(${scale})`, filter: `blur(${blur / scale}px)`, opacity: art.opacity },
-        ], { duration: 900, easing: "cubic-bezier(.77,0,.175,1)", fill: "forwards" });
+        ], { duration: 1150, easing: "cubic-bezier(.65,0,.35,1)", fill: "forwards" });
         // The opening ends when every finite animation of the page has played out.
         const finite = document.getAnimations().filter((a) => a.effect && a.effect.getComputedTiming().endTime !== Infinity);
         Promise.all(finite.map((a) => a.finished)).then(done, done);
       };
       const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-      Promise.race([document.fonts ? document.fonts.ready : wait(0), wait(650)])
-        .then(() => wait(Math.max(0, 380 - (performance.now() - started))))
+      // The leaves grow and open first (about a second, Leaves.astro), then the mark takes off.
+      Promise.race([document.fonts ? document.fonts.ready : wait(0), wait(1200)])
+        .then(() => wait(Math.max(0, 1180 - (performance.now() - started))))
         .then(fly, fly);
-      setTimeout(done, 4000);
+      setTimeout(done, 5000);
     })();
   </script>
   <UseCases lang={lang} />

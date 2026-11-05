@@ -4,11 +4,18 @@
 import { readFileSync } from "node:fs";
 const mark = readFileSync("../docs/brand/mark.svg", "utf8");
 const [green, blue] = [...mark.matchAll(/ d="([^"]+)"/g)].map((m) => m[1]);
+// The green leaf alone: the green shape minus the part that runs on under the blue leaf
+// (outline difference of the two paths above, so the first leaf can grow by itself).
+const greenAlone = "M36.5 0.0L29.8 24.4L24.8 44.6L19.3 70.2L14.8 94.2L11.0 117.4L8.0 139.8L4.9 167.7L3.0 190.2L1.4 214.6L0.5 237.1L0.0 264.2L0.1 289.6L0.8 313.1L2.1 341.1L3.9 366.3L6.5 394.2L9.5 420.3L13.0 446.2L16.7 470.4L21.9 499.7L27.6 528.1L33.4 553.7L39.8 580.0L46.8 606.2L53.8 630.6L62.2 657.3L70.3 681.3L79.2 706.0L88.3 729.6L97.7 752.1L107.1 773.6L118.2 797.4L129.5 820.0L139.6 839.2L150.6 859.0L163.4 880.8L174.4 898.5L188.8 920.4L202.2 939.7L215.5 958.0L229.9 976.6L244.2 994.1L259.5 1011.9L274.6 1028.7L289.0 1043.7L305.7 1060.3L321.4 1075.2L336.9 1089.1L354.2 1103.7L370.4 1116.7L386.9 1129.3L405.3 1142.5L424.0 1155.2L442.2 1166.9L460.1 1177.7L478.1 1187.9L496.5 1197.7L515.9 1207.4L536.4 1217.0L556.2 1225.7L577.2 1234.1L596.7 1241.4L627.5 1252.0L642.1 1256.7L642.2 1256.5L606.6 1214.3L591.3 1195.9L580.1 1181.9L569.8 1168.5L557.9 1152.2L546.2 1135.2L534.1 1116.4L524.0 1099.6L513.0 1080.2L501.6 1058.5L491.3 1037.5L481.8 1016.7L473.2 996.1L464.3 973.2L455.6 948.6L448.3 925.8L441.0 900.1L434.5 874.2L429.1 849.2L424.3 823.0L421.0 800.9L419.4 787.9L418.0 774.4L416.0 749.4L414.9 726.0L414.7 703.7L415.3 679.8L416.8 656.4L419.1 634.2L421.6 615.9L425.2 595.5L429.0 576.8L438.5 532.8L438.4 533.2L438.1 533.3L430.2 508.3L422.9 486.9L416.1 468.2L409.2 450.5L401.7 432.1L391.8 408.8L381.7 386.6L372.1 366.1L362.6 346.6L353.2 328.1L346.1 314.4L338.7 301.0L331.9 289.2L323.6 275.3L314.9 261.5L306.5 248.6L296.9 234.3L287.0 220.3L274.7 203.5L264.9 190.6L253.6 176.4L242.7 163.2L232.6 151.6L222.3 140.2L211.8 128.9L202.3 119.3L193.2 110.4L181.9 100.0L164.1 84.7L150.3 73.1L137.6 62.9L124.0 52.4L111.6 43.3L101.2 36.1L91.3 29.7L81.3 23.6L68.7 16.5L46.9 5.5Z";
 const { splash = false } = Astro.props as { splash?: boolean };
 ---
 {splash ? (
   <div class="iva-splash" data-intro-mark aria-hidden="true">
-    <svg viewBox="-24 0 828 1257"><path fill="#a4dc55" d={green} /><path fill="#368ad2" d={blue} /></svg>
+    <svg viewBox="-24 0 828 1257">
+      <path class="iva-leaf-full" fill="#a4dc55" d={green} />
+      <path class="iva-leaf-g" fill="#a4dc55" d={greenAlone} />
+      <path class="iva-leaf-b" fill="#368ad2" d={blue} />
+    </svg>
   </div>
 ) : (
   <div class="v7-leaves" data-leaves aria-hidden="true">
@@ -17,22 +24,25 @@ const { splash = false } = Astro.props as { splash?: boolean };
 )}
 <style>
   /* Placed in the phone wrapper's units: 100cqw is the phone width, the phone is 205cqw tall.
-     Phone beside the heading: the mark stands behind it, a leaf tip showing on each side. */
-  .v7-leaves { position:absolute; z-index:0; left:-16cqw; top:2cqw; width:132cqw; height:200.4cqw; pointer-events:none; }
-  .v7-leaves svg { position:absolute; inset:0; width:100%; height:100%; overflow:visible; filter:blur(2.2cqw); opacity:.9; }
-  /* Phone under the heading: a small sprout peeks over its top right corner. */
-  @media (max-width:960px) {
-    .v7-leaves { left:68cqw; top:-33cqw; width:38cqw; height:57.7cqw; }
-    .v7-leaves svg { filter:blur(1.2cqw); }
-  }
-  /* Opening (Home.astro): a small sharp mark appears mid-screen, then flies into this place,
-     growing and softening while the phone rises in front of it, and hands over to these leaves. */
+     A large mark stands behind the phone: the green leaf sweeps out on the left and above,
+     the blue one shows on the right; both soft, as if seen through glass. */
+  .v7-leaves { position:absolute; z-index:0; left:-50.3cqw; top:-12cqw; width:166.6cqw; height:252.9cqw; pointer-events:none; }
+  .v7-leaves svg { position:absolute; inset:0; width:100%; height:100%; overflow:visible; filter:blur(2.4cqw); opacity:.9; }
+  /* Opening (Home.astro): one leaf grows mid-screen, the second unfolds from it, then the mark
+     flies into this place, growing and softening, while the phone floats up in front of it. */
   .iva-splash { display:none; }
   :global(html[data-intro="play"]) .iva-splash,
-  :global(html[data-intro="fly"]) .iva-splash { display:block; position:fixed; z-index:-1; left:50%; top:50%; height:min(10vh, 84px); aspect-ratio:828 / 1257; translate:-50% -50%; pointer-events:none; }
+  :global(html[data-intro="fly"]) .iva-splash { display:block; position:fixed; z-index:-1; left:50%; top:50%; height:min(14vh, 112px); aspect-ratio:828 / 1257; translate:-50% -50%; pointer-events:none; }
   .iva-splash svg { display:block; width:100%; height:100%; overflow:visible; }
-  :global(html[data-intro="play"]) .iva-splash svg { animation:iva-splash-in 340ms cubic-bezier(.23,1,.32,1) both; }
-  @keyframes iva-splash-in { from { opacity:0; transform:scale(.86); } }
+  /* Both leaves turn around the point where their stems meet. */
+  .iva-splash path { transform-box:view-box; transform-origin:641px 1256px; }
+  :global(html[data-intro="play"]) .iva-leaf-g { animation:iva-leaf-grow 560ms cubic-bezier(.22,1,.36,1) both; }
+  /* Once the blue leaf has opened over it, the whole green shape takes over: no seam between them. */
+  :global(html[data-intro="play"]) .iva-leaf-full { opacity:0; animation:iva-leaf-settle 1ms linear 1080ms forwards; }
+  @keyframes iva-leaf-settle { to { opacity:1; } }
+  :global(html[data-intro="play"]) .iva-leaf-b { animation:iva-leaf-open 680ms cubic-bezier(.34,1.28,.64,1) 400ms both; }
+  @keyframes iva-leaf-grow { from { opacity:0; transform:rotate(10deg) scale(.3); } 30% { opacity:1; } to { opacity:1; transform:none; } }
+  @keyframes iva-leaf-open { from { opacity:0; transform:rotate(-38deg) scale(.9); } 20% { opacity:1; } to { opacity:1; transform:none; } }
   :global(html[data-intro="play"]) .v7-leaves,
   :global(html[data-intro="fly"]) .v7-leaves { opacity:0; }
 </style>

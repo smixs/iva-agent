@@ -322,9 +322,9 @@ const prepared = messages.map(message => {
   /* Phone rises in front of the mark during the opening (Home.astro). */
   :global(html[data-intro="play"]) .v7-device-wrap > :global(.v7-device),
   :global(html[data-intro="play"]) .v7-caption { opacity:0; }
-  :global(html[data-intro="fly"]) .v7-device-wrap > :global(.v7-device) { animation:v7-phone-rise 760ms cubic-bezier(.23,1,.32,1) 260ms both; }
-  :global(html[data-intro="fly"]) .v7-caption { animation:v7-fade-in 400ms ease 600ms both; }
-  @keyframes v7-phone-rise { 0% { opacity:0; transform:translateY(10%) scale(.94); } 16% { opacity:1; } 100% { opacity:1; transform:none; } }
+  :global(html[data-intro="fly"]) .v7-device-wrap > :global(.v7-device) { animation:v7-phone-rise 1200ms cubic-bezier(.22,1,.36,1) 140ms both; }
+  :global(html[data-intro="fly"]) .v7-caption { animation:v7-fade-in 500ms ease 800ms both; }
+  @keyframes v7-phone-rise { 0% { opacity:0; transform:translateY(7%) scale(.97); } 18% { opacity:1; } 100% { opacity:1; transform:none; } }
   @keyframes v7-fade-in { from { opacity:0; } }
   .v7-menu-install-footer { margin-top:calc(9 * var(--vp)); }
   .v7-menu-install-button { appearance:none; width:100%; border:0; border-radius:calc(12 * var(--vp)); min-height:38px; padding:calc(8 * var(--vp)); background:#a4dc55; color:#17211d; font:inherit; font-weight:600; cursor:pointer; animation:v7-install-pulse 1.8s ease-in-out .4s 2; }

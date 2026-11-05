@@ -348,20 +348,20 @@ code {
 main {
   overflow-x: clip;
 }
-html[data-intro="play"] :is(.header, .hero-heading, .hero-intro, .hero ~ *) {
+html[data-intro="play"] :is(.header, .hero-heading, .hero-intro, .hero ~ :not(.iva-splash)) {
   opacity: 0;
 }
-html[data-intro="fly"] :is(.header, .hero-heading, .hero-intro, .hero ~ *) {
-  animation: iva-intro-in 640ms cubic-bezier(0.23, 1, 0.32, 1) both;
+html[data-intro="fly"] :is(.header, .hero-heading, .hero-intro, .hero ~ :not(.iva-splash)) {
+  animation: iva-intro-in 800ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 html[data-intro="fly"] .header {
-  animation-delay: 300ms;
+  animation-delay: 260ms;
 }
 html[data-intro="fly"] .hero-heading {
-  animation-delay: 360ms;
+  animation-delay: 340ms;
 }
-html[data-intro="fly"] :is(.hero-intro, .hero ~ *) {
-  animation-delay: 460ms;
+html[data-intro="fly"] :is(.hero-intro, .hero ~ :not(.iva-splash)) {
+  animation-delay: 440ms;
 }
 @keyframes iva-intro-in {
   from {
