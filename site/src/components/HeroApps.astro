@@ -1,108 +1,129 @@
 ---
-// Services Iva works through fly into the hero phone in a wave: each one comes from afar, small and
-// faint, grows as it nears, then shrinks into the phone and is gone. Nothing stays hanging around it.
+// Services Iva works with keep flying into the hero phone, one after another and never in step:
+// each comes from afar, small and faint, grows as it nears, then shrinks into the phone and is
+// gone. Over a minute the whole list goes by (lib/services.ts), so the variety itself is the point.
 // Coordinates are in the phone wrapper's units: 100cqw is the phone width, the phone is 205cqw tall.
-// A service that would start on the hero text or past the screen edge stays out (script below).
-import { marks } from "../lib/services";
-// [id, desktop x, desktop y, mobile x, mobile y]; no mobile place = desktop only.
-type App = [string, number, number, number?, number?];
-const apps: App[] = [
-  ["taxi", -22, 14, 7, -7],
-  ["gmail", -50, 6, 21.3, -10],
-  ["bitrix24", -78, 22, 35.7, -12],
-  ["delivery", -36, 38, 50, -12.5],
-  ["googlecalendar", -64, 52, 64.3, -12],
-  ["1c", -14, 62, 78.7, -10],
-  ["notion", -44, 76, 93, -7],
-  ["googlesheets", -80, 86],
-  ["slack", -26, 100],
-  ["googledrive", -58, 118],
-  ["todoist", -12, 136],
-  ["github", -40, 150],
-  ["obsidian", 120, 18],
-  ["linear", 126, 58],
-  ["googledocs", 118, 100],
-  ["googletasks", 124, 142],
+// A place that would start on the hero text or past the screen edge stays empty (script below).
+import { marks, stream, wide } from "../lib/services";
+// Starting places around the phone: beside it on wide screens, in an arc above it on narrow ones.
+const desk: [number, number][] = [
+  [-22, 14], [-50, 6], [-78, 22], [-36, 38], [-64, 52], [-14, 62], [-44, 76], [-80, 86],
+  [-26, 100], [-58, 118], [-12, 136], [-40, 150], [120, 18], [126, 58], [118, 100], [124, 142],
 ];
-// The wave rolls down the phone on wide screens and across its top on narrow ones.
-const wave = [...apps].sort((a, b) => a[2] - b[2]);
-const mobile = apps.filter((a) => a[3] !== undefined);
-// Each service flies into the nearest edge of the phone, a little towards its middle.
-const flight = ([id, x, y, mx = 0, my = 0]: App) => {
-  const [, bg, fg] = marks[id];
-  const tx = (x > 50 ? 90 : 10) - x;
-  const ty = (102 - y) * 0.3;
-  return `--bg:${bg};--fg:${fg};--x:${x};--y:${y};--tx:${tx};--ty:${ty};--mx:${mx};--my:${my};--mtx:${(50 - mx) * 0.4};--mty:${10 - my}`;
-};
+const narrow: [number, number][] = [[7, -7], [21.3, -10], [35.7, -12], [50, -12.5], [64.3, -12], [78.7, -10], [93, -7]];
+// Each service flies into the nearest edge of the phone, a little towards its middle; a longer
+// way takes a little longer, so near and far ones move at about the same pace.
+const time = (x: number, y: number, base: number) => Math.round(Math.min(3800, Math.max(2800, base + Math.hypot(x, y) * 18)));
+const slots = [
+  ...desk.map(([x, y]) => {
+    const to = [(x > 50 ? 90 : 10) - x, (102 - y) * 0.3];
+    return { x, y, to, t: time(to[0], to[1], 2200), kind: "is-desk" };
+  }),
+  ...narrow.map(([x, y]) => {
+    const to = [(50 - x) * 0.4, 10 - y];
+    return { x, y, to, t: time(to[0], to[1], 2400), kind: "is-narrow" };
+  }),
+];
+const tiles = Object.fromEntries(stream.map((id) => [id, [marks[id][1], marks[id][2], wide.has(id) ? 1 : 0]]));
 ---
-<div class="v7-apps" data-apps aria-hidden="true">
-  {apps.map((a) => (
-    <span
-      class:list={["v7-app", a[3] === undefined && "is-desk-only"]}
-      data-app={a[0]}
-      style={`${flight(a)};--o:${wave.indexOf(a)};--mo:${mobile.indexOf(a)}`}
-    >
-      <span class="v7-app-art" set:html={marks[a[0]][0]} />
+<div class="v7-apps" data-apps data-tiles={JSON.stringify(tiles)} aria-hidden="true">
+  {slots.map((s) => (
+    <span class:list={["v7-app", s.kind]} data-to={s.to.map((v) => +v.toFixed(2)).join(" ")} data-t={s.t} style={`--x:${s.x};--y:${s.y}`}>
+      <svg class="v7-app-art"><use /></svg>
     </span>
   ))}
 </div>
 <script>
   const apps = document.querySelector<HTMLElement>("[data-apps]");
-  // Keep out every service that would start on the hero text or cross the screen edge.
+  const tiles = JSON.parse(apps?.dataset.tiles || "{}") as Record<string, [string, string, number]>;
+  const order = Object.keys(tiles);
+  const slots = [...(apps?.querySelectorAll<HTMLElement>(".v7-app") || [])];
+  // Keep out every place that would start on the hero text or cross the screen edge.
   const fit = () => {
     if (!apps) return;
     const wrap = apps.getBoundingClientRect();
     const text: DOMRect[] = [];
-    for (const el of document.querySelectorAll(".hero-heading span, .hero-intro .lead, .hero-note")) {
+    for (const el of document.querySelectorAll(".hero-heading span, .hero-intro .lead")) {
       const range = document.createRange();
       range.selectNodeContents(el);
       text.push(...range.getClientRects());
     }
     for (const el of document.querySelectorAll(".hero-intro .button, .v7-cue-text, .v7-cue-arrow")) if (el.getClientRects().length) text.push(el.getBoundingClientRect());
-    for (const app of apps.querySelectorAll<HTMLElement>(".v7-app")) {
-      const l = wrap.left + app.offsetLeft, t = wrap.top + app.offsetTop;
-      const r = l + app.offsetWidth, b = t + app.offsetHeight;
-      app.toggleAttribute("data-off", l < 8 || r > innerWidth - 8 || text.some((k) => l < k.right + 16 && r > k.left - 16 && t < k.bottom + 12 && b > k.top - 12));
+    for (const slot of slots) {
+      const l = wrap.left + slot.offsetLeft, t = wrap.top + slot.offsetTop;
+      const r = l + slot.offsetWidth, b = t + slot.offsetHeight;
+      slot.toggleAttribute("data-off", l < 8 || r > innerWidth - 8 || text.some((k) => l < k.right + 16 && r > k.left - 16 && t < k.bottom + 12 && b > k.top - 12));
     }
   };
-  // The wave starts once the page opening has finished (Home.astro), or right away.
+  // The list in its own order first, then shuffled each time round; never one already in the air.
+  let queue = [...order];
+  const flying = new Set<string>();
+  const next = () => {
+    if (!queue.length) queue = order.map((id) => [Math.random(), id] as const).sort((a, b) => a[0] - b[0]).map(([, id]) => id);
+    const i = Math.max(0, queue.findIndex((id) => !flying.has(id)));
+    return queue.splice(i, 1)[0];
+  };
+  // A free place is taken among the three that waited longest, so the stream wanders around the phone.
+  const waited = new Map<HTMLElement, number>();
+  const busy = new Set<HTMLElement>();
+  const fly = () => {
+    const free = slots.filter((s) => !busy.has(s) && s.offsetParent && !s.hasAttribute("data-off"));
+    if (busy.size >= (innerWidth > 960 ? 4 : 3) || !free.length) return;
+    free.sort((a, b) => (waited.get(a) || 0) - (waited.get(b) || 0));
+    const slot = free[Math.floor(Math.random() * Math.min(3, free.length))];
+    const id = next();
+    const [bg, fg, isWide] = tiles[id];
+    slot.style.setProperty("--bg", bg);
+    slot.style.setProperty("--fg", fg);
+    slot.classList.toggle("is-wide", !!isWide);
+    slot.querySelector("use")!.setAttribute("href", `/services.svg#${id}`);
+    busy.add(slot);
+    flying.add(id);
+    waited.set(slot, performance.now());
+    const [x, y] = slot.dataset.to!.split(" ");
+    const duration = Number(slot.dataset.t);
+    // Unhurried while far away, then drawn a little faster into the phone.
+    slot.animate([{ translate: "0 0" }, { translate: `${x}cqw ${y}cqw` }], { duration, easing: "cubic-bezier(.42, 0, .7, .6)" });
+    const land = () => { busy.delete(slot); flying.delete(id); };
+    slot.animate([
+      { opacity: 0, scale: 0.45, easing: "cubic-bezier(.22, 1, .36, 1)" },
+      { opacity: 1, scale: 1, offset: 0.24 },
+      { opacity: 1, scale: 0.9, offset: 0.62, easing: "cubic-bezier(.55, 0, .85, .4)" },
+      { opacity: 0, scale: 0.2 },
+    ], { duration }).finished.then(land, land);
+  };
+  // A new service every 0.65 to 1.5 seconds, never on a beat, while the hero is on screen.
+  let seen = true;
+  const tick = () => {
+    if (seen && !document.hidden) fly();
+    window.setTimeout(tick, (innerWidth > 960 ? 650 : 850) + Math.random() * 700);
+  };
   const start = () => {
     fit();
-    apps?.setAttribute("data-on", "");
     new ResizeObserver(fit).observe(document.querySelector(".hero") || document.body);
     document.fonts?.ready.then(fit);
+    new IntersectionObserver(([entry]) => { seen = entry.isIntersecting; }).observe(apps!);
+    tick();
   };
-  const intro = document.documentElement.dataset.intro;
-  if (intro === "play" || intro === "fly") window.addEventListener("iva:intro-done", start, { once: true });
-  else start();
+  // The stream starts once the page opening has finished (Home.astro), or right away.
+  if (apps && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    const intro = document.documentElement.dataset.intro;
+    if (intro === "play" || intro === "fly") window.addEventListener("iva:intro-done", start, { once: true });
+    else start();
+  }
 </script>
 <style>
-  .v7-apps { position:absolute; inset:0; z-index:0; pointer-events:none; --s:12.5cqw; --step:.18s; --cycle:7s; }
-  .v7-app { position:absolute; left:calc(var(--x) * 1cqw - var(--s) / 2); top:calc(var(--y) * 1cqw - var(--s) / 2); width:var(--s); height:var(--s); border-radius:28%; background:var(--bg); color:var(--fg); box-shadow:0 .5cqw 2.2cqw rgb(18 44 32 / .13), 0 0 0 .22cqw rgb(18 44 32 / .06); display:grid; place-items:center; opacity:0; --fx:var(--tx); --fy:var(--ty); --n:var(--o); }
+  .v7-apps { position:absolute; inset:0; z-index:0; pointer-events:none; --s:12.5cqw; }
+  .v7-app { position:absolute; left:calc(var(--x) * 1cqw - var(--s) / 2); top:calc(var(--y) * 1cqw - var(--s) / 2); width:var(--s); height:var(--s); border-radius:28%; background:var(--bg); color:var(--fg); box-shadow:0 .5cqw 2.2cqw rgb(18 44 32 / .13), 0 0 0 .22cqw rgb(18 44 32 / .06); display:grid; place-items:center; opacity:0; }
+  .v7-app.is-narrow { display:none; }
   .v7-app[data-off] { visibility:hidden; }
-  .v7-app-art { display:grid; place-items:center; width:56%; height:56%; }
-  .v7-app-art :global(svg) { display:block; width:100%; height:100%; }
-  .v7-app[data-app="1c"] .v7-app-art, .v7-app[data-app="bitrix24"] .v7-app-art { width:68%; }
-
-  /* One flight takes the first quarter of the cycle; the rest of the cycle the service is gone. */
-  .v7-apps[data-on] .v7-app { animation:v7-app-move var(--cycle) linear calc(var(--n) * var(--step)) infinite both, v7-app-look var(--cycle) linear calc(var(--n) * var(--step)) infinite both; }
-  @keyframes v7-app-move {
-    /* Slow while it is far away, then drawn faster and faster into the phone. */
-    0% { translate:0 0; animation-timing-function:cubic-bezier(.5, 0, .85, .4); }
-    24%, 100% { translate:calc(var(--fx) * 1cqw) calc(var(--fy) * 1cqw); }
-  }
-  @keyframes v7-app-look {
-    0% { opacity:0; scale:.4; animation-timing-function:cubic-bezier(.22, 1, .36, 1); }
-    8% { opacity:1; scale:1; animation-timing-function:cubic-bezier(.5, 0, .9, .5); }
-    24%, 100% { opacity:0; scale:.2; }
-  }
-
+  .v7-app-art { display:block; width:calc(var(--s) * .56); height:calc(var(--s) * .56); overflow:visible; }
+  .v7-app.is-wide .v7-app-art { width:calc(var(--s) * .68); }
   /* Phone under the heading: the services come from above and drop into its top edge. */
   @media (max-width:960px) {
-    .v7-apps { --s:11cqw; --step:.22s; --cycle:5s; }
-    .v7-app { left:calc(var(--mx) * 1cqw - var(--s) / 2); top:calc(var(--my) * 1cqw - var(--s) / 2); --fx:var(--mtx); --fy:var(--mty); --n:var(--mo); }
-    .v7-app.is-desk-only { display:none; }
-    .v7-app:not(.is-desk-only) .v7-app-art { width:56%; }
+    .v7-apps { --s:11cqw; }
+    .v7-app.is-desk { display:none; }
+    .v7-app.is-narrow { display:grid; }
   }
   @media (prefers-reduced-motion:reduce) {
     .v7-apps { display:none; }
