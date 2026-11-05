@@ -330,22 +330,6 @@ code {
   gap: 18px;
   flex-wrap: wrap;
 }
-.hero-note {
-  max-width: 42ch;
-  margin: 28px 0 0;
-  color: var(--muted);
-  font-size: 16px;
-  line-height: 1.55;
-}
-.hero-note strong {
-  display: block;
-  color: var(--ink);
-  font-size: 32px;
-  font-weight: 650;
-  line-height: 1.2;
-  letter-spacing: -0.025em;
-  margin-bottom: 8px;
-}
 /* Opening, once per session (see Home.astro): the page settles in around the mark. */
 main {
   overflow-x: clip;
@@ -494,54 +478,45 @@ html[data-intro="fly"] :is(.hero-intro, .hero ~ :not(.iva-splash)) {
 .connection-mark.is-wide svg {
   width: 66%;
 }
-.configuration {
+/* Price: the whole offer in one line, beside a person who owns their Iva. */
+.price {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.12fr);
+  align-items: center;
   gap: 64px;
-  align-items: start;
-  padding-top: 64px;
-  padding-bottom: 72px;
+  padding-top: 72px;
+  padding-bottom: 88px;
 }
-.configuration h2 {
-  max-width: 18ch;
-  margin: 0;
+.price h2 {
+  max-width: 12ch;
+  margin: 0 0 22px;
+  font-size: clamp(40px, 4vw, 56px);
+  line-height: 1.04;
 }
-.configuration-copy p {
+.price-line {
+  max-width: 30ch;
+  margin: 0 0 16px;
+  font-size: 22px;
+  line-height: 1.45;
+  letter-spacing: -0.012em;
+}
+.price-note {
   max-width: 40ch;
-  margin-bottom: 20px;
+  margin: 0;
+  color: var(--muted);
   font-size: var(--body);
-  color: var(--muted);
-}
-.security {
-  display: grid;
-  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
-  gap: 88px;
-  padding-top: 56px;
-  padding-bottom: 104px;
-}
-.security h2 {
-  max-width: 15ch;
-  margin: 0;
-}
-.ownership-facts {
-  display: grid;
-  gap: 28px;
-  margin: 0 0 28px;
-}
-.ownership-facts > div {
-  display: grid;
-  gap: 8px;
-}
-.ownership-facts dt {
-  font-size: 18px;
-  font-weight: 700;
-  line-height: 1.35;
-}
-.ownership-facts dd {
-  margin: 0;
-  color: var(--muted);
-  font-size: 18px;
   line-height: 1.55;
+}
+.price-art {
+  display: block;
+  min-width: 0;
+  mix-blend-mode: multiply;
+}
+.price-art img {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 4 / 3;
+  object-fit: contain;
 }
 .install-band {
   background: var(--leaf-tint);
@@ -1092,16 +1067,12 @@ html[data-intro="fly"] :is(.hero-intro, .hero ~ :not(.iva-splash)) {
   .case-copy h2 {
     font-size: 36px;
   }
-  .connections-copy,
-  .configuration {
+  .connections-copy {
     gap: 28px 36px;
   }
   .connection-list {
     grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 30px 20px;
-  }
-  .security {
-    gap: 48px;
   }
 }
 @media (max-width: 760px) {
@@ -1142,24 +1113,17 @@ html[data-intro="fly"] :is(.hero-intro, .hero ~ :not(.iva-splash)) {
     max-width: 48ch;
     margin-bottom: 16px;
   }
-  .configuration,
-  .security {
+  .price {
     grid-template-columns: 1fr;
-    gap: 26px;
+    gap: 28px;
+    padding-top: 48px;
+    padding-bottom: 56px;
   }
-  .configuration h2,
-  .security h2 {
-    max-width: 21ch;
+  .price h2 {
+    font-size: 38px;
   }
-  .configuration-copy p {
-    max-width: 48ch;
-  }
-  .ownership-facts {
-    gap: 24px;
-  }
-  .ownership-facts dt,
-  .ownership-facts dd {
-    font-size: 18px;
+  .price-line {
+    font-size: 19px;
   }
 }
 @media (max-width: 600px) {
@@ -1215,14 +1179,6 @@ html[data-intro="fly"] :is(.hero-intro, .hero ~ :not(.iva-splash)) {
     min-height: 54px;
     padding-inline: 24px;
   }
-  .hero-note {
-    margin-top: 24px;
-    font-size: 16px;
-    max-width: 35ch;
-  }
-  .hero-note strong {
-    font-size: 28px;
-  }
   .case-copy h2 {
     font-size: 30px;
     line-height: 1.15;
@@ -1245,23 +1201,6 @@ html[data-intro="fly"] :is(.hero-intro, .hero ~ :not(.iva-splash)) {
   .connection-mark {
     width: 52px;
     height: 52px;
-  }
-  .configuration {
-    padding-top: 40px;
-    padding-bottom: 48px;
-  }
-  .configuration-copy p {
-    font-size: 18px;
-  }
-  .security {
-    padding-top: 40px;
-    padding-bottom: 64px;
-  }
-  .ownership-facts dt {
-    font-size: 17px;
-  }
-  .ownership-facts dd {
-    font-size: 17px;
   }
   .install {
     padding-top: 44px;

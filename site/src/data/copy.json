@@ -21,13 +21,7 @@
           "Ива помнит вас и ваши задачи, готовит ответы и сама напоминает о важном."
         ],
         "Кнопки": [
-          "Установить Иву"
-        ],
-        "Примечание": [
-          "Бесплатно"
-        ],
-        "Условия": [
-          "Для работы нужен ваш сервер или Mac и подписка Claude, Codex или OpenCode Go."
+          "Установить бесплатно"
         ]
       }
     },
@@ -46,47 +40,27 @@
       }
     },
     {
-      "number": 4,
-      "groups": {
-        "H2": [
-          "Модель и настройки в Telegram"
-        ],
-        "Подзаголовок": [
-          "Выберите Claude, Codex или Ollama, смените язык ответов и уведомления. Всё в меню Ивы в Telegram."
-        ],
-        "Кнопки": [
-          "Открыть меню в демо"
-        ]
-      }
-    },
-    {
-      "number": 5,
-      "groups": {
-        "H2": [
-          "Память хранится у вас"
-        ],
-        "Факты": [
-          "Память и история хранятся обычными файлами на вашем сервере или Mac. Вы можете читать, копировать и удалять их.",
-          "Бот отвечает только разрешённым Telegram-аккаунтам. Вы выбираете, какие сервисы подключить.",
-          "Переписка проходит через Telegram. Запросы получает выбранный AI-провайдер, а голосовые получает сервис расшифровки, если он подключён.",
-          "Исходный код открыт на GitHub под лицензией MIT, его можно проверить и изменить."
-        ],
-        "Ссылка": [
-          "Как устроена защита"
-        ],
-        "Термины": [
-          "Ваши файлы",
-          "Ваш круг",
-          "Внешние запросы",
-          "Открытый код"
-        ]
-      }
-    },
-    {
       "number": 6,
       "groups": {
         "Label": [
           "Отзывы пользователей"
+        ]
+      }
+    },
+    {
+      "number": 7,
+      "groups": {
+        "H2": [
+          "Бесплатно и навсегда"
+        ],
+        "Подзаголовок": [
+          "Ива целиком ваша. Платите только за подписку на модель и за сервер."
+        ],
+        "Условия": [
+          "Для работы нужен ваш сервер или Mac и подписка Claude, Codex или OpenCode Go."
+        ],
+        "Кнопки": [
+          "Установить бесплатно"
         ]
       }
     },
@@ -164,13 +138,7 @@
           "Iva remembers you and your tasks, prepares replies and reminds you about what matters."
         ],
         "Кнопки": [
-          "Install Iva"
-        ],
-        "Примечание": [
-          "Free"
-        ],
-        "Условия": [
-          "You need your own server or Mac and a Claude, Codex or OpenCode Go subscription."
+          "Install for free"
         ]
       }
     },
@@ -189,47 +157,27 @@
       }
     },
     {
-      "number": 4,
-      "groups": {
-        "H2": [
-          "Models and settings in Telegram"
-        ],
-        "Подзаголовок": [
-          "Choose Claude, Codex or Ollama, change your reply language and notifications. It is all in Iva’s Telegram menu."
-        ],
-        "Кнопки": [
-          "Open the demo menu"
-        ]
-      }
-    },
-    {
-      "number": 5,
-      "groups": {
-        "H2": [
-          "Your memory stays with you"
-        ],
-        "Факты": [
-          "Memory and history are plain files on your server or Mac. You can read, copy and delete them.",
-          "The bot only responds to allowed Telegram accounts. You choose which services to connect.",
-          "Messages pass through Telegram. Your chosen AI provider receives model requests; a connected transcription service receives voice messages.",
-          "The source code is on GitHub under the MIT licence. You can inspect and modify it."
-        ],
-        "Ссылка": [
-          "How the safeguards work"
-        ],
-        "Термины": [
-          "Your files",
-          "Your people",
-          "External requests",
-          "Open source"
-        ]
-      }
-    },
-    {
       "number": 6,
       "groups": {
         "Label": [
           "User reviews"
+        ]
+      }
+    },
+    {
+      "number": 7,
+      "groups": {
+        "H2": [
+          "Free, forever"
+        ],
+        "Подзаголовок": [
+          "Iva is entirely yours. You only pay for your model subscription and your server."
+        ],
+        "Условия": [
+          "You need your own server or Mac and a Claude, Codex or OpenCode Go subscription."
+        ],
+        "Кнопки": [
+          "Install for free"
         ]
       }
     },

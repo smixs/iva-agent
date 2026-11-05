@@ -29,9 +29,9 @@ const enPath = en || Astro.url.pathname.replace(/^\/ru\//, "/");
 const ruPath = ru || (enPath === "/privacy/" ? "/privacy/" : "/ru" + enPath);
 const og = `/media/og-${lang}.png`;
 const nav = isRu
-  ? ["Примеры задач", "Настройки", "Безопасность", "Установка"]
-  : ["Features", "Settings", "Security", "Install"];
-const links = ["features", "configuration", "security", "install"];
+  ? ["Примеры задач", "Сервисы", "Цена", "Установка"]
+  : ["Features", "Services", "Price", "Install"];
+const links = ["features", "connections", "price", "install"];
 const footer = isRu
   ? [
       "Документация",

@@ -245,7 +245,7 @@ for (const home of [path.join(dist, "index.html"), path.join(dist, "ru/index.htm
   assert.deepEqual(headings, [
     ...usecases[lang].rows.map((row: any) => row.title),
     ...copy[lang]
-      .filter((section: any) => [3, 4, 5, 9, 10].includes(section.number))
+      .filter((section: any) => [3, 7, 9, 10].includes(section.number))
       .map((section: any) => section.groups.H2[0]),
   ]);
   assert.ok(
@@ -264,7 +264,7 @@ for (const home of [path.join(dist, "index.html"), path.join(dist, "ru/index.htm
     }
   }
   for (const section of copy[lang].filter((section: any) =>
-    [1, 3, 4, 5, 9, 10].includes(section.number),
+    [1, 3, 7, 9, 10].includes(section.number),
   )) {
     for (const [key, values] of Object.entries(section.groups)) {
       if (

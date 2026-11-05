@@ -21,7 +21,6 @@ const title = (n: number) => t(n, "H2");
 const installLabel = t(1, "Кнопки");
 const headline = group(1, "H1");
 const faq = c[10].faq!;
-const securityLabels = group(5, "Термины");
 const docs = ru ? "/ru/docs/" : "/docs/";
 const schema = [
   {
@@ -74,7 +73,6 @@ const schema = [
         <div class="actions">
           <button class="button" data-copy={phrase(lang)}>{installLabel}</button>
         </div>
-        <p class="hero-note"><strong>{t(1, "Примечание")}</strong>{t(1, "Условия")}</p>
       </div>
     </div>
     <div class="hero-visual">
@@ -135,24 +133,17 @@ const schema = [
   <UseCases lang={lang} />
   <Reviews lang={lang} label={t(6, "Label")} />
   <Connections lang={lang} title={title(3)} line={t(3, "Подзаголовок")} link={t(3, "Ссылка")} />
-  <section id="configuration" class="section configuration" aria-labelledby="configuration-title">
-    <span id="menu" class="legacy-anchor" aria-hidden="true"></span>
-    <h2 id="configuration-title">{title(4)}</h2>
-    <div class="configuration-copy">
-      <p>{t(4, "Подзаголовок")}</p>
-      <button type="button" class="button secondary" data-open-demo-menu>{t(4, "Кнопки")}</button>
+  <section id="price" class="section price" aria-labelledby="price-title">
+    {["configuration", "menu", "security"].map((id) => <span id={id} class="legacy-anchor" aria-hidden="true"></span>)}
+    <div class="price-copy">
+      <h2 id="price-title">{title(7)}</h2>
+      <p class="price-line">{t(7, "Подзаголовок")}</p>
+      <p class="price-note">{t(7, "Условия")}</p>
     </div>
-  </section>
-  <section id="security" class="section security" aria-labelledby="security-title">
-    <h2 id="security-title">{title(5)}</h2>
-    <div class="security-copy">
-      <dl class="ownership-facts">
-        {group(5, "Факты").map((fact, index) => (
-          <div><dt>{securityLabels[index]}</dt><dd>{fact}</dd></div>
-        ))}
-      </dl>
-      <a class="text-link" href={docs + "security/"}>{t(5, "Ссылка")}</a>
-    </div>
+    <picture class="price-art">
+      <source type="image/avif" srcset="/media/price/home-800.avif 800w, /media/price/home-1024.avif 1024w" sizes="(max-width: 760px) calc(100vw - 44px), 48vw" />
+      <img src="/media/price/home-800.webp" srcset="/media/price/home-800.webp 800w, /media/price/home-1024.webp 1024w" sizes="(max-width: 760px) calc(100vw - 44px), 48vw" width="1024" height="768" alt={ru ? "Мужчина дома радостно держит в руках Mac mini" : "A man at home happily holding up a Mac mini"} loading="lazy" decoding="async" />
+    </picture>
   </section>
   <section id="install" class="install-band" aria-labelledby="install-title">
     <div class="section install">
