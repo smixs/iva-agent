@@ -3,36 +3,33 @@
 // faint, grows as it nears, then shrinks into the phone and is gone. Nothing stays hanging around it.
 // Coordinates are in the phone wrapper's units: 100cqw is the phone width, the phone is 205cqw tall.
 // A service that would start on the hero text or past the screen edge stays out (script below).
-const svg = import.meta.glob<string>("../assets/logos/*.svg", { query: "?raw", import: "default", eager: true });
-const logo = (id: string) => svg[`../assets/logos/${id}.svg`];
-const b24 = (logo("bitrix24").match(/<path[^>]*d="(M132[^"]+)"/) || [])[1];
-const taxi = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M9.6 3.2h4.8l.5 2H9.1z"/><path d="M7.4 6.4h9.2c.8 0 1.5.5 1.8 1.2l1.4 3.6c.9.3 1.6 1.2 1.6 2.2V17c0 .6-.4 1-1 1h-1.1a2.4 2.4 0 0 1-4.7 0H9.6a2.4 2.4 0 0 1-4.7 0H3.6c-.6 0-1-.4-1-1v-3.6c0-1 .7-1.9 1.6-2.2l1.4-3.6c.3-.7 1-1.2 1.8-1.2zm.4 1.9-1 2.7h10.4l-1-2.7z"/></svg>`;
-const bag = `<svg viewBox="0 0 24 24" fill="none" stroke-width="1.9" stroke-linecap="round"><path d="M5.2 8.2h13.6l-1.1 11.6a1.4 1.4 0 0 1-1.4 1.3H7.7a1.4 1.4 0 0 1-1.4-1.3z" fill="currentColor"/><path d="M9 10.5V7a3 3 0 0 1 6 0v3.5" stroke="#ff6a2b"/></svg>`;
-// [id, art, tile colour, mark colour, desktop x, desktop y, mobile x, mobile y]; no mobile place = desktop only.
-type App = [string, string, string, string, number, number, number?, number?];
+import { marks } from "../lib/services";
+// [id, desktop x, desktop y, mobile x, mobile y]; no mobile place = desktop only.
+type App = [string, number, number, number?, number?];
 const apps: App[] = [
-  ["taxi", taxi, "#ffd23f", "#141414", -22, 14, 7, -7],
-  ["gmail", logo("gmail"), "#fff", "#ea4335", -50, 6, 21.3, -10],
-  ["bitrix24", `<svg viewBox="131 -1 41 27.6" fill="currentColor"><path d="${b24}"/></svg>`, "#2fc6f6", "#fff", -78, 22, 35.7, -12],
-  ["delivery", bag, "#fff", "#ff6a2b", -36, 38, 50, -12.5],
-  ["googlecalendar", logo("googlecalendar"), "#fff", "#1a73e8", -64, 52, 64.3, -12],
-  ["1c", logo("1c"), "#ffe14d", "#d52b1e", -14, 62, 78.7, -10],
-  ["notion", logo("notion"), "#fff", "#111", -44, 76, 93, -7],
-  ["googlesheets", logo("googlesheets"), "#fff", "#0f9d58", -80, 86],
-  ["slack", logo("slack"), "#fff", "#4a154b", -26, 100],
-  ["googledrive", logo("googledrive"), "#fff", "#1fa463", -58, 118],
-  ["todoist", logo("todoist"), "#fff", "#e44332", -12, 136],
-  ["github", logo("github"), "#17211d", "#fff", -40, 150],
-  ["obsidian", logo("obsidian"), "#fff", "#7c3aed", 120, 18],
-  ["linear", logo("linear"), "#fff", "#5e6ad2", 126, 58],
-  ["googledocs", logo("googledocs"), "#fff", "#4285f4", 118, 100],
-  ["googletasks", logo("googletasks"), "#fff", "#1a73e8", 124, 142],
+  ["taxi", -22, 14, 7, -7],
+  ["gmail", -50, 6, 21.3, -10],
+  ["bitrix24", -78, 22, 35.7, -12],
+  ["delivery", -36, 38, 50, -12.5],
+  ["googlecalendar", -64, 52, 64.3, -12],
+  ["1c", -14, 62, 78.7, -10],
+  ["notion", -44, 76, 93, -7],
+  ["googlesheets", -80, 86],
+  ["slack", -26, 100],
+  ["googledrive", -58, 118],
+  ["todoist", -12, 136],
+  ["github", -40, 150],
+  ["obsidian", 120, 18],
+  ["linear", 126, 58],
+  ["googledocs", 118, 100],
+  ["googletasks", 124, 142],
 ];
 // The wave rolls down the phone on wide screens and across its top on narrow ones.
-const wave = [...apps].sort((a, b) => a[5] - b[5]);
-const mobile = apps.filter((a) => a[6] !== undefined);
+const wave = [...apps].sort((a, b) => a[2] - b[2]);
+const mobile = apps.filter((a) => a[3] !== undefined);
 // Each service flies into the nearest edge of the phone, a little towards its middle.
-const flight = ([, , bg, fg, x, y, mx = 0, my = 0]: App) => {
+const flight = ([id, x, y, mx = 0, my = 0]: App) => {
+  const [, bg, fg] = marks[id];
   const tx = (x > 50 ? 90 : 10) - x;
   const ty = (102 - y) * 0.3;
   return `--bg:${bg};--fg:${fg};--x:${x};--y:${y};--tx:${tx};--ty:${ty};--mx:${mx};--my:${my};--mtx:${(50 - mx) * 0.4};--mty:${10 - my}`;
@@ -41,11 +38,11 @@ const flight = ([, , bg, fg, x, y, mx = 0, my = 0]: App) => {
 <div class="v7-apps" data-apps aria-hidden="true">
   {apps.map((a) => (
     <span
-      class:list={["v7-app", a[6] === undefined && "is-desk-only"]}
+      class:list={["v7-app", a[3] === undefined && "is-desk-only"]}
       data-app={a[0]}
       style={`${flight(a)};--o:${wave.indexOf(a)};--mo:${mobile.indexOf(a)}`}
     >
-      <span class="v7-app-art" set:html={a[1]} />
+      <span class="v7-app-art" set:html={marks[a[0]][0]} />
     </span>
   ))}
 </div>

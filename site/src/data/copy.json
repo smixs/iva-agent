@@ -35,10 +35,10 @@
       "number": 3,
       "groups": {
         "H2": [
-          "Gmail, календарь и ваши сервисы"
+          "Почта, календарь, браузер и любые ваши сервисы"
         ],
         "Подзаголовок": [
-          "Подключите почту, календарь, документы и рабочие сервисы. Ива сможет помогать с ними в одном чате."
+          "Ива читает почту и календарь, открывает сайты во встроенном браузере и работает с любыми сервисами, которые вы подключите."
         ],
         "Ссылка": [
           "Все подключения"
@@ -178,10 +178,10 @@
       "number": 3,
       "groups": {
         "H2": [
-          "Gmail, calendar and your work tools"
+          "Mail, calendar, browser and any of your services"
         ],
         "Подзаголовок": [
-          "Connect mail, calendar, documents and work tools. Iva can help with them in one chat."
+          "Iva reads your mail and calendar, opens websites in her built-in browser and works with any service you connect."
         ],
         "Ссылка": [
           "All connections"

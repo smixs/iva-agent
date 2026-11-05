@@ -1,28 +1,28 @@
 ---
-// Verified services, using the existing official and Simple Icons marks.
+// Mail, calendar and the built-in browser first, then services people connect; the last tile
+// says that any other service connects the same way.
 import type { Lang } from "../lib/copy";
+import { marks } from "../lib/services";
 const { lang, title, line, link } = Astro.props as {
   lang: Lang;
   title: string;
   line: string;
   link: string;
 };
-const svg = import.meta.glob<string>("../assets/logos/*.svg", {
-  query: "?raw",
-  import: "default",
-  eager: true,
-});
-const mark = (id: string) => svg[`../assets/logos/${id}.svg`];
 const ru = lang === "ru";
 const items = [
-  ["gmail", "Gmail"],
-  ["googlecalendar", ru ? "Google Календарь" : "Google Calendar"],
+  ["mail", ru ? "Почта" : "Mail"],
+  ["googlecalendar", ru ? "Календарь" : "Calendar"],
+  ["browser", ru ? "Браузер" : "Browser"],
   ["googledrive", "Google Drive"],
   ["notion", "Notion"],
   ["slack", "Slack"],
   ["github", "GitHub"],
   ["todoist", "Todoist"],
   ["obsidian", "Obsidian"],
+  ["bitrix24", ru ? "Битрикс24" : "Bitrix24"],
+  ["1c", ru ? "1С" : "1C"],
+  ["more", ru ? "Любые ваши" : "Any of yours"],
 ];
 ---
 
@@ -35,7 +35,7 @@ const items = [
   <ul class="connection-list">
     {items.map(([id, name]) => (
       <li>
-        <span class="connection-mark" aria-hidden="true" set:html={mark(id)} />
+        <span class:list={["connection-mark", (id === "1c" || id === "bitrix24") && "is-wide"]} aria-hidden="true" style={`--tile:${marks[id][1]};--mark:${marks[id][2]}`} set:html={marks[id][0]} />
         <span>{name}</span>
       </li>
     ))}
