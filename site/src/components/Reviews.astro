@@ -1,19 +1,29 @@
 ---
+// Reviews as clippings of the Telegram messages they came from: an initial avatar, the first
+// name, the message and its date with a link to the original. A wall, not a carousel.
 import reviews from "../data/reviews.json";
 import type { Lang } from "../lib/copy";
 const { lang, label } = Astro.props as { lang: Lang; label: string };
 const quotes = reviews.filter((review) => review.lang === lang);
+// Telegram's own name colours for people in a group chat.
+const hues = ["#e17076", "#7bc862", "#65aadd", "#a695e7", "#ee7aae", "#6ec9cb", "#faa774"];
+const day = new Intl.DateTimeFormat(lang === "ru" ? "ru-RU" : "en-GB", { day: "numeric", month: "long" });
+const when = (date: string) => {
+  const [d, m, y] = date.split(".").map(Number);
+  return day.format(new Date(Date.UTC(y, m - 1, d)));
+};
 ---
 
 <section id="reviews" class="section testimonials" aria-label={label}>
   <div class="reviews">
-    {quotes.map((review) => (
-      <figure class="review">
-        <blockquote>{lang === "ru" ? `«${review.short}»` : `“${review.short}”`}</blockquote>
-        <figcaption>
-          <strong>{review.name}</strong>
-          <a href={review.url}>Telegram</a>
-        </figcaption>
+    {quotes.map((review, index) => (
+      <figure class="review" style={`--hue:${hues[index % hues.length]}`}>
+        <span class="review-avatar" aria-hidden="true">{review.first[0]}</span>
+        <div class="review-bubble">
+          <figcaption class="review-name">{review.first}</figcaption>
+          <blockquote>{review.short}</blockquote>
+          <a class="review-source" href={review.url}>{when(review.date)} · Telegram</a>
+        </div>
       </figure>
     ))}
   </div>

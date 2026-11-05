@@ -205,7 +205,6 @@ for (const home of [path.join(dist, "index.html"), path.join(dist, "ru/index.htm
     assert.equal(actualFAQ[index].question, plain(question.name));
     assert.equal(actualFAQ[index].answer, plain(question.acceptedAnswer.text));
   });
-  assert.equal((visible.match(/class="review"/g) || []).length, 3);
   const lang = home.includes("/ru/") ? "ru" : "en";
   const publishedReviews = JSON.parse(
     readFileSync("src/data/reviews.json", "utf8"),
@@ -213,7 +212,8 @@ for (const home of [path.join(dist, "index.html"), path.join(dist, "ru/index.htm
   const localeReviews = publishedReviews.filter(
     (review: any) => review.lang === lang,
   );
-  assert.equal(localeReviews.length, 3);
+  assert.equal((visible.match(/class="review"/g) || []).length, localeReviews.length);
+  assert.ok(localeReviews.length >= 6, `${home}: reviews`);
   for (const review of localeReviews) {
     assert.ok(visible.includes(review.url), `${home}: review source link`);
     assert.ok(
