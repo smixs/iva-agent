@@ -89,12 +89,12 @@ export const stream = [
   "airtable", "googleanalytics", "x", "zoom", "threads", "canva", "shopify", "stripe", "hubspot", "figma",
   "miro", "dropbox", "obsidian", "github", "perplexity", "maildotru", "outlook", "teams", "googletasks", "googledocs",
 ];
-// Every streamed mark as a symbol in one file (pages/services.svg.ts), so the page itself
-// carries only the tile colours and the marks load once the opening is over.
+// Every mark as a symbol in one file (pages/services.svg.ts): the hero stream and the services
+// section both draw from it, so the page itself carries only the tile colours.
 const symbol = (id: string, art: string) => {
   const [, attrs, inner] = art.match(/<svg([^>]*)>([\s\S]*)<\/svg>/)!;
   const box = attrs.match(/viewBox="([^"]+)"/)![1];
   const rest = attrs.replace(/\s(viewBox|xmlns|aria-hidden)="[^"]*"/g, "");
   return `<symbol id="${id}" viewBox="${box}"><g${rest}>${inner}</g></symbol>`;
 };
-export const sprite = `<svg xmlns="http://www.w3.org/2000/svg">${stream.map((id) => symbol(id, marks[id][0])).join("")}</svg>`;
+export const sprite = `<svg xmlns="http://www.w3.org/2000/svg">${Object.entries(marks).map(([id, [art]]) => symbol(id, art)).join("")}</svg>`;

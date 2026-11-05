@@ -2,7 +2,7 @@
 // Mail, calendar and the built-in browser first, then services people connect; the last tile
 // says that any other service connects the same way.
 import type { Lang } from "../lib/copy";
-import { marks } from "../lib/services";
+import { marks, wide } from "../lib/services";
 const { lang, title, line, link } = Astro.props as {
   lang: Lang;
   title: string;
@@ -35,7 +35,7 @@ const items = [
   <ul class="connection-list">
     {items.map(([id, name]) => (
       <li>
-        <span class:list={["connection-mark", (id === "1c" || id === "bitrix24") && "is-wide"]} aria-hidden="true" style={`--tile:${marks[id][1]};--mark:${marks[id][2]}`} set:html={marks[id][0]} />
+        <span class:list={["connection-mark", wide.has(id) && "is-wide"]} aria-hidden="true" style={`--tile:${marks[id][1]};--mark:${marks[id][2]}`}><svg><use href={`/services.svg#${id}`} /></svg></span>
         <span>{name}</span>
       </li>
     ))}
