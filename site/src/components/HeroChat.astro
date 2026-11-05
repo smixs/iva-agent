@@ -1,5 +1,6 @@
 ---
 import Phone from "./Phone.astro";
+import Leaves from "./Leaves.astro";
 import { demoCopy, demoMessages, demoMenuCopy } from "../data/demo";
 import { phrase, type Lang } from "../lib/copy";
 const { lang = "en" } = Astro.props as { lang?: Lang };
@@ -30,6 +31,7 @@ const prepared = messages.map(message => {
 ---
 <figure class="v7-demo" data-demo data-ui="telegram-demo" data-lang={lang} aria-label={c.label}>
   <div class="v7-device-wrap">
+  <Leaves />
   <Phone>
     {["iva", "maria"].map(peer => (
       <div class:list={["v7-screen", peer === "maria" && "v7-maria"]} data-screen={peer} aria-hidden={peer === "maria" ? "true" : undefined} inert={peer === "maria"}>
@@ -292,9 +294,14 @@ const prepared = messages.map(message => {
   .v7-install-copy-status { font-size:max(12px,calc(14 * var(--vp))); line-height:max(16px,calc(19 * var(--vp))); margin:calc(8 * var(--vp)) 0 0; color:#395549; }
   .v7-install-phrase { margin:calc(8 * var(--vp)) 0 0; padding:calc(8 * var(--vp)); border-radius:calc(8 * var(--vp)); background:#e4f3ff; user-select:text; overflow-wrap:anywhere; }
   .v7-device-wrap { position:relative; width:100%; container-type:inline-size; }
+  .v7-device-wrap > :global(.v7-device) { position:relative; z-index:1; }
   /* Menu cue: a handwritten note outside the phone. Beside the phone on desktop, its arrow
      tip at the left edge level with the menu button (185cqw); below the phone when centred. */
   .v7-demo { --cue-at:.7s; }
+  /* During the page opening the cue and the pulse wait; they start once the phone has landed. */
+  :global(html:is([data-intro="play"], [data-intro="fly"])) .v7-cue { display:none; }
+  :global(html:is([data-intro="play"], [data-intro="fly"])) .v7-demo .v7-menu,
+  :global(html:is([data-intro="play"], [data-intro="fly"])) .v7-demo .v7-menu::after { animation:none; }
   .v7-cue { position:absolute; z-index:2; inset:0; pointer-events:none; color:#0b73d9; }
   .v7-cue-text { position:absolute; right:calc(100% + 100px); top:calc(185cqw - 47px); font-family:var(--font-hand,"Caveat",cursive); font-weight:600; font-size:27px; line-height:1; white-space:nowrap; animation:v7-cue-write 700ms cubic-bezier(.23,1,.32,1) var(--cue-at) both; }
   .v7-cue-arrow { position:absolute; overflow:visible; fill:none; stroke:currentColor; stroke-width:2.4px; stroke-linecap:round; stroke-linejoin:round; }
@@ -312,6 +319,13 @@ const prepared = messages.map(message => {
   .v7-demo[data-menu-seen="false"] .v7-menu::after { box-shadow:0 0 0 calc(2.5 * var(--vp)) #0589ff; animation:v7-menu-ring 2.4s cubic-bezier(.23,1,.32,1) var(--cue-at) infinite; }
   @keyframes v7-menu-breathe { 0%, 34%, 100% { transform:scale(1); } 14% { transform:scale(1.12); } }
   @keyframes v7-menu-ring { 0% { transform:scale(1); opacity:.7; } 60%, 100% { transform:scale(2); opacity:0; } }
+  /* Phone rises in front of the mark during the opening (Home.astro). */
+  :global(html[data-intro="play"]) .v7-device-wrap > :global(.v7-device),
+  :global(html[data-intro="play"]) .v7-caption { opacity:0; }
+  :global(html[data-intro="fly"]) .v7-device-wrap > :global(.v7-device) { animation:v7-phone-rise 760ms cubic-bezier(.23,1,.32,1) 260ms both; }
+  :global(html[data-intro="fly"]) .v7-caption { animation:v7-fade-in 400ms ease 600ms both; }
+  @keyframes v7-phone-rise { 0% { opacity:0; transform:translateY(10%) scale(.94); } 16% { opacity:1; } 100% { opacity:1; transform:none; } }
+  @keyframes v7-fade-in { from { opacity:0; } }
   .v7-menu-install-footer { margin-top:calc(9 * var(--vp)); }
   .v7-menu-install-button { appearance:none; width:100%; border:0; border-radius:calc(12 * var(--vp)); min-height:38px; padding:calc(8 * var(--vp)); background:#a4dc55; color:#17211d; font:inherit; font-weight:600; cursor:pointer; animation:v7-install-pulse 1.8s ease-in-out .4s 2; }
   .v7-menu-install-button:focus-visible { outline:2px solid #17211d; outline-offset:-4px; }

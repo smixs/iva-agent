@@ -318,6 +318,12 @@ code {
   min-width: 0;
   margin-bottom: 44px;
 }
+/* Text stays above Iva's blurred leaves behind the phone. */
+.hero-heading,
+.hero-intro {
+  position: relative;
+  z-index: 1;
+}
 .hero-heading {
   margin: 0 0 28px;
   font-size: var(--display);
@@ -362,6 +368,31 @@ code {
   line-height: 1.2;
   letter-spacing: -0.025em;
   margin-bottom: 8px;
+}
+/* Opening, once per session (see Home.astro): the page settles in around the mark. */
+main {
+  overflow-x: clip;
+}
+html[data-intro="play"] :is(.header, .hero-heading, .hero-intro, .hero ~ *) {
+  opacity: 0;
+}
+html[data-intro="fly"] :is(.header, .hero-heading, .hero-intro, .hero ~ *) {
+  animation: iva-intro-in 640ms cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+html[data-intro="fly"] .header {
+  animation-delay: 300ms;
+}
+html[data-intro="fly"] .hero-heading {
+  animation-delay: 360ms;
+}
+html[data-intro="fly"] :is(.hero-intro, .hero ~ *) {
+  animation-delay: 460ms;
+}
+@keyframes iva-intro-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
 }
 .hero-visual {
   width: var(--hero-phone-width);

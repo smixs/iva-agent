@@ -3,6 +3,7 @@ import Base from "../layouts/Base.astro";
 import UseCases from "./UseCases.astro";
 import Connections from "./Connections.astro";
 import HeroChat from "./HeroChat.astro";
+import Leaves from "./Leaves.astro";
 import Reviews from "./Reviews.astro";
 import { homeCopy, rich, phrase, glue, type Lang } from "../lib/copy";
 const { lang = "en" } = Astro.props as { lang: Lang };
@@ -81,6 +82,52 @@ const schema = [
       <HeroChat lang={lang} />
     </div>
   </section>
+  <Leaves splash />
+  <script is:inline>
+    // Opening, once per session: a small Iva mark appears mid-screen, then flies into its place
+    // behind the phone, growing and softening, while the page and the phone come in.
+    // The flight is measured after the web fonts settle, so the target does not move under it.
+    (() => {
+      const root = document.documentElement;
+      try {
+        if (sessionStorage.getItem("iva-intro") || scrollY > 0 || location.hash || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+        sessionStorage.setItem("iva-intro", "1");
+      } catch { return; }
+      const splash = document.querySelector("[data-intro-mark]");
+      const leaves = document.querySelector("[data-leaves]");
+      if (!splash || !leaves || !splash.animate) return;
+      root.dataset.intro = "play";
+      const started = performance.now();
+      const done = () => {
+        if (root.dataset.intro === "done") return;
+        root.dataset.intro = "done";
+        dispatchEvent(new Event("iva:intro-done"));
+      };
+      const fly = () => {
+        if (root.dataset.intro !== "play") return;
+        root.dataset.intro = "fly";
+        // Land exactly on the leaves, with their blur and opacity, so the swap at the end is invisible.
+        const from = splash.getBoundingClientRect();
+        const to = leaves.getBoundingClientRect();
+        const art = getComputedStyle(leaves.firstElementChild);
+        const blur = parseFloat(art.filter.replace(/[^\d.]/g, "")) || 0;
+        const scale = to.height / from.height;
+        splash.style.transformOrigin = "0 0";
+        splash.animate([
+          { transform: "none", filter: "blur(0px)", opacity: 1 },
+          { transform: `translate(${to.left - from.left}px, ${to.top - from.top}px) scale(${scale})`, filter: `blur(${blur / scale}px)`, opacity: art.opacity },
+        ], { duration: 900, easing: "cubic-bezier(.77,0,.175,1)", fill: "forwards" });
+        // The opening ends when every finite animation of the page has played out.
+        const finite = document.getAnimations().filter((a) => a.effect && a.effect.getComputedTiming().endTime !== Infinity);
+        Promise.all(finite.map((a) => a.finished)).then(done, done);
+      };
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      Promise.race([document.fonts ? document.fonts.ready : wait(0), wait(650)])
+        .then(() => wait(Math.max(0, 380 - (performance.now() - started))))
+        .then(fly, fly);
+      setTimeout(done, 4000);
+    })();
+  </script>
   <UseCases lang={lang} />
   <Reviews lang={lang} label={t(6, "Label")} />
   <Connections lang={lang} title={title(3)} line={t(3, "Подзаголовок")} link={t(3, "Ссылка")} />

@@ -61,7 +61,14 @@ function mountDemo(root: HTMLElement) {
   let suspended = false;
   const abort = new AbortController();
   const on = { signal: abort.signal };
-  const playing = () => !disposed && !suspended && interaction.menu === null && !reduced && !userPaused && !focusPaused && !document.hidden && inView && state.frame < DEMO_FRAMES;
+  // The page opening (Home.astro) runs first; the story starts once the phone has landed.
+  let introHold = ["play", "fly"].includes(document.documentElement.dataset.intro ?? "");
+  if (introHold) {
+    const release = () => { if (introHold) { introHold = false; sync(); } };
+    window.addEventListener("iva:intro-done", release, { once: true });
+    window.setTimeout(release, 3500);
+  }
+  const playing = () => !disposed && !suspended && !introHold && interaction.menu === null && !reduced && !userPaused && !focusPaused && !document.hidden && inView && state.frame < DEMO_FRAMES;
   const setText = (el: Element, value: string) => {
     if (el.textContent !== value) el.textContent = value;
   };

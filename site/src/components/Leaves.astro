@@ -1,0 +1,38 @@
+---
+// Iva's two leaves, softly blurred behind the phone, so the phone reads as Iva's own app.
+// Shapes come from the brand mark itself (cwd is site/, as in build.ts).
+import { readFileSync } from "node:fs";
+const mark = readFileSync("../docs/brand/mark.svg", "utf8");
+const [green, blue] = [...mark.matchAll(/ d="([^"]+)"/g)].map((m) => m[1]);
+const { splash = false } = Astro.props as { splash?: boolean };
+---
+{splash ? (
+  <div class="iva-splash" data-intro-mark aria-hidden="true">
+    <svg viewBox="-24 0 828 1257"><path fill="#a4dc55" d={green} /><path fill="#368ad2" d={blue} /></svg>
+  </div>
+) : (
+  <div class="v7-leaves" data-leaves aria-hidden="true">
+    <svg viewBox="-24 0 828 1257"><path fill="#a4dc55" d={green} /><path fill="#368ad2" d={blue} /></svg>
+  </div>
+)}
+<style>
+  /* Placed in the phone wrapper's units: 100cqw is the phone width, the phone is 205cqw tall.
+     Phone beside the heading: the mark stands behind it, a leaf tip showing on each side. */
+  .v7-leaves { position:absolute; z-index:0; left:-16cqw; top:2cqw; width:132cqw; height:200.4cqw; pointer-events:none; }
+  .v7-leaves svg { position:absolute; inset:0; width:100%; height:100%; overflow:visible; filter:blur(2.2cqw); opacity:.9; }
+  /* Phone under the heading: a small sprout peeks over its top right corner. */
+  @media (max-width:960px) {
+    .v7-leaves { left:68cqw; top:-33cqw; width:38cqw; height:57.7cqw; }
+    .v7-leaves svg { filter:blur(1.2cqw); }
+  }
+  /* Opening (Home.astro): a small sharp mark appears mid-screen, then flies into this place,
+     growing and softening while the phone rises in front of it, and hands over to these leaves. */
+  .iva-splash { display:none; }
+  :global(html[data-intro="play"]) .iva-splash,
+  :global(html[data-intro="fly"]) .iva-splash { display:block; position:fixed; z-index:-1; left:50%; top:50%; height:min(10vh, 84px); aspect-ratio:828 / 1257; translate:-50% -50%; pointer-events:none; }
+  .iva-splash svg { display:block; width:100%; height:100%; overflow:visible; }
+  :global(html[data-intro="play"]) .iva-splash svg { animation:iva-splash-in 340ms cubic-bezier(.23,1,.32,1) both; }
+  @keyframes iva-splash-in { from { opacity:0; transform:scale(.86); } }
+  :global(html[data-intro="play"]) .v7-leaves,
+  :global(html[data-intro="fly"]) .v7-leaves { opacity:0; }
+</style>
