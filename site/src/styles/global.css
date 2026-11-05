@@ -337,22 +337,28 @@ main {
 html[data-intro="play"] :is(.header, .hero-heading, .hero-intro, .hero ~ :not(.iva-splash)) {
   opacity: 0;
 }
-html[data-intro="fly"] :is(.header, .hero-heading, .hero-intro, .hero ~ :not(.iva-splash)) {
-  animation: iva-intro-in 800ms cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-html[data-intro="fly"] .header {
-  animation-delay: 260ms;
-}
+/* The heading leads and rises the most, the intro and its button follow with less, the header
+   and the rest of the page only fade in; each start comes sooner after the one before. */
 html[data-intro="fly"] .hero-heading {
-  animation-delay: 340ms;
+  --rise: 14px;
+  animation: iva-intro-rise 800ms cubic-bezier(0.22, 1, 0.36, 1) 260ms both;
 }
-html[data-intro="fly"] :is(.hero-intro, .hero ~ :not(.iva-splash)) {
-  animation-delay: 440ms;
+html[data-intro="fly"] .hero-intro {
+  --rise: 6px;
+  animation: iva-intro-rise 700ms cubic-bezier(0.22, 1, 0.36, 1) 360ms both;
 }
-@keyframes iva-intro-in {
+html[data-intro="fly"] :is(.header, .hero ~ :not(.iva-splash)) {
+  animation: iva-intro-fade 600ms cubic-bezier(0.22, 1, 0.36, 1) 420ms both;
+}
+@keyframes iva-intro-rise {
   from {
     opacity: 0;
-    transform: translateY(10px);
+    transform: translateY(var(--rise));
+  }
+}
+@keyframes iva-intro-fade {
+  from {
+    opacity: 0;
   }
 }
 .hero-visual {

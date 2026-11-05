@@ -310,19 +310,20 @@ const prepared = messages.map(message => {
   .v7-cue-arrow { position:absolute; overflow:visible; fill:none; stroke:currentColor; stroke-width:2.4px; stroke-linecap:round; stroke-linejoin:round; }
   .v7-cue-arrow path { stroke-dasharray:1; stroke-dashoffset:1; animation:v7-cue-draw 650ms cubic-bezier(.23,1,.32,1) calc(var(--cue-at) + 250ms) forwards; }
   .v7-cue-arrow .v7-cue-head { animation-duration:260ms; animation-delay:calc(var(--cue-at) + 780ms); }
-  .v7-cue-arrow.is-side { left:-95px; top:calc(185cqw - 37px); width:96px; height:56px; animation:v7-cue-nudge-side 2.4s cubic-bezier(.77,0,.175,1) calc(var(--cue-at) + 1.4s) infinite; }
+  .v7-cue-arrow.is-side { left:-95px; top:calc(185cqw - 37px); width:96px; height:56px; animation:v7-cue-nudge-side 6s cubic-bezier(.77,0,.175,1) calc(var(--cue-at) + 1.1s) infinite; }
   .v7-cue-arrow.is-below { display:none; }
   /* Handwritten glyphs overhang their box, so the reveal ends past it. */
   @keyframes v7-cue-write { from { clip-path:inset(-40% 100% -40% 0); } to { clip-path:inset(-40% -14% -40% 0); } }
   @keyframes v7-cue-draw { to { stroke-dashoffset:0; } }
-  @keyframes v7-cue-nudge-side { 0%, 40%, 100% { transform:none; } 20% { transform:translate(4px, 1px); } }
-  @keyframes v7-cue-nudge-up { 0%, 40%, 100% { transform:none; } 20% { transform:translate(0, -4px); } }
-  /* The menu button keeps pulsing until it has been opened once. */
+  @keyframes v7-cue-nudge-side { 0%, 16%, 100% { transform:none; } 8% { transform:translate(4px, 1px); } }
+  @keyframes v7-cue-nudge-up { 0%, 16%, 100% { transform:none; } 8% { transform:translate(0, -4px); } }
+  /* Once the arrow is drawn, the button breathes about every six seconds, the arrow nudging it just
+     before, until the menu has been opened once. */
   .v7-menu::after { content:""; position:absolute; inset:0; border-radius:50%; pointer-events:none; opacity:0; }
-  .v7-demo[data-menu-seen="false"] .v7-menu { animation:v7-menu-breathe 2.4s cubic-bezier(.77,0,.175,1) var(--cue-at) infinite; }
-  .v7-demo[data-menu-seen="false"] .v7-menu::after { box-shadow:0 0 0 calc(2.5 * var(--vp)) #0589ff; animation:v7-menu-ring 2.4s cubic-bezier(.23,1,.32,1) var(--cue-at) infinite; }
-  @keyframes v7-menu-breathe { 0%, 34%, 100% { transform:scale(1); } 14% { transform:scale(1.12); } }
-  @keyframes v7-menu-ring { 0% { transform:scale(1); opacity:.7; } 60%, 100% { transform:scale(2); opacity:0; } }
+  .v7-demo[data-menu-seen="false"] .v7-menu { animation:v7-menu-breathe 6s cubic-bezier(.77,0,.175,1) calc(var(--cue-at) + 1.3s) infinite; }
+  .v7-demo[data-menu-seen="false"] .v7-menu::after { box-shadow:0 0 0 calc(2.5 * var(--vp)) #0589ff; animation:v7-menu-ring 6s cubic-bezier(.23,1,.32,1) calc(var(--cue-at) + 1.3s) infinite; }
+  @keyframes v7-menu-breathe { 0%, 13.6%, 100% { transform:scale(1); } 5.6% { transform:scale(1.12); } }
+  @keyframes v7-menu-ring { 0% { transform:scale(1); opacity:.7; } 24%, 100% { transform:scale(2); opacity:0; } }
   /* Phone rises in front of the mark during the opening (Home.astro). */
   :global(html[data-intro="play"]) .v7-device-wrap > :global(.v7-device),
   :global(html[data-intro="play"]) .v7-caption { opacity:0; }
@@ -349,7 +350,7 @@ const prepared = messages.map(message => {
   @media (max-width:960px) {
     .v7-cue-text { right:auto; left:calc(9.2cqw + 26px); top:calc(205cqw + 26px); font-size:23px; }
     .v7-cue-arrow.is-side { display:none; }
-    .v7-cue-arrow.is-below { display:block; left:calc(9.2cqw - 6px); top:205cqw; width:30px; height:40px; animation:v7-cue-nudge-up 2.4s cubic-bezier(.77,0,.175,1) calc(var(--cue-at) + 1.4s) infinite; }
+    .v7-cue-arrow.is-below { display:block; left:calc(9.2cqw - 6px); top:205cqw; width:30px; height:40px; animation:v7-cue-nudge-up 6s cubic-bezier(.77,0,.175,1) calc(var(--cue-at) + 1.1s) infinite; }
     .v7-control-row { justify-content:flex-end; }
     .v7-caption { text-align:right; }
   }

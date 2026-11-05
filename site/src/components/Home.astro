@@ -95,11 +95,15 @@ const schema = [
       if (!splash || !leaves || !splash.animate) return;
       root.dataset.intro = "play";
       const started = performance.now();
+      const input = new AbortController();
       const done = () => {
         if (root.dataset.intro === "done") return;
+        input.abort();
         root.dataset.intro = "done";
         dispatchEvent(new Event("iva:intro-done"));
       };
+      // Any scroll, tap or key ends the opening at once: the page never waits on its own show.
+      for (const type of ["wheel", "touchstart", "pointerdown", "keydown", "scroll"]) addEventListener(type, done, { passive: true, signal: input.signal });
       const fly = () => {
         if (root.dataset.intro !== "play") return;
         root.dataset.intro = "fly";
