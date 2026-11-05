@@ -27,8 +27,8 @@
       },
       {
         "id": "invoice",
-        "title": "Счёт одной фразой",
-        "text": "Напишите часы и ставку, и Ива пришлёт готовый PDF.",
+        "title": "Юрист, бухгалтер и операционный директор",
+        "text": "Ива ведёт офисные документы: составляет договоры, подписывает счета и отправляет платёжки. Дайте ей только подключение к вашим сервисам.",
         "alt": "Женщина работает за ноутбуком"
       },
       {
@@ -80,8 +80,8 @@
       },
       {
         "id": "invoice",
-        "title": "An invoice in one message",
-        "text": "Send the hours and rate, and Iva sends back a ready PDF.",
+        "title": "Lawyer, accountant and operations director",
+        "text": "Iva handles the office paperwork: drafts contracts, signs invoices and sends payment orders. Just connect her to your services.",
         "alt": "A woman working at a laptop"
       },
       {
