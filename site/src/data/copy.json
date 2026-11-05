@@ -28,9 +28,6 @@
         ],
         "Условия": [
           "Для работы нужен ваш сервер или Mac и подписка Claude, Codex или OpenCode Go."
-        ],
-        "Подсказка": [
-          "Через Codex или Claude"
         ]
       }
     },
@@ -174,9 +171,6 @@
         ],
         "Условия": [
           "You need your own server or Mac and a Claude, Codex or OpenCode Go subscription."
-        ],
-        "Подсказка": [
-          "With Codex or Claude"
         ]
       }
     },

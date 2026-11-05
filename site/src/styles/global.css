@@ -349,10 +349,6 @@ code {
   gap: 18px;
   flex-wrap: wrap;
 }
-.install-hint {
-  font-size: 14px;
-  color: var(--muted);
-}
 .hero-note {
   max-width: 42ch;
   margin: 28px 0 0;
@@ -1229,12 +1225,6 @@ html[data-intro="fly"] :is(.hero-intro, .hero ~ *) {
   .hero .actions .button {
     min-height: 54px;
     padding-inline: 24px;
-  }
-  .install-hint {
-    align-self: center;
-    max-width: 12ch;
-    font-size: 13px;
-    line-height: 1.5;
   }
   .hero-note {
     margin-top: 24px;
