@@ -1,6 +1,7 @@
 ---
 import Phone from "./Phone.astro";
 import Leaves from "./Leaves.astro";
+import HeroApps from "./HeroApps.astro";
 import { demoCopy, demoMessages, demoMenuCopy } from "../data/demo";
 import { phrase, type Lang } from "../lib/copy";
 const { lang = "en" } = Astro.props as { lang?: Lang };
@@ -32,6 +33,7 @@ const prepared = messages.map(message => {
 <figure class="v7-demo" data-demo data-ui="telegram-demo" data-lang={lang} aria-label={c.label}>
   <div class="v7-device-wrap">
   <Leaves />
+  <HeroApps />
   <Phone>
     {["iva", "maria"].map(peer => (
       <div class:list={["v7-screen", peer === "maria" && "v7-maria"]} data-screen={peer} aria-hidden={peer === "maria" ? "true" : undefined} inert={peer === "maria"}>

@@ -303,7 +303,9 @@ code {
   position: relative;
   z-index: 1;
 }
+/* Three short lines on wide screens, so the services beside the phone keep clear of the heading. */
 .hero-heading {
+  max-width: 9.6em;
   margin: 0 0 28px;
   font-size: var(--display);
   line-height: 1.06;
@@ -1061,6 +1063,8 @@ html[data-intro="fly"] :is(.hero-intro, .hero ~ :not(.iva-splash)) {
     width: var(--hero-phone-width);
     max-width: calc(100vw - 44px);
     justify-self: auto;
+    /* Room for the row of services above the phone (HeroApps). */
+    margin-top: 72px;
   }
   .hero .hero-visual .v7-demo {
     width: 100%;
