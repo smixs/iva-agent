@@ -106,15 +106,19 @@ const schema = [
         if (root.dataset.intro !== "play") return;
         root.dataset.intro = "fly";
         // Land exactly on the leaves, with their blur and opacity, so the swap at the end is invisible.
+        // The leaves may be turned (narrow screens), so take their box before the turn and turn with it.
         const from = splash.getBoundingClientRect();
-        const to = leaves.getBoundingClientRect();
+        const wrap = leaves.offsetParent.getBoundingClientRect();
+        const to = { left: wrap.left + leaves.offsetLeft, top: wrap.top + leaves.offsetTop, height: leaves.offsetHeight };
+        const turn = getComputedStyle(leaves).rotate;
         const art = getComputedStyle(leaves.firstElementChild);
         const blur = parseFloat(art.filter.replace(/[^\d.]/g, "")) || 0;
         const scale = to.height / from.height;
+        const half = `${from.width / 2}px, ${from.height / 2}px`;
         splash.style.transformOrigin = "0 0";
         splash.animate([
-          { transform: "none", filter: "blur(0px)", opacity: 1 },
-          { transform: `translate(${to.left - from.left}px, ${to.top - from.top}px) scale(${scale})`, filter: `blur(${blur / scale}px)`, opacity: art.opacity },
+          { transform: `translate(0px, 0px) scale(1) translate(${half}) rotate(0deg) translate(-${half.replace(", ", ", -")})`, filter: "blur(0px)", opacity: 1 },
+          { transform: `translate(${to.left - from.left}px, ${to.top - from.top}px) scale(${scale}) translate(${half}) rotate(${turn === "none" ? "0deg" : turn}) translate(-${half.replace(", ", ", -")})`, filter: `blur(${blur / scale}px)`, opacity: art.opacity },
         ], { duration: 1150, easing: "cubic-bezier(.65,0,.35,1)", fill: "forwards" });
         // The opening ends when every finite animation of the page has played out.
         const finite = document.getAnimations().filter((a) => a.effect && a.effect.getComputedTiming().endTime !== Infinity);
