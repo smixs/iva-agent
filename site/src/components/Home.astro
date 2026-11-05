@@ -197,7 +197,7 @@ const schema = [
     const inDemo = Boolean(button.closest("[data-demo]"));
     try {
       await navigator.clipboard.writeText(text);
-      if (!inDemo) say(ru ? "Фраза скопирована — отправьте её Claude Code или Codex" : "Phrase copied — send it to Claude Code or Codex", 3200);
+      if (!inDemo) say(ru ? "Фраза скопирована. Отправьте её Claude Code или Codex" : "Phrase copied. Send it to Claude Code or Codex", 3200);
       button.dispatchEvent(new CustomEvent("iva:copy-result", { bubbles: true, detail: { ok: true, text } }));
       window.dispatchEvent(new CustomEvent("iva:analytics", { detail: { name: "copy_prompt" } }));
     } catch {
