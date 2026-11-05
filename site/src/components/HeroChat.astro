@@ -312,7 +312,8 @@ const prepared = messages.map(message => {
   .v7-cue-arrow .v7-cue-head { animation-duration:260ms; animation-delay:calc(var(--cue-at) + 780ms); }
   .v7-cue-arrow.is-side { left:-95px; top:calc(185cqw - 37px); width:96px; height:56px; animation:v7-cue-nudge-side 2.4s cubic-bezier(.77,0,.175,1) calc(var(--cue-at) + 1.4s) infinite; }
   .v7-cue-arrow.is-below { display:none; }
-  @keyframes v7-cue-write { from { clip-path:inset(0 100% 0 0); } to { clip-path:inset(0 0 0 0); } }
+  /* Handwritten glyphs overhang their box, so the reveal ends past it. */
+  @keyframes v7-cue-write { from { clip-path:inset(-40% 100% -40% 0); } to { clip-path:inset(-40% -14% -40% 0); } }
   @keyframes v7-cue-draw { to { stroke-dashoffset:0; } }
   @keyframes v7-cue-nudge-side { 0%, 40%, 100% { transform:none; } 20% { transform:translate(4px, 1px); } }
   @keyframes v7-cue-nudge-up { 0%, 40%, 100% { transform:none; } 20% { transform:translate(0, -4px); } }
