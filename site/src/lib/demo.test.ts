@@ -9,14 +9,14 @@ test("V6 phone footage retains scene order and omits only title/logo/connection 
   assert.equal(filmFrame(180), 1200);
   assert.equal(filmFrame(840), 1980);
   assert.equal(filmFrame(1620), 2880);
-  assert.equal(filmFrame(DEMO_FRAMES), 4380);
-  for (const frame of [360, 1240, 2060, 2420, 2950, 3220, 3640, 3950, 4226]) assert.equal(filmFrame(demoFrame(frame)), frame);
-  assert.deepEqual(demoMessages("ru").map(m => m.id), ["morning", "voice", "crm", "who-ask", "who", "reminder", "flight-ask", "taxi", "invoice", "restaurant", "shopping", "goal-ask", "goal", "next-day", "done"]);
+  assert.equal(filmFrame(DEMO_FRAMES), 6240);
+  for (const frame of [360, 1240, 2060, 2420, 2950, 3220, 3640, 3950, 4226, 4380, 4660, 4950, 5320, 5710, 6000]) assert.equal(filmFrame(demoFrame(frame)), frame);
+  assert.deepEqual(demoMessages("ru").map(m => m.id), ["morning", "voice", "crm", "who-ask", "who", "reminder", "flight-ask", "taxi", "invoice", "restaurant", "shopping", "goal-ask", "goal", "next-day", "done", "ads", "stock", "payment", "contract-ask", "contract", "post-ask", "post", "summary"]);
 });
-test("all five autoplay contacts select the original affirmative branch exactly once", () => {
+test("every autoplay contact selects the affirmative branch exactly once", () => {
   const state = freshDemo();
   advance(state, DEMO_FRAMES);
-  assert.equal(Object.keys(state.decisions).length, 5);
+  assert.equal(Object.keys(state.decisions).length, 10);
   for (const id of actions) {
     assert.equal(state.decisions[id]?.value, true);
     assert.equal(state.decisions[id]?.source, "auto");
@@ -68,7 +68,7 @@ test("replay owns a fresh empty decision set and does not mutate the previous sh
   advance(old, DEMO_FRAMES);
   const next = freshDemo();
   assert.deepEqual(next, { frame: 0, decisions: {} });
-  assert.equal(Object.keys(old.decisions).length, 5);
+  assert.equal(Object.keys(old.decisions).length, 10);
 });
 test("film spring, word ramp, iOS push and tap retain exact end states and a small landing overshoot", () => {
   assert.equal(springAt(9, 10, "arrive"), 0);
@@ -84,7 +84,7 @@ test("film spring, word ramp, iOS push and tap retain exact end states and a sma
 test("every negative choice remains negative when the complete autoplay catches up", () => {
   for (const id of actions) {
     const state = freshDemo();
-    const at = { reminder: 2190, taxi: 2580, invoice: 3080, restaurant: 3340, shopping: 3780 }[id];
+    const at = { reminder: 2190, taxi: 2580, invoice: 3080, restaurant: 3340, shopping: 3780, ads: 4510, stock: 4790, payment: 5090, contract: 5470, post: 5850 }[id];
     advance(state, demoFrame(at));
     assert.equal(choose(state, id, false), true);
     advance(state, DEMO_FRAMES);

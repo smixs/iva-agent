@@ -24,6 +24,7 @@ function mountDemo(root: HTMLElement) {
   const playLabel = get("[data-play-label]");
   const icon = root.querySelector<SVGPathElement>("[data-play-icon] path")!;
   const sceneLabel = get("[data-scene]");
+  const photo = root.querySelector<HTMLImageElement>("[data-photo]");
   const announcement = get("[data-announcement]");
   const clock = get("[data-demo-clock]");
   const tap = get("[data-tap]");
@@ -90,6 +91,8 @@ function mountDemo(root: HTMLElement) {
   }
   function render() {
     const f = filmFrame(state.frame);
+    // The post's photo starts loading a scene ahead, so it is already there when the message arrives.
+    if (photo && f >= 5200) photo.loading = "eager";
     let thinking: { start: number; end: number } | undefined;
     for (const ref of refs) {
       const { message, el, think, words, after, buttons } = ref;
