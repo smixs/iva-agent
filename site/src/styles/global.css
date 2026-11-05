@@ -1,41 +1,21 @@
+/* Unbounded: one wide grotesque for every text on the page, in rhyme with the IVA wordmark. */
 @font-face {
-  font-family: "Onest";
+  font-family: "Unbounded";
   font-style: normal;
-  font-weight: 400 700;
+  font-weight: 200 900;
   font-display: swap;
-  src: url("/media/fonts/onest-latin-variable.woff2") format("woff2");
+  src: url("/media/fonts/unbounded-latin-variable.woff2") format("woff2");
   unicode-range:
     U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
     U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212,
     U+2215, U+FEFF, U+FFFD;
 }
 @font-face {
-  font-family: "Onest";
+  font-family: "Unbounded";
   font-style: normal;
-  font-weight: 400 700;
+  font-weight: 200 900;
   font-display: swap;
-  src: url("/media/fonts/onest-cyrillic-variable.woff2") format("woff2");
-  unicode-range:
-    U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
-}
-/* Noto Serif Display, instanced at width 78 and weight 500 for headings. */
-@font-face {
-  font-family: "Iva Display";
-  font-style: normal;
-  font-weight: 500;
-  font-display: swap;
-  src: url("/media/fonts/noto-serif-display-latin-500-78.woff2") format("woff2");
-  unicode-range:
-    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
-    U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212,
-    U+2215, U+FEFF, U+FFFD;
-}
-@font-face {
-  font-family: "Iva Display";
-  font-style: normal;
-  font-weight: 500;
-  font-display: swap;
-  src: url("/media/fonts/noto-serif-display-cyrillic-500-78.woff2") format("woff2");
+  src: url("/media/fonts/unbounded-cyrillic-variable.woff2") format("woff2");
   unicode-range:
     U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
 }
@@ -72,19 +52,19 @@
   --leaf-tint: #e8f2db;
   --blue: #368ad2;
   --link: #2468a8;
-  --font: "Onest", "Avenir Next", sans-serif;
-  --font-display: "Iva Display", "Noto Serif Display", Georgia, serif;
+  --font: "Unbounded", "Avenir Next", sans-serif;
   --font-hand: "Iva Hand", "Caveat", "Segoe Print", cursive;
-  --display: clamp(58px, 5.4vw, 80px);
-  --heading: clamp(42px, 3.8vw, 54px);
-  --subheading: 30px;
-  --body: 20px;
-  --small: 16px;
+  --display: clamp(44px, 4.3vw, 62px);
+  --heading: clamp(30px, 2.8vw, 40px);
+  --subheading: 24px;
+  --body: 17px;
+  --small: 14px;
   --gutter: 48px;
   --section-space: 96px;
   font-family: var(--font);
-  font-size: 18px;
-  line-height: 1.55;
+  font-size: 16px;
+  font-weight: 350;
+  line-height: 1.6;
   color: var(--ink);
   background: var(--canvas);
   font-synthesis: none;
@@ -148,9 +128,8 @@ h3 {
 }
 h1,
 h2 {
-  font-family: var(--font-display);
-  font-weight: 500;
-  letter-spacing: -0.012em;
+  font-weight: 700;
+  letter-spacing: -0.03em;
 }
 h1 {
   font-size: var(--display);
@@ -327,8 +306,8 @@ code {
 .hero-heading {
   margin: 0 0 28px;
   font-size: var(--display);
-  line-height: 1.02;
-  letter-spacing: -0.015em;
+  line-height: 1.06;
+  letter-spacing: -0.035em;
 }
 .hero-heading span {
   display: block;
@@ -337,9 +316,9 @@ code {
   max-width: 560px;
 }
 .hero-intro .lead {
-  max-width: 42ch;
+  max-width: 40ch;
   margin: 0 0 28px;
-  font-size: 22px;
+  font-size: 18px;
   line-height: 1.5;
   letter-spacing: -0.012em;
 }
@@ -1075,7 +1054,7 @@ html[data-intro="fly"] :is(.hero-intro, .hero ~ *) {
     width: 100%;
     max-width: 650px;
     margin: 0;
-    font-size: 56px;
+    font-size: 46px;
   }
   .hero .hero-visual {
     order: 1;
@@ -1177,8 +1156,8 @@ html[data-intro="fly"] :is(.hero-intro, .hero ~ *) {
   :root {
     --gutter: 22px;
     --section-space: 56px;
-    --display: clamp(38px, 11vw, 46px);
-    --heading: 36px;
+    --display: clamp(29px, 8.3vw, 34px);
+    --heading: 26px;
     --subheading: 28px;
     --body: 18px;
     --small: 16px;
@@ -1207,8 +1186,8 @@ html[data-intro="fly"] :is(.hero-intro, .hero ~ *) {
   .hero-heading {
     max-width: 100%;
     font-size: var(--display);
-    line-height: 1.04;
-    letter-spacing: -0.012em;
+    line-height: 1.08;
+    letter-spacing: -0.035em;
   }
   .hero-intro {
     margin-top: 10px;
