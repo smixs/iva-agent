@@ -2,23 +2,108 @@
 import usecases from "../data/usecases.json";
 import { glue, type Lang } from "../lib/copy";
 const { lang } = Astro.props as { lang: Lang };
+// Percentages follow the people in the four source photos, rather than their white edges.
+// [top, right, bottom, left] for the three image slices; [x, y, size] for pixels.
+const figures = [
+  { bands: [[29, 42, 64, 18], [47, 34, 47, 12], [67, 39, 28, 19]], pixels: [[30, 35, 8], [43, 46, 12], [24, 57, 6], [51, 62, 10], [36, 74, 14], [45, 29, 6]] },
+  { bands: [[28, 43, 65, 25], [48, 28, 46, 14], [69, 30, 25, 22]], pixels: [[41, 33, 8], [33, 48, 12], [55, 57, 6], [27, 68, 10], [47, 75, 14], [57, 43, 6]] },
+  { bands: [[30, 44, 64, 32], [49, 42, 44, 25], [70, 38, 24, 29]], pixels: [[44, 34, 8], [35, 49, 12], [49, 58, 6], [36, 72, 10], [48, 80, 14], [53, 46, 6]] },
+  { bands: [[31, 12, 63, 58], [49, 11, 45, 18], [69, 13, 25, 23]], pixels: [[27, 43, 8], [72, 38, 12], [35, 61, 6], [67, 59, 10], [74, 74, 14], [31, 75, 6]] },
+];
 const legacy = ["asks", "scenarios", "userbot", "memory", "invoice", "goal", "family"];
 ---
 
 <section id="features" class="section use-cases" aria-label={usecases[lang].label}>
   {legacy.map((id) => <span id={id} class="legacy-anchor" aria-hidden="true"></span>)}
   <div class="usecase-rows">
-    {usecases[lang].rows.map((row) => (
+    {usecases[lang].rows.map((row, index) => (
       <article id={row.id} class="usecase-row" aria-labelledby={`case-${row.id}`}>
         <div class="case-copy">
           <h2 id={`case-${row.id}`}>{glue(row.title)}</h2>
           <p>{glue(row.text)}</p>
         </div>
-        <picture class="case-art">
-          <source type="image/avif" srcset={`/media/usecases/${row.id}-800.avif 800w, /media/usecases/${row.id}-1600.avif 1600w`} sizes="(max-width: 760px) calc(100vw - 44px), 52vw" />
-          <img src={`/media/usecases/${row.id}-800.webp`} srcset={`/media/usecases/${row.id}-800.webp 800w, /media/usecases/${row.id}-1600.webp 1600w`} sizes="(max-width: 760px) calc(100vw - 44px), 52vw" width="1600" height="1200" alt={row.alt} loading="lazy" decoding="async" />
-        </picture>
+        <div class="case-art" data-case-glitch>
+          <picture class="case-photo">
+            <source type="image/avif" srcset={`/media/usecases/${row.id}-800.avif 800w, /media/usecases/${row.id}-1600.avif 1600w`} sizes="(max-width: 760px) calc(100vw - 44px), 52vw" />
+            <img src={`/media/usecases/${row.id}-800.webp`} srcset={`/media/usecases/${row.id}-800.webp 800w, /media/usecases/${row.id}-1600.webp 1600w`} sizes="(max-width: 760px) calc(100vw - 44px), 52vw" width="1600" height="1200" alt={row.alt} loading="lazy" decoding="async" />
+          </picture>
+          {figures[index].bands.map(([top, right, bottom, left], slice) => (
+            <picture class="case-glitch-slice" aria-hidden="true" style={`clip-path: inset(${top}% ${right}% ${bottom}% ${left}%); --shift: ${[-8, 6, -4][slice]}px; --return: ${[4, -4, 8][slice]}px`}>
+              <source type="image/avif" srcset={`/media/usecases/${row.id}-800.avif 800w, /media/usecases/${row.id}-1600.avif 1600w`} sizes="(max-width: 760px) calc(100vw - 44px), 52vw" />
+              <img src={`/media/usecases/${row.id}-800.webp`} srcset={`/media/usecases/${row.id}-800.webp 800w, /media/usecases/${row.id}-1600.webp 1600w`} sizes="(max-width: 760px) calc(100vw - 44px), 52vw" width="1600" height="1200" alt="" loading="lazy" decoding="async" />
+            </picture>
+          ))}
+          {figures[index].pixels.map(([x, y, size], pixel) => (
+            <span class="case-glitch-pixel" aria-hidden="true" style={`left: ${x}%; top: ${y}%; width: ${size}px; height: ${size}px; --pixel: ${["#2b6291", "#83b2d9", "#d6e7f5"][pixel % 3]}; --shift: ${pixel % 2 ? 4 : -6}px`} />
+          ))}
+        </div>
       </article>
     ))}
   </div>
 </section>
+
+<style>
+  .case-art { position: relative; }
+  .case-photo { display: block; }
+  .case-glitch-slice,
+  .case-glitch-pixel {
+    position: absolute;
+    pointer-events: none;
+    opacity: 0;
+  }
+  .case-glitch-slice { inset: 0; }
+  .case-glitch-pixel { background: var(--pixel); }
+  .is-glitching .case-glitch-slice { animation: case-slice 320ms steps(1, end); }
+  .is-glitching .case-glitch-pixel { animation: case-pixel 320ms steps(1, end); }
+  @keyframes case-slice {
+    0%, 32%, 60%, 100% { opacity: 0; transform: translateX(0); }
+    12%, 72% { opacity: 1; transform: translateX(var(--shift)); }
+    44% { opacity: 1; transform: translateX(var(--return)); }
+  }
+  @keyframes case-pixel {
+    0%, 28%, 56%, 100% { opacity: 0; transform: translateX(0); }
+    16%, 68% { opacity: 0.8; transform: translateX(var(--shift)); }
+    40% { opacity: 0.55; transform: translateX(0); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .case-glitch-slice, .case-glitch-pixel { display: none; animation: none; }
+  }
+</style>
+
+<script>
+  const reduced = matchMedia("(prefers-reduced-motion: reduce)");
+  const hover = matchMedia("(hover: hover) and (pointer: fine)");
+  const pictures = document.querySelectorAll<HTMLElement>("[data-case-glitch]");
+
+  const flash = async (picture: HTMLElement, fromHover = false) => {
+    if (reduced.matches || (fromHover && !hover.matches)) return;
+    // Lazy images must be ready before the brief burst starts.
+    const photo = picture.querySelector<HTMLImageElement>(".case-photo img")!;
+    try { await photo.decode(); } catch { return; }
+    if (reduced.matches || (fromHover && !hover.matches) || picture.classList.contains("is-glitching")) return;
+    const box = picture.getBoundingClientRect();
+    if (box.bottom <= 0 || box.top >= innerHeight) return;
+    picture.classList.add("is-glitching");
+  };
+
+  const observer = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue;
+      observer.unobserve(entry.target);
+      void flash(entry.target as HTMLElement);
+    }
+  }, { threshold: 0.25 });
+
+  for (const picture of pictures) {
+    observer.observe(picture);
+    picture.addEventListener("pointerenter", () => { void flash(picture, true); });
+    picture.addEventListener("animationend", (event) => {
+      if ((event.target as HTMLElement).classList.contains("case-glitch-slice")) {
+        picture.classList.remove("is-glitching");
+      }
+    });
+  }
+  const quiet = () => pictures.forEach((picture) => picture.classList.remove("is-glitching"));
+  reduced.addEventListener("change", quiet);
+  hover.addEventListener("change", quiet);
+</script>
