@@ -222,7 +222,7 @@ for (const home of [path.join(dist, "index.html"), path.join(dist, "ru/index.htm
     );
   }
 
-  assert.equal((visible.match(/class="usecase-row"/g) || []).length, 4);
+  assert.equal((visible.match(/class="usecase-row"/g) || []).length, usecases[lang].rows.length);
   const casesHTML = visible.match(
     /<section id="features"[\s\S]*?<\/section>/,
   )![0];

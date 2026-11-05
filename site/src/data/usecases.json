@@ -20,10 +20,34 @@
         "alt": "Женщина в костюме на ходу читает почту в телефоне"
       },
       {
+        "id": "memory",
+        "title": "Память о договорённостях",
+        "text": "Спросите, о чём договорились, и Ива ответит с датой и деталями.",
+        "alt": "Двое коллег за столиком кафе сверяются с телефоном"
+      },
+      {
+        "id": "invoice",
+        "title": "Счёт одной фразой",
+        "text": "Напишите часы и ставку, и Ива пришлёт готовый PDF.",
+        "alt": "Женщина работает за ноутбуком"
+      },
+      {
+        "id": "goal",
+        "title": "Цели, доведённые до конца",
+        "text": "Поставьте цель, и Ива сама напишет, проверит и доложит о результате.",
+        "alt": "Мужчина отмечает шаги в блокноте у ноутбука"
+      },
+      {
         "id": "birthday",
         "title": "Напоминания о днях рождения",
         "text": "Скажите дату один раз. Ива сохранит её и напомнит о поздравлении.",
         "alt": "Дочь дарит отцу подарок"
+      },
+      {
+        "id": "family",
+        "title": "Своя Ива для каждого в семье",
+        "text": "У каждого свой помощник и свои напоминания.",
+        "alt": "Мама, сын и бабушка за столом, у каждого свой телефон"
       }
     ],
     "label": "Примеры задач"
@@ -49,10 +73,34 @@
         "alt": "A woman in a suit reading mail on her phone on the go"
       },
       {
+        "id": "memory",
+        "title": "Agreements you can look up",
+        "text": "Ask what you agreed on and Iva answers with the date and details.",
+        "alt": "Two colleagues at a café table checking a phone"
+      },
+      {
+        "id": "invoice",
+        "title": "An invoice in one message",
+        "text": "Send the hours and rate, and Iva sends back a ready PDF.",
+        "alt": "A woman working at a laptop"
+      },
+      {
+        "id": "goal",
+        "title": "Goals seen through",
+        "text": "Set a goal and Iva writes, checks and reports back on the result.",
+        "alt": "A man checking off steps in a notebook by his laptop"
+      },
+      {
         "id": "birthday",
         "title": "Birthday reminders",
         "text": "Tell Iva the date once. She saves it and reminds you to send a greeting.",
         "alt": "A daughter giving her father a gift"
+      },
+      {
+        "id": "family",
+        "title": "An Iva for everyone in the family",
+        "text": "Everyone gets their own assistant and their own reminders.",
+        "alt": "A mother, her son and a grandmother at the table, each with a phone"
       }
     ],
     "label": "Example tasks"

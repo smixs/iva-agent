@@ -4,12 +4,15 @@ import { glue, type Lang } from "../lib/copy";
 const { lang } = Astro.props as { lang: Lang };
 // Where the phone is in each photo (the gift in the last one), in percent of the photo, and the
 // side with open space in degrees (0 is right, -90 is up). Pixels drift off the phone that way.
-const phones = [[60, 55, -30], [60, 42, -25], [61, 43, -35], [54, 50, -90]];
+const phones: Record<string, number[]> = {
+  morning: [60, 55, -30], voice: [60, 42, -25], mail: [61, 43, -35], memory: [44, 56, -80],
+  invoice: [53, 84, -70], goal: [31, 88, -110], birthday: [54, 50, -90], family: [68, 50, -95],
+};
 const shades = ["#ffffff", "#368ad2", "#d6e7f5", "#a4dc55", "#2b6291"];
-const pixels = phones.map(([px, py, open], photo) => {
+const pixels = Object.fromEntries(Object.entries(phones).map(([id, [px, py, open]], photo) => {
   let seed = photo * 977 + 13;
   const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
-  return Array.from({ length: 14 }, (_, i) => {
+  return [id, Array.from({ length: 14 }, (_, i) => {
     const angle = ((open + (i / 13 - 0.5) * 150 + (rand() - 0.5) * 16) * Math.PI) / 180;
     const near = 3 + rand() * 10;
     const far = 14 + rand() * 18;
@@ -23,9 +26,9 @@ const pixels = phones.map(([px, py, open], photo) => {
       time: (3 + rand() * 2.2).toFixed(2),
       delay: (-rand() * 5).toFixed(2),
     };
-  });
-});
-const legacy = ["asks", "scenarios", "userbot", "memory", "invoice", "goal", "family"];
+  })];
+}));
+const legacy = ["asks", "scenarios", "userbot"];
 ---
 
 <section id="features" class="section use-cases" aria-label={usecases[lang].label}>
@@ -42,7 +45,7 @@ const legacy = ["asks", "scenarios", "userbot", "memory", "invoice", "goal", "fa
             <source type="image/avif" srcset={`/media/usecases/${row.id}-800.avif 800w, /media/usecases/${row.id}-1600.avif 1600w`} sizes="(max-width: 760px) calc(100vw - 44px), 52vw" />
             <img src={`/media/usecases/${row.id}-800.webp`} srcset={`/media/usecases/${row.id}-800.webp 800w, /media/usecases/${row.id}-1600.webp 1600w`} sizes="(max-width: 760px) calc(100vw - 44px), 52vw" width="1600" height="1200" alt={row.alt} loading="lazy" decoding="async" />
           </picture>
-          {pixels[index].map((p) => (
+          {pixels[row.id].map((p) => (
             <span class="case-pixel" aria-hidden="true" style={`left: ${p.x}%; top: ${p.y}%; width: ${p.size}px; height: ${p.size}px; --shade: ${p.shade}; --dx: ${p.dx}px; --dy: ${p.dy}px; --time: ${p.time}s; --delay: ${p.delay}s`} />
           ))}
         </div>
