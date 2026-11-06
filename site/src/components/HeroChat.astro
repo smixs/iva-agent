@@ -332,12 +332,19 @@ const prepared = messages.map(message => {
   .v7-demo[data-menu-seen="false"] .v7-menu::after { box-shadow:0 0 0 calc(2.5 * var(--vp)) #0589ff; animation:v7-menu-ring 6s cubic-bezier(.23,1,.32,1) calc(var(--cue-at) + 1.3s) infinite; }
   @keyframes v7-menu-breathe { 0%, 13.6%, 100% { transform:scale(1); } 5.6% { transform:scale(1.12); } }
   @keyframes v7-menu-ring { 0% { transform:scale(1); opacity:.7; } 24%, 100% { transform:scale(2); opacity:0; } }
-  /* The phone rises in front of the mark once it has landed (Home.astro). */
+  /* The phone floats up from below in front of the mark once it has landed (Home.astro): quick out
+     of the deep, a little past its place and tilted, back under it, then still. */
   :global(html:is([data-intro="play"], [data-intro="fly"])) .v7-device-wrap > :global(.v7-device),
   :global(html:is([data-intro="play"], [data-intro="fly"])) .v7-caption { opacity:0; }
-  :global(html[data-intro="land"]) .v7-device-wrap > :global(.v7-device) { animation:v7-phone-rise 900ms cubic-bezier(.22,1,.36,1) both; }
-  :global(html[data-intro="land"]) .v7-caption { animation:v7-fade-in 500ms ease 500ms both; }
-  @keyframes v7-phone-rise { 0% { opacity:0; transform:translateY(7%) scale(.97); } 18% { opacity:1; } 100% { opacity:1; transform:none; } }
+  :global(html[data-intro="land"]) .v7-device-wrap > :global(.v7-device) { transform-origin:50% 100%; animation:v7-phone-rise 1150ms both; }
+  :global(html[data-intro="land"]) .v7-caption { animation:v7-fade-in 500ms ease 650ms both; }
+  @keyframes v7-phone-rise {
+    0% { opacity:0; transform:translateY(34%) rotate(-3deg); animation-timing-function:cubic-bezier(.2,.7,.3,1); }
+    12% { opacity:1; }
+    52% { transform:translateY(-1.8%) rotate(.7deg); animation-timing-function:cubic-bezier(.45,0,.55,1); }
+    76% { transform:translateY(.5%) rotate(-.25deg); animation-timing-function:cubic-bezier(.45,0,.55,1); }
+    100% { opacity:1; transform:none; }
+  }
   @keyframes v7-fade-in { from { opacity:0; } }
   .v7-menu-install-footer { margin-top:calc(9 * var(--vp)); }
   .v7-menu-install-button { appearance:none; width:100%; border:0; border-radius:calc(12 * var(--vp)); min-height:38px; padding:calc(8 * var(--vp)); background:#a4dc55; color:#17211d; font:inherit; font-weight:600; cursor:pointer; animation:v7-install-pulse 1.8s ease-in-out .4s 2; }

@@ -87,9 +87,10 @@ const schema = [
   </section>
   <script is:inline>
     // Opening, once per session (decided in Base.astro before the first paint). In order, never
-    // overlapping: one leaf grows mid-screen and the second opens out of it, turning blue; the mark
-    // flies into its place behind the phone, growing and softening; only then do the phone and the
-    // page come in. The flight is measured after the web fonts settle, so the target stays put.
+    // overlapping: one leaf sprouts mid-screen and the second opens out of it, turning blue; the
+    // mark crouches, then flies on an arc into its place behind the phone, growing and softening;
+    // only then do the phone and the page come in. The flight is measured after the web fonts
+    // settle, so the target stays put.
     (() => {
       const root = document.documentElement;
       if (root.dataset.intro !== "play") return;
@@ -122,20 +123,67 @@ const schema = [
         // The leaves may be turned (narrow screens), so take their box before the turn and turn with it.
         const from = splash.getBoundingClientRect();
         const wrap = leaves.offsetParent.getBoundingClientRect();
-        const to = { left: wrap.left + leaves.offsetLeft, top: wrap.top + leaves.offsetTop, height: leaves.offsetHeight };
-        const turn = getComputedStyle(leaves).rotate;
         const art = getComputedStyle(leaves.firstElementChild);
         const blur = parseFloat(art.filter.replace(/[^\d.]/g, "")) || 0;
-        const scale = to.height / from.height;
-        const half = `${from.width / 2}px, ${from.height / 2}px`;
+        const fade = parseFloat(art.opacity);
+        const turn = parseFloat(getComputedStyle(leaves).rotate) || 0;
+        const w = from.width / 2, h = from.height / 2, end = leaves.offsetHeight / from.height;
+        // Centres of the mark: here, after the crouch, and on the leaves. The arc bends upwards.
+        const c0 = [from.left + w, from.top + h];
+        const c2 = [wrap.left + leaves.offsetLeft + w * end, wrap.top + leaves.offsetTop + h * end];
+        const span = Math.hypot(c2[0] - c0[0], c2[1] - c0[1]) || 1;
+        const dir = [(c2[0] - c0[0]) / span, (c2[1] - c0[1]) / span];
+        const reach = h * 0.45;
+        const c1 = [c0[0] - dir[0] * reach, c0[1] - dir[1] * reach];
+        const up = dir[0] >= 0 ? [dir[1], -dir[0]] : [-dir[1], dir[0]];
+        const bend = [(c1[0] + c2[0]) / 2 + up[0] * span * 0.28, (c1[1] + c2[1]) / 2 + up[1] * span * 0.28];
+        const D = 1400, A = 260;
+        // Pose at a moment: centre, scale, turn. Anticipation first: the mark draws back against the
+        // flight, a little smaller and squashed along it, winding up its turn. Then the flight: out
+        // fast, slowing into the place, a touch past it and back; the turn swings and dies out. The
+        // mark grows by equal ratios (slowly at first, as a thing far away), a little past its size
+        // near the end, and settles.
+        const pose = (ms) => {
+          if (ms < A) {
+            const k = 0.5 - 0.5 * Math.cos((Math.PI * ms) / A);
+            return { c: [c0[0] - dir[0] * reach * k, c0[1] - dir[1] * reach * k], s: 1 - 0.08 * k, r: -8 * k, squash: 1 - 0.2 * k, x: 0 };
+          }
+          const x = (ms - A) / (D - A), u = x - 1, q = 1 + 2 * u * u * u + u * u, v = 1 - q;
+          const grow = x < 0.5 ? 2 * x * x : 1 - 2 * u * u;
+          const past = x > 0.55 ? 0.035 * Math.sin((Math.PI * (x - 0.55)) / 0.45) : 0;
+          return {
+            c: [v * v * c1[0] + 2 * v * q * bend[0] + q * q * c2[0], v * v * c1[1] + 2 * v * q * bend[1] + q * q * c2[1]],
+            s: 0.92 * (end / 0.92) ** grow * (1 + past),
+            r: -8 + (turn + 8) * q + 8 * Math.sin(2 * Math.PI * x) * (1 - x) ** 1.5,
+            x,
+          };
+        };
+        // Each frame stretches the mark along its motion by its speed (sizes per frame), squashing it
+        // across, so its volume stays; at rest it is its own shape again.
+        const frames = [];
+        for (let i = 0, n = Math.ceil(D / 16); i <= n; i++) {
+          const ms = Math.min(D, i * 16), p = pose(ms);
+          const a = pose(Math.max(0, ms - 8)).c, b = pose(ms + 8).c;
+          const run = Math.hypot(b[0] - a[0], b[1] - a[1]) / 16;
+          const angle = ms < A ? Math.atan2(dir[1], dir[0]) : Math.atan2(b[1] - a[1], b[0] - a[0]);
+          const stretch = ms < A ? p.squash : ms === D ? 1 : 1 + Math.min(0.24, (16 * run) / (p.s * from.height));
+          const soft = blur * Math.max(0, (p.x - 0.3) / 0.7) ** 2;
+          frames.push({
+            offset: ms / D,
+            transform: `translate(${p.c[0] - p.s * w - from.left}px, ${p.c[1] - p.s * h - from.top}px) scale(${p.s}) translate(${w}px, ${h}px) rotate(${angle}rad) scale(${stretch}, ${1 / stretch}) rotate(${-angle}rad) rotate(${p.r}deg) translate(${-w}px, ${-h}px)`,
+            filter: `blur(${soft / p.s}px)`,
+            opacity: 1 + (fade - 1) * p.x,
+          });
+        }
         splash.style.transformOrigin = "0 0";
-        splash.animate([
-          { transform: `translate(0px, 0px) scale(1) translate(${half}) rotate(0deg) translate(-${half.replace(", ", ", -")})`, filter: "blur(0px)", opacity: 1 },
-          { transform: `translate(${to.left - from.left}px, ${to.top - from.top}px) scale(${scale}) translate(${half}) rotate(${turn === "none" ? "0deg" : turn}) translate(-${half.replace(", ", ", -")})`, filter: `blur(${blur / scale}px)`, opacity: art.opacity },
-        ], { duration: 1000, easing: "cubic-bezier(.65,0,.35,1)", fill: "forwards" }).finished.then(land, done);
+        splash.animate(frames, { duration: D, fill: "forwards" }).finished.then(land, done);
+        // Overlapping action: as the mark sets off, its leaves swing against each other and settle.
+        const swing = (el, deg) => el.animate([0, deg, -deg * 0.45, deg * 0.15, 0].map((d, i) => ({ offset: [0, 0.25, 0.55, 0.8, 1][i], transform: `rotate(${d}deg)`, easing: "cubic-bezier(.45,0,.55,1)" })), { duration: 800, delay: A });
+        for (const el of splash.querySelectorAll(".iva-leaf-g, .iva-leaf-full")) swing(el, 3);
+        swing(splash.querySelector(".iva-leaf-b"), -7);
       };
       // The second leaf has opened (Leaves.astro) and held for a moment, and the fonts are in.
-      const opened = ended(splash.querySelector(".iva-leaf-b").getAnimations()).then(() => wait(220));
+      const opened = ended(splash.querySelector(".iva-leaf-b").getAnimations()).then(() => wait(120));
       const fonts = Promise.race([document.fonts ? document.fonts.ready : wait(0), wait(2500)]);
       Promise.all([opened, fonts]).then(fly, done);
     })();
