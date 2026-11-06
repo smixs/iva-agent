@@ -178,7 +178,7 @@ const prepared = messages.map(message => {
       <span class="v7-sr">{c.demo}</span>
       <div class="v7-controls" data-controls hidden>
       <button type="button" data-play hidden><svg viewBox="0 0 16 16" aria-hidden="true" data-play-icon><path d="M5 3v10M11 3v10" /></svg><span data-play-label>{c.pause}</span></button>
-      <button type="button" data-replay><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 5A5.5 5.5 0 1 1 2.7 9M3.5 1.7V5H.3" /></svg>{c.replay}</button>
+      <button type="button" data-replay><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.2A5.2 5.2 0 1 1 2.8 8.4" /><path class="v7-replay-head" d="M4.9 3.2 7.7 1.2v4z" /></svg>{c.replay}</button>
       </div>
     </div>
     <p class="v7-sr" data-demo-hint>{c.hint}</p>
@@ -358,6 +358,7 @@ const prepared = messages.map(message => {
   .v7-controls button { display:inline-flex; gap:5px; align-items:center; padding:5px 2px; min-height:32px; border:0; background:transparent; color:inherit; font:inherit; font-weight:600; cursor:pointer; border-radius:5px; }
   .v7-controls button:focus-visible,.v7-viewport:focus-visible { outline:2px solid #167a63; outline-offset:3px; }
   .v7-controls button svg { width:14px; height:14px; stroke:currentColor; stroke-width:1.6; fill:none; stroke-linecap:round; stroke-linejoin:round; }
+  .v7-controls button .v7-replay-head { fill:currentColor; stroke-width:1.2; }
   .v7-controls button:disabled { cursor:default; color:#395549; }
   .v7-sr { position:absolute; width:1px; height:1px; padding:0; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
   .v7-demo ::selection { background:#c9e5ff; color:#17211d; }
