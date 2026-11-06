@@ -22,7 +22,7 @@ const random = () => {
 const wave = Array.from({ length: 36 }, (_, i) => Math.max(2.2, (0.16 + 0.84 * Math.pow(Math.sin(Math.PI * (i + .5) / 36), .55) * (.3 + .7 * random())) * 20));
 const escape = (text: string) => text.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 const typed = (text: string, counter: { i: number }) => text.split(/( +)/).map(part => !part || /^ +$/.test(part) ? part : `<span data-word="${counter.i++}">${part === "11:00" ? "<b>11:00</b>" : escape(part)}</span>`).join("");
-// Answers under a card: yes and no, and on Marina's card a third, to open her chat.
+// Answers under a card: yes and no, and on Helga's card a third, to open her chat.
 type Choices = { yes: string; no: string; open?: string; accepted: string; declined: string; opened?: string };
 const choices = (action: keyof typeof c.choices): Choices => c.choices[action];
 const prepared = messages.map(message => {
@@ -40,7 +40,7 @@ const prepared = messages.map(message => {
   <Leaves />
   {/* <HeroApps /> */}
   <Phone>
-    {(["iva", "maria", "marina"] as const).map(peer => (
+    {(["iva", "maria", "helga"] as const).map(peer => (
       <div class:list={["v7-screen", peer !== "iva" && "v7-person"]} data-screen={peer} aria-hidden={peer !== "iva" ? "true" : undefined} inert={peer !== "iva"}>
         <img class="v7-wall" src="/media/tg-wall.webp" width="402" height="858" alt="" decoding="async" aria-hidden="true" />
         <div class="v7-viewport" data-viewport={peer} role="log" aria-live="off" aria-label={c[peer]} tabindex="0">
@@ -123,7 +123,7 @@ const prepared = messages.map(message => {
                 </div></div></div>
               </>
             ) : (
-              <div class="v7-bubble"><svg class="v7-tail" viewBox="-7 -17 14 17" aria-hidden="true"><path d={tail} /></svg>{c.marinaMessage}<span class="v7-time">11:24</span></div>
+              <div class="v7-bubble"><svg class="v7-tail" viewBox="-7 -17 14 17" aria-hidden="true"><path d={tail} /></svg>{c.helgaMessage}<span class="v7-time">11:24</span></div>
             )}
             {peer === "iva" && (
               <>
@@ -285,7 +285,7 @@ const prepared = messages.map(message => {
   .v7-iva-avatar { background:#0b1218; }
   .v7-avatar img { width:77%; height:77%; object-fit:contain; }
   .v7-person-avatar { background:linear-gradient(#ff8aa8,#e0507a); color:#fff; font-size:calc(16 * var(--vp)); font-weight:600; }
-  .v7-person-avatar[data-person="marina"] { background:linear-gradient(#b4a3f5,#7464dc); }
+  .v7-person-avatar[data-person="helga"] { background:linear-gradient(#b4a3f5,#7464dc); }
   .v7-composer > :is(span,button) { position:absolute; top:calc(768 * var(--vp)); height:calc(36 * var(--vp)); display:flex; align-items:center; justify-content:center; }
   .v7-composer svg { fill:none; stroke:#17211d; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; }
   .v7-menu { appearance:none; border:0; padding:0; color:inherit; cursor:pointer; left:calc(8 * var(--vp)); width:calc(36 * var(--vp)); border-radius:50%; background:#0589ff; box-shadow:0 calc(1.5 * var(--vp)) calc(6 * var(--vp)) #0589ff4d; }

@@ -17,7 +17,7 @@ function mountDemo(root: HTMLElement) {
   const get = <T extends HTMLElement = HTMLElement>(selector: string) => root.querySelector<T>(selector)!;
   const iva = get('[data-screen="iva"]');
   const view = get('[data-viewport="iva"]');
-  const chats = (["maria", "marina"] as const).map(chat => ({ chat, screen: get(`[data-screen="${chat}"]`), view: get(`[data-viewport="${chat}"]`) }));
+  const chats = (["maria", "helga"] as const).map(chat => ({ chat, screen: get(`[data-screen="${chat}"]`), view: get(`[data-viewport="${chat}"]`) }));
   const play = get<HTMLButtonElement>("[data-play]");
   const replay = get<HTMLButtonElement>("[data-replay]");
   const playLabel = get("[data-play-label]");
@@ -90,7 +90,7 @@ function mountDemo(root: HTMLElement) {
   }
   function render() {
     const f = filmFrame(state.frame);
-    const open = { maria: chatAt(state, "maria", f), marina: chatAt(state, "marina", f) };
+    const open = { maria: chatAt(state, "maria", f), helga: chatAt(state, "helga", f) };
     // The post's photo starts loading a scene ahead, so it is already there when the message arrives.
     if (photo && f >= 5200) photo.loading = "eager";
     let thinking: { start: number; end: number } | undefined;
@@ -146,7 +146,7 @@ function mountDemo(root: HTMLElement) {
         style(button, "background", pressed > .5 ? primary ? "#0473d6" : "#d5d4d8" : primary ? "#0589ff" : "#e7e6e9");
       }
     }
-    // Maria's or Marina's chat slides in over Iva's, which moves a little aside under a shade.
+    // Maria's or Helga's chat slides in over Iva's, which moves a little aside under a shade.
     let p = 0, mariaActive = false;
     for (const { chat, screen } of chats) {
       const q = interaction.menu !== null ? 0 : reduced ? open[chat].p > .5 ? 1 : 0 : open[chat].p;

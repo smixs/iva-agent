@@ -2,11 +2,11 @@ import { actionFrames, demoProviders, demoMenuEntries, type DemoProvider, type D
 
 export const FPS = 60;
 // Only phone footage remains. Morning starts with the fully readable film card; the team brief
-// and Marina's message fill the stretch where the film had its titles.
+// and Helga's message fill the stretch where the film had its titles.
 const spans = [[360, 1860], [1980, 2760], [2880, 6240]] as const;
 export const DEMO_FRAMES = spans.reduce((sum, [a, b]) => sum + b - a, 0);
 export const actions = Object.keys(actionFrames) as ActionId[];
-// Most cards ask yes or no; Marina's also offers to open her chat.
+// Most cards ask yes or no; Helga's also offers to open her chat.
 export type Choice = "yes" | "no" | "open";
 export type Decision = { value: Choice; at: number; source: "user" | "auto" };
 export type DemoState = { frame: number; decisions: Partial<Record<ActionId, Decision>> };
@@ -99,10 +99,10 @@ export function iosPush(f: number, at: number): number {
   return x === 0 || x === 1 ? x : bezier(t, 0.72, 1);
 }
 // A chat that slides in over Iva's and back: Maria's once the restaurant is shared with her,
-// Marina's once her chat is opened from her card. The card's answer lands while it is open.
-const chats = { maria: ["restaurant", "yes"], marina: ["marina", "open"] } as const;
+// Helga's once her chat is opened from her card. The card's answer lands while it is open.
+const chats = { maria: ["restaurant", "yes"], helga: ["helga", "open"] } as const;
 export type Chat = keyof typeof chats;
-export const chatOf: Partial<Record<ActionId, Chat>> = { restaurant: "maria", marina: "marina" };
+export const chatOf: Partial<Record<ActionId, Chat>> = { restaurant: "maria", helga: "helga" };
 export function chatAt(state: DemoState, chat: Chat, f = filmFrame(state.frame)) {
   const [action, value] = chats[chat];
   const choice = state.decisions[action];

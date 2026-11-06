@@ -1,10 +1,10 @@
 // Transcript and event frames from V6 -> v5/Film5.tsx. Titles, logo and connection
 // interstitials are omitted; Telegram content and the five default choices are retained.
 // The next day goes on past the film: ads, stock, a payment, a contract, a post and the day's
-// numbers, each asking before it acts. The morning adds a team brief, and in the meeting Marina
+// numbers, each asking before it acts. The morning adds a team brief, and in the meeting Helga
 // writes: three ready answers, the way Iva offers them.
 export type DemoLang = "ru" | "en";
-export type ActionId = "marina" | "reminder" | "taxi" | "invoice" | "restaurant" | "shopping" | "ads" | "stock" | "payment" | "contract" | "post";
+export type ActionId = "helga" | "reminder" | "taxi" | "invoice" | "restaurant" | "shopping" | "ads" | "stock" | "payment" | "contract" | "post";
 export type DemoBlock = { kind: "title" | "p" | "item"; text: string; emoji?: string };
 export type DemoMessage = {
   id: string; at: number; think?: number; time?: string;
@@ -16,7 +16,7 @@ const NB = "\u00a0";
 const p = (text: string): DemoBlock => ({ kind: "p", text });
 const item = (emoji: string, text: string): DemoBlock => ({ kind: "item", emoji, text });
 export const actionFrames: Record<ActionId, number> = {
-  marina: 1085, reminder: 2200, taxi: 2590, invoice: 3090, restaurant: 3350, shopping: 3790,
+  helga: 1085, reminder: 2200, taxi: 2590, invoice: 3090, restaurant: 3350, shopping: 3790,
   ads: 4520, stock: 4800, payment: 5100, contract: 5480, post: 5860,
 };
 export const demoCopy = {
@@ -26,17 +26,17 @@ export const demoCopy = {
     note: "Все действия происходят внутри демонстрации.",
     play: "Продолжить", pause: "Пауза", replay: "Сначала", next: "Следующая сцена",
     end: "Демонстрация завершена", paused: "На паузе", playing: "Воспроизведение",
-    today: "Сегодня", yesterday: "Вчера", iva: "Ива", maria: "Мария", marina: "Марина", bot: "бот",
+    today: "Сегодня", yesterday: "Вчера", iva: "Ива", maria: "Мария", helga: "Хельга", bot: "бот",
     online: "в сети", typing: "печатает", thinking: "Думаю…", message: "Сообщение",
     voice: "Голосовое сообщение, 12 секунд", photo: "Осенняя коллекция: пальто, свитер, шапка и ботинки",
     restaurant: "Ресторан «Олива»", address: "Садовая ул., 18",
     map: "Карта расположения ресторана «Олива»",
-    scenes: ["Утро", "Сводка по команде", "Марина пишет", "Голосовое и CRM", "Кто писал", "Напоминание", "Такси для Алеси", "Счёт Тимуру", "Ресторан для Марии", "Чат с Марией", "Покупки", "Задача про интернет", "Интернет починили", "Реклама в Meta", "Склад", "Платёжка", "Договор", "Пост", "Итоги дня"],
+    scenes: ["Утро", "Сводка по команде", "Хельга пишет", "Голосовое и CRM", "Кто писал", "Напоминание", "Такси для Анны", "Счёт Марку", "Ресторан для Марии", "Чат с Марией", "Покупки", "Задача про интернет", "Интернет починили", "Реклама в Meta", "Склад", "Платёжка", "Договор", "Пост", "Итоги дня"],
     choices: {
-      marina: { yes: "Освобожусь через полчаса", no: "Я в курсе", open: "Открыть чат", accepted: "✅ Ответила Марине: «Освобожусь через полчаса»", declined: "✅ Ответила Марине: «Я в курсе»", opened: "Хорошо, ответишь Марине сам." },
+      helga: { yes: "Освобожусь через полчаса", no: "Я в курсе", open: "Открыть чат", accepted: "✅ Ответила Хельге: «Освобожусь через полчаса»", declined: "✅ Ответила Хельге: «Я в курсе»", opened: "Хорошо, ответишь Хельге сам." },
       reminder: { yes: "Напомнить", no: "Не надо", accepted: `✅ Напомню завтра в${NB}10:00`, declined: "Хорошо, напоминание пропускаю." },
       taxi: { yes: "Заказать", no: "Не надо", accepted: `✅ Такси будет в${NB}19:15`, declined: "Хорошо, такси пропускаю." },
-      invoice: { yes: "Отправить", no: "Не сейчас", accepted: "✅ Отправила Тимуру", declined: "Хорошо, письмо остаётся черновиком." },
+      invoice: { yes: "Отправить", no: "Не сейчас", accepted: "✅ Отправила Марку", declined: "Хорошо, письмо остаётся черновиком." },
       restaurant: { yes: "Скинуть", no: "Не надо", accepted: "✅ Скинула Марии", declined: "Хорошо, ресторан оставляю здесь." },
       shopping: { yes: "Составить", no: "Не надо", accepted: "", declined: "Хорошо, список покупок пропускаю." },
       ads: { yes: "Перенести", no: "Оставить", accepted: "✅ «Осень-2» на паузе, бюджет перешёл в «Осень-1»", declined: "Хорошо, кампании не трогаю." },
@@ -47,7 +47,7 @@ export const demoCopy = {
     },
     shopping: [item("🥦", "Брокколи"), item("🐟", "Рыба"), item("🥚", "Яйца"), item("🍗", "Курица"), item("🥛", "Кефир")],
     mariaMessages: ["Завтра в силе?", "Да, в 19", "Куда ехать?"],
-    marinaMessage: `Клиент приехал, ждёт в${NB}переговорке`,
+    helgaMessage: `Клиент приехал, ждёт в${NB}переговорке`,
   },
   en: {
     label: "Interactive Iva demo in Telegram",
@@ -55,17 +55,17 @@ export const demoCopy = {
     note: "Every action takes place inside this demo.",
     play: "Continue", pause: "Pause", replay: "Replay", next: "Next scene",
     end: "Demo complete", paused: "Paused", playing: "Playing",
-    today: "Today", yesterday: "Yesterday", iva: "Iva", maria: "Maria", marina: "Marina", bot: "bot",
+    today: "Today", yesterday: "Yesterday", iva: "Iva", maria: "Maria", helga: "Helga", bot: "bot",
     online: "online", typing: "typing", thinking: "Thinking…", message: "Message",
     voice: "Voice message, 12 seconds", photo: "Autumn collection: a coat, a sweater, a beanie and boots",
     restaurant: "Oliva restaurant", address: "18 Sadovaya St.",
     map: "Map showing Oliva restaurant",
-    scenes: ["Morning", "Team brief", "Marina writes", "Voice note and CRM", "Who messaged", "Reminder", "Alesya’s taxi", "Timur’s invoice", "Restaurant for Maria", "Chat with Maria", "Shopping", "Fixing the internet", "Internet fixed", "Meta ads", "Stock", "Payment", "Contract", "Post", "Day in numbers"],
+    scenes: ["Morning", "Team brief", "Helga writes", "Voice note and CRM", "Who messaged", "Reminder", "Anna’s taxi", "Mark’s invoice", "Restaurant for Maria", "Chat with Maria", "Shopping", "Fixing the internet", "Internet fixed", "Meta ads", "Stock", "Payment", "Contract", "Post", "Day in numbers"],
     choices: {
-      marina: { yes: "Free in 30 minutes", no: "Got it", open: "Open chat", accepted: "✅ Replied to Marina: “Free in 30 minutes”", declined: "✅ Replied to Marina: “Got it”", opened: "Okay, you’ll reply to Marina yourself." },
+      helga: { yes: "Free in 30 minutes", no: "Got it", open: "Open chat", accepted: "✅ Replied to Helga: “Free in 30 minutes”", declined: "✅ Replied to Helga: “Got it”", opened: "Okay, you’ll reply to Helga yourself." },
       reminder: { yes: "Remind me", no: "No thanks", accepted: "✅ I’ll remind you tomorrow at 10:00", declined: "Okay, skipping the reminder." },
       taxi: { yes: "Book it", no: "No thanks", accepted: "✅ The taxi will be there at 19:15", declined: "Okay, skipping the taxi." },
-      invoice: { yes: "Send", no: "Not now", accepted: "✅ Sent to Timur", declined: "Okay, the email stays a draft." },
+      invoice: { yes: "Send", no: "Not now", accepted: "✅ Sent to Mark", declined: "Okay, the email stays a draft." },
       restaurant: { yes: "Share it", no: "No thanks", accepted: "✅ Shared with Maria", declined: "Okay, keeping the restaurant here." },
       shopping: { yes: "Make a list", no: "No thanks", accepted: "", declined: "Okay, skipping the shopping list." },
       ads: { yes: "Move it", no: "Leave it", accepted: "✅ “Autumn 2” is paused, its budget went to “Autumn 1”", declined: "Okay, leaving the campaigns alone." },
@@ -76,7 +76,7 @@ export const demoCopy = {
     },
     shopping: [item("🥦", "Broccoli"), item("🐟", "Fish"), item("🥚", "Eggs"), item("🍗", "Chicken"), item("🥛", "Kefir")],
     mariaMessages: ["Still on for tomorrow?", "Yes, at 7", "Where should I go?"],
-    marinaMessage: "The client is here, waiting in the meeting room.",
+    helgaMessage: "The client is here, waiting in the meeting room.",
   },
 } as const;
 
@@ -87,41 +87,41 @@ export function demoMessages(lang: DemoLang): DemoMessage[] {
     { id: "morning", at: 300, think: 250, kind: "card", time: "9:41", blocks: [
       { kind: "title", text: t("☀️ Доброе утро!", "☀️ Good morning!") },
       p(t(`Я твоя Ива. Вот что у нас на${NB}сегодня:`, "I’m your Iva. Here’s what we have today:")),
-      item("📅", t(`11:00 встреча с${NB}Тимуром`, "11:00 meeting with Timur")),
-      item("✍️", t(`Арсен ждёт подпись в${NB}DocuSign`, "Arsen is waiting for your signature in DocuSign")),
+      item("📅", t(`11:00 встреча с${NB}Марком`, "11:00 meeting with Mark")),
+      item("✍️", t(`Алекс ждёт подпись в${NB}DocuSign`, "Alex is waiting for your signature in DocuSign")),
       item("🎂", t(`У${NB}Марии сегодня день рождения`, "It’s Maria’s birthday today")),
     ] },
     { id: "team", at: 595, think: 540, kind: "card", time: "9:42", blocks: [
       { kind: "title", text: t("📋 Сводка по команде", "📋 Team brief") },
       p(t(`По${NB}Bitrix24 и${NB}чатам команды:`, "From Bitrix24 and the team chats:")),
       item("⏳", t(`Вчера не${NB}успели смету для${NB}«Альфы»`, "Not done yesterday: the Alfa estimate")),
-      item("👥", t(`В${NB}работе: лендинг у${NB}Дилнозы, отчёт у${NB}Рустама`, "In progress: Dilnoza’s landing page, Rustam’s report")),
-      item("🧱", t(`Застряло: Азиз третий день ждёт доступ к${NB}рекламе`, "Stuck: Aziz has waited three days for ad access")),
+      item("👥", t(`В${NB}работе: лендинг у${NB}Евы, отчёт у${NB}Макса`, "In progress: Eva’s landing page, Max’s report")),
+      item("🧱", t(`Застряло: Лео третий день ждёт доступ к${NB}рекламе`, "Stuck: Leo has waited three days for ad access")),
       item("👀", t(`Нужно твоё решение: бюджет на${NB}ноябрь`, "Needs your call: the November budget")),
     ] },
-    { id: "marina", at: 970, think: 915, kind: "card", action: "marina", time: "11:25", blocks: [
-      p(t(`💬 Марина пишет: «Клиент приехал, ждёт в${NB}переговорке». По${NB}расписанию у${NB}тебя встреча с${NB}Тимуром до${NB}12:00. Что ей ответить?`, "💬 Marina writes: “The client is here, waiting in the meeting room.” Your calendar has you with Timur until 12:00. What should I reply?")),
+    { id: "helga", at: 970, think: 915, kind: "card", action: "helga", time: "11:25", blocks: [
+      p(t(`💬 Хельга пишет: «Клиент приехал, ждёт в${NB}переговорке». По${NB}расписанию у${NB}тебя встреча с${NB}Марком до${NB}12:00. Что ей ответить?`, "💬 Helga writes: “The client is here, waiting in the meeting room.” Your calendar has you with Mark until 12:00. What should I reply?")),
     ] },
     { id: "voice", at: 1240, kind: "voice", time: "12:04" },
     { id: "crm", at: 1380, think: 1290, kind: "card", time: "12:04", blocks: [
-      p(t(`✅ Принято. Итоги встречи записала в${NB}Bitrix24. Во${NB}вторник напомню позвонить Олегу.`, "✅ Got it. I’ve saved the meeting notes in Bitrix24. I’ll remind you to call Oleg on Tuesday.")),
+      p(t(`✅ Принято. Итоги встречи записала в${NB}Bitrix24. Во${NB}вторник напомню позвонить Нику.`, "✅ Got it. I’ve saved the meeting notes in Bitrix24. I’ll remind you to call Nick on Tuesday.")),
     ] },
     { id: "who-ask", at: 1530, kind: "out", time: "12:10", text: t("Что мне сегодня писали?", "What did people message me today?") },
     { id: "who", at: 1630, think: 1570, kind: "card", time: "12:10", blocks: [
       p(t("Тебе писали трое:", "Three people messaged you:")),
-      item("💬", t(`Арсен про${NB}договор`, "Arsen about the contract")),
+      item("💬", t(`Алекс про${NB}договор`, "Alex about the contract")),
       item("🍽", t(`Мария про${NB}ужин`, "Maria about dinner")),
-      item("💵", t("Тимур ждёт счёт", "Timur is waiting for the invoice")),
+      item("💵", t("Марк ждёт счёт", "Mark is waiting for the invoice")),
     ] },
     { id: "reminder", at: 2060, think: 2010, kind: "card", action: "reminder", time: "13:00", blocks: [
       p(t(`🗂 В${NB}Bitrix24 обновились 3${NB}карточки клиентов. Напомнить завтра?`, "🗂 Three client cards changed in Bitrix24. Remind you tomorrow?")),
     ] },
-    { id: "flight-ask", at: 2330, kind: "out", time: "15:20", text: t("Во сколько Алеся прилетает?", "What time does Alesya arrive?") },
+    { id: "flight-ask", at: 2330, kind: "out", time: "15:20", text: t("Во сколько Анна прилетает?", "What time does Anna arrive?") },
     { id: "taxi", at: 2420, think: 2370, kind: "card", action: "taxi", time: "15:20", blocks: [
       p(t(`✈️ Нашла её билеты. Прилетает в${NB}19:30. Заказать такси?`, "✈️ I found her tickets. She arrives at 19:30. Book a taxi?")),
     ] },
     { id: "invoice", at: 2950, think: 2910, kind: "card", action: "invoice", time: "16:05", doc: [t("Счёт №14.pdf", "Invoice №14.pdf"), "84 KB"], blocks: [
-      p(t(`✉️ Тимур ждёт счёт на${NB}$4${NB}800. Письмо готово. Отправить?`, "✉️ Timur is waiting for the $4,800 invoice. The email is ready. Send it?")),
+      p(t(`✉️ Марк ждёт счёт на${NB}$4${NB}800. Письмо готово. Отправить?`, "✉️ Mark is waiting for the $4,800 invoice. The email is ready. Send it?")),
     ] },
     { id: "restaurant", at: 3220, think: 3180, kind: "card", action: "restaurant", time: "17:41", blocks: [
       p(t("📍 Мария спрашивает, куда ехать. Скинуть ей ресторан?", "📍 Maria asks where to go. Share the restaurant with her?")),
