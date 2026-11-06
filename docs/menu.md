@@ -57,7 +57,7 @@ The four letters pick one of **16 fixed, bilingual archetypes** (Big Sister, Mus
 
 The **💾 Memory** screen shows a short excerpt of your current `CORE.md` and offers a six-question interview: how to address you, what you do, your city/timezone/rhythm, the people and context that matter, your current priorities, and what you never want an assistant to do. Answers are free text; **Skip** and **Finish** are always available.
 
-Your raw answers are archived verbatim to `vault/core-interview.md` (overwritten each run — nothing is ever lost). Then the bridge hands them to Iva as a message from you, asking her to distill them into `vault/CORE.md` (the ≤1,200-char file that rides in every prompt) with her own memory tools, and confirm. This is the one menu action that spends model tokens. How the core compounds: [memory.md](memory.md).
+Your raw answers are archived verbatim to `vault/core-interview.md` (overwritten each run — nothing is ever lost). Then the bridge hands them to Iva as a message from you, asking her to distill them into `vault/CORE.md` (the ≤3,600-char file that rides in every prompt) with her own memory tools, and confirm. This is the one menu action that spends model tokens. How the core compounds: [memory.md](memory.md).
 
 ## Notices
 

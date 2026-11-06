@@ -29,22 +29,24 @@ import {
   relative,
   resolve,
 } from "node:path";
+import {
+  readNightSettings,
+  nightSettingsFile,
+  setNightSetting,
+  nightRaised,
+  nightSaveFailed,
+  type NightNotice,
+} from "./memory-night-constants.ts";
 
 /** Сколько ждать освобождения индекса: сосед коммитит за десятки миллисекунд. */
 const INDEX_WAIT_MS = [60, 120, 240, 480];
-/** Замок старше этого возраста - огрызок убитого коммита, а не живой сосед. Порог тот же,
- * что у замка карточки. */
-const INDEX_LOCK_STALE_MS = 15_000;
+/** Запас после потолка времени git: сосед мог поднять срок только в памяти. */
+const INDEX_LOCK_GRACE_MS = 15_000;
 const INDEX_LOCK = "index.lock";
-/** Потолок на один вызов git. Холодная запись на вольте из 20000 карточек занимает 2597 мс
- * (замер QA), дальше медиана 275 мс: 12 с - это тот же порядок с запасом больше четырёх раз,
- * чтобы медленный диск не отменял коммит, а висящий хук не держал запись минутами. */
-const GIT_TIMEOUT_MS = 12_000;
-/** Тест висящего git не ждёт боевые двенадцать секунд: потолок читается на каждом вызове. */
-function gitTimeoutMs(): number {
-  const override = Number(process.env.IVA_VAULT_GIT_TIMEOUT_MS);
-  return Number.isFinite(override) && override > 0 ? override : GIT_TIMEOUT_MS;
-}
+export const vaultGitNotices: NightNotice[] = [];
+export let vaultGitCeiling:
+  { value: number; raises: number; atMax: boolean } | undefined;
+const gitRecovery = new Map<string, { raises: number; timeout: number }>();
 /** В vault может не быть identity (headless VPS, свежий образ): коммитим от Ивы через
  * `-c`, конфиг владельца не трогаем. */
 const IVA_IDENTITY = ["-c", "user.name=Iva", "-c", "user.email=iva@localhost"];
@@ -106,22 +108,24 @@ type GitRun = {
   readonly out: string;
   /** Убит по таймауту: `code` при этом пуст, и без флага причина выходила ложной. */
   readonly timeout: boolean;
+  readonly timeoutMs?: number;
 };
 
 function detail(run: GitRun): string {
   return `${run.err}\n${run.out}`.trim();
 }
 
-function git(
+function gitOnce(
   args: readonly string[],
   cwd: string,
+  timeout: number,
   input?: string,
 ): Promise<GitRun> {
   return new Promise((done) => {
     const child = execFile(
       "git",
       [...args],
-      { cwd, env: gitEnv(), timeout: gitTimeoutMs(), windowsHide: true },
+      { cwd, env: gitEnv(), timeout, windowsHide: true },
       (error, stdout, stderr) => {
         const failed = error !== null;
         done({
@@ -129,11 +133,70 @@ function git(
           err: failed ? `${stderr}${error.message}` : stderr,
           out: stdout,
           timeout: killed(error),
+          timeoutMs: timeout,
         });
       },
     );
     if (input !== undefined) child.stdin?.end(input);
   });
+}
+
+/** Один повтор той же команды; поднятия общие для всех вызовов git этого процесса. */
+async function git(
+  args: readonly string[],
+  cwd: string,
+  input?: string,
+): Promise<GitRun> {
+  const file = nightSettingsFile();
+  const { values } = readNightSettings(file);
+  const state = gitRecovery.get(file) ?? {
+    raises: 0,
+    timeout: values.gitTimeoutMs,
+  };
+  const timeout = Math.min(
+    values.maxGitTimeoutMs,
+    Math.max(values.gitTimeoutMs, state.timeout),
+  );
+  const first = await gitOnce(args, cwd, timeout, input);
+  if (!first.timeout) return first;
+  if (
+    timeout >= values.maxGitTimeoutMs ||
+    state.raises >= values.raisesPerNight
+  ) {
+    vaultGitCeiling = {
+      value: timeout,
+      raises: state.raises,
+      atMax: timeout >= values.maxGitTimeoutMs,
+    };
+    return first;
+  }
+  state.raises++;
+  state.timeout = Math.min(values.maxGitTimeoutMs, timeout * 2);
+  gitRecovery.set(file, state);
+  const raised = nightRaised("gitTimeoutMs", timeout, state.timeout);
+  vaultGitNotices.push(raised);
+  console.error(`${LOG_PREFIX} ${raised[1]}`);
+  const retryTimeout = state.timeout;
+  try {
+    setNightSetting("gitTimeoutMs", retryTimeout, file);
+    state.timeout = 0;
+  } catch {
+    const failed = nightSaveFailed("gitTimeoutMs");
+    vaultGitNotices.push(failed);
+    console.error(`${LOG_PREFIX} ${failed[1]}`);
+  }
+  const retried = await gitOnce(args, cwd, retryTimeout, input);
+  if (
+    retried.timeout &&
+    (retryTimeout >= values.maxGitTimeoutMs ||
+      state.raises >= values.raisesPerNight)
+  )
+    vaultGitCeiling = {
+      value: retryTimeout,
+      raises: state.raises,
+      atMax: retryTimeout >= values.maxGitTimeoutMs,
+    };
+  return retried;
 }
 
 /** Убитый по таймауту процесс приходит с пустым кодом и `killed`. */
@@ -153,7 +216,7 @@ function exitCode(error: unknown): number | string {
  * неё, поэтому берём первую строку, которая не подсказка. */
 function reasonOf(run: GitRun): string {
   if (run.timeout)
-    return `git не ответил за ${String(gitTimeoutMs() / 1000)} с`;
+    return `git не ответил за ${String(run.timeoutMs! / 1000)} с`;
   if (run.code === 127) return "git не найден в PATH";
   const lines = detail(run)
     .split("\n")
@@ -176,7 +239,9 @@ const sleep = (ms: number) =>
 function clearStaleIndexLock(vault: string): boolean {
   const lock = join(vault, ".git", INDEX_LOCK);
   try {
-    if (Date.now() - statSync(lock).mtimeMs < INDEX_LOCK_STALE_MS) return false;
+    const staleAfter =
+      readNightSettings().values.maxGitTimeoutMs + INDEX_LOCK_GRACE_MS;
+    if (Date.now() - statSync(lock).mtimeMs < staleAfter) return false;
   } catch {
     return false;
   }
@@ -526,9 +591,16 @@ export async function commitVaultSweep(
   message: string,
   root: string,
 ): Promise<VaultCommit> {
-  const paths = await changedVaultPaths(root);
-  if (paths.length === 0) return { ok: true, committed: false };
-  return await commitVaultWrite(message, paths, root);
+  try {
+    const paths = await changedVaultPaths(root, true);
+    if (paths.length === 0) return { ok: true, committed: false };
+    return await commitVaultWrite(message, paths, root);
+  } catch (error) {
+    return {
+      ok: false,
+      reason: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
 /** Снимок «до» и результат «после» чужой работы над vault: чистку карточек делает не
@@ -564,10 +636,16 @@ function statusPaths(output: string): string[] {
 
 /** Незакоммиченные пути vault: паре нужен снимок «до» и результат работы, а `add -A` в шве
  * запрещён - коммит обязан называть свои пути. */
-async function changedVaultPaths(root: string): Promise<string[]> {
+async function changedVaultPaths(
+  root: string,
+  strict = false,
+): Promise<string[]> {
   const vault = vaultRoot(root);
   if (vault === null) return [];
   const run = await git(["status", "--porcelain", "-z", "-uall"], vault);
-  if (run.code !== 0) return [];
+  if (run.code !== 0) {
+    if (strict) throw new Error(reasonOf(run));
+    return [];
+  }
   return statusPaths(run.out).map((path) => join(vault, path));
 }

@@ -76,6 +76,7 @@ test("status renders fast fields before the asynchronous userbot probe settles",
 
   const initial = await status.default.render(state, context);
   assert.match(initial.text, /Iva v0\.3\.11/);
+  assert.match(initial.text, /\| Context window \| 272k \|/);
   assert.match(initial.text, /\| Userbot \| … \|/);
   assert.equal(edits.length, 0);
 
@@ -155,4 +156,26 @@ test("status surfaces an invalid model provider instead of presenting Ollama", a
     );
     assert.doesNotMatch(view.text, /Model \| ollama|wrong-model/);
   }
+});
+
+test("status uses the shared Claude model window without a configured override", async () => {
+  const { root, envPath } = await fixture();
+  await writeFile(
+    envPath,
+    "MODEL_PROVIDER=claude\nCLAUDE_MODEL=claude-fable-5-1\n",
+  );
+  const state: StatusState = { chatId: 1, userId: "2", screen: "st" };
+  const context: StatusContext = {
+    deps: {
+      root,
+      envPath,
+      dataDir: join(root, "data"),
+      probeUserbotHealth: async () => ({ state: "off" }),
+    },
+    flows: { get: () => null, screen: async () => undefined },
+    getLang: () => "ru",
+    tr: (_en, ru) => ru,
+  };
+  const view = await status.default.render(state, context);
+  assert.match(view.text, /\| Окно контекста \| 1M \|/);
 });

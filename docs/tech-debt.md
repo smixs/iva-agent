@@ -279,23 +279,39 @@ The `ai` pin is gone: Iva used to override `ai` to 7.0.39 against eve 0.51.1's p
 
 Startup recovery uses the same chat-status lock with a two-second stale threshold; ordinary chat writers retain their usual thirty-second threshold. A killed writer's fresh lock becomes reclaimable within two seconds. A live synchronous writer stalled beyond this recovery threshold can lose its lock (`FileLock-sync-slow.cfg`); normal writes must finish well within the threshold.
 
-## 19. Daily-summary conflicts with absent or matching body hashes
+## 19. Daily-summary conflicts across nights
 
-A direct edit during the model's day response is kept by that night. A mismatching
-`body_hash` also keeps the edited summary on subsequent automatic and manual nights,
-including a cached open pass. This N1 case is closed and covered by the single
-three-night process test in `scripts/memory/night-process.test.ts` ("mismatch summary
-survives three nights"). The two N1 cases with an absent or matching `body_hash`
-remain open: the next night can overwrite the edited summary. The day cache retains
-the model answer and open pass, while the expected summary snapshot and detected conflict live only
-in the first process. This is existing behavior in baseline `91dd9bb6` and release
-`0.4.17`. QA round 3 reproduced both open cases across three nights with a separate
-probe in `.scratch/work/fixes-1013/fixes2-qa3-probes`; the report is
-`.scratch/work/fixes-1013/fixes2-qa3-opus.md`. The repeated-night message
-"день ждёт владельца" has no test assertion. The two open data-loss cases remain
-release blockers under ADR-0002.
+Closed by storing the original summary hash in the open day pass before the model
+call and the last published hash in `cache.writtenSummaryHash` before writing the
+summary. The published hash survives day completion. Subsequent passes compare
+against that publication, so a late entry preserves owner edits with absent,
+matching or mismatching `body_hash`, including description-only edits. Interrupted
+publication can finish its git commit after the raw day, model or instruction
+changes. The comparison uses the saved publication hash throughout recovery.
 
-Persisting a summary-conflict flag in the existing day pass would carry the decision
-across processes. That changes the stored cache format and needs a separate decision;
-the narrow repair leaves this proposal for review. Existing Card-conflict deferrals
-continue to preserve pending facts while other days, CORE, periods and Report finish.
+Three-night process tests in `scripts/memory/night-process.test.ts` assert the
+preserved bytes and "день ждёт владельца" on repeated nights. The message and the
+old-queue reminder name `iva jobs skip memory-night <date>` or restoring the summary.
+An explicit owner skip takes precedence over an open pass; the CLI writes it even
+when an ordinary completion marker already exists. Other days, CORE and periods
+continue to finish. The property test runs 100 cases with seed `20261020`.
+
+`NightWriter.HumanEditWins` covers open passes and edits after day completion, before
+a late entry opens the next pass, including closed 0.5.5 caches without a publication
+hash. `PublishedSummaryResumes` covers publication,
+interruption and continuation after input changes. Mutants that reread the expected
+hash, omit the published hash or compare with recomputed output produce witnesses.
+The model retains the filesystem stability assumption between the final comparison
+and atomic publication from ADR-0016.
+
+Both `pass.summaryHash` and `writtenSummaryHash` are optional in cache version 1.
+With a closed old cache, an existing summary and a new pass, the day waits for the
+owner because its last publication hash is unknown. The summary stays intact. The
+0.5.5 reader validates only version, date and integer `through`, so it accepts the
+added fields. Its writer preserves the top-level hash, but ignores it on rollback;
+the absent/matching `body_hash` cases regain the old behavior until upgraded again.
+После отката на 0.5.5 и обратно день с поздней репликой может ждать владельца; освобождается `iva jobs skip`.
+
+## 20. Accepted empty-response limit
+
+After three recoverable empty responses, a fourth ends the eve turn with `turn.failed`; background turns retain their owner-facing outcome (#338), and the owner can start another attempt from the parked chat turn. See [ADR-0023](adr/0023-eve-is-ours-to-change.md).

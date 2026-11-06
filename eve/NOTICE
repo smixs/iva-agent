@@ -78,3 +78,9 @@ SOFTWARE.
 
 Iva modifications: model retries, error classification, skill context and paths,
 HTTP fetch metadata, busy-task guidance, manual compaction, and resolved input events.
+
+telegram-mcp tool metadata fixture
+The connection-search test fixture includes tool names and descriptions from
+https://github.com/chigwell/telegram-mcp at commit
+f1a2d8e00a7f127bb7702655c58fdfcee7e73a5a, licensed under the Apache License,
+Version 2.0. The license text is included in LICENSE.

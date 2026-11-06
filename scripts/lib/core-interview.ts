@@ -4,12 +4,13 @@
 //
 // РАЗДЕЛЕНИЕ ОТВЕТСТВЕННОСТИ: тут НЕТ никакой «дистилляции» и НЕ трогаем vault/CORE.md.
 // saveInterview кладёт только сырой архив (полные ответы никогда не теряются), а ужать
-// их в ядро (лимит 1200 симв. — MAX_CHARS из agent/instructions/20-core.ts) должна сама
+// их в ядро (лимит CORE_CAP симв. из agent/lib/core-cap.ts) должна сама
 // ива своими write-инструментами, получив buildDistillMessage. Так лимит и «не выдумывай»
 // остаются заботой модели, а мост не знает про формат ядра.
 
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { CORE_CAP } from "#lib/core-cap.ts";
 import { writeFileAtomic } from "#lib/fs-atomic.ts";
 
 const RECOVERY_PREFIX = "<!-- iva-core-distillation:v1:";
@@ -139,7 +140,7 @@ export async function readInterviewRecovery(
 
 // Синтетическое сообщение «от имени юзера»: мост шлёт его иве вместо реального текста,
 // чтобы она сама сжала ответы в ядро. Вежливо, коротко, с ЯВНЫМ «ничего не выдумывай»
-// и упоминанием лимита 1200 (тот же MAX_CHARS, что режет 20-core.ts). lang: "ru"|"en",
+// и упоминанием лимита CORE_CAP (тот же, что режет 20-core.ts). lang: "ru"|"en",
 // незнакомое значение → русский (дефолт канала).
 export function buildDistillMessage(qa: unknown, lang: unknown): string {
   const items = Array.isArray(qa) ? qa : [];
@@ -154,7 +155,7 @@ export function buildDistillMessage(qa: unknown, lang: unknown): string {
     return [
       "[Настройка core memory]",
       "",
-      "Ниже мои ответы о себе. Сожми их в ядро памяти и обнови файл vault/CORE.md своими инструментами (лимит 1200 символов).",
+      `Ниже мои ответы о себе. Сожми их в ядро памяти и обнови файл vault/CORE.md своими инструментами (лимит ${CORE_CAP} символов).`,
       "Опирайся только на мои ответы — ничего не выдумывай и не додумывай. Когда обновишь ядро, кратко подтверди.",
       "",
       block,
@@ -163,7 +164,7 @@ export function buildDistillMessage(qa: unknown, lang: unknown): string {
   return [
     "[Core memory setup]",
     "",
-    "Below are my answers about myself. Distill them into the memory core and update the file vault/CORE.md with your own tools (1200-character limit).",
+    `Below are my answers about myself. Distill them into the memory core and update the file vault/CORE.md with your own tools (${CORE_CAP}-character limit).`,
     "Rely only on my answers — don't make anything up or add extra. Once the core is updated, confirm briefly.",
     "",
     block,

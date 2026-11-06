@@ -1,3 +1,4 @@
+import { claudeContextWindow as sharedClaudeContextWindow } from "../../packages/context-window/index.ts";
 // Живой вендор `claude`: ключа в .env нет — Ива зовёт установленный и залогиненный
 // Claude Code CLI на той же машине. Здесь половина CLI: статус входа, живой список
 // моделей из рукопожатия initialize и одна проба выбранной модели. agent/ этот модуль
@@ -634,21 +635,7 @@ export async function probeClaudeModel(
   );
 }
 
-// ── окно контекста ────────────────────────────────────────────────────────────
-
-// Окна моделей подписки: миллион у fable/opus/sonnet и Haiku 5.5, двести тысяч у Haiku 4.5.
-// Та же таблица стоит у рантайма в agent/lib/claude-cli.ts — разъехаться им нельзя, поэтому
-// правило одно на оба случая и живёт рядом с именами моделей, которые его знают.
-const CLAUDE_CONTEXT_WINDOWS: ReadonlyArray<[RegExp, string]> = [
-  [/claude-haiku-4/u, "200000"],
-];
-const CLAUDE_DEFAULT_CONTEXT_WINDOW = "1000000";
-
-/** Окно контекста выбранной модели: мастер пишет его в .env, чтобы компактация считала
- *  порог от настоящего окна, а не от круглого числа побольше. */
+// Setup persists the same model window used by the runtime.
 export function claudeContextWindow(model: string): string {
-  for (const [pattern, window] of CLAUDE_CONTEXT_WINDOWS) {
-    if (pattern.test(model)) return window;
-  }
-  return CLAUDE_DEFAULT_CONTEXT_WINDOW;
+  return String(sharedClaudeContextWindow(model));
 }

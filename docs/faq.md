@@ -16,7 +16,7 @@ Your memory is a plain-markdown vault in a private git repo you own; no third pa
 
 ## How much does it cost to run?
 
-About $9/mo, no markup: one model subscription plus a small VPS, with voice on Deepgram's free tier. The line-item breakdown — and the low-memory VPS notes — live in [providers.md](providers.md).
+Iva herself is free; the model and server on the standard stack run about $14–15/mo, with voice on Deepgram's free tier, and with a ChatGPT or Claude subscription you already have the model line adds $0 on top. The line-item breakdown — and the low-memory VPS notes — live in [providers.md](providers.md).
 
 ## Does it work in Russian?
 
@@ -24,7 +24,7 @@ Yes — the setup wizard and the agent both run in Russian or English (`AGENT_LA
 
 ## What models does it support?
 
-Four providers. Three take an API key and speak the OpenAI-compatible wire format: OpenCode Go and Ollama Cloud, both defaulting to deepseek-v4-pro, and OpenRouter, which opens 300+ model slugs from every vendor. The fourth, `codex`, rides your own OpenAI (ChatGPT) subscription over OAuth and calls its Responses API instead — no key at all. Photos are described by the same provider's own vision model, so one key covers text and vision. Full model lists, prices and limits: [providers.md](providers.md).
+Six providers. Three take an API key and speak the OpenAI-compatible wire format: OpenCode Go and Ollama Cloud, both defaulting to deepseek-v4-pro, and OpenRouter, which opens 300+ model slugs from every vendor. Two ride a subscription you already pay for, with no key at all: `codex`, your own OpenAI (ChatGPT) subscription over OAuth against its Responses API, and `claude`, your Claude Pro/Max subscription through the Claude Code CLI. The sixth, `custom`, is your own OpenAI-compatible endpoint. Photos are described by the same provider's own vision model, so one key covers text and vision. Full model lists, prices and limits: [providers.md](providers.md).
 
 ## Do I need a domain or HTTPS?
 
@@ -42,7 +42,7 @@ Yes — that is the point. You talk, it files: daily transcripts, nightly rollup
 | Voice            | Deepgram nova-3, auto ru/uz/en  | Whisper transcription       | Built-in STT/TTS       | Yes                   |
 | Long-term memory | Layered vault + nightly rollups | Per-dialog history          | Opt-in key/value store | Built-in, vendor-held |
 | Personal CRM     | Contact/project/decision cards  | No                          | No                     | No                    |
-| Price            | ~$9/mo, no markup               | VPS + API usage             | VPS + API usage        | ~$20/mo               |
+| Price            | Free; ~$14–15/mo stack          | VPS + API usage             | VPS + API usage        | ~$20/mo               |
 | License          | MIT                             | MIT                         | MIT                    | Proprietary           |
 
 ## When NOT to use Iva

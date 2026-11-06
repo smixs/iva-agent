@@ -21,6 +21,7 @@ const ROOT = join(import.meta.dirname, "../..");
 
 // Весь статический граф обоих входов: сам ход, его политика (node:fs) и то, что тянет CLI.
 const ISLAND_FILES = [
+  "packages/alert-state/index.ts",
   "scripts/lib/reminder-turn.ts",
   "scripts/lib/notice-policy.ts",
   "scripts/lib/env-file.ts",

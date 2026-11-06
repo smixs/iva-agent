@@ -218,6 +218,14 @@ IVA_NVM_INSTALLER
     if [ "$IVA_TEST_FAIL_ARTIFACT_DOWNLOAD" = "$artifact" ]; then exit 22; fi
     printf 'synthetic npm package\n' >"$out"
     ;;
+  *google-workspace-cli-*-unknown-linux-musl.tar.gz)
+    if [ "$IVA_TEST_FAIL_ARTIFACT_DOWNLOAD" = musl ]; then exit 22; fi
+    mkdir -p "$TMPDIR/musl"
+    printf '#!/bin/sh\necho "gws 0.22.5"\nexit \${IVA_TEST_MUSL_EXIT:-0}\n' >"$TMPDIR/musl/gws"
+    chmod +x "$TMPDIR/musl/gws"
+    tar -czf "$out" -C "$TMPDIR/musl" ./gws
+    rm -rf "$TMPDIR/musl"
+    ;;
 esac
 exit 0
 `;
@@ -228,6 +236,8 @@ echo "sha256sum $*" >> "$IVA_TEST_CALLS"
 last=""
 for arg in "$@"; do last="$arg"; done
 case "$last" in
+  *aarch64-unknown-linux-musl.tar.gz) artifact=musl; expected=e700fe63524932b10ec2130b47ece90aa850e66005fe52ccfc4cf8767bf9919a ;;
+  *x86_64-unknown-linux-musl.tar.gz) artifact=musl; expected=4db473dde4b1ab872e4ff35d769b0d4af1f1a6441a605e79d5cf8ada9c87e920 ;;
   */iva-uv-*) artifact=uv; expected=${PINNED_ARTIFACTS.uv.sha256} ;;
   */iva-nvm-*) artifact=nvm; expected=${PINNED_ARTIFACTS.nvm.sha256} ;;
   */iva-agent-browser-*) artifact=agent-browser; expected=${PINNED_ARTIFACTS.agentBrowser.sha256} ;;
@@ -352,6 +362,13 @@ case "$1" in
     if [ -n "$tool" ]; then
       mkdir -p "$install_prefix/bin"
       ln -sf "$IVA_TEST_RECORDER" "$install_prefix/bin/$tool"
+      if [ "$tool" = gws ]; then
+        mkdir -p "$install_prefix/lib/node_modules/@googleworkspace/cli/bin"
+        binary="$install_prefix/lib/node_modules/@googleworkspace/cli/bin/gws"
+        printf '#!/bin/sh\necho "gws --version" >> "$IVA_TEST_CALLS"\nif [ -n "$IVA_TEST_GWS_ERROR" ]; then echo "$IVA_TEST_GWS_ERROR" >&2; exit 1; fi\necho "gws 0.22.5"\n' >"$binary"
+        chmod +x "$binary"
+        ln -sf "$binary" "$install_prefix/bin/gws"
+      fi
     fi
     ;;
 esac
@@ -467,7 +484,7 @@ const TOOLS = realpathSync(mkdtempSync(join(tmpdir(), "iva-install-tools-")));
 const RECORDER_PATH = join(TOOLS, "recorder");
 writeFileSync(
   join(TOOLS, "uname"),
-  '#!/bin/sh\nprintf "%s\\n" "${IVA_TEST_OS:-Linux}"\n',
+  '#!/bin/sh\nif [ "$1" = -m ]; then echo "${IVA_TEST_ARCH:-aarch64}"; else echo "${IVA_TEST_OS:-Linux}"; fi\n',
   { mode: 0o755 },
 );
 writeFileSync(
@@ -2694,6 +2711,92 @@ for (const field of ["resolved", "integrity"] as const) {
     assert.match(world.calls(join(world.dir, "second.log")), /^npm ci$/mu);
   });
 }
+
+for (const existing of [false, true]) {
+  void test(`installation repairs GLIBC gws (already installed: ${existing})`, (t) => {
+    const world = createWorld(t);
+    if (existing) {
+      mkdirSync(join(world.home, ".local/bin"), { recursive: true });
+      writeFileSync(
+        join(world.home, ".local/bin/gws"),
+        "#!/bin/sh\necho GLIBC_2.39 >&2\nexit 1\n",
+        { mode: 0o755 },
+      );
+    }
+    const result = world.run({
+      env: { IVA_TEST_GWS_ERROR: "GLIBC_2.39 not found" },
+    });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.match(world.calls(), /unknown-linux-musl/u);
+    assert.match(result.stdout, /gws ready/u);
+    assert.deepEqual(leftovers(world.tmp), []);
+  });
+}
+
+void test("installation continues when the musl repair fails", (t) => {
+  const world = createWorld(t);
+  const result = world.run({
+    env: {
+      IVA_TEST_GWS_ERROR: "GLIBC_2.39 not found",
+      IVA_TEST_CORRUPT_ARTIFACT: "musl",
+    },
+  });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /couldn't install gws/u);
+  assert.deepEqual(leftovers(world.tmp), []);
+});
+
+for (const arch of ["aarch64", "x86_64"]) {
+  void test(`updater GWS replaces a GLIBC failure with verified musl on ${arch}`, (t) => {
+    const world = createWorld(t);
+    const prefix = join(world.home, "prefix with spaces");
+    const result = world.run({
+      args: ["--update-gws", prefix],
+      env: {
+        IVA_TEST_GWS_ERROR: "version GLIBC_2.39 not found",
+        IVA_TEST_ARCH: arch,
+      },
+    });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.match(result.stdout, /gws 0\.22\.5/u);
+    assert.ok(
+      world
+        .calls()
+        .includes(`google-workspace-cli-${arch}-unknown-linux-musl.tar.gz`),
+    );
+    assert.deepEqual(leftovers(world.tmp), []);
+  });
+}
+
+const gwsRepairFailures: Array<Record<string, string>> = [
+  { IVA_TEST_CORRUPT_ARTIFACT: "musl" },
+  { IVA_TEST_FAIL_ARTIFACT_DOWNLOAD: "musl" },
+  { IVA_TEST_MUSL_EXIT: "1" },
+  { IVA_TEST_ARCH: "riscv64" },
+];
+for (const env of gwsRepairFailures) {
+  void test(`GWS repair reports failure and cleans downloads: ${JSON.stringify(env)}`, (t) => {
+    const world = createWorld(t);
+    const result = world.run({
+      args: ["--update-gws", join(world.home, ".local")],
+      env: { IVA_TEST_GWS_ERROR: "version GLIBC_2.39 not found", ...env },
+    });
+    assert.equal(result.status, 1, result.stdout + result.stderr);
+    assert.match(result.stdout + result.stderr, /Google.*unavailable/u);
+    assert.deepEqual(leftovers(world.tmp), []);
+  });
+}
+
+void test("GWS errors unrelated to GLIBC do not download musl", (t) => {
+  const world = createWorld(t);
+  const result = world.run({
+    args: ["--update-gws", join(world.home, ".local")],
+    env: { IVA_TEST_GWS_ERROR: "permission denied" },
+  });
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.doesNotMatch(world.calls(), /unknown-linux-musl/u);
+  assert.match(result.stdout + result.stderr, /permission denied/u);
+});
 
 void test("updater GWS path checks the same pinned bytes and preserves credentials", (t) => {
   const world = createWorld(t);

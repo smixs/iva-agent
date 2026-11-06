@@ -274,6 +274,7 @@ export async function wireTurn(
     sequence?: string[];
     invalidLast?: boolean;
     emptyLast?: boolean;
+    emptyN?: number;
     noEvents?: boolean;
     retry?: boolean;
     compact?: boolean;
@@ -349,7 +350,11 @@ export async function wireTurn(
         : [
             {
               type: "text" as const,
-              text: options.emptyLast && !params.tools?.length ? "" : "done",
+              text:
+                (options.emptyN !== undefined && count <= options.emptyN) ||
+                (options.emptyLast && !params.tools?.length)
+                  ? ""
+                  : "done",
             },
           ],
     };

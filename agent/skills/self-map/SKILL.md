@@ -8,7 +8,7 @@ description: "Your evidence and how you work: one Trace turn to its cause and wh
 Paths are relative to the `bash` folder — the running Version
 (`~/iva/versions/<v>`; `~/iva/current` points at it). Your own code is here, not
 in `~/iva`. Data is `$ASSISTANT_DATA_DIR` (default `./data`). Everything below
-only reads.
+is for inspection unless the owner requests a repair.
 
 ## Keep the output small
 
@@ -18,9 +18,12 @@ they run to megabytes. A long turn — print only what is around its failures:
 
     iva trace show <session>/<turn> | grep -B4 -A2 -e 'failure=' -e 'turn.failed' -e 'step.failed'
 
-## Never in a turn without the owner
+## Commands in a turn
 
-- `iva doctor` — blocked: its repairs restart iva.service.
+Only one lifecycle command is accepted at a time; read its result before requesting another.
+
+- `iva doctor` in a turn prints the complete read-only diagnosis; repairs belong to the owner in a terminal.
+- Перезапуск, обновление, откат — только `iva <глагол>`: он сам отложит действие до конца хода; systemctl/launchctl/pkill по Иве из хода убивают ответ.
 - `iva diagnose` — read-only; in a turn only through `report-problem`.
 - `iva logs`, `iva trace tail` — they follow forever and end only on the bash
   timeout. Use `journalctl … --no-pager -n N` and `iva trace show`.
@@ -94,8 +97,7 @@ as an object and have no `failure`.
    `guard.repeat_stop` — the loop is part of the cause.
 
 Not every non-zero exit is a failure: `grep` 1 = nothing found, `diff` 1 = the
-files differ, `test` 1 = false; those have no `failure=`. «ЗАБЛОКИРОВАНО: …»
-from `bash` is the guard doing its job. «The Trace does not show why» is a
+files differ, `test` 1 = false; those have no `failure=`. «The Trace does not show why» is a
 correct answer; a guessed reason is not.
 
 ## Whose it is
@@ -163,12 +165,15 @@ What becomes of your work — for the owner's questions about you.
   you wrote and what you sent stay; a command still running is killed, the
   unfinished answer is dropped. A correction does not reach the running turn;
   it starts the next one.
+- Helpers, Watch, Brief and Insight use the helper and background model selected in `/menu`; an empty `HELPER_MODEL` selects the chat model.
 - **Helper** works in a separate background turn. Read `helper outcome` and tell
   the owner; `helper close` stops it and keeps the last completed message.
   A new conversation keeps it running; restart gives interrupted. Repeat with the owner's permission.
 - **■ Stop** (or `/stop`) stops the main turn; a helper continues. The turn ends the same way: what is done stays. The
   next turn opens with a note that the previous one was stopped; do not redo
   that work unless asked.
+- `[The previous turn was interrupted` / `[Предыдущий ход был прерван`: an explicit Stop was pressed; repeat the work only on request.
+- `[This message arrived while` / `[Это сообщение пришло, пока`: check the conversation for completion of the previous request before repeating any work.
 - **A broken model call** (the network, the provider failing for a moment):
   up to three requests inside the same turn; a tool from a cut-off answer does
   not run, finished steps are not redone. When the third breaks off too, the
@@ -178,8 +183,11 @@ What becomes of your work — for the owner's questions about you.
   answer began: what happened and to write again, no button.
 - **Iva restarts while a turn is running** (a crash, a restart): the
   conversation of every chat starts anew, memory (CORE, cards, days) stays.
-  The owner sees «Предыдущий ход оборвался - повтори запрос или /new»; the
-  turn does not start again by itself.
+  The owner sees «Предыдущий ход оборвался», a short quote of the last accepted
+  question in a private chat, and a «Повторить» button. The button sends the full
+  question as an ordinary turn, once and only on the owner's tap. An attachment
+  asks the owner to send it again; a group shows no quote. A new conversation or
+  another accepted turn closes the old button. The turn stays stopped until a tap.
 - **After a miss** (the server was off or restarting): a Reminder that came
   due fires on the first minute after; a Brief or an Insight runs if it is
   less than 3 hours late, otherwise that time is skipped; a night less than 20
@@ -198,6 +206,21 @@ What becomes of your work — for the owner's questions about you.
   sizes and `failure=`; the failure list then also counts your own Insight turns.
 
 ## Spend, schedule, services
+
+`CLAUDE_CONTEXT_WINDOW=200000` — дешевле на подписке Claude, раньше сворачивает историю.
+
+### Why the cache warmed again
+
+Read only the relevant steps from `data/usage.jsonl`, matching `sessionId` and `turnId`.
+The optional `request` holds eight-character SHA-256 fingerprints: `system`, `cache`,
+`tools`, and `toolCount`. They identify changes, not the original text.
+Compare steps using the same provider and model: changed `system` means instructions
+changed; changed `tools` or `toolCount` means the advertised tool definitions changed.
+`cache` covers explicitly cache-marked messages/parts/tools, excluding the final user
+message; a changed hash can also mean more messages were added. User text alone leaves these hashes stable.
+Compare with `cacheRead`, `cacheWrite` and input tokens: a changed prefix can need a fresh
+cache write; matching hashes do not prove a hit (expiry and provider policy still matter).
+Older rows have no `request`: say the evidence is unavailable. Explain the cost in plain words.
 
 Goals: `goal list` shows the Plan, next check and waiting Outcome; Trace `helper.goal_*` and `helper.finished` with `goal` record their checks.
 

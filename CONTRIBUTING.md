@@ -88,6 +88,7 @@ nothing runs automatically when you open it, and no bot will tell you what broke
 the PR which checks you ran and what they said.
 
 - One change per PR. A rename, a refactor and a feature in one diff cannot be reviewed.
+- When the documentation and existing code conflict, follow the code's conventions, and in your final reply, list all the inconsistencies you found.
 - Commit messages describe the code change and nothing else — no AI or tool
   attribution, no "generated with" footers.
 - Tests come with the change. Bug fixes get a test that fails without the fix.

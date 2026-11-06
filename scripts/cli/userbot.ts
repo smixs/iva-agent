@@ -43,13 +43,13 @@ export type UserbotRuntime = Pick<
   | "uvExecutable"
 >;
 
-export interface EnsureUserbotVenvOptions {
+interface EnsureUserbotVenvOptions {
   readonly quiet?: boolean;
   readonly requirementsPath?: string | null;
   readonly requireHashes?: boolean;
 }
 
-export interface RestartUserbotOptions extends EnsureUserbotVenvOptions {
+interface RestartUserbotOptions extends EnsureUserbotVenvOptions {
   readonly knownActive?: boolean;
   /**
    * `iva restart`: a proxy that answers is left running. Its version is the same, and a
@@ -414,7 +414,7 @@ export function createUserbotCommands(
  * that is not there. Never fatal: an integration that cannot be rebuilt is a
  * broken integration, not a failed update.
  */
-export type UserbotRecovery =
+type UserbotRecovery =
   | { readonly status: "skipped" }
   | { readonly status: "ready"; readonly health: UserbotHealth }
   | { readonly status: "failed"; readonly reason: string };

@@ -1,23 +1,16 @@
-// Хранилище карточек: поиск существующего файла по идентичности, слияние (merge)
-// нового содержимого со старым, лок + атомарная запись.
+// Хранилище карточек: слияние (merge) нового содержимого со старым,
+// лок + атомарная запись.
 //
 // Инвариант: write_card сохраняет неизвестные поля frontmatter и created. UPDATE
 // дополняет один ## Log, SUPERSEDE заменяет Compiled Truth и переносит прежний факт
 // в ## History, а NOOP не пишет файл.
 
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  readdirSync,
-  statSync,
-} from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { scanFences } from "./card-text.ts";
 import { acquireFileLock, releaseFileLock } from "./fs-atomic.ts";
 import {
   parseFrontmatter,
-  parseFrontmatterOrSkip,
   writeFrontmatter,
   type FmFields,
   type FmValue,
@@ -53,13 +46,6 @@ export function normalizeName(s: string): string {
     .trim();
 }
 
-/** Имя без уточнения в скобках — для матча «голое имя ↔ квалифицированная карточка». */
-export function baseName(s: string): string {
-  return normalizeName(s.replace(/\([^)]*\)/g, " "));
-}
-
-const hasQualifier = (s: string) => /\(/.test(s);
-
 export function extractH1(body: string): string | null {
   const lines = body.split("\n");
   return (
@@ -67,140 +53,6 @@ export function extractH1(body: string): string | null {
       (section) => section.level === 1 && section.heading,
     )?.heading ?? null
   );
-}
-
-function fmNames(fields: FmFields | null): string[] {
-  if (!fields) return [];
-  const out: string[] = [];
-  for (const key of ["name", "title", "aka", "aliases"]) {
-    const v = fields[key];
-    if (!v) continue;
-    if (Array.isArray(v)) out.push(...v);
-    else
-      out.push(
-        ...String(v)
-          .split(",")
-          .map((x) => x.trim()),
-      );
-  }
-  return out.filter(Boolean);
-}
-
-export interface Identity {
-  /** Абсолютный/относительный путь файла карточки (может ещё не существовать). */
-  file: string;
-  /** Файл найден по H1/name/aliases, а не по точному слагу (легаси-слаг). */
-  matchedBy: "slug" | "title" | "new";
-  /** Несколько кандидатов — писать нельзя, нужен выбор человека/модели. */
-  candidates?: string[];
-}
-
-// Имена одной карточки в уже нормализованном виде — вместе со снимком файла, по которому
-// видно, что разбирать её заново не нужно.
-interface CardNames {
-  mtimeNs: bigint;
-  size: bigint;
-  /** normalizeName каждого кандидата (H1, name/title/aka/aliases, слаг файла). */
-  full: string[];
-  /** baseName тех же кандидатов — для матча «голое имя ↔ квалифицированная карточка». */
-  bare: string[];
-}
-
-// Промах точного слага — это КАЖДАЯ новая карточка, а за ночь ролловера их десятки.
-// Без кэша каждая из них перечитывала и разбирала весь каталог типа: N карточек → N²
-// чтений с диска. Кэш живёт в процессе, по каталогу; ключ записи — снимок файла (mtime в
-// наносекундах + размер), поэтому правка карточки чужими руками (ночной Brain, git pull)
-// видна так же, как своя.
-//
-// Что осталось и почему: обход никуда не делся — на каждый промах это readdirSync плюс
-// statSync на файл, то есть O(N) СИСТЕМНЫХ ВЫЗОВОВ (ушли только чтение содержимого и
-// разбор frontmatter, самая дорогая часть). Это осознанная цена: карточки пишет не
-// только этот процесс, и единственный способ увидеть чужую правку — спросить у диска.
-// Замеры на 2000 карточек, 50 промахов подряд: 5283 мс → 1143 мс, и весь остаток —
-// как раз эти stat'ы.
-const namesByDir = new Map<string, Map<string, CardNames>>();
-
-// Счётчики для тестов: сколько карточек реально прочитано с диска при разрешении имени.
-export const resolveStats = { fileReads: 0 };
-
-function cardNames(dir: string): Map<string, CardNames> {
-  let names: string[];
-  try {
-    names = readdirSync(dir).filter((n) => n.endsWith(".md"));
-  } catch {
-    names = [];
-  }
-  const cached = namesByDir.get(dir) ?? new Map<string, CardNames>();
-  const fresh = new Map<string, CardNames>();
-  for (const name of names.sort()) {
-    const full = join(dir, name);
-    let stats;
-    try {
-      stats = statSync(full, { bigint: true });
-    } catch {
-      continue; // файл исчез между листингом и снимком
-    }
-    const prior = cached.get(name);
-    if (prior && prior.mtimeNs === stats.mtimeNs && prior.size === stats.size) {
-      fresh.set(name, prior);
-      continue;
-    }
-    let text: string;
-    try {
-      text = readFileSync(full, "utf8");
-    } catch {
-      continue;
-    }
-    resolveStats.fileReads++;
-    // Соседняя карточка со сломанным frontmatter не имеет права уронить разбор
-    // всего каталога: её просто не найти по заголовку, остальные на месте.
-    const parsed = parseFrontmatterOrSkip(text, full);
-    if (parsed === null) continue;
-    const { fields, body } = parsed;
-    const h1 = extractH1(body);
-    const cands = [h1, ...fmNames(fields), name.replace(/\.md$/, "")].filter(
-      Boolean,
-    ) as string[];
-    fresh.set(name, {
-      mtimeNs: stats.mtimeNs,
-      size: stats.size,
-      full: cands.map(normalizeName),
-      bare: cands.map(baseName),
-    });
-  }
-  namesByDir.set(dir, fresh);
-  return fresh;
-}
-
-/**
- * Идентичность карточки: сначала точный слаг, иначе — поиск среди карточек ТОГО ЖЕ типа
- * по H1-заголовку и полям name/title/aka/aliases. Так карточка с латинским легаси-слагом
- * (yasmin.md) и кириллическим H1 («Ясмин …») находится, а не дублируется.
- * Несколько кандидатов → candidates, вызывающий обязан отказаться от записи.
- */
-export function resolveCard(dir: string, title: string): Identity {
-  const slug = slugify(title);
-  const exact = join(dir, `${slug}.md`);
-  if (existsSync(exact)) return { file: exact, matchedBy: "slug" };
-
-  // Правило квалификаторов: «Ясмин» (без скобок) находит «Ясмин (AI Content Creator)»,
-  // но «Alex (UK)» НЕ сливается в «Alex (US)» — квалифицированный запрос матчится только
-  // при полном совпадении (со скобками), иначе это другая сущность и нужен новый файл.
-  const wanted = normalizeName(title);
-  const wantedBase = baseName(title);
-  const bareQuery = !hasQualifier(title);
-  const hits: string[] = [];
-  for (const [name, entry] of cardNames(dir)) {
-    const matched =
-      entry.full.includes(wanted) ||
-      (bareQuery && entry.bare.includes(wantedBase));
-    if (matched) hits.push(join(dir, name));
-  }
-
-  if (hits.length === 1) return { file: hits[0], matchedBy: "title" };
-  if (hits.length > 1)
-    return { file: exact, matchedBy: "new", candidates: hits };
-  return { file: exact, matchedBy: "new" };
 }
 
 // ─── merge ─────────────────────────────────────────────────────────────────

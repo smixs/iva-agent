@@ -42,6 +42,9 @@ AGENT_BROWSER_TARBALL_URL="https://registry.npmjs.org/agent-browser/-/agent-brow
 AGENT_BROWSER_TARBALL_SHA256="a4744fb189e598467abcfb3acdde07118d9e5cb43dc3b31727f869af4eb9d598"
 GWS_TARBALL_URL="https://registry.npmjs.org/@googleworkspace/cli/-/cli-0.22.5.tgz"
 GWS_TARBALL_SHA256="b3d415a6d1b09589b13f6a71451d3d3927c4dc4701822d6aae549f8ff8f3380a"
+GWS_MUSL_RELEASE="https://github.com/googleworkspace/cli/releases/download/v0.22.5"
+GWS_MUSL_X86_64_SHA256="4db473dde4b1ab872e4ff35d769b0d4af1f1a6441a605e79d5cf8ada9c87e920"
+GWS_MUSL_AARCH64_SHA256="e700fe63524932b10ec2130b47ece90aa850e66005fe52ccfc4cf8767bf9919a"
 CHECKSUM_MISMATCH_RC=86
 VERIFIED_DOWNLOAD_DIR=""
 VERIFIED_DOWNLOAD=""
@@ -131,11 +134,40 @@ install_verified_npm_tarball() {
   return "$rc"
 }
 
+repair_gws_glibc() {
+  local prefix="$1" arch sha
+  arch="$(uname -m)"
+  case "$arch" in
+    x86_64) sha="$GWS_MUSL_X86_64_SHA256" ;;
+    aarch64|arm64) arch=aarch64; sha="$GWS_MUSL_AARCH64_SHA256" ;;
+    *) return 1 ;;
+  esac
+  download_verified gws-musl "$GWS_MUSL_RELEASE/google-workspace-cli-$arch-unknown-linux-musl.tar.gz" "$sha" \
+    && tar -xzf "$VERIFIED_DOWNLOAD" -C "$VERIFIED_DOWNLOAD_DIR" ./gws \
+    && install -m 755 "$VERIFIED_DOWNLOAD_DIR/gws" "$prefix/lib/node_modules/@googleworkspace/cli/bin/gws"
+}
+
+install_gws() {
+  local prefix="$1" output
+  install_verified_npm_tarball gws "$GWS_TARBALL_URL" "$GWS_TARBALL_SHA256" --prefix "$prefix" || return $?
+  if output="$("$prefix/bin/gws" --version 2>&1)"; then echo "$output"; return 0; fi
+  echo "$output" >&2
+  if [ "$IVA_OS" = Linux ] && [[ "$output" == *GLIBC_* ]]; then
+    if repair_gws_glibc "$prefix"; then
+      cleanup_verified_download
+      if "$prefix/bin/gws" --version; then return 0; fi
+    fi
+    cleanup_verified_download
+  fi
+  warn "$(t 'Google CLI unavailable; Iva continues. Repair: bash install.sh --update-gws "$HOME/.local"' 'Google CLI недоступен; Ива продолжает работу. Починка: bash install.sh --update-gws "$HOME/.local"')"
+  return 1
+}
+
 # Internal updater entry: exactly the same pins, download and checksum as installation.
 # Runs before setup, repository discovery, units or service changes.
 if [ "${1:-}" = --update-gws ]; then
   [ "$#" -eq 2 ] || exit 2
-  install_verified_npm_tarball gws "$GWS_TARBALL_URL" "$GWS_TARBALL_SHA256" --prefix "$2"
+  install_gws "$2"
   exit "$?"
 fi
 
@@ -1075,12 +1107,12 @@ fi
 # interactive — the bot walks the user through it in chat (agent skill
 # `google-workspace`); nothing to configure here.
 CURRENT_STEP="gws"
-if command -v gws >/dev/null 2>&1; then
+if command -v gws >/dev/null 2>&1 && gws --version >/dev/null 2>&1; then
   ok "$(t "gws already installed" "gws уже установлен")"
 else
   gws_rc=0
   if run_stage "$(t "Installing Google Workspace CLI" "Ставлю Google Workspace CLI")" "$(t "gws installed" "gws установлен")" \
-    install_verified_npm_tarball gws "$GWS_TARBALL_URL" "$GWS_TARBALL_SHA256" --prefix "$HOME/.local" \
+    install_gws "$HOME/.local" \
     && command -v gws >/dev/null 2>&1; then
     ok "$(t "gws ready — connect Google later: message the bot \"connect Google\"" "gws готов — Google подключишь позже: напиши боту «подключи Google»")"
   else

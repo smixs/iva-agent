@@ -37,6 +37,7 @@ type Proxy = {
 async function startProxy(
   token: string,
   answer: (args: Record<string, unknown>) => string,
+  messageTools?: (name: string, args: Record<string, unknown>) => string,
 ): Promise<Proxy> {
   const calls: Array<Record<string, unknown>> = [];
   const server: Server = createServer((req, res) => {
@@ -61,6 +62,25 @@ async function startProxy(
         return { content: [{ type: "text" as const, text: answer(args) }] };
       },
     );
+    if (messageTools) {
+      for (const name of ["list_messages", "get_message_link"]) {
+        mcp.registerTool(
+          name,
+          {
+            inputSchema: {
+              chat_id: z.number(),
+              limit: z.number().optional(),
+              message_id: z.number().optional(),
+            },
+          },
+          (args) => ({
+            content: [
+              { type: "text" as const, text: messageTools(name, args) },
+            ],
+          }),
+        );
+      }
+    }
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
     });
@@ -515,5 +535,200 @@ test(`PBT senderOf: never throws, never invents an address or a name (seed ${SEE
       assert.equal(sender.name, name.trim() === "" ? undefined : name.trim());
     }),
     { seed: SEED, numRuns: 500 },
+  );
+});
+
+test("Telegram group items carry the latest message and forum topic to Watch", async () => {
+  for (const [username, link, topic] of [
+    [undefined, "https://t.me/c/4398169447/40", undefined],
+    [undefined, "https://t.me/c/4398169447/12/40", 12],
+    ["public_team", "https://t.me/public_team/40", undefined],
+    ["public_team", "https://t.me/public_team/12/40", 12],
+    [undefined, "https://t.me/c/4398169447/40?thread=12", 12],
+    [undefined, "https://t.me/c/111/12/40", undefined],
+    [undefined, "https://t.me/c/4398169447/12/41", undefined],
+    [undefined, "https://t.me/c/4398169447/0/40", undefined],
+  ] as const) {
+    const calls: string[] = [];
+    const source = telegramSource({}, DATA, (name, args) =>
+      Promise.resolve().then(() => {
+        calls.push(name);
+        if (name === "list_chats")
+          return results(
+            args.chat_type === "group"
+              ? [
+                  {
+                    chat_id: -1004398169447,
+                    type: "Supergroup",
+                    title: "Team",
+                    username,
+                    unread_mentions: 1,
+                  },
+                ]
+              : [],
+          );
+        if (name === "list_messages") {
+          assert.deepEqual(args, { chat_id: -1004398169447, limit: 1 });
+          return results([{ id: 40, reply_to: 7 }]);
+        }
+        assert.equal(name, "get_message_link");
+        assert.deepEqual(args, { chat_id: -1004398169447, message_id: 40 });
+        return `Link: ${link}\nHTML: ignored`;
+      }),
+    );
+    const checked = await source.check();
+    assert.equal(checked.error, null);
+    assert.equal(checked.items[0]?.message_id, 40);
+    assert.equal(checked.items[0]?.topic_id, topic);
+    assert.equal(checked.items[0]?.from.username, username);
+    assert.deepEqual(calls, [
+      "list_chats",
+      "list_chats",
+      "list_messages",
+      "get_message_link",
+    ]);
+  }
+});
+
+test("missing Telegram message metadata keeps the item without a fabricated id", async () => {
+  for (const answer of [
+    "No messages found matching the criteria.",
+    results([{ id: -1 }]),
+    results([{ id: "40" }]),
+    "failure",
+  ]) {
+    const source = telegramSource({}, DATA, (name, args) =>
+      Promise.resolve().then(() => {
+        if (name === "list_chats")
+          return results(
+            args.chat_type === "group"
+              ? [
+                  {
+                    chat_id: -1004398169447,
+                    type: "Supergroup",
+                    unread_mentions: 1,
+                  },
+                ]
+              : [],
+          );
+        if (answer === "failure") throw new Error("offline");
+        return answer;
+      }),
+    );
+    const checked = await source.check();
+    assert.equal(checked.items.length, 1);
+    assert.equal(checked.items[0]?.message_id, undefined);
+    assert.equal(checked.items[0]?.topic_id, undefined);
+  }
+});
+
+test("a refused message link preserves the known message id", async () => {
+  const source = telegramSource(
+    {},
+    DATA,
+    (name, args) =>
+      Promise.resolve().then(() => {
+        if (name === "list_chats")
+          return results(
+            args.chat_type === "group"
+              ? [
+                  {
+                    chat_id: -1004398169447,
+                    type: "Supergroup",
+                    unread_mentions: 1,
+                  },
+                ]
+              : [],
+          );
+        if (name === "list_messages") return results([{ id: 40 }]);
+        throw new Error("export unavailable");
+      }),
+    () => undefined,
+  );
+  assert.deepEqual((await source.check()).items[0], {
+    key: "tg:-1004398169447",
+    unread: 1,
+    from: { name: undefined, username: undefined },
+    message_id: 40,
+  });
+});
+
+test("on the wire: group metadata uses read tools with the same chat and message", async (t) => {
+  const seen: Array<{ name: string; args: Record<string, unknown> }> = [];
+  const proxy = await startProxy(
+    "tok",
+    (args) =>
+      results(
+        args.chat_type === "group"
+          ? [
+              {
+                chat_id: -1004398169447,
+                type: "Supergroup",
+                unread_mentions: 1,
+              },
+            ]
+          : [],
+      ),
+    (name, args) => {
+      seen.push({ name, args });
+      return name === "list_messages"
+        ? results([{ id: 40 }])
+        : "Link: https://t.me/c/4398169447/12/40";
+    },
+  );
+  t.after(() => proxy.close());
+  const checked = await telegramSource(
+    {},
+    DATA,
+    proxyCallTool(proxy.url, "tok"),
+  ).check();
+  assert.equal(checked.items[0]?.message_id, 40);
+  assert.equal(checked.items[0]?.topic_id, 12);
+  assert.deepEqual(seen, [
+    { name: "list_messages", args: { chat_id: -1004398169447, limit: 1 } },
+    {
+      name: "get_message_link",
+      args: { chat_id: -1004398169447, message_id: 40 },
+    },
+  ]);
+});
+
+test(`PBT exported topic belongs to the selected chat and latest message (seed=${SEED})`, async () => {
+  await fc.assert(
+    fc.asyncProperty(
+      fc.integer({ min: 1000000, max: 9999999999 }),
+      fc.integer({ min: 1, max: 2147483647 }),
+      fc.integer({ min: 1, max: 2147483647 }),
+      fc.boolean(),
+      fc.boolean(),
+      fc.boolean(),
+      async (peer, message, topic, publicChat, query, mismatch) => {
+        const chat_id = Number(`-100${peer}`);
+        const source = telegramSource({}, DATA, (name, args) =>
+          Promise.resolve().then(() => {
+            if (name === "list_chats")
+              return results(
+                args.chat_type === "group"
+                  ? [
+                      {
+                        chat_id,
+                        type: "Supergroup",
+                        username: publicChat ? "public_team" : undefined,
+                        unread_mentions: 1,
+                      },
+                    ]
+                  : [],
+              );
+            if (name === "list_messages") return results([{ id: message }]);
+            const target = publicChat ? "public_team" : `c/${peer}`;
+            return `Link: https://t.me/${target}/${query ? `${message + Number(mismatch)}?thread=${topic}` : `${topic}/${message + Number(mismatch)}`}`;
+          }),
+        );
+        const item = (await source.check()).items[0];
+        assert.equal(item?.message_id, message);
+        assert.equal(item?.topic_id, mismatch ? undefined : topic);
+      },
+    ),
+    { seed: SEED, numRuns: 80 },
   );
 });

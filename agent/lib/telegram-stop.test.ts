@@ -2,12 +2,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import fc from "fast-check";
-import {
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { StopCancelRequest } from "./telegram-stop.ts";
+const root = mkdtempSync(join(tmpdir(), "iva-stop-"));
+process.env.ASSISTANT_DATA_DIR = root;
+test.after(() => rmSync(root, { recursive: true, force: true }));
+const {
   handleTelegramDraftStop,
   requestTurnCancel,
   handleTelegramDraftStopRequest,
-  type StopCancelRequest,
-} from "./telegram-stop.ts";
+} = await import("./telegram-stop.ts");
 
 const native = { chat: { id: 7, type: "private" }, draft_id: 41 };
 function options(snapshot: Record<string, unknown> | null) {
@@ -244,4 +250,37 @@ void test("malformed native stop cannot use an absent draft id to cancel a runni
       "ignored",
     );
   assert.equal(f.calls.length, 0);
+});
+
+void test("no_active_turn clears the Stop fact only for the requested session and turn", async () => {
+  const { getChatStatus, setChatStatus } = await import("./run-status.ts");
+  for (const replacement of [
+    null,
+    { sessionId: "s", turnId: "next" },
+    { sessionId: "new", turnId: "t" },
+  ]) {
+    setChatStatus("7:", {
+      status: "running",
+      sessionId: "s",
+      turnId: "t",
+      wasCancelled: null,
+    });
+    assert.equal(
+      await requestTurnCancel("7:", {
+        url: "http://localhost/cancel",
+        secret: "secret",
+        cancelImpl: async () => {
+          assert.equal(getChatStatus("7:")?.wasCancelled, true);
+          if (replacement)
+            setChatStatus("7:", { ...replacement, wasCancelled: true });
+          return { status: "no_active_turn" };
+        },
+      }),
+      "idle",
+    );
+    assert.equal(
+      getChatStatus("7:")?.wasCancelled,
+      replacement ? true : undefined,
+    );
+  }
 });

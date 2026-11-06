@@ -10,7 +10,49 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { appendUsage, subagentTurnId, usageFilePath } from "./usage.ts";
+import {
+  appendUsage,
+  subagentTurnId,
+  usageFilePath,
+  setUsageRequest,
+  takeUsageRequest,
+} from "./usage.ts";
+import fc from "fast-check";
+
+void test("fingerprint labels isolate sessions/turns and abandoned calls stay bounded (seed 101820)", () => {
+  console.error("[usage label property] seed 101820, runs 40");
+  const request = {
+    system: "12345678",
+    cache: "23456789",
+    tools: "34567890",
+    toolCount: 0,
+  };
+  fc.assert(
+    fc.property(fc.string(), fc.string(), (a, b) => {
+      const first = { sessionId: a, turnId: `${b}:`, step: 0 };
+      const second = { sessionId: `${a}:${b}`, turnId: "", step: 0 };
+      setUsageRequest(first, request);
+      setUsageRequest(second, { ...request, toolCount: 1 });
+      assert.deepEqual(takeUsageRequest(first), request);
+      assert.equal(takeUsageRequest(second)?.toolCount, 1);
+      assert.equal(takeUsageRequest(first), undefined);
+    }),
+    { seed: 101820, numRuns: 40 },
+  );
+  for (let step = 0; step <= 256; step++)
+    setUsageRequest(
+      { sessionId: "abandoned", turnId: "turn_0", step },
+      request,
+    );
+  assert.equal(
+    takeUsageRequest({ sessionId: "abandoned", turnId: "turn_0", step: 0 }),
+    undefined,
+  );
+  assert.deepEqual(
+    takeUsageRequest({ sessionId: "abandoned", turnId: "turn_0", step: 256 }),
+    request,
+  );
+});
 
 const record = (over: Partial<Parameters<typeof appendUsage>[0]> = {}) => ({
   ts: "2026-07-31T01:23:14.343Z",

@@ -8,11 +8,18 @@
 // (NoticeSend): гейт стоит на вызове Bot API, а не тут (правило в outbox.ts). Реплика с
 // кнопкой «Повторить» канал везёт швом Outbox: кнопка живёт только в rich-сообщении.
 import { humanizeProviderError } from "./error-humanizer.ts";
+import { notificationChat } from "./notification-chat.ts";
+import { modelAuthFailure } from "./model-auth.ts";
+import {
+  dispatchModelAuth,
+  type AuthObservation,
+} from "./model-auth-dispatch.ts";
 import { tr } from "./i18n.ts";
 import type { NoticeSend } from "./outbox.ts";
 
 export type TelegramFailureData = {
   message: string;
+  chatId?: string | number | undefined;
   details?: unknown;
   /** Последнее принятое сообщение владельца (turn-question.ts): цитата при обрыве. */
   question?: string | undefined;
@@ -85,8 +92,15 @@ export async function notifyTelegramFailure(
   turnId: string | null,
   data: TelegramFailureData,
   send: NoticeSend,
-  { now = Date.now() }: { now?: number } = {},
+  {
+    now = Date.now(),
+    authDispatch = dispatchModelAuth,
+  }: {
+    now?: number;
+    authDispatch?: (observation: AuthObservation) => Promise<void>;
+  } = {},
 ): Promise<void> {
+  const provider = modelAuthFailure(data);
   if (turnId === "") {
     console.error(
       `[telegram] turn.failed без turnId, сессия ${sessionId}: уведомление считаю по сессии`,
@@ -98,8 +112,32 @@ export async function notifyTelegramFailure(
     now,
   );
   if (claim === null) return;
+  const reply = async () => {
+    try {
+      await send(telegramFailureMessage(data));
+    } catch (error) {
+      releaseFailureNotification(sessionId, claim);
+      throw error;
+    }
+  };
+  if (provider) {
+    const owner = notificationChat({
+      ...process.env,
+      TELEGRAM_DIGEST_CHAT_ID: "",
+    });
+    void authDispatch({
+      provider,
+      at: now,
+      failed: true,
+      answers: true,
+      reply,
+      ownerReply:
+        !data.group && owner !== "" && String(data.chatId ?? "") === owner,
+    });
+    return;
+  }
   try {
-    await send(telegramFailureMessage(data));
+    await reply();
   } catch (error) {
     releaseFailureNotification(sessionId, claim);
     console.error(

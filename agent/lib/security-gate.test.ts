@@ -260,6 +260,69 @@ await test("scanOutbound redacts repeated secrets but keeps injection artifacts 
   ]);
 });
 
+await test("scanOutbound preserves Spark deep links with folded base64 tokens", () => {
+  const base64 = Buffer.from(
+    "message:synthetic-spark-message\r\naccount:owner",
+  ).toString("base64");
+  const token = encodeURIComponent(
+    `${base64.slice(0, 40)}\r\n${base64.slice(40)}`,
+  );
+  assert.match(token, /%0D%0A/u);
+  assert.match(token, /%3D/u);
+  for (const scheme of ["https", "http"]) {
+    const input = `Письмо: ${scheme}://sparkmailapp.com/dpl/bl?token=${token}`;
+    assert.deepEqual(scanOutbound(input), {
+      clean: true,
+      text: input,
+      findings: [],
+    });
+  }
+});
+
+await test("scanOutbound redacts secret URLs outside the exact Spark prefix", async (t) => {
+  const token = "abcdefgh123";
+  for (const prefix of [
+    "https://evil.example/",
+    "https://sparkmailapp.com.evil.example/dpl/bl",
+    "https://evil.example/sparkmailapp.com/dpl/",
+    "https://x.sparkmailapp.com/dpl/",
+    "https://sparkmailapp.com:443/dpl/",
+    "https://owner@sparkmailapp.com/dpl/",
+    "https://sparkmailapp.com/other",
+    "https://sparkmailappXcom/dpl/",
+  ]) {
+    await t.test(prefix, () => {
+      assert.equal(scanOutbound(`${prefix}?token=${token}`).text, "[REDACTED]");
+    });
+  }
+  // The existing userinfo rule replaces its match before URL replacement.
+  const userinfo = scanOutbound(
+    `https://sparkmailapp.com:443@evil.example/dpl/?token=${token}`,
+  );
+  assert.equal(userinfo.clean, false);
+  assert.ok(
+    userinfo.findings.some(
+      (finding) => finding.name === "url_with_secret_param",
+    ),
+  );
+  assert.match(userinfo.text, /\[REDACTED\]/u);
+  const nested = `https://sparkmailapp.com/dpl/bl?token=${token}&next=https://evil.example/?token=${token}`;
+  const result = scanOutbound(nested);
+  assert.equal(result.clean, false);
+  assert.equal(
+    result.text,
+    `https://sparkmailapp.com/dpl/bl?token=${token}&next=[REDACTED]`,
+  );
+});
+
+await test("scanOutbound redacts API key shapes inside Spark deep links", () => {
+  const key = `sk-ant-api03-${"a".repeat(32)}`;
+  const result = scanOutbound(`https://sparkmailapp.com/dpl/bl?token=${key}`);
+  assert.equal(result.clean, false);
+  assert.equal(result.text, "https://sparkmailapp.com/dpl/bl?token=[REDACTED]");
+  assert.ok(result.findings.some((finding) => finding.type === "api_key"));
+});
+
 await test("scanOutbound redacts every confirmed named-secret carrier", () => {
   const cases = [
     ["ASSISTANT_BEARER", "ASSISTANT_BEARER=syntheticBearerValue123456"],

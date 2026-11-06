@@ -22,7 +22,6 @@ import {
   CUSTOM_ALERT_KEY,
   customStockAlert,
   deliverMemoryReport,
-  memoryReportTail,
   memoryReportsEnabled,
   nightReport,
   noticeLang,
@@ -83,22 +82,6 @@ test("memory reports stay off for anything that is not an explicit true", () => 
     memoryReportsEnabled({ language: "en", memoryReports: { enabled: true } }),
     true,
   );
-});
-
-// ── Report: язык и форма ночного отчёта ──────────────────────────────────────────────────
-test("the report tail names the language and forbids self-delivery", () => {
-  const en = memoryReportTail(EN);
-  const ru = memoryReportTail(RU);
-  assert.match(en, /written in English/);
-  assert.match(ru, /written in Russian/);
-  for (const tail of [en, ru]) {
-    assert.match(tail, /first person/);
-    assert.match(tail, /3-5 short lines/);
-    assert.match(tail, /Do not send it anywhere yourself/);
-    assert.match(tail, /no rich messages, no digest chat/);
-  }
-  // Инструкция «без внутренних терминов» — единственное место, где они названы.
-  assert.equal(en.split("ADD").length - 1, 1);
 });
 
 // ── Notice: язык берётся у резолвера, без дерева — у env ──────────────────────────────────
@@ -872,7 +855,6 @@ const policy = await import(process.env.__POLICY_URL);
 const tr = await policy.noticeTranslator();
 process.stdout.write(JSON.stringify({
   lang: await policy.noticeLang(),
-  tail: policy.memoryReportTail(tr),
   migration: policy.memoryReportsOffNotice(tr),
 }));
 `;
@@ -902,7 +884,6 @@ function probe(settingsLanguage: string | null, agentLanguage: string) {
   rmSync(dir, { recursive: true, force: true });
   return JSON.parse(output) as {
     lang: string;
-    tail: string;
     migration: string;
   };
 }
@@ -910,12 +891,10 @@ function probe(settingsLanguage: string | null, agentLanguage: string) {
 test("the switch in /menu decides the language of every notice, not the env", () => {
   const english = probe("en", "ru");
   assert.equal(english.lang, "en");
-  assert.match(english.tail, /written in English/);
   assert.match(english.migration, /Morning memory reports are now off/);
 
   const russian = probe("ru", "en");
   assert.equal(russian.lang, "ru");
-  assert.match(russian.tail, /written in Russian/);
   assert.match(russian.migration, /Утренние отчёты памяти теперь выключены/);
 
   // Настроек нет — остаётся env, потом дефолт.
@@ -1054,14 +1033,22 @@ test("the weekly throttle works on an installation whose agent/ is gone", (t) =>
   const home = dataDir(t);
   const island = join(home, "island");
   const data = join(home, "data");
-  mkdirSync(island, { recursive: true });
+  mkdirSync(join(island, "scripts/lib"), { recursive: true });
+  mkdirSync(join(island, "packages/alert-state"), { recursive: true });
+  writeFileSync(
+    join(island, "packages/alert-state/index.ts"),
+    readFileSync(
+      new URL("../../packages/alert-state/index.ts", import.meta.url),
+      "utf8",
+    ),
+  );
   mkdirSync(data, { recursive: true });
   writeFileSync(
     join(island, "package.json"),
     JSON.stringify({ type: "module" }),
   );
   writeFileSync(
-    join(island, "notice-policy.ts"),
+    join(island, "scripts/lib/notice-policy.ts"),
     readFileSync(join(import.meta.dirname, "notice-policy.ts"), "utf8"),
   );
 
@@ -1072,7 +1059,9 @@ test("the weekly throttle works on an installation whose agent/ is gone", (t) =>
       encoding: "utf8",
       env: {
         ...process.env,
-        __POLICY_URL: pathToFileURL(join(island, "notice-policy.ts")).href,
+        __POLICY_URL: pathToFileURL(
+          join(island, "scripts/lib/notice-policy.ts"),
+        ).href,
         __DATA_DIR: data,
       },
       stdio: ["ignore", "pipe", "pipe"],

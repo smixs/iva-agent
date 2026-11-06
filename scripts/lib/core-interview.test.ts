@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { CORE_CAP } from "#lib/core-cap.ts";
 import {
   INTERVIEW,
   saveInterview,
@@ -63,10 +64,10 @@ void test("saveInterview показывает пропущенный ответ 
   assert.ok(md.includes("—"));
 });
 
-void test("buildDistillMessage (ru) несёт все ответы, лимит 1200 и явное «не выдумывай»", () => {
+void test("buildDistillMessage (ru) несёт все ответы, лимит CORE_CAP и явное «не выдумывай»", () => {
   const msg = buildDistillMessage(QA, "ru");
   assert.ok(msg.includes("[Настройка core memory]"));
-  assert.ok(msg.includes("1200"), "лимит 1200 не упомянут");
+  assert.ok(msg.includes(String(CORE_CAP)), "лимит CORE_CAP не упомянут");
   assert.ok(msg.includes("vault/CORE.md"));
   assert.match(msg, /не выдумывай/);
   for (const { q, a } of QA) {
@@ -75,10 +76,10 @@ void test("buildDistillMessage (ru) несёт все ответы, лимит 1
   }
 });
 
-void test("buildDistillMessage (en) — английский вариант с тем же лимитом 1200", () => {
+void test("buildDistillMessage (en) — английский вариант с тем же лимитом CORE_CAP", () => {
   const msg = buildDistillMessage(QA, "en");
   assert.ok(msg.includes("[Core memory setup]"));
-  assert.ok(msg.includes("1200"));
+  assert.ok(msg.includes(String(CORE_CAP)));
   assert.ok(msg.includes("vault/CORE.md"));
   assert.match(msg, /make anything up/i);
   for (const { a } of QA) assert.ok(msg.includes(a));

@@ -925,3 +925,47 @@ void test("early ingress time survives adoption when the same session also owns 
   assert.equal(store.get().ingressAt, 1000);
   assert.equal(store.get().queuedIngressId, undefined);
 });
+
+void test("a takeover for compaction or a reminder clears the previous Stop fact", async () => {
+  for (const fields of [
+    { sessionId: "session-1", compacting: true },
+    { sessionId: "session-reminder" },
+  ]) {
+    const store = statusStore({
+      status: "idle",
+      generation: 3,
+      wasCancelled: true,
+    });
+    assert.equal(
+      await takeOverTelegramChat({
+        chatKey: "1:",
+        patch: chatTakeOverPatch(fields),
+        now: () => 90_000,
+        getStatusImpl: store.get,
+        setStatusIfImpl: store.cas,
+      }),
+      true,
+    );
+    assert.equal(store.get().wasCancelled, undefined);
+  }
+});
+
+void test("a started reminder clears the previous Stop fact", async () => {
+  const store = statusStore({
+    status: "idle",
+    generation: 3,
+    wasCancelled: true,
+  });
+  assert.equal(
+    await publishTelegramTurnStarted({
+      chatKey: "1:",
+      sessionId: "session-reminder",
+      turnId: "turn-reminder",
+      draftId: 41,
+      getStatusImpl: store.get,
+      setStatusIfImpl: store.cas,
+    }),
+    true,
+  );
+  assert.equal(store.get().wasCancelled, undefined);
+});

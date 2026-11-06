@@ -8,7 +8,7 @@
 
 Iva can read and send from your **personal Telegram account** (a userbot), not just
 the bot. It talks to a small proxy — `services/telegram-userbot/serve.py` — that owns
-one Telethon session and exposes Telegram over MCP on `127.0.0.1`. Iva connects to it
+the Telethon sessions and exposes Telegram over MCP on `127.0.0.1`. Iva connects to it
 natively (`agent/connections/telegram-userbot.ts`).
 
 > ⚠️ **Account-ban risk.** Automating a personal account violates Telegram's ToS and can
@@ -54,7 +54,7 @@ iva userbot off      # stop and disable the proxy
 
 The health state is one of `off`, `starting`, `unreachable`, `unauthorized` or
 `ready`. CLI and Telegram use the same 1.5-second probe. It checks the existing
-proxy's `/healthz` route, which reads authorization from the proxy's one live
+proxy's `/healthz` route, which reads authorization from the default account's live
 Telethon client and never opens another session. Diagnostics expose only fixed
 state/reason values; bearer tokens and transport errors are not returned. CLI status and diagnostics also check that the version's Python interpreter can import the proxy dependencies; this import check never opens a Telegram session.
 
@@ -81,6 +81,33 @@ labels before Telegram MCP masks it as `GEN-ERR`.
 Use `list_accounts` for actual labels. Omitted accounts keep the upstream single-account
 selection and read-only multi-account fanout. Other generic upstream `GEN-ERR` replies
 can still hide their cause; account discovery and health diagnostics help narrow it down.
+
+## Several accounts and downloaded files
+
+The proxy discovers saved sessions in `data/`, or in `ASSISTANT_DATA_DIR` when set.
+The main file `telegram-userbot.session` has the label `default`. Additional accounts
+use `telegram-userbot-<label>.session`, with labels containing only lowercase ASCII
+letters, digits and underscores. Restart the proxy after adding a session file.
+QR login and health checks use `default`; the startup journal lists all accounts.
+Use `list_accounts` to get their labels and pass `account` when choosing an account
+in multi-account mode. With one account, omit `account`.
+
+Saved files take precedence over session environment variables with matching labels.
+The proxy blanks superseded variables so upstream's `.env` reload preserves that choice.
+File sessions use their resolved paths to identify duplicates: another label pointing
+to the same saved session is skipped and logged, including symlink aliases.
+Other `TELEGRAM_SESSION_NAME_<LABEL>` and `TELEGRAM_SESSION_STRING_<LABEL>` accounts
+remain available and their labels appear in the startup journal.
+
+`download_media` retrieves files beyond the bot's 20 MB limit, including large audio.
+File tools use only `data/userbot-files/`, or `userbot-files/` inside `ASSISTANT_DATA_DIR`.
+The proxy creates this directory with mode 0700 and checks its type, owner and permissions.
+A symlink, another owner or group/other permissions disable file tools; the proxy
+continues serving account tools. Each download goes into a fresh private subdirectory,
+and the tool returns the actual saved path. Iva works with that path and can move the
+file to vault afterward. Uploads also use this directory; vault and `ASSISTANT_TMP`
+are outside the file tools' allowed roots. Session, token and environment files remain
+excluded even inside the file directory. MCP client Roots can narrow this boundary.
 
 ## Safety knobs
 

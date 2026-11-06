@@ -121,6 +121,30 @@ test("F14: concurrent chat and helper use separate wire models and image verdict
   );
   assert.equal(chat.result.session.compaction.threshold, 6000);
   assert.equal(helper.result.session.compaction.threshold, 6000);
+  for (const kind of [
+    "watch",
+    "brief",
+    "insight",
+    "reminder",
+    "signal",
+    "alert",
+  ]) {
+    const start = wire.length;
+    const turn = await run(kind);
+    const expectedModel = ["watch", "brief", "insight"].includes(kind)
+      ? "deepseek-v4-pro"
+      : "text-fixture";
+    assert.ok(
+      wire
+        .slice(start)
+        .some((request) => request.stream && request.model === expectedModel),
+      kind,
+    );
+    assert.equal(
+      turn.result.session.agent.modelReference?.contextWindowTokens,
+      8000,
+    );
+  }
   const verdicts = new Map(
     await Promise.all(
       choices.map(async (c) => [c.model, await c.seesImages()] as const),

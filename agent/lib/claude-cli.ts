@@ -29,6 +29,11 @@
 // CLAUDE_SILENCE_TIMEOUT_MS считается смертью хода; таймер сбрасывается на КАЖДОМ событии,
 // потому что думающая модель молчит между дельтами дольше, чем между кадрами.
 
+import { wrapLanguageModel, type LanguageModelMiddleware } from "ai";
+import {
+  claudeAuthRotationStream,
+  type ClaudeTurn,
+} from "./claude-auth-rotation.ts";
 import {
   spawn,
   type ChildProcess,
@@ -130,121 +135,12 @@ const CLAUDE_ENV: Record<string, string> = {
   DISABLE_COMPACT: "1",
   CLAUDE_CODE_TOTAL_TOKENS_REMINDER: "off",
 };
-/**
- * Пул моделей аккаунта. Рукопожатие CLI отдаёт route-ид (`resolvedModel`): `claude-fable-5-1`,
- * `claude-opus-5-5`, `claude-sonnet-5-5`, `claude-haiku-5-5` (у CLI постарше
- * `claude-haiku-4-5-20251001`) — и он же ложится в CLAUDE_MODEL. CLI же выбирает модель по
- * СВОЕМУ имени, и у миллионного окна оно с суффиксом `[1m]`: `claude -p --model
- * claude-fable-5-1` отвечает «It may not exist or you may not have access to it» (проверено
- * живьём 22.09.2026, CLI 2.1.278, план Max), а `claude-fable-5-1[1m]` — работает. Haiku 4.5
- * миллионного окна не умеет вовсе, поэтому едет без суффикса. Окно контекста считается здесь же: одно число на весь вендор было бы враньём
- * в одну из сторон, а меньшее окно безопаснее большего — оно лишь раньше сжимает историю,
- * тогда как завышенное валит ход на первом же переполнении.
- */
-const CLAUDE_MODELS: Record<
-  string,
-  {
-    readonly native: string;
-    readonly window: number;
-    readonly adaptive: boolean;
-  }
-> = {
-  "claude-fable-5-1": {
-    native: "claude-fable-5-1",
-    window: 1_000_000,
-    adaptive: true,
-  },
-  // Живьём 23.09.2026 (CLI 2.1.280): пикер отдаёт resolvedModel `claude-opus-5-5[1m]`,
-  // `claude -p --model claude-opus-5-5[1m]` с adaptive thinking отвечает, окно 1000000.
-  "claude-opus-5-5": {
-    native: "claude-opus-5-5",
-    window: 1_000_000,
-    adaptive: true,
-  },
-  // Живьём 29.09.2026 (CLI 2.1.284, подписка): пикер отдаёт resolvedModel `claude-sonnet-5-5`
-  // на псевдоним `sonnet`, `claude -p --model claude-sonnet-5-5[1m]` отвечает, окно 1000000.
-  "claude-sonnet-5-5": {
-    native: "claude-sonnet-5-5",
-    window: 1_000_000,
-    adaptive: true,
-  },
-  // Живьём 08.10.2026 (CLI 2.1.287 на c1, подписка): пикер этой модели ещё не знает
-  // (`haiku` → Haiku 4.5), CLI печатает «isn't described by this version's model catalog… append
-  // [1m] to the model name for 1M», но и `claude-haiku-5-5`, и `claude-haiku-5-5[1m]` отвечают
-  // «ок»; с adaptive thinking приняты усилия low…max, мусорное — 400. Окно 1M по документации
-  // Anthropic. Пикер CLI 2.1.293 отдаёт её на псевдоним `haiku`.
-  "claude-haiku-5-5": {
-    native: "claude-haiku-5-5",
-    window: 1_000_000,
-    adaptive: true,
-  },
-  // Прошлые Opus, Sonnet и Haiku остаются в таблице: у кого в .env старый id, без строки
-  // здесь ход ушёл бы к CLI именем без суффикса, а на такое имя он отвечает «модели нет».
-  "claude-sonnet-5": {
-    native: "claude-sonnet-5",
-    window: 1_000_000,
-    adaptive: true,
-  },
-  "claude-opus-5": {
-    native: "claude-opus-5",
-    window: 1_000_000,
-    adaptive: true,
-  },
-  "claude-opus-4-8": {
-    native: "claude-opus-4-8",
-    window: 1_000_000,
-    adaptive: true,
-  },
-  // Haiku 4.5 adaptive thinking не умеет: с ним подписка отвечает
-  // 400 «adaptive thinking is not supported on this model» (живьём 22.09.2026).
-  "claude-haiku-4-5-20251001": {
-    native: "claude-haiku-4-5-20251001",
-    window: 200_000,
-    adaptive: false,
-  },
-};
-/** Короткие имена из списка аккаунта и старых .env — те же модели. */
-const CLAUDE_ALIASES: Record<string, string> = {
-  fable: "claude-fable-5-1",
-  opus: "claude-opus-5-5",
-  sonnet: "claude-sonnet-5-5",
-  // `haiku` — на 5.5, как у пикера CLI 2.1.293: окно у неё не меньше, чем у 4.5, а живая
-  // проба на c1 прошла. Прошлая модель остаётся по полному имени.
-  haiku: "claude-haiku-5-5",
-  "claude-haiku-4-5": "claude-haiku-4-5-20251001",
-};
-/** Незнакомая модель: окно берём меньшее из известных — см. рассуждение выше. */
-const CLAUDE_UNKNOWN_WINDOW = 200_000;
-
-/**
- * Имя для `--model` и окно контекста одной моделью: `[1m]` снимается с route-ида (его может
- * дописать владелец руками), короткое имя разворачивается в полное, миллионному окну суффикс
- * возвращается. Незнакомый ид уезжает как есть: чужой аккаунт не угадывают, а отказ CLI
- * назовёт модель по имени.
- */
-export function claudeModel(route: string): {
-  readonly native: string;
-  readonly window: number;
-  readonly adaptive: boolean;
-} {
-  const asked = route.trim();
-  const bare = asked.replace(/\[1m\]$/u, "");
-  const entry = CLAUDE_MODELS[CLAUDE_ALIASES[bare] ?? bare];
-  if (entry === undefined)
-    return { native: asked, window: CLAUDE_UNKNOWN_WINDOW, adaptive: false };
-  return entry.window === 200_000
-    ? entry
-    : { ...entry, native: `${entry.native}[1m]` };
-}
+export { claudeModel, claudeContextWindow } from "./context-window.ts";
+import { claudeModel } from "./context-window.ts";
 
 /** Имя модели в том виде, в каком его понимает `claude -p --model`. */
 export function claudeNativeModel(route: string): string {
   return claudeModel(route).native;
-}
-
-/** Окно контекста выбранной модели: та же таблица, что и у имени для CLI. */
-export function claudeContextWindow(route: string): number {
-  return claudeModel(route).window;
 }
 
 /** Имя инструмента: правило Anthropic, [A-Za-z0-9_-] и вместе с префиксом до 64 символов. */
@@ -308,9 +204,14 @@ process.stdin.on("data", (chunk) => {
 export class ClaudeCliError extends Error {
   override readonly name = "ClaudeCliError";
   readonly isRetryable: boolean;
-  constructor(message: string, { retryable = false } = {}) {
+  readonly authRotation: boolean;
+  constructor(
+    message: string,
+    { retryable = false, authRotation = false } = {},
+  ) {
     super(message);
     this.isRetryable = retryable;
+    this.authRotation = authRotation;
   }
 }
 
@@ -1057,8 +958,12 @@ class ClaudeSession {
     if (this.closed) return;
     this.closed = true;
     this.abort();
-    await this.admission?.close();
-    rmSync(this.tempDir, { recursive: true, force: true });
+    try {
+      await this.admission?.close();
+      if (this.child !== undefined) await waitForExit(this.child);
+    } finally {
+      rmSync(this.tempDir, { recursive: true, force: true });
+    }
   }
 }
 
@@ -1167,6 +1072,9 @@ async function* silentFor(
 // ─── Шаг модели ─────────────────────────────────────────────────────────────────────────
 
 type ClaudeSettings = {
+  /** The provider's existing deadline, applied inside recovery to each attempt. */
+  readonly attemptMiddleware?: LanguageModelMiddleware;
+  readonly turn?: ClaudeTurn;
   /** Тишина CLI до отказа; в тестах — доли секунды, в бою CLAUDE_SILENCE_TIMEOUT_MS. */
   readonly silenceTimeoutMs?: number;
   /**
@@ -1196,16 +1104,34 @@ export function makeClaudeCliModel(
     upstream: settings.upstream ?? CLAUDE_UPSTREAM,
     sessionId: settings.sessionId,
   };
-  return {
+  const single: LanguageModelV4 = {
     specificationVersion: "v4",
     provider: CLAUDE_PROVIDER_ID,
     modelId: model,
     // Картинки едут только base64: URL пришлось бы скачивать, а у CLI нет для этого канала.
     supportedUrls: {},
     doStream: (options: LanguageModelV4CallOptions) =>
-      Promise.resolve(streamCall(model, options, run)),
+      Promise.resolve(attemptStream(model, options, run)),
     doGenerate: (options: LanguageModelV4CallOptions) =>
-      generateCall(model, options, run),
+      generateCall(options, (options) => attemptStream(model, options, run)),
+  };
+  const attempt = settings.attemptMiddleware
+    ? wrapLanguageModel({
+        model: single,
+        middleware: settings.attemptMiddleware,
+      })
+    : single;
+  const recovered = (options: LanguageModelV4CallOptions) =>
+    claudeAuthRotationStream(
+      options,
+      settings.turn,
+      (options) => attempt.doStream(options),
+      (error) => error instanceof ClaudeCliError && error.authRotation,
+    );
+  return {
+    ...single,
+    doStream: (options) => Promise.resolve(recovered(options)),
+    doGenerate: (options) => generateCall(options, recovered),
   };
 }
 
@@ -1215,38 +1141,44 @@ export function makeClaudeCliModel(
  * срабатывает никогда, и ход оплачивал бы запрос к API, а `claude -p` висел бы до таймаута
  * тишины (QA: 8116 мс при пороге 8 с, в бою было бы 180 с).
  */
-function streamCall(
+function attemptStream(
   model: string,
   options: LanguageModelV4CallOptions,
   run: ClaudeRun,
 ): LanguageModelV4StreamResult {
   if (options.abortSignal?.aborted === true) return abortedStream(options);
+  const cancelled = new AbortController();
+  const signal = options.abortSignal
+    ? AbortSignal.any([options.abortSignal, cancelled.signal])
+    : cancelled.signal;
   const session = new ClaudeSession();
   const onAbort = () => {
     session.abort();
   };
-  options.abortSignal?.addEventListener("abort", onAbort, { once: true });
+  signal.addEventListener("abort", onAbort, { once: true });
+  let completed = Promise.resolve();
   const stream = new ReadableStream<LanguageModelV4StreamPart>({
     start(controller) {
       controller.enqueue({
         type: "stream-start",
         warnings: claudeWarnings(options),
       });
-      void runCall({ model, options, session, controller, run })
+      completed = runCall({
+        model,
+        options: { ...options, abortSignal: signal },
+        session,
+        controller,
+        run,
+      })
         .catch((error: unknown) => {
-          try {
-            controller.error(asClaudeError(error));
-          } catch {
-            // Поток уже закрыт отменой хода: сообщать ошибку некому.
-            return;
-          }
+          if (!cancelled.signal.aborted) controller.error(asClaudeError(error));
         })
-        .finally(() =>
-          options.abortSignal?.removeEventListener("abort", onAbort),
-        );
+        .finally(() => signal.removeEventListener("abort", onAbort));
     },
-    cancel() {
-      session.abort();
+    async cancel(reason) {
+      // runCall owns pending acquire/adopt; its finally must close late resources too.
+      cancelled.abort(reason);
+      await completed;
     },
   });
   return { stream };
@@ -1310,6 +1242,7 @@ async function runCall(context: RunContext): Promise<void> {
       prepared.frames.at(-1)?.message.content,
     );
     session.adopt(admission);
+    assertLive(options.abortSignal);
     const env = claudeEnv(
       process.env,
       admission.url,
@@ -1325,6 +1258,7 @@ async function runCall(context: RunContext): Promise<void> {
       detached: true,
     });
     session.attach(child);
+    assertLive(options.abortSignal);
     if (child.stdout === null)
       throw new ClaudeCliError("Claude CLI started without a stdout pipe");
     const events = silentFor(jsonLines(child.stdout), run.silenceMs);
@@ -1340,6 +1274,7 @@ async function runCall(context: RunContext): Promise<void> {
     // его в /tmp (QA: четыре папки после четырёх пробников). Ответ уже собран: ни реле, ни
     // временная папка дальше не нужны.
     await session.close();
+    assertLive(options.abortSignal);
     emit(completion, step, admission);
     report(model, completion, admission);
     controller.close();
@@ -1676,7 +1611,10 @@ function capturedMessage(
     said === undefined || said.includes(ADMISSION_CONSUMED) ? "" : `: ${said}`;
   throw new ClaudeCliError(
     `api.anthropic.com did not finish the response (${relayWitness(admission)})${detail}`,
-    { retryable: connectionBroke(admission.status) },
+    {
+      retryable: connectionBroke(admission.status),
+      authRotation: admission.status === 401,
+    },
   );
 }
 
@@ -1879,11 +1817,10 @@ function report(
 
 /** doGenerate — это тот же поход, только собранный в один результат: второй дороги нет. */
 async function generateCall(
-  model: string,
   options: LanguageModelV4CallOptions,
-  run: ClaudeRun,
+  call: (options: LanguageModelV4CallOptions) => LanguageModelV4StreamResult,
 ): Promise<LanguageModelV4GenerateResult> {
-  const { stream } = streamCall(model, options, run);
+  const { stream } = call(options);
   const reader = stream.getReader();
   const content: LanguageModelV4Content[] = [];
   const warnings: SharedV4Warning[] = [];

@@ -137,6 +137,7 @@ export function createRemindCommand(
       (await import("../lib/telegram-send.ts")).sendTelegramHtml;
     const result = await send(target.token, target.chat, message, {
       retryTransient: true,
+      rich: true,
     });
     if (!result.ok)
       throw new Error(`Reminder Telegram send failed: ${result.error}`);

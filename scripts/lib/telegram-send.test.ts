@@ -4,6 +4,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import fc from "fast-check";
+import {
+  humanizeProviderError,
+  interruptedTurnText,
+} from "../../agent/lib/error-humanizer.ts";
+import {
+  escHtml,
+  htmlToPlain,
+  richQuoteLine,
+} from "../../agent/lib/telegram-format.ts";
 
 // КАК ВОСПРОИЗВЕСТИ ПАДЕНИЕ: при провале fast-check печатает в отчёте строку вида
 // `Property failed after N tests { seed: -1234567, path: "12:3:0", endOnFailure: true }`.
@@ -34,6 +43,65 @@ function captureRequest(
     typeof url === "string" ? url : url instanceof URL ? url.href : url.url;
   return { url: requestUrl, body: parseRequestBody(body) };
 }
+
+void test("rich 400 keeps the quoted question and button labels on the HTML wire", async () => {
+  const question = "Что значит **цена** & `код` _имя_ C:\\tmp?";
+  const quote = richQuoteLine(question, 120);
+  const button =
+    '<tg-button type="callback_data" data="Повторить">Повторить</tg-button>';
+  for (const [markdown, expected] of [
+    [
+      `> ${quote}\n\n<tg-button-row>${button}</tg-button-row>`,
+      `<blockquote>${escHtml(question)}</blockquote>`,
+    ],
+    [
+      interruptedTurnText({
+        question,
+        media: false,
+        group: false,
+        data: "Повторить",
+      }).ru,
+      escHtml(`«${question}»`),
+    ],
+    [
+      humanizeProviderError({
+        message: "StreamTruncated: broke off",
+        details: { answerStarted: true },
+        provider: "claude",
+        question,
+      }).ru,
+      escHtml(`«${question}»`),
+    ],
+  ]) {
+    const requests: CapturedRequest[] = [];
+    const { sendTelegramHtml } = await import("./telegram-send.ts");
+    const result = await sendTelegramHtml("test-bot", "test-chat", markdown, {
+      rich: true,
+      fetchImpl: (url, options) => {
+        requests.push(captureRequest(url, options));
+        return Promise.resolve(
+          new Response("rich unsupported", {
+            status: requests.length === 1 ? 400 : 200,
+          }),
+        );
+      },
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.fellBack, true);
+    assert.equal(requests.length, 2);
+    assert.ok(requests[0].url.endsWith("/sendRichMessage"));
+    assert.deepEqual(requests[0].body.rich_message, { markdown });
+    assert.ok(requests[1].url.endsWith("/sendMessage"));
+    assert.equal(requests[1].body.parse_mode, "HTML");
+    assert.equal(requests[1].body.chat_id, "test-chat");
+    const html = requests[1].body.text;
+    assert.ok(typeof html === "string");
+    assert.ok(html.includes(expected), html);
+    assert.ok(html.includes("<b>Повторить</b>"), html);
+    assert.doesNotMatch(html, /tg-button/u);
+    assert.ok(htmlToPlain(html).includes(question));
+  }
+});
 
 void test("telegram-send loads under bare Node and redacts outbound secrets", async (t) => {
   const originalFetch = globalThis.fetch;

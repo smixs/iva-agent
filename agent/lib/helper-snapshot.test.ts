@@ -132,13 +132,18 @@ test(`v7 quiet check equals the original for Unicode and decorated QUIET; summar
     { seed, numRuns: 500 },
   );
   assert.equal(helperSummary("x\n\n" + "😀".repeat(1500))?.endsWith("…"), true);
+  const summaryText =
+    "Остановилась на пределе входных токенов. Вот что успела: нашла документ.";
   const f = foldHelperSnapshot([
+    { type: "message.completed", data: { message: summaryText } },
     {
       type: "turn.completed",
       data: { sequence: 1, turnId: "turn", reason: "step-limit" },
     },
   ]);
   assert.equal(f.outcome, "ceiling");
+  assert.equal(f.text, summaryText);
+  assert.equal(f.reason, "предел работы");
   assert.equal(
     foldHelperSnapshot([
       { type: "authorization.required", data: { sequence: 1, turnId: "turn" } },

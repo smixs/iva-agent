@@ -63,7 +63,7 @@ test("helper uses chat definitions and static block, retaining owner instruction
     /owner-fixture/,
   );
 });
-test("R7 Telegram chat and existing turns retain 91dd9bb6 wire bytes except approved tools, tasks description and prefix switch", async () => {
+test("R7 Telegram chat and existing turns retain 91dd9bb6 wire bytes except approved tools, current bash/tasks/remind/memory_search definitions and prefix switch", async () => {
   const base = JSON.parse(
     await readFile(
       new URL("./fixtures/helper-w3-base.json", import.meta.url),
@@ -87,9 +87,16 @@ test("R7 Telegram chat and existing turns retain 91dd9bb6 wire bytes except appr
     tools = previous.tools
       .filter((tool) => !removed.has(tool.name))
       .map((tool) =>
-        tool.name === "tasks"
-          ? { ...tool, description: tasks.description }
-          : tool,
+        tool.name === "memory_search"
+          ? enabled.tools.find((current) => current.name === tool.name)!
+          : ["bash", "tasks", "remind"].includes(tool.name)
+            ? {
+                ...tool,
+                description: enabled.tools.find(
+                  (current) => current.name === tool.name,
+                )!.description,
+              }
+            : tool,
       ),
     helper = enabled.tools.find((tool) => tool.name === "helper");
   assert.ok(helper);
@@ -102,6 +109,9 @@ test("R7 Telegram chat and existing turns retain 91dd9bb6 wire bytes except appr
   assert.ok(goal);
   tools.splice(enabled.tools.indexOf(goal), 0, goal);
   tools.splice(enabled.tools.indexOf(helper), 0, helper);
+  const schedule = enabled.tools.find((tool) => tool.name === "schedule");
+  assert.ok(schedule);
+  tools.splice(enabled.tools.indexOf(schedule), 0, schedule);
   const expected = JSON.stringify({ tools, prefix: enabled.ruPrefix });
   const saved = { ...process.env };
   Object.assign(process.env, {
@@ -121,7 +131,7 @@ test("R7 Telegram chat and existing turns retain 91dd9bb6 wire bytes except appr
         assert.equal(turn.authored.auth?.attributes?.chat_id, "41");
         assert.equal(turn.authored.auth?.attributes?.chat_type, "private");
       }
-      assert.equal(turn.wire.tools.length, 138, kind);
+      assert.equal(turn.wire.tools.length, 139, kind);
       assert.ok(
         turn.wire.tools.some((t) => t.name === "goal"),
         kind,

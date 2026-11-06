@@ -5,7 +5,7 @@ import { syncBuiltinESMExports } from "node:module";
 // (метод + текст/клавиатура) и что записалось в состояние. Сеть и .env подменены:
 // fetch пишет вызовы, состояние сеется напрямую во flows.
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { after, mock } from "node:test";
@@ -223,9 +223,22 @@ test("R8 helper model: full /model path, back button, saved clears helper flag",
   spy();
   try {
     const { chat, user } = seed("intro");
+    // Rich-рендер: имя модели обязано стоять внутри подписи <tg-button>, не после неё.
+    writeFileSync(
+      join(home, "settings.json"),
+      JSON.stringify({ menuStyle: "rich" }),
+    );
     await handleModelCmd(chat, user, { msgId: 11 });
-    assert.match(edits().at(-1)!.text, /Helper model/);
+    assert.match(
+      edits().at(-1)!.text,
+      /<tg-button[^>]*data="iva_model:helper"[^>]*>Helper and background model: same as Iva<\/tg-button>/,
+    );
+    assert.match(
+      edits().at(-1)!.text,
+      /Used by helpers, Watch, Brief and Insight/,
+    );
     assert.match(edits().at(-1)!.keyboard, /iva_model:helper/);
+    rmSync(join(home, "settings.json"), { force: true });
     assert.equal(await tap(chat, user, "iva_model:helper"), true);
     const st = getWizard(chat, user) as unknown as {
       helperModel: boolean;

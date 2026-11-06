@@ -58,25 +58,38 @@ function keytermQuery(raw: string | undefined): string {
   return kept.map((term) => `&keyterm=${encodeURIComponent(term)}`).join("");
 }
 
+const TRANSCRIBE_TIMEOUT_MS = 120_000;
+
 export async function transcribe(audio: ArrayBuffer): Promise<string> {
   const language = process.env.DEEPGRAM_LANGUAGE || "multi";
   const url =
     `https://api.deepgram.com/v1/listen?model=nova-3&language=${language}` +
     `&punctuate=true&smart_format=true` +
     keytermQuery(process.env.DEEPGRAM_KEYTERMS);
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      Authorization: `Token ${process.env.DEEPGRAM_API_KEY ?? ""}`,
-      "Content-Type": "application/octet-stream",
-    },
-    body: audio,
-  });
-  if (!res.ok) throw new Error(`Deepgram HTTP ${res.status}`);
-  const json = (await res.json()) as {
-    results?: {
-      channels?: Array<{ alternatives?: Array<{ transcript?: string }> }>;
+  const signal = AbortSignal.timeout(TRANSCRIBE_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, {
+      signal,
+      method: "POST",
+      headers: {
+        Authorization: `Token ${process.env.DEEPGRAM_API_KEY ?? ""}`,
+        "Content-Type": "application/octet-stream",
+      },
+      body: audio,
+    });
+    if (!res.ok) throw new Error(`Deepgram HTTP ${res.status}`);
+    const json = (await res.json()) as {
+      results?: {
+        channels?: Array<{ alternatives?: Array<{ transcript?: string }> }>;
+      };
     };
-  };
-  return json.results?.channels?.[0]?.alternatives?.[0]?.transcript ?? "";
+    return json.results?.channels?.[0]?.alternatives?.[0]?.transcript ?? "";
+  } catch (error) {
+    if (signal.aborted)
+      throw new Error(
+        `Deepgram не ответил за ${TRANSCRIBE_TIMEOUT_MS / 1000} с`,
+        { cause: error },
+      );
+    throw error;
+  }
 }

@@ -1,0 +1,23 @@
+[
+  { "query": "Ильёй встреча", "expect": "cards/contacts/илья-турецкий.md" },
+  { "query": "Турецкого созвон", "expect": "cards/contacts/илья-турецкий.md" },
+  { "query": "Ilya Turetsky", "expect": "cards/contacts/илья-турецкий.md" },
+  { "query": "кофаундер Маженто", "expect": "cards/contacts/shima.md" },
+  {
+    "query": "Аксёнову письмо",
+    "expect": "cards/contacts/семён-аксёнов-yandex-eats.md"
+  },
+  {
+    "query": "Аксенов",
+    "expect": "cards/contacts/семён-аксёнов-yandex-eats.md"
+  },
+  { "query": "Батыру оффер", "expect": "cards/contacts/batyr-latypov.md" },
+  { "query": "Остриковым", "expect": "cards/contacts/алексей-остриков.md" },
+  { "query": "Жанговару", "expect": "cards/contacts/жанговар.md" },
+  { "query": "Галине договор", "expect": "cards/contacts/галина-ким.md" },
+  { "query": "Майе", "expect": "cards/contacts/майя-дочь-шимы.md" },
+  { "query": "какая модель у Ивы", "expect": "cards/agents/iva.md" },
+  { "query": "Касперскому", "expect": "cards/projects/kaspersky.md" },
+  { "query": "Majento рост", "expect": "cards/projects/majento-growth.md" },
+  { "query": "Маженто", "expect": "cards/projects/majento.md" }
+]

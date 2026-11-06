@@ -48,7 +48,7 @@ for (const mode of ["conversation", "task"] as const)
         projection(await eventProbe(mode, scenario, true)),
         projection({
           ...rest,
-          tools: (rest.tools as number[]).map((n) => (n ? n - 2 : 0)),
+          tools: (rest.tools as number[]).map((n) => (n ? n - 1 : 0)),
           wire: {
             tools: [
               ...enabledWire.tools,

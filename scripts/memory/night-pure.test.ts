@@ -106,6 +106,24 @@ void test("реплики [queued] — владельца, [iva] и пересл
   assert.deepEqual(origins, ["owner", "iva", "forwarded", "owner"]);
 });
 
+void test("legacy queued daily keeps its text, IDs and origin", () => {
+  assert.deepEqual(
+    parseDay(
+      "## 10:00 [queued]\nмоё\n[forwarded]\nчужое\n\n## 10:01 [iva]\nответ\n",
+    ),
+    [
+      {
+        id: "e1",
+        time: "10:00",
+        type: "[queued]",
+        text: "моё\n[forwarded]\nчужое",
+        origin: "owner",
+      },
+      { id: "e2", time: "10:01", type: "[iva]", text: "ответ", origin: "iva" },
+    ],
+  );
+});
+
 void test(`канонический hash не зависит от порядка ключей (seed ${SEED})`, () => {
   fc.assert(
     fc.property(

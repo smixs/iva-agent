@@ -328,6 +328,8 @@ for (const [model, override, expected] of [
   ["sonnet", "200000", 200000],
   ["sonnet", undefined, 1000000],
   ["claude-haiku-4-5", undefined, 200000],
+  ["claude-haiku-4-5", "1000000", 200000],
+  ["future-model", "1000000", 200000],
 ] as const)
   test(`N5 exact Claude helper window: ${model || "same"} ${override ?? "default"}`, async () => {
     const env: NodeJS.ProcessEnv = {

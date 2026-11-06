@@ -336,6 +336,11 @@ test("результат старого срока не переписывает
     nextRunAtMs: now,
   });
   const [first] = await fireDue(now, 10);
+  await recordDelivery(first.id, {
+    firedAt: first.firedAt,
+    delivered: true,
+    error: null,
+  });
   const [second] = await fireDue(first.nextRunAtMs, 10);
   assert.ok(first && second);
 

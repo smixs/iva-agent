@@ -59,7 +59,10 @@ import {
 } from "./lib/version-update.ts";
 import type { PluginFailure } from "./lib/plugin-build.ts";
 import { tryLoadPluginCore } from "./lib/plugin-core.ts";
-import { pluginUnitNames, runningPluginUnits } from "./lib/plugin-units.ts";
+import {
+  canonicalPluginScope,
+  runningPluginUnits,
+} from "./lib/plugin-units.ts";
 import type { createCliRuntime } from "./cli/runtime.ts";
 import type { createCliSystemd } from "./cli/systemd.ts";
 import type { reinstallUserbot } from "./cli/userbot.ts";
@@ -931,15 +934,12 @@ export async function restartPluginUnits(
   if (!core) return;
   const { state, damaged } = await core.store.readPluginsStateSafe(dataDir);
   if (damaged) return;
-  const units: string[] = [];
-  for (const entry of state.plugins) {
-    if (!entry.enabled || !entry.trusted) continue;
-    units.push(...pluginUnitNames(entry));
-  }
   const live = runningPluginUnits({
-    units,
+    scope: canonicalPluginScope(dataDir),
+    entries: state.plugins.filter((entry) => entry.enabled && entry.trusted),
     unitDir: runtime.UNIT_DIR,
-    isActive: (unit) => runtime.systemd.isActive(unit),
+    manager: runtime.systemd.manager,
+    systemd: runtime.systemd,
   });
   if (live.length === 0) return;
   try {

@@ -45,7 +45,7 @@ type MockResponse = {
 type MockFetch = (url: string, init: { body: string }) => Promise<MockResponse>;
 const mutableGlobal = globalThis as unknown as { fetch: MockFetch };
 
-test("modelSummary uses configured provider values without runtime defaults", () => {
+test("modelSummary uses configured provider values with explicit overrides", () => {
   assert.deepEqual(
     modelSummary({
       MODEL_PROVIDER: "codex",
@@ -67,20 +67,36 @@ test("modelSummary uses the exact context-window resolver", () => {
     ["opencode", "OPENCODE_CONTEXT_WINDOW"],
     ["openrouter", "OPENROUTER_CONTEXT_WINDOW"],
     ["codex", "CODEX_CONTEXT_WINDOW"],
+    ["claude", "CLAUDE_CONTEXT_WINDOW"],
+    ["custom", "CUSTOM_CONTEXT_WINDOW"],
   ] as const;
 
   for (const [provider, variable] of cases) {
     assert.equal(
-      modelSummary({ MODEL_PROVIDER: provider }).contextWindow,
-      null,
+      modelSummary({ MODEL_PROVIDER: provider, CUSTOM_MODEL: "local" })
+        .contextWindow,
+      provider === "claude"
+        ? 1_000_000
+        : provider === "codex"
+          ? 272_000
+          : 131_072,
     );
     assert.equal(
-      modelSummary({ MODEL_PROVIDER: provider, [variable]: "1" }).contextWindow,
+      modelSummary({
+        MODEL_PROVIDER: provider,
+        CUSTOM_MODEL: "local",
+        [variable]: "1",
+      }).contextWindow,
       1,
     );
     for (const raw of ["1.5", "1e3", " ", "9007199254740990.5"]) {
       assert.throws(
-        () => modelSummary({ MODEL_PROVIDER: provider, [variable]: raw }),
+        () =>
+          modelSummary({
+            MODEL_PROVIDER: provider,
+            CUSTOM_MODEL: "local",
+            [variable]: raw,
+          }),
         (error: unknown) => {
           assert.ok(error instanceof ContextWindowConfigurationError);
           assert.equal(error.code, CONTEXT_WINDOW_CONFIGURATION_ERROR);

@@ -94,7 +94,7 @@ Normally the nightly rollup writes `CORE.md`. When the user DIRECTLY asks to
 remember a standing fact, preference or goal — update `vault/CORE.md` through `write_file`
 right away — `write_file` takes the host path from the project root, NOT a
 vault-relative one: add or fix the line,
-keep the file short (≤~1200 characters), do not duplicate, confirm briefly.
+keep the file short (code enforces its size), do not duplicate, confirm briefly.
 CORE loads every turn, so the change applies immediately. Do NOT write the
 ephemeral into CORE (task status, "call at 5"): the steps of the work at hand
 go to your `todo` list (it lasts the session and survives compaction), what
@@ -106,3 +106,10 @@ once the owner confirms, append one line to `data/custom/agent/instructions/rule
 read the file first, add the line, write the whole file back; if the file does
 not exist, create it with the header `# Owner rules`. It loads every turn, so
 the rule applies from the next turn.
+Keep all owner rules within 4000 characters total (`OWNER_RULES_CAP` in `agent/lib/owner-rules.ts`); put long instructions in a personal skill at `data/custom/agent/skills/<topic>/SKILL.md` and leave a line in `rules.md` saying when to load it.
+If the rules already exceed that total, offer the owner to move the long part into a skill.
+For authority such as "confirm/send X yourself", record who and what the
+permission covers and its expiry date or the owner's "until I revoke it".
+Ask for any missing scope or term before saving or using that authority.
+When acting under it, name the rule in one sentence to the owner.
+Use it only within its scope and term; an expired rule grants no authority.

@@ -62,6 +62,10 @@ function makeVault(
     sh(["commit", "-q", "-m", "vault"], dir);
   }
   process.env.ASSISTANT_VAULT_DIR = dir;
+  const data = `${dir}-data`;
+  mkdirSync(data);
+  process.env.ASSISTANT_DATA_DIR = data;
+  t.after(() => rmSync(data, { recursive: true, force: true }));
   return dir;
 }
 
@@ -604,11 +608,21 @@ test("vault внутри чужого репозитория: память не 
 });
 test("git не ответил за таймаут: причина - таймаут, а не «нет в PATH»", async (t) => {
   const vault = makeVault(t);
-  hook(vault, "sleep 40");
-  process.env.IVA_VAULT_GIT_TIMEOUT_MS = "1500";
+  const pidFile = join(process.env.ASSISTANT_DATA_DIR!, "hook.pid");
+  hook(vault, `echo $$ > "${pidFile}"; exec sleep 40`);
   t.after(() => {
-    delete process.env.IVA_VAULT_GIT_TIMEOUT_MS;
+    if (existsSync(pidFile)) {
+      try {
+        process.kill(Number(readFileSync(pidFile, "utf8")), "SIGTERM");
+      } catch (error) {
+        assert.equal((error as NodeJS.ErrnoException).code, "ESRCH");
+      }
+    }
   });
+  writeFileSync(
+    join(process.env.ASSISTANT_DATA_DIR!, "settings.json"),
+    JSON.stringify({ night: { gitTimeoutMs: 1500, raisesPerNight: 0 } }),
+  );
   const started = Date.now();
   const { logged, value: result } = await journal(() =>
     tool.card(card({ title: "Тишина" })),
@@ -1096,3 +1110,305 @@ test("vaultShow отдаёт текст пути, null на отсутствую
   drop(head);
   await assert.rejects(vaultShow(vault, head, "CORE.md"), /ls-tree/u);
 });
+
+// Настоящий fake git получает те же аргументы и окружение, зависает без дочернего sleep.
+// Проба только ускоряет таймер раннера; исходный срок 12/24 с сохраняется в трассе.
+for (const hangs of [1, 2])
+  test(`self-heal git: hangs ${hangs} time(s), exactly one retry`, async (t) => {
+    const vault = makeVault(t);
+    const data = process.env.ASSISTANT_DATA_DIR!;
+    const bin = join(data, "bin");
+    mkdirSync(bin);
+    const count = join(data, "hang-count");
+    const fake = join(bin, "git");
+    writeFileSync(
+      fake,
+      `#!${process.execPath}
+const fs = require("node:fs");
+const cp = require("node:child_process");
+const args = process.argv.slice(2);
+const countFile = ${JSON.stringify(count)};
+let count = fs.existsSync(countFile) ? Number(fs.readFileSync(countFile, "utf8")) : 0;
+if (args.includes("commit") && count < ${hangs}) {
+  fs.writeFileSync(countFile, String(count + 1));
+  setInterval(() => {}, 1000);
+} else {
+  const result = cp.spawnSync("/usr/bin/git", args, { stdio: "inherit" });
+  process.exit(result.status ?? 1);
+}
+`,
+    );
+    chmodSync(fake, 0o755);
+    const file = join(vault, "pending.md");
+    writeFileSync(file, "owner bytes\n");
+    const trace = join(data, "timeouts.jsonl");
+    const preload = `import cp from "node:child_process";
+import fs from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
+const original = cp.execFile;
+cp.execFile = (file, args, options, callback) => {
+  fs.appendFileSync(${JSON.stringify(trace)}, JSON.stringify({ args, timeout: options.timeout }) + "\\n");
+  return original(file, args, { ...options, timeout: args.includes("commit") && (!fs.existsSync(${JSON.stringify(count)}) || Number(fs.readFileSync(${JSON.stringify(count)}, "utf8")) < ${hangs}) ? options.timeout / 20 : options.timeout }, callback);
+};
+syncBuiltinESMExports();`;
+    const seam = join(REPO, "agent/lib/vault-commit.ts");
+    const child = spawn(
+      process.execPath,
+      [
+        "--import",
+        join(REPO, "scripts/lib/ts-esm-hooks.ts"),
+        "--import",
+        `data:text/javascript,${encodeURIComponent(preload)}`,
+        "--input-type=module",
+        "-e",
+        `
+      const { commitVaultWrite } = await import(${JSON.stringify(seam)});
+      console.log(JSON.stringify(await commitVaultWrite("night test", [${JSON.stringify(file)}], ${JSON.stringify(vault)})));
+    `,
+      ],
+      {
+        env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => {
+      stdout += String(chunk);
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += String(chunk);
+    });
+    const exit = await new Promise<number | null>((accept) =>
+      child.once("close", accept),
+    );
+    assert.equal(exit, 0, stderr);
+    const result = JSON.parse(stdout) as {
+      ok: boolean;
+      reason?: string;
+      committed?: boolean;
+    };
+    assert.equal(result.ok, hangs === 1, stderr);
+    if (hangs === 1) {
+      assert.equal(result.committed, true);
+      assert.equal(sh(["show", "HEAD:pending.md"], vault), "owner bytes");
+    } else assert.equal(result.reason, "git не ответил за 24 с");
+    const settings = JSON.parse(
+      readFileSync(join(data, "settings.json"), "utf8"),
+    ) as { night: { gitTimeoutMs: number } };
+    assert.equal(settings.night.gitTimeoutMs, 24_000);
+    const calls = readFileSync(trace, "utf8")
+      .trim()
+      .split("\n")
+      .map((row) => JSON.parse(row) as { args: string[]; timeout: number });
+    assert.deepEqual(
+      calls
+        .filter((row) => row.args.includes("commit"))
+        .map((row) => row.timeout),
+      [12_000, 24_000],
+    );
+    assert.equal(readFileSync(count, "utf8"), String(hangs));
+    assert.equal(readFileSync(file, "utf8"), "owner bytes\n");
+  });
+
+function repairCommitProcess(
+  vault: string,
+  path: string,
+  bin: string,
+  preload: string,
+) {
+  const child = spawn(
+    process.execPath,
+    [
+      "--import",
+      join(REPO, "scripts/lib/ts-esm-hooks.ts"),
+      "--import",
+      `data:text/javascript,${encodeURIComponent(preload)}`,
+      "--input-type=module",
+      "-e",
+      `
+      const { commitVaultWrite } = await import(${JSON.stringify(join(REPO, "agent/lib/vault-commit.ts"))});
+      console.log(JSON.stringify(await commitVaultWrite(${JSON.stringify(`repair ${path}`)}, [${JSON.stringify(join(vault, path))}], ${JSON.stringify(vault)})));
+    `,
+    ],
+    {
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (chunk) => {
+    stdout += String(chunk);
+  });
+  child.stderr.on("data", (chunk) => {
+    stderr += String(chunk);
+  });
+  const result = new Promise<{
+    code: number | null;
+    stdout: string;
+    stderr: string;
+  }>((accept) =>
+    child.once("close", (code) => accept({ code, stdout, stderr })),
+  );
+  return { child, result };
+}
+
+for (const memoryOnly of [false, true])
+  test(`repair lock: a live writer survives an aged index lock; memory-only raise=${memoryOnly}`, async (t) => {
+    const vault = makeVault(t);
+    const data = process.env.ASSISTANT_DATA_DIR!;
+    const settings = join(data, "settings.json");
+    const bytes = memoryOnly
+      ? "{broken"
+      : JSON.stringify({
+          night: { gitTimeoutMs: 24_000, maxGitTimeoutMs: 24_000 },
+        });
+    writeFileSync(settings, bytes);
+    const trace = join(data, "trace.jsonl");
+    const ready = join(data, "ready.pid");
+    const release = join(data, "release");
+    const count = join(data, "add-count");
+    const lock = join(vault, ".git/index.lock");
+    const binA = join(data, "bin-a");
+    const binB = join(data, "bin-b");
+    mkdirSync(binA);
+    mkdirSync(binB);
+    const fake = (hold: boolean) => `#!${process.execPath}
+const fs = require("node:fs"); const cp = require("node:child_process");
+const args = process.argv.slice(2);
+const run = () => process.exit(cp.spawnSync("/usr/bin/git", args, { stdio: "inherit" }).status ?? 1);
+if (${hold} && args[0] === "add") {
+  const countFile = ${JSON.stringify(count)};
+  const n = fs.existsSync(countFile) ? Number(fs.readFileSync(countFile, "utf8")) : 0;
+  fs.writeFileSync(countFile, String(n + 1));
+  if (${memoryOnly} && n === 0) setInterval(() => {}, 1000);
+  else {
+    const lock = ${JSON.stringify(lock)};
+    const fd = fs.openSync(lock, "wx"); fs.writeSync(fd, String(process.pid));
+    fs.writeFileSync(${JSON.stringify(ready)}, String(process.pid));
+    const timer = setInterval(() => {
+      if (!fs.existsSync(${JSON.stringify(release)})) return;
+      clearInterval(timer); fs.closeSync(fd);
+      if (fs.existsSync(lock)) fs.unlinkSync(lock);
+      run();
+    }, 10);
+  }
+} else run();
+`;
+    for (const [bin, hold] of [
+      [binA, true],
+      [binB, false],
+    ] as const) {
+      writeFileSync(join(bin, "git"), fake(hold));
+      chmodSync(join(bin, "git"), 0o755);
+    }
+    const preload = (
+      role: string,
+    ) => `import fs from "node:fs"; import cp from "node:child_process";
+import { syncBuiltinESMExports } from "node:module";
+const lock = fs.realpathSync(${JSON.stringify(vault)}) + "/.git/index.lock";
+const note = row => fs.appendFileSync(${JSON.stringify(trace)}, JSON.stringify({ role: ${JSON.stringify(role)}, ...row }) + "\\n");
+const remove = fs.rmSync; const exec = cp.execFile;
+fs.rmSync = (file, ...args) => {
+  if (String(file) === lock) {
+    const owner = Number(fs.readFileSync(${JSON.stringify(ready)}, "utf8"));
+    let live = true; try { process.kill(owner, 0); } catch (error) { if (error.code === "ESRCH") live = false; else throw error; }
+    note({ event: "remove-index-lock", ageMs: Date.now() - fs.statSync(file).mtimeMs, ownerAStillRunning: live });
+  }
+  return remove(file, ...args);
+};
+let adds = 0;
+cp.execFile = (file, args, options, callback) => {
+  note({ event: "git", args, timeout: options.timeout });
+  const firstHang = ${memoryOnly && role === "A"} && args[0] === "add" && adds++ === 0;
+  return exec(file, args, { ...options, timeout: firstHang ? 200 : options.timeout }, callback);
+};
+syncBuiltinESMExports();`;
+    writeFileSync(join(vault, "a.md"), "writer A\n");
+    writeFileSync(join(vault, "b.md"), "writer B\n");
+    writeFileSync(join(vault, "owner.md"), "owner staged bytes\n");
+    sh(["add", "owner.md"], vault);
+    const a = repairCommitProcess(vault, "a.md", binA, preload("A"));
+    let bResult:
+      Awaited<ReturnType<typeof repairCommitProcess>["result"]> | undefined;
+    let protectedWhileAlive: boolean;
+    let aResult: Awaited<typeof a.result>;
+    try {
+      for (let wait = 0; wait < 500 && !existsSync(ready); wait++)
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      assert.ok(existsSync(ready), "writer A reached its live git add");
+      const aged = new Date(Date.now() - 16_000);
+      utimesSync(lock, aged, aged);
+      bResult = await repairCommitProcess(vault, "b.md", binB, preload("B"))
+        .result;
+      process.kill(Number(readFileSync(ready, "utf8")), 0);
+      protectedWhileAlive = existsSync(lock);
+    } finally {
+      writeFileSync(release, "go");
+      aResult = await a.result;
+    }
+    const resumed = await repairCommitProcess(
+      vault,
+      "b.md",
+      binB,
+      preload("B-after"),
+    ).result;
+    const rows = readFileSync(trace, "utf8")
+      .trim()
+      .split("\n")
+      .map(
+        (row) =>
+          JSON.parse(row) as {
+            role: string;
+            event: string;
+            ownerAStillRunning?: boolean;
+            timeout?: number;
+            args?: string[];
+          },
+      );
+    const removals = rows.filter((row) => row.event === "remove-index-lock");
+    t.diagnostic(
+      JSON.stringify({
+        memoryOnly,
+        protectedWhileAlive,
+        removals,
+        aAddTimeouts: rows
+          .filter((row) => row.role === "A" && row.args?.[0] === "add")
+          .map((row) => row.timeout),
+        contender: bResult?.stdout.trim(),
+      }),
+    );
+    assert.ok(
+      protectedWhileAlive,
+      "contender must preserve the live writer's index lock",
+    );
+    assert.deepEqual(removals, [], "no seam removes the live writer's lock");
+    assert.ok(bResult);
+    assert.equal(bResult.code, 0, bResult.stderr);
+    assert.equal((JSON.parse(bResult.stdout) as { ok: boolean }).ok, false);
+    assert.equal(aResult.code, 0, aResult.stderr);
+    assert.equal(
+      (JSON.parse(aResult.stdout) as { committed: boolean }).committed,
+      true,
+    );
+    assert.equal(resumed.code, 0, resumed.stderr);
+    assert.equal(
+      (JSON.parse(resumed.stdout) as { committed: boolean }).committed,
+      true,
+    );
+    assert.equal(sh(["show", "HEAD:a.md"], vault), "writer A");
+    assert.equal(sh(["show", "HEAD:b.md"], vault), "writer B");
+    assert.equal(sh(["diff", "--cached", "--name-only"], vault), "owner.md");
+    assert.equal(sh(["show", ":owner.md"], vault), "owner staged bytes");
+    assert.equal(readFileSync(settings, "utf8"), bytes);
+    if (memoryOnly) {
+      assert.match(aResult.stderr, /сохранить настройки пока не удалось/u);
+      assert.deepEqual(
+        rows
+          .filter((row) => row.role === "A" && row.args?.[0] === "add")
+          .map((row) => row.timeout),
+        [12_000, 24_000],
+      );
+    }
+  });

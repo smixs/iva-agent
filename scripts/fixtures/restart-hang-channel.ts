@@ -1,6 +1,14 @@
 import { defineChannel, POST } from "eve/channels";
 import { extractBearerToken } from "eve/channels/auth";
-import { appendFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { setTimeout } from "node:timers/promises";
 import { join } from "node:path";
 import { handleTelegramResetRequest } from "#lib/telegram-reset-route.ts";
 import {
@@ -9,6 +17,35 @@ import {
 } from "#lib/eve-compact.ts";
 import { setChatStatus } from "#lib/run-status.ts";
 import { chatTakeOverPatch } from "#lib/telegram-turn-start.ts";
+import { handleTelegramCompactRequest } from "#lib/telegram-compact-route.ts";
+import {
+  closeIdleCompactionTurn,
+  openIdleCompactionTurn,
+  parkIdleCompactionTurn,
+  startIdleCompaction,
+} from "#lib/idle-compaction.ts";
+
+const MATRIX_FIXTURE = Object.freeze({
+  enabledFlag: "1",
+  pollMs: 25,
+  contextWindowTokens: 131_072,
+  chatKey: "1:",
+});
+
+// Только матрица обрыва включает эти барьеры. Они останавливают настоящий обработчик
+// до/после пересказа; родитель убивает всю группу процесса, не меняя код Ивы/eve.
+async function checkpoint(point: string): Promise<void> {
+  if (process.env.COMPACT_STEP1_MATRIX !== MATRIX_FIXTURE.enabledFlag) return;
+  const dir = process.env.ASSISTANT_DATA_DIR ?? "data";
+  appendFileSync(
+    join(dir, "restart-hang-events.jsonl"),
+    `${JSON.stringify({ point })}\n`,
+  );
+  const flag = join(dir, "restart-hang-barrier");
+  if (!existsSync(flag) || readFileSync(flag, "utf8") !== point) return;
+  writeFileSync(join(dir, "restart-hang-blocked"), point);
+  while (existsSync(flag)) await setTimeout(MATRIX_FIXTURE.pollMs);
+}
 
 function authorized(request: Request): boolean {
   const expected = process.env.ASSISTANT_BEARER;
@@ -41,13 +78,70 @@ export default defineChannel({
         process.env.TELEGRAM_WEBHOOK_SECRET_TOKEN,
       ),
     ),
+    POST("/eve/v1/telegram/compact", (request, args) =>
+      handleTelegramCompactRequest(
+        request,
+        args,
+        (key, sessionId) =>
+          startIdleCompaction({
+            sessionId,
+            manual: true,
+            claimImpl: () => {
+              setChatStatus(
+                key,
+                chatTakeOverPatch({ sessionId, compacting: true }),
+              );
+              return true;
+            },
+            requestImpl: (id) =>
+              requestSessionCompact({
+                url: localSessionCompactUrl(id),
+                bearer: process.env.ASSISTANT_BEARER ?? "",
+              }),
+            releaseImpl: () =>
+              setChatStatus(key, { status: "idle", compacting: null }),
+          }),
+        process.env.TELEGRAM_WEBHOOK_SECRET_TOKEN,
+      ),
+    ),
   ],
   events: {
+    "turn.started"(data, _channel, ctx) {
+      if (process.env.COMPACT_STEP1_MATRIX !== MATRIX_FIXTURE.enabledFlag)
+        return;
+      openIdleCompactionTurn(ctx.session.id);
+      setChatStatus(MATRIX_FIXTURE.chatKey, {
+        ...chatTakeOverPatch({ sessionId: ctx.session.id }),
+        turnId: data.turnId,
+      });
+    },
+    "turn.completed"(_data, _channel, ctx) {
+      if (process.env.COMPACT_STEP1_MATRIX !== MATRIX_FIXTURE.enabledFlag)
+        return;
+      closeIdleCompactionTurn(
+        ctx.session.id,
+        MATRIX_FIXTURE.contextWindowTokens,
+      );
+      setChatStatus(MATRIX_FIXTURE.chatKey, {
+        status: "idle",
+        compacting: null,
+      });
+    },
+    async "compaction.requested"() {
+      await checkpoint("before-summary");
+    },
+    async "compaction.completed"() {
+      await checkpoint("after-summary");
+    },
     // Свёртка между ходами, как её делает канал Telegram: на парковке занять чат и,
     // не выходя из обработчика, дождаться ответа штатного роута eve. Включается файлом
     // data/compact-on-waiting; исход и время ожидания пишутся в журнал теста.
     async "session.waiting"(_data, _channel, ctx) {
       const dir = process.env.ASSISTANT_DATA_DIR ?? "data";
+      if (process.env.COMPACT_STEP1_MATRIX === MATRIX_FIXTURE.enabledFlag) {
+        parkIdleCompactionTurn(ctx.session.id);
+        await checkpoint("parked");
+      }
       const flag = join(dir, "compact-on-waiting");
       if (!existsSync(flag)) return;
       rmSync(flag);

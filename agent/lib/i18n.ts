@@ -65,8 +65,7 @@ export const tr = (en: string, ru: string): string =>
 
 // ЕДИНЫЙ список команд для helpText() и setMyCommands. Порядок = порядок в /help и
 // в синем меню. args (опц.) — подсказка аргументов: попадает только в /help, не в
-// описание команды Telegram (там аргументов быть не должно). Никаких /clear и /compact —
-// как в текущем HELP.
+// описание команды Telegram (там аргументов быть не должно).
 export const COMMANDS: ReadonlyArray<Command> = [
   { command: "menu", en: "settings menu", ru: "меню настроек" },
   { command: "help", en: "this list", ru: "этот список" },

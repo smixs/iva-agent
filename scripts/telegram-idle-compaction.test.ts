@@ -6,6 +6,7 @@
 // статус чата — настоящий файл, маршрутизация моста настоящая.
 import "./lib/ts-esm-hooks.ts";
 import assert from "node:assert/strict";
+import fc from "fast-check";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -19,7 +20,7 @@ process.env.ASSISTANT_DATA_DIR = dataDir;
 process.env.ASSISTANT_VAULT_DIR = vault;
 process.env.AGENT_LANGUAGE = "en";
 process.env.TELEGRAM_ALLOWED_USER_IDS = "9";
-process.env.TELEGRAM_BOT_TOKEN = "idle-compaction-test-token";
+process.env.TELEGRAM_BOT_TOKEN = "12345:idle-compaction-test-token";
 process.env.TELEGRAM_WEBHOOK_SECRET_TOKEN = "idle-compaction-test-secret";
 process.env.TELEGRAM_BOT_USERNAME = "my_bot";
 process.env.ASSISTANT_BEARER = "idle-compaction-test-bearer";
@@ -34,6 +35,8 @@ type ApiCall = { method: string; body: Record<string, unknown> | undefined };
 const apiCalls: ApiCall[] = [];
 const compactCalls: { sessionId: string; auth: string | null }[] = [];
 // Что отвечает eve на просьбу: приняла, сессии нет, отказала, либо ответа нет вовсе.
+let manualSessionId: string | null = null;
+const manualRequests: { body: unknown; auth: string | null }[] = [];
 let compactStatus:
   "accepted" | "no_active_session" | "refused" | "broken" | "silent" =
   "accepted";
@@ -45,6 +48,23 @@ const COMPACT_URL =
 globalThis.fetch = async (url, init = {}) => {
   // eslint-disable-next-line @typescript-eslint/no-base-to-string -- the double reads whatever the caller passes.
   const href = String(url);
+  if (href === `http://127.0.0.1:8723${TELEGRAM_COMPACT_ROUTE}`) {
+    const request = new Request(href, init);
+    manualRequests.push({
+      body: await request.clone().json(),
+      auth: request.headers.get("x-telegram-bot-api-secret-token"),
+    });
+    return route(TELEGRAM_COMPACT_ROUTE).handler(request, {
+      attachSession: (id) => ({ id }) as Session,
+      resolveSession: async () =>
+        manualSessionId ? ({ id: manualSessionId } as Session) : undefined,
+      from: unused,
+      to: unused,
+      params: {},
+      waitUntil: unused,
+      requestIp: "127.0.0.1",
+    });
+  }
   const compact = COMPACT_URL.exec(href);
   if (compact) {
     const sessionId = decodeURIComponent(compact[1] ?? "");
@@ -96,6 +116,7 @@ type Adapter = {
 const channelModule = "../agent/channels/telegram.ts?idle-compaction-test";
 const [
   { default: channel },
+  { TELEGRAM_COMPACT_ROUTE },
   { default: usageHook },
   { providerConfig },
   { idleCompactionLimit },
@@ -108,6 +129,7 @@ const [
   import(channelModule) as Promise<
     typeof import("../agent/channels/telegram.ts")
   >,
+  import("../agent/lib/telegram-compact-route.ts"),
   import("../agent/hooks/usage.ts"),
   import("../agent/provider.ts"),
   import("../agent/lib/compaction.ts"),
@@ -146,6 +168,8 @@ const settings = join(dataDir, "settings.json");
 let seq = 0;
 beforeEach(() => {
   apiCalls.length = 0;
+  manualRequests.length = 0;
+  manualSessionId = null;
   compactCalls.length = 0;
   compactStatus = "accepted";
   whileAsking = null;
@@ -241,12 +265,19 @@ function session(sessionId: string, chatId: number) {
 }
 
 /** Сообщение владельца через настоящий вебхук канала; возвращает число доставок в eve. */
-async function incoming(chatId: number, sessionId: string): Promise<number> {
+const incomingContexts: unknown[] = [];
+async function incoming(
+  chatId: number,
+  sessionId: string,
+  updateId = ++seq,
+  accepted = false,
+): Promise<number> {
   let sends = 0;
   const pending: Promise<unknown>[] = [];
   const target = { id: sessionId } as Session;
   const source = {
-    send: async () => {
+    send: async (...input: unknown[]) => {
+      incomingContexts.push(input);
       sends += 1;
       return target;
     },
@@ -256,7 +287,8 @@ async function incoming(chatId: number, sessionId: string): Promise<number> {
     clear: unused,
     reset: unused,
   } as unknown as ChannelSource<TelegramChannelState>;
-  const response = await webhook.handler(
+  const deliveryRoute = accepted ? route("/eve/v1/telegram/accepted") : webhook;
+  const response = await deliveryRoute.handler(
     new Request("http://local/eve/v1/telegram", {
       method: "POST",
       headers: {
@@ -264,7 +296,7 @@ async function incoming(chatId: number, sessionId: string): Promise<number> {
         "x-telegram-bot-api-secret-token": "idle-compaction-test-secret",
       },
       body: JSON.stringify({
-        update_id: ++seq,
+        update_id: updateId,
         message: {
           message_id: 100 + seq,
           chat: { id: chatId, type: "private" },
@@ -285,7 +317,7 @@ async function incoming(chatId: number, sessionId: string): Promise<number> {
       requestIp: "127.0.0.1",
     },
   );
-  assert.equal(response.status, 200);
+  assert.ok(response.status === 200 || (accepted && response.status === 204));
   await Promise.all(pending);
   return sends;
 }
@@ -303,7 +335,15 @@ test("ход под порогом чат не занимает; ход на п�
   const over = session("s-over", 42);
   await over.turn([1_000, LIMIT]);
   assert.deepEqual(compactCalls, [], "до парковки просьбы нет");
-  assert.equal(statusOf(42)?.status, "idle", "ход кончился — чат свободен");
+  assert.equal(
+    statusOf(42)?.status,
+    "running",
+    "до парковки сохраняется резерв свёртки",
+  );
+  assert.equal(
+    await (await import("./lib/deferred-command.ts")).activityBusy(dataDir),
+    true,
+  );
   await over.waiting();
   assert.deepEqual(compactCalls, [
     { sessionId: "s-over", auth: "Bearer idle-compaction-test-bearer" },
@@ -441,6 +481,8 @@ test("порядок steer: сообщение уходит в eve и сразу
   await s.waiting();
   assert.equal(compactCalls.length, 1, "пересказ просим при любом порядке");
   apiCalls.length = 0;
+  manualRequests.length = 0;
+  manualSessionId = null;
   assert.equal(await incoming(45, "s-steer"), 1, "сообщение доставлено в eve");
   // Чат занят пересказом: раннего статуса нет, запись пересказа не тронута, но под
   // сообщением сразу знак очереди — без него минута пересказа выглядит как тишина.
@@ -525,14 +567,22 @@ test("запоздалая просьба: eve приняла её после т
   await s.waiting(); // ответа нет: исход неизвестен, чат занят
   compactStatus = "accepted";
   await s.turn([LIMIT, LIMIT]); // eve сначала провела ход по пришедшему сообщению
-  assert.equal(statusOf(62)?.status, "idle");
+  assert.equal(
+    statusOf(62)?.status,
+    "running",
+    "неизвестный исход сохраняет резерв до события свёртки",
+  );
   await s.waiting();
   assert.equal(
     compactCalls.length,
     1,
     "вторую просьбу не шлём: первая может быть у eve",
   );
-  assert.equal(statusOf(62)?.status, "idle");
+  assert.equal(
+    statusOf(62)?.status,
+    "running",
+    "неизвестный исход сохраняет резерв до события свёртки",
+  );
   await s.compacting(); // eve начала отложенный пересказ
   assert.equal(statusOf(62)?.status, "running");
   assert.equal(statusOf(62)?.compacting, true);
@@ -599,6 +649,12 @@ test("упавший ход пересказа не просит", async () => {
 test("сообщение успело занять чат до парковки: пересказа нет, запись сообщения цела", async () => {
   const s = session("s-raced", 49);
   await s.turn([LIMIT]);
+  // An external cancellation can release the reservation before new input claims it.
+  runStatus.setChatStatus("49:", {
+    status: "idle",
+    sessionId: null,
+    compacting: null,
+  });
   assert.equal(await incoming(49, "s-raced"), 1);
   const ingress = statusOf(49);
   assert.equal(typeof ingress?.ingressId, "string");
@@ -653,11 +709,13 @@ test("отмена пересказа (turn.cancelled, как после /stop):
   await s.cancelled();
   assert.equal(statusOf(51)?.status, "idle");
   assert.equal(statusOf(51)?.wasCancelled, undefined);
-  // Отмена настоящего хода отметку ставит, как раньше.
+  assert.equal(statusOf(51)?.stopPressed, undefined);
+  // Без нажатия Стоп отмена настоящего хода тоже не ставит отметку.
   const real = session("s-stop-turn", 52);
   await real.started();
   await real.cancelled();
-  assert.equal(statusOf(52)?.wasCancelled, true);
+  assert.equal(statusOf(52)?.wasCancelled, undefined);
+  assert.equal(statusOf(52)?.stopPressed, undefined);
 });
 
 test("законченный пересказ, который не помог, больше не повторяется", async () => {
@@ -673,4 +731,389 @@ test("законченный пересказ, который не помог, �
   await s.waiting();
   assert.deepEqual(compactCalls, []);
   assert.equal(statusOf(53)?.status, "idle");
+});
+
+for (const language of ["ru", "en"] as const) {
+  test(`steer note on the channel wire, ${language}: running, idle, queue, legacy Stop`, async (t) => {
+    t.mock.timers.enable({
+      apis: ["Date"],
+      now: Date.now() + (language === "ru" ? 100_000 : 200_000),
+    });
+    const neutral =
+      language === "ru" ? "Это сообщение пришло" : "This message arrived";
+    const stop =
+      language === "ru"
+        ? "Предыдущий ход был прерван"
+        : "The previous turn was interrupted";
+    for (const [index, state] of [
+      "running",
+      "idle",
+      "queue",
+      "legacy",
+      "pressed",
+      "compacting",
+    ].entries()) {
+      const chatId = 800 + index;
+      writeFileSync(
+        settings,
+        JSON.stringify({
+          language,
+          turnPolicy: state === "queue" ? "queue" : "steer",
+        }),
+      );
+      t.mock.timers.tick(3000);
+      runStatus.setChatStatus(`${chatId}:`, {
+        status: state === "idle" || state === "legacy" ? "idle" : "running",
+        sessionId: `s-note-${index}`,
+        turnId: "old",
+        compacting: state === "compacting" ? true : null,
+        wasCancelled: state === "legacy" || state === "pressed" ? true : null,
+      });
+      incomingContexts.length = 0;
+      assert.equal(await incoming(chatId, `s-note-${index}`), 1);
+      const wire = JSON.stringify(incomingContexts);
+      if (state === "legacy" || state === "pressed") {
+        assert.ok(wire.includes(stop), wire);
+        assert.ok(!wire.includes(neutral), wire);
+        assert.equal(statusOf(chatId)?.stopPressed, undefined);
+        assert.equal(statusOf(chatId)?.wasCancelled, undefined);
+      } else if (state === "running") {
+        assert.ok(wire.includes(neutral), wire);
+        assert.ok(!wire.includes(stop), wire);
+      } else {
+        assert.ok(!wire.includes(neutral), wire);
+        assert.ok(!wire.includes(stop), wire);
+      }
+    }
+  });
+}
+
+test("explicit native Stop is kept through terminal cancellation and consumed once", async () => {
+  const { handleTelegramDraftStop } =
+    await import("../agent/lib/telegram-stop.ts");
+  const s = session("s-explicit-stop", 9);
+  await s.started();
+  runStatus.setChatStatus("9:", { draftId: 999 });
+  const before = statusOf(9);
+  assert.equal(
+    await handleTelegramDraftStop(
+      {
+        chat: { id: 9, type: "private" },
+        draft_id: 999,
+      },
+      { cancelImpl: async () => ({ status: "accepted" }) },
+    ),
+    "requested",
+  );
+  assert.equal(statusOf(9)?.wasCancelled, true);
+  assert.equal(statusOf(9)?.updatedAt, before?.updatedAt);
+  await s.cancelled();
+  assert.equal(statusOf(9)?.wasCancelled, true);
+  incomingContexts.length = 0;
+  await incoming(9, "s-explicit-stop");
+  assert.match(JSON.stringify(incomingContexts), /«Stop»|«Стоп»/u);
+  assert.equal(statusOf(9)?.wasCancelled, undefined);
+  incomingContexts.length = 0;
+  await incoming(9, "s-explicit-stop");
+  assert.doesNotMatch(JSON.stringify(incomingContexts), /«Stop»|«Стоп»/u);
+});
+
+test("a repeated older accepted update neither dispatches nor consumes a fresh Stop", async () => {
+  const chatId = 910;
+  runStatus.setChatStatus(`${chatId}:`, { status: "idle" });
+  assert.equal(await incoming(chatId, "s-repeat-note", 90001, true), 1);
+  assert.equal(await incoming(chatId, "s-repeat-note", 90002, true), 1);
+  runStatus.setChatStatus(`${chatId}:`, { wasCancelled: true });
+  assert.equal(await incoming(chatId, "s-repeat-note", 90001, true), 0);
+  assert.equal(statusOf(chatId)?.wasCancelled, true);
+  incomingContexts.length = 0;
+  assert.equal(await incoming(chatId, "s-repeat-note", 90003, true), 1);
+  assert.match(JSON.stringify(incomingContexts), /«Stop»|«Стоп»/u);
+  assert.equal(statusOf(chatId)?.wasCancelled, undefined);
+});
+
+test("a reminder turn after Stop clears the fact before the next owner message", async () => {
+  const chatId = 911;
+  const reminder = session("s-reminder-after-stop", chatId);
+  runStatus.setChatStatus(`${chatId}:`, { status: "idle", wasCancelled: true });
+  await reminder.turn([100]);
+  assert.equal(statusOf(chatId)?.wasCancelled, undefined);
+  incomingContexts.length = 0;
+  await incoming(chatId, "s-owner-after-reminder");
+  assert.doesNotMatch(JSON.stringify(incomingContexts), /«Stop»|«Стоп»/u);
+});
+
+const { handleControl, registerBotCommands } =
+  await import("./poller/control.ts");
+function compactUpdate(chatId: number, text = "/compact", type = "private") {
+  return {
+    update_id: ++seq,
+    message: {
+      message_id: ++seq,
+      chat: { id: chatId, type },
+      from: { id: 9, is_bot: false },
+      text,
+    },
+  };
+}
+const sentText = () =>
+  apiCalls
+    .filter((call) => call.method === "sendMessage")
+    .map((call) => String(call.body?.text))
+    .join("\n");
+
+test("/compact на проводе: команда моста, общий POST eve, занятость до парковки, честный размер первого шага", async () => {
+  const s = session("s-manual-wire", 701);
+  manualSessionId = "s-manual-wire";
+  await s.turn([40_000]);
+  await s.waiting();
+  assert.equal(await handleControl(compactUpdate(701)), true);
+  assert.deepEqual(manualRequests, [
+    {
+      body: { chatKey: "701:", target: { address: { chatId: "701" } } },
+      auth: "idle-compaction-test-secret",
+    },
+  ]);
+  assert.deepEqual(compactCalls, [
+    { sessionId: "s-manual-wire", auth: "Bearer idle-compaction-test-bearer" },
+  ]);
+  assert.equal(statusOf(701)?.compacting, true);
+  assert.match(sentText(), /Compressing the conversation/);
+  await handleControl(compactUpdate(701));
+  assert.equal(compactCalls.length, 1);
+  assert.match(
+    sentText(),
+    /The conversation is already being compressed\. Please wait for the reply\.$/,
+  );
+  s.compacted();
+  await s.waiting();
+  assert.equal(statusOf(701)?.status, "idle");
+  assert.match(sentText(), /it was ≈40k tokens/);
+  await s.turn([25_000, 27_000]);
+  await s.waiting();
+  assert.match(sentText(), /≈40k → ≈25k tokens/);
+  assert.equal(compactCalls.length, 1);
+});
+
+test("/compact при малом входе, после /stop, /new и перезапуска: без POST и без занятия чата", async () => {
+  for (const mode of ["small", "stop", "new", "restart"] as const) {
+    const chatId = 710 + seq++;
+    const id = `s-manual-${mode}`;
+    const s = session(id, chatId);
+    manualSessionId = id;
+    if (mode === "small") {
+      await s.turn([23_000]);
+      await s.waiting();
+    }
+    if (mode === "stop") {
+      await s.running([80_000]);
+      await s.cancelled();
+      await s.waiting();
+    }
+    // /new and process restart have no in-memory step input for the selected session.
+    assert.equal(await handleControl(compactUpdate(chatId)), true);
+    assert.notEqual(statusOf(chatId)?.compacting, true);
+  }
+  assert.deepEqual(compactCalls, []);
+  assert.match(sentText(), /nothing to compress/);
+});
+
+test("/compact во время ответа оставляет ход, отказ и прерывание свёртки видны владельцу", async () => {
+  const s = session("s-manual-fail", 702);
+  manualSessionId = "s-manual-fail";
+  await s.running([80_000]);
+  await handleControl(compactUpdate(702));
+  assert.deepEqual(compactCalls, []);
+  await s.cancelled();
+  await s.waiting();
+  await s.turn([40_000]);
+  await s.waiting();
+  compactStatus = "refused";
+  await handleControl(compactUpdate(702));
+  assert.equal(statusOf(702)?.status, "idle");
+  assert.match(sentText(), /couldn't be confirmed/);
+  compactStatus = "accepted";
+  await handleControl(compactUpdate(702));
+  await s.waiting();
+  assert.match(sentText(), /Compression was interrupted/);
+  assert.equal(statusOf(702)?.status, "idle");
+});
+
+test("/compact в группах адресуется как /new; посторонний отправитель командой не управляет", async () => {
+  await handleControl(compactUpdate(-703, "/compact", "group"));
+  assert.equal(manualRequests.length, 0);
+  assert.match(sentText(), /Reply to my message/);
+  const update = compactUpdate(704);
+  update.message.from.id = 999;
+  assert.equal(await handleControl(update), false);
+  assert.equal(manualRequests.length, 0);
+});
+
+test("/compact скрыта в /help и синем меню на проводе setMyCommands", async () => {
+  await handleControl(compactUpdate(705, "/help"));
+  assert.doesNotMatch(sentText(), /\/compact/);
+  await registerBotCommands();
+  const menus = apiCalls.filter((call) => call.method === "setMyCommands");
+  assert.equal(menus.length, 2);
+  for (const menu of menus)
+    assert.doesNotMatch(JSON.stringify(menu.body), /"command":"compact"/);
+});
+
+test("роут /compact проверяет секрет и формат до захвата чата", async () => {
+  const handler = route("/eve/v1/telegram/compact").handler;
+  const args = {
+    attachSession: unused,
+    resolveSession: unused,
+    from: unused,
+    to: unused,
+    params: {},
+    waitUntil: unused,
+    requestIp: "127.0.0.1",
+  };
+  for (const [body, secret, status] of [
+    ["{}", "wrong", 401],
+    ["{", "idle-compaction-test-secret", 400],
+    ["{}", "idle-compaction-test-secret", 400],
+  ] as const) {
+    const response = await handler(
+      new Request("http://local/eve/v1/telegram/compact", {
+        method: "POST",
+        body,
+        headers: { "x-telegram-bot-api-secret-token": secret },
+      }),
+      args,
+    );
+    assert.equal(response.status, status);
+  }
+  assert.deepEqual(compactCalls, []);
+});
+
+test("/compact в ответ на сообщение бота в группе выбирает ту же адресацию, что /new", async () => {
+  const s = session("s-manual-group", -706);
+  manualSessionId = "s-manual-group";
+  await s.turn([40_000]);
+  await s.waiting();
+  const base = compactUpdate(-706, "/compact", "group");
+  const update = {
+    ...base,
+    message: {
+      ...base.message,
+      reply_to_message: { message_id: 88, from: { id: 12345, is_bot: true } },
+    },
+  };
+  assert.equal(await handleControl(update), true);
+  assert.deepEqual(manualRequests.at(-1)?.body, {
+    chatKey: "-706:",
+    target: { address: { chatId: "-706", conversationId: "88" } },
+  });
+  assert.deepEqual(compactCalls, [
+    { sessionId: "s-manual-group", auth: "Bearer idle-compaction-test-bearer" },
+  ]);
+  s.compacted();
+  await s.waiting();
+});
+
+test("property: произвольный неверный ключ /compact отвергается до разрешения сессии", async () => {
+  const handler = route("/eve/v1/telegram/compact").handler;
+  const args = {
+    attachSession: unused,
+    resolveSession: unused,
+    from: unused,
+    to: unused,
+    params: {},
+    waitUntil: unused,
+    requestIp: "127.0.0.1",
+  };
+  await fc.assert(
+    fc.asyncProperty(
+      fc.string({ maxLength: 100 }).filter((key) => !/^-?\d+:\d*$/u.test(key)),
+      fc.jsonValue(),
+      async (chatKey, target) => {
+        const response = await handler(
+          new Request("http://local/eve/v1/telegram/compact", {
+            method: "POST",
+            headers: {
+              "x-telegram-bot-api-secret-token": "idle-compaction-test-secret",
+            },
+            body: JSON.stringify({ chatKey, target }),
+          }),
+          args,
+        );
+        assert.equal(response.status, 400);
+      },
+    ),
+    { numRuns: 100 },
+  );
+  assert.deepEqual(compactCalls, []);
+});
+
+test("/compact между turn.completed и session.waiting ждёт парковки того же хода", async () => {
+  const s = session("s-manual-window-r1", 720);
+  manualSessionId = "s-manual-window-r1";
+  await s.turn([40_000]);
+  assert.equal(statusOf(720)?.status, "idle");
+  await handleControl(compactUpdate(720));
+  assert.deepEqual(compactCalls, [], "до парковки ручной POST запрещён");
+  assert.match(sentText(), /Try \/compact after I finish/);
+  await s.waiting();
+  assert.doesNotMatch(sentText(), /Compression was interrupted/);
+  await handleControl(compactUpdate(720));
+  assert.equal(compactCalls.length, 1);
+  await s.compacting();
+  assert.equal(statusOf(720)?.compacting, true, "пересказ держит чат");
+  s.compacted();
+  await s.waiting();
+  assert.match(sentText(), /it was ≈40k tokens/);
+  assert.equal(statusOf(720)?.status, "idle");
+});
+
+test("/compact сразу после автосвёртки сохраняет один POST", async () => {
+  const s = session("s-manual-after-auto-r1", 721);
+  manualSessionId = "s-manual-after-auto-r1";
+  await s.turn([LIMIT]);
+  await s.waiting();
+  assert.equal(compactCalls.length, 1);
+  s.compacted();
+  await s.waiting();
+  await handleControl(compactUpdate(721));
+  assert.equal(
+    compactCalls.length,
+    1,
+    "повторного пересказа устаревшего входа нет",
+  );
+  assert.match(sentText(), /nothing to compress/);
+});
+
+test("/compact во время автосвёртки сообщает о пересказе", async () => {
+  const s = session("s-manual-during-auto-r1", 722);
+  manualSessionId = "s-manual-during-auto-r1";
+  await s.turn([LIMIT]);
+  await s.waiting();
+  await handleControl(compactUpdate(722));
+  assert.equal(compactCalls.length, 1);
+  assert.equal(
+    sentText(),
+    "The conversation is already being compressed. Please wait for the reply.",
+  );
+  assert.doesNotMatch(sentText(), /I'm answering now/);
+  s.compacted();
+  await s.waiting();
+});
+
+test("ручная свёртка предупреждает о повторе после перезапуска; восстановление освобождает чат", async () => {
+  const s = session("s-manual-restart-r1", 723);
+  manualSessionId = "s-manual-restart-r1";
+  await s.turn([40_000]);
+  await s.waiting();
+  await handleControl(compactUpdate(723));
+  assert.match(sentText(), /After a restart, repeat \/compact/);
+  const { rewriteRunStatusesForUpdate } = await import("./lib/wf-store.ts");
+  assert.ok(rewriteRunStatusesForUpdate(dataDir, true) >= 1);
+  assert.equal(statusOf(723)?.status, "idle");
+  assert.equal(statusOf(723)?.compacting, undefined);
+  assert.equal(typeof statusOf(723)?.resetAt, "number");
+  apiCalls.length = 0;
+  await handleControl(compactUpdate(723));
+  assert.equal(compactCalls.length, 1);
+  assert.match(sentText(), /nothing to compress/);
 });

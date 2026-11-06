@@ -21,9 +21,9 @@ does not prove the customization was included.
    Resolve the actual data directory using the shared data-dir helper; do not assume it is `data/`.
    Read the update log locally to distinguish a compile error, failed startup probe, and a held-back
    version of your files: the last version carrying them did not come up after its restart. Do not
-   infer the cause from the stock notice. `iva doctor` auto-repairs, so it is not a first step;
-   `iva diagnose` repairs nothing and only writes a support package — repairs are `iva doctor` in a
-   terminal. Do not publish raw agent/build logs, custom contents or `.env` values.
+   infer the cause from the stock notice. In a turn, `iva doctor` only checks; repairs belong to
+   the owner's terminal or the Doctor button in `/menu`. `iva diagnose` only writes a support
+   package. Do not publish raw agent/build logs, custom contents or `.env` values.
 
 3. `workflow store: 0 runs; 0 hook files` describes past workflow runs, not whether customizations are
    in the build. For two skill sources such as `my-skill.md` and `my-skill/SKILL.md`,
@@ -59,16 +59,16 @@ does not prove the customization was included.
 
 ## Activate corrected sources
 
-On an installed Version or a managed legacy checkout, ask the owner to run
-`iva update --force --verbose`, or send `/update --force`. The updater creates and probes a new
-candidate with the corrected custom sources before activation. This restarts services: do not
-launch it from the agent turn that would be interrupted. A failed custom build can still finish as
+On the owner's request, run `iva update --force --verbose` on an installed Version or a managed
+legacy checkout. The updater creates and probes a new candidate with the corrected custom sources
+before activation. A failed custom build can still finish as
 stock; confirm the final result and log before claiming recovery. Repeating it without fixing the
 reported cause is not a recovery procedure.
 
-Only in a developer checkout marked `.iva-dev`, run `npm run build`; after success tell the owner
-to send `/restart`. Running `npm run build` inside an immutable Version does not reapply the edited
-custom layer. Do not call `iva restart`, `systemctl`, `nohup` or a detached process from this turn.
+Only in a developer checkout marked `.iva-dev`, run `npm run build`; after success use `iva restart`.
+Running `npm run build` inside an immutable Version does not reapply the edited custom layer.
+In a turn, `iva restart|update|rollback` are deferred until all turns finish; the Bridge executes
+the request and reports its result. Direct `systemctl`/`launchctl`/`pkill` against Iva interrupt the reply.
 
 If a merge is ambiguous, preserve the local copy and ask the owner which behavior should win. Never
 delete a recovery bundle or git stash; retention cleanup belongs to the updater.

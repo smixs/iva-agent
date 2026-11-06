@@ -157,6 +157,7 @@ export function planSchedule(
   fields: AddFields,
   nowMs: number,
   tz: string,
+  allowFrequent = false,
 ): PlannedSchedule {
   const kind = fields.at === undefined ? "cron" : "at";
   try {
@@ -169,7 +170,7 @@ export function planSchedule(
       throw new ReminderStoreError("schedule: not a cron expression");
     return {
       schedule,
-      nextRunAtMs: nextCronRunMs(schedule.expr, tz, nowMs),
+      nextRunAtMs: nextCronRunMs(schedule.expr, tz, nowMs, allowFrequent),
     };
   } catch (error) {
     if (

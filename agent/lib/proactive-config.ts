@@ -11,6 +11,11 @@ export const TELEGRAM_USERS_LIMIT = 500;
 export const TELEGRAM_GROUPS_LIMIT = 200;
 /** Сколько писем проверка почты смотрит за прогон. */
 export const MAIL_LIMIT = 20;
+/** Окно Brief и сроки напоминаний Watch о днях рождения Google Контактов. */
+export const BIRTHDAY_LOOKAHEAD_DAYS = 7;
+export const BIRTHDAY_NOTICE_DAYS = 3;
+export const BIRTHDAY_MORNING_END_HOUR = 12;
+export const BIRTHDAY_TIMEOUT_MS = 20_000;
 
 export type ProactiveConfig = {
   readonly enabled: boolean;
@@ -38,6 +43,10 @@ export const PROACTIVE_DEFAULTS: ProactiveConfig = {
   insightTimes: [],
   urgentSenders: [],
 };
+
+/** Варианты кнопок Insight и время включения; действующее время — только в settings.json. */
+export const INSIGHT_TIME_PRESETS = ["09:30", "11:30", "17:30"] as const;
+export const INSIGHT_ENABLE_TIME = INSIGHT_TIME_PRESETS[1];
 
 export type ProactiveKey = keyof ProactiveConfig;
 

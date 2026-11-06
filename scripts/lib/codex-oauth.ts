@@ -76,6 +76,7 @@ const FALLBACK_PORT = 1457;
 const b64url = (buf: string | Buffer) => Buffer.from(buf).toString("base64url");
 const defaultDir = () => resolveDataDir(process.cwd());
 const MODELS_FETCH_TIMEOUT_MS = 10_000;
+const AUTH_TIMEOUT_MS = 30_000;
 // Язык подсказок входа (en по умолчанию — как у codex CLI). Мастер/CLI прокидывают lang.
 const tr = (lang: string, en: string, ru: string) => (lang === "ru" ? ru : en);
 
@@ -178,23 +179,30 @@ async function exchangeCode({
   verifier: string;
   redirectUri: string;
 }): Promise<TokenResponse> {
-  const body = new URLSearchParams({
-    grant_type: "authorization_code",
-    code,
-    redirect_uri: redirectUri,
-    client_id: CLIENT_ID,
-    code_verifier: verifier,
-  });
-  const res = await fetch(TOKEN_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: body.toString(),
-  });
-  if (!res.ok)
-    throw new Error(
-      `token exchange failed: ${res.status} ${(await res.text()).slice(0, 300)}`,
-    );
-  return (await res.json()) as TokenResponse; // { id_token, access_token, refresh_token }
+  try {
+    const body = new URLSearchParams({
+      grant_type: "authorization_code",
+      code,
+      redirect_uri: redirectUri,
+      client_id: CLIENT_ID,
+      code_verifier: verifier,
+    });
+    const res = await fetch(TOKEN_URL, {
+      signal: AbortSignal.timeout(AUTH_TIMEOUT_MS),
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: body.toString(),
+    });
+    if (!res.ok)
+      throw new Error(
+        `token exchange failed: ${res.status} ${(await res.text()).slice(0, 300)}`,
+      );
+    return (await res.json()) as TokenResponse; // { id_token, access_token, refresh_token }
+  } catch (error) {
+    if (error instanceof Error && /^(Timeout|Abort)Error$/.test(error.name))
+      throw new Error("Codex не ответил при входе за 30 с", { cause: error });
+    throw error;
+  }
 }
 
 // ── device-code flow (headless-friendly, по ссылке) ────────────────────────
@@ -203,57 +211,65 @@ export async function runDeviceCodeLogin({
   log = console.log,
   lang = "en",
 }: LoginOptions = {}): Promise<CodexAuth> {
-  const api = `${ISSUER}/api/accounts`;
-  const uc = await fetch(`${api}/deviceauth/usercode`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ client_id: CLIENT_ID }),
-  });
-  if (!uc.ok)
-    throw new Error(
-      `device usercode failed: ${uc.status} ${(await uc.text()).slice(0, 200)}`,
-    );
-  const { device_auth_id, user_code, interval } = (await uc.json()) as {
-    device_auth_id: string;
-    user_code: string;
-    interval: unknown;
-  };
-
-  log(
-    `\n  1. ${tr(lang, "Open this link in a browser (any device):", "Открой в браузере (на любом устройстве):")}  ${ISSUER}/codex/device`,
-  );
-  log(
-    `  2. ${tr(lang, "Enter this one-time code (expires in 15 min):", "Введи одноразовый код (живёт 15 минут):")}   ${user_code}\n`,
-  );
-  log(`  ${tr(lang, "Waiting for confirmation…", "Жду подтверждения…")}`);
-
-  const pollMs = Math.max(Number(interval) || 5, 1) * 1000;
-  const deadline = Date.now() + 15 * 60 * 1000;
-  for (;;) {
-    if (Date.now() > deadline)
-      throw new Error("device auth timed out (15 min)");
-    const r = await fetch(`${api}/deviceauth/token`, {
+  try {
+    const api = `${ISSUER}/api/accounts`;
+    const uc = await fetch(`${api}/deviceauth/usercode`, {
+      signal: AbortSignal.timeout(AUTH_TIMEOUT_MS),
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ device_auth_id, user_code }),
+      body: JSON.stringify({ client_id: CLIENT_ID }),
     });
-    if (r.ok) {
-      const { authorization_code, code_verifier } = (await r.json()) as {
-        authorization_code: string;
-        code_verifier: string;
-      };
-      const tokens = await exchangeCode({
-        code: authorization_code,
-        verifier: code_verifier,
-        redirectUri: `${ISSUER}/deviceauth/callback`,
+    if (!uc.ok)
+      throw new Error(
+        `device usercode failed: ${uc.status} ${(await uc.text()).slice(0, 200)}`,
+      );
+    const { device_auth_id, user_code, interval } = (await uc.json()) as {
+      device_auth_id: string;
+      user_code: string;
+      interval: unknown;
+    };
+
+    log(
+      `\n  1. ${tr(lang, "Open this link in a browser (any device):", "Открой в браузере (на любом устройстве):")}  ${ISSUER}/codex/device`,
+    );
+    log(
+      `  2. ${tr(lang, "Enter this one-time code (expires in 15 min):", "Введи одноразовый код (живёт 15 минут):")}   ${user_code}\n`,
+    );
+    log(`  ${tr(lang, "Waiting for confirmation…", "Жду подтверждения…")}`);
+
+    const pollMs = Math.max(Number(interval) || 5, 1) * 1000;
+    const deadline = Date.now() + 15 * 60 * 1000;
+    for (;;) {
+      if (Date.now() > deadline)
+        throw new Error("device auth timed out (15 min)");
+      const r = await fetch(`${api}/deviceauth/token`, {
+        signal: AbortSignal.timeout(AUTH_TIMEOUT_MS),
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ device_auth_id, user_code }),
       });
-      const auth = toAuth(tokens);
-      writeAuth(auth, dataDir);
-      return auth;
+      if (r.ok) {
+        const { authorization_code, code_verifier } = (await r.json()) as {
+          authorization_code: string;
+          code_verifier: string;
+        };
+        const tokens = await exchangeCode({
+          code: authorization_code,
+          verifier: code_verifier,
+          redirectUri: `${ISSUER}/deviceauth/callback`,
+        });
+        const auth = toAuth(tokens);
+        writeAuth(auth, dataDir);
+        return auth;
+      }
+      if (r.status !== 403 && r.status !== 404)
+        throw new Error(`device auth failed: ${r.status}`);
+      await new Promise((res) => setTimeout(res, pollMs));
     }
-    if (r.status !== 403 && r.status !== 404)
-      throw new Error(`device auth failed: ${r.status}`);
-    await new Promise((res) => setTimeout(res, pollMs));
+  } catch (error) {
+    if (error instanceof Error && /^(Timeout|Abort)Error$/.test(error.name))
+      throw new Error("Codex не ответил при входе за 30 с", { cause: error });
+    throw error;
   }
 }
 

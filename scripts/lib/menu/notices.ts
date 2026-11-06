@@ -12,6 +12,8 @@
 // render() через ctx.tr, иначе язык замёрзнет до рестарта.
 import { join } from "node:path";
 import {
+  INSIGHT_ENABLE_TIME,
+  INSIGHT_TIME_PRESETS,
   parseProactive,
   withProactive,
   type ProactiveConfig,
@@ -50,11 +52,11 @@ function isToggle(value: string): value is Toggle {
 // Время Insight — аргумент кнопки без двоеточия: движок режет callback_data по «:».
 const INSIGHT_SLOTS: Readonly<Record<string, readonly string[]>> = {
   "0": [],
-  "0930": ["09:30"],
-  "1130": ["11:30"],
-  "1730": ["17:30"],
+  ...Object.fromEntries(
+    INSIGHT_TIME_PRESETS.map((time) => [time.replace(":", ""), [time]]),
+  ),
 };
-const INSIGHT_ROW = ["0930", "1130", "1730"] as const;
+const INSIGHT_ROW = INSIGHT_TIME_PRESETS.map((time) => time.replace(":", ""));
 
 /** Тап по тумблеру: цель и значение из словаря, иначе null — протухшая или чужая кнопка. */
 function toggleWrite(args: readonly string[]): Write | null {
@@ -173,13 +175,13 @@ function switchLine(on: boolean, label: string, data: string, what: string) {
   return `${button(`${on ? "✓" : "○"} ${label}`, data)} — ${what}`;
 }
 
-/** Тумблер Insight: включает в 11:30 или выключает. */
+/** Тумблер Insight: включает в заданное конфигом время или выключает. */
 function insightSwitch(times: readonly string[], T: Translate): string {
   const on = times.length > 0;
   return switchLine(
     on,
     T("Insight", "Инсайт"),
-    `iva_menu:ntc:ins:${on ? "0" : "1130"}`,
+    `iva_menu:ntc:ins:${on ? "0" : INSIGHT_ENABLE_TIME.replace(":", "")}`,
     T(
       "once a day: a plugin draft for something you do by hand; installed only after your tap.",
       "раз в день: черновик плагина под то, что вы делаете руками; ставлю только после «Поставить».",
@@ -187,7 +189,7 @@ function insightSwitch(times: readonly string[], T: Translate): string {
   );
 }
 
-/** «08:30 и 14:00» — времена Brief из настроек. */
+/** Времена Brief из того же parseProactive, что читает `iva proactive show`. */
 function briefTimes(times: readonly string[], and: string): string {
   return times.length < 2
     ? times.join("")

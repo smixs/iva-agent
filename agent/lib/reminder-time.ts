@@ -131,6 +131,7 @@ export function nextCronRunMs(
   expr: string,
   tz: string,
   afterMs: number,
+  allowFrequent = false,
 ): number {
   try {
     const cron = new Cron(expr, { timezone: tz, paused: true });
@@ -138,6 +139,7 @@ export function nextCronRunMs(
     if (next === null) throw new ReminderTimeError("cron: never fires");
     const second = cron.nextRun(next);
     if (
+      !allowFrequent &&
       second !== null &&
       second.getTime() - next.getTime() < REMINDER_MIN_CRON_INTERVAL_MS
     )

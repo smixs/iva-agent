@@ -10,6 +10,7 @@ import {
   writeFile,
   stat,
   readdir,
+  mkdir,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -614,7 +615,7 @@ test("fc.commands mixes goal and owner transitions while preserving links and un
         after.goals.map((g) => g.id).sort(),
         [...model.ids].sort(),
       );
-      assert.ok(after.rows.filter((r) => r.run).length <= 1);
+      assert.ok(after.rows.filter((r) => r.run).length <= 3);
       assert.ok(after.rows.filter((r) => r.status === "pending").length <= 3);
       assert.ok(
         after.rows.filter((r) => r.goal !== null && r.status !== "closed")
@@ -671,5 +672,157 @@ test("fc.commands mixes goal and owner transitions while preserving links and un
       );
     }),
     { seed: 20261014, numRuns: 40 },
+  );
+});
+
+test("due Goal and owner helper both start behind 20 delivered rows", async (t) => {
+  const { dir } = await setup(t);
+  const goal = await start();
+  const old: string[] = [];
+  for (let i = 0; i < 20; i++) {
+    const added = await s.addHelper({ task: "old", may: "", chat }, now + i);
+    assert.ok(added.ok);
+    await s.finalizeHelper(
+      added.row.id,
+      { kind: "pending", createdAt: now + i },
+      finish,
+      now + i + 1,
+    );
+    await s.markHelperDelivered(added.row.id, chat, now + 100 + i);
+    await mkdir(join(dir, "helpers", added.row.id), { recursive: true });
+    old.push(added.row.id);
+  }
+  const owner = await s.addHelper({ task: "owner", may: "", chat }, now + 200);
+  assert.ok(owner.ok);
+  await g.dueGoals(now + 201);
+  const state = await s.readHelpers();
+  assert.ok(state.goals[0].check);
+  assert.equal(state.goals[0].id, goal.id);
+  assert.equal(state.goals[0].checks.count, 1);
+  assert.equal(state.rows.length, 19);
+  assert.ok(state.rows.some((r) => r.id === owner.row.id));
+  assert.ok(
+    state.rows.some((r) => r.id === state.goals[0].check && r.goal === goal.id),
+  );
+  for (const id of old.slice(0, 3)) {
+    assert.equal(await s.getHelper(id), null);
+    await assert.rejects(stat(join(dir, "helpers", id)), { code: "ENOENT" });
+  }
+  assert.deepEqual(
+    state.rows.filter((r) => old.includes(r.id)).map((r) => r.id),
+    old.slice(3),
+  );
+});
+
+test("blocked Goal logs refusal and preserves all unread outcomes", async (t) => {
+  const { file } = await setup(t);
+  const goal = await start();
+  for (let i = 0; i < 20; i++) {
+    const added = await s.addHelper({ task: "unread", may: "", chat }, now + i);
+    assert.ok(added.ok);
+    await s.finalizeHelper(
+      added.row.id,
+      { kind: "pending", createdAt: now + i },
+      finish,
+      now + i + 1,
+    );
+  }
+  const before = await readFile(file, "utf8");
+  const logs: string[] = [];
+  t.mock.method(console, "error", (...parts: unknown[]) =>
+    logs.push(parts.map(String).join(" ")),
+  );
+  await g.dueGoals(now + 100);
+  assert.equal(await readFile(file, "utf8"), before);
+  assert.ok(
+    logs.some((line) => line.includes(goal.id) && /max-rows/.test(line)),
+  );
+  const refused = await s.addHelper(
+    { task: "owner", may: "", chat },
+    now + 200,
+  );
+  assert.ok(!refused.ok);
+  assert.match(refused.text, /running tasks or unread outcomes/);
+  assert.doesNotMatch(refused.text, /Wait for completion and delivery/);
+});
+
+test("Goal admission preserves protected rows and its owner reserve; seed 20261020", async (t) => {
+  await setup(t);
+  const goal = await start();
+  const added = await s.addHelper({ task: "template", may: "", chat }, now);
+  assert.ok(added.ok);
+  await fc.assert(
+    fc.asyncProperty(
+      fc.array(
+        fc.constantFrom("delivered", "closed", "unread", "goal", "pending"),
+        { minLength: 20, maxLength: 20 },
+      ),
+      async (kinds) => {
+        const state = await s.readHelpers();
+        state.rows = kinds.map((kind, i) => ({
+          ...added.row,
+          id: `h-${i.toString(16).padStart(6, "0")}`,
+          goal: kind === "goal" ? goal.id : null,
+          status:
+            kind === "pending"
+              ? "pending"
+              : kind === "closed"
+                ? "closed"
+                : "finished",
+          outcome: kind === "pending" ? null : "done",
+          finishedAt: kind === "pending" ? null : now + i,
+          deliveredAt:
+            kind === "delivered" || kind === "goal" ? now + 100 + i : null,
+        }));
+        const before = structuredClone(state);
+        const eligible = state.rows
+          .filter(
+            (r) =>
+              r.goal === null &&
+              (r.status === "closed" || r.deliveredAt !== null),
+          )
+          .sort(
+            (a, b) =>
+              (a.deliveredAt ?? a.finishedAt!) -
+              (b.deliveredAt ?? b.finishedAt!),
+          );
+        const result = s.insertRow(
+          state,
+          { task: "check", may: "", chat, goal: goal.id },
+          now + 300,
+        );
+        const allowed =
+          eligible.length >= 2 &&
+          before.rows.filter((r) => r.status === "pending").length < 2;
+        assert.equal(result.ok, allowed);
+        if (!allowed) assert.deepEqual(state, before);
+        else {
+          assert.equal(state.rows.length, 19);
+          assert.deepEqual(
+            state.rows.slice(0, -1),
+            before.rows.filter(
+              (r) => !eligible.slice(0, 2).some((e) => e.id === r.id),
+            ),
+          );
+          assert.deepEqual(state.goals, before.goals);
+        }
+      },
+    ),
+    {
+      seed: 20261020,
+      numRuns: 30,
+      examples: [
+        [Array.from({ length: 20 }, () => "closed" as const)],
+        [Array.from({ length: 20 }, () => "delivered" as const)],
+        [["delivered", ...Array.from({ length: 19 }, () => "unread" as const)]],
+        [
+          [
+            "pending",
+            "pending",
+            ...Array.from({ length: 18 }, () => "delivered" as const),
+          ],
+        ],
+      ],
+    },
   );
 });

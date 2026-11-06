@@ -9,9 +9,11 @@
 // `bridge.dropped`, Стоп владельца, `tool.rejected` (тот же вызов уже есть строкой
 // `action.result` с ходом) и всё в сессиях самого Insight — иначе его же ошибка завтра стала бы
 // причиной в списке.
-import { readFileSync, readdirSync } from "node:fs";
+import { closeSync, fstatSync, openSync, readSync, readdirSync } from "node:fs";
+import { StringDecoder } from "node:string_decoder";
 import { join } from "node:path";
 import { turnRef } from "./turn-ref.ts";
+export { turnRef } from "./turn-ref.ts";
 
 export type TurnFailure = {
   /** Имя инструмента, "turn", "outbox", "stop". */
@@ -205,6 +207,7 @@ function parseLine(raw: string): Line | null {
 export function readTrace(
   dataDir: string,
   days = Number.POSITIVE_INFINITY,
+  maxBytesPerFile = Number.POSITIVE_INFINITY,
 ): {
   readonly lines: Line[];
   unreadable: number;
@@ -223,26 +226,57 @@ export function readTrace(
     .filter((name) => DAY_FILE.test(name))
     .sort()
     .slice(-days))
-    readDay(join(directory, day), out);
+    readDay(join(directory, day), out, maxBytesPerFile);
   return out;
 }
 
 function readDay(
   file: string,
   out: { readonly lines: Line[]; unreadable: number },
+  maxBytes: number,
 ): void {
-  let body: string;
+  let fd: number | undefined;
   try {
-    body = readFileSync(file, "utf8");
+    fd = openSync(file, "r");
+    const size = fstatSync(fd).size;
+    let position = Math.max(0, size - maxBytes);
+    const marker = Buffer.alloc(1);
+    if (position > 0) readSync(fd, marker, 0, 1, position - 1);
+    let skip = position > 0 && marker[0] !== 10;
+    const accept = (raw: string) => {
+      if (skip) {
+        skip = false;
+        return;
+      }
+      if (raw.trim() === "") return;
+      const line = parseLine(raw);
+      if (line === null) out.unreadable += 1;
+      else out.lines.push(line);
+    };
+    const buffer = Buffer.alloc(64 * 1024);
+    const decoder = new StringDecoder("utf8");
+    let pending = "";
+    while (position < size) {
+      const bytes = readSync(
+        fd,
+        buffer,
+        0,
+        Math.min(buffer.length, size - position),
+        position,
+      );
+      if (bytes === 0) break;
+      position += bytes;
+      const parts = (pending + decoder.write(buffer.subarray(0, bytes))).split(
+        "\n",
+      );
+      pending = parts.pop() ?? "";
+      for (const raw of parts) accept(raw);
+    }
+    accept(pending + decoder.end());
   } catch {
     out.unreadable += 1;
-    return;
-  }
-  for (const raw of body.split("\n")) {
-    if (raw.trim() === "") continue;
-    const line = parseLine(raw);
-    if (line === null) out.unreadable += 1;
-    else out.lines.push(line);
+  } finally {
+    if (fd !== undefined) closeSync(fd);
   }
 }
 
@@ -343,13 +377,13 @@ export function listTurnFailures(
 }
 
 /** Строка для промпта Insight: до 200 знаков за счёт причины, `ref` не режется никогда. */
-function insightLine(cause: TurnFailure): string {
+export function insightLine(cause: TurnFailure, maxChars = LINE_CHARS): string {
   const head = `${cause.count}× ${cause.where} · ${cause.kind}`;
   const open = cause.ref
     ? `iva trace show ${cause.ref}`
     : "no turn in the Trace";
   const tail = ` · last ${new Date(cause.at).toISOString().slice(11, 16)} UTC · ${open}`;
-  const room = LINE_CHARS - head.length - tail.length - " · ".length;
+  const room = maxChars - head.length - tail.length - " · ".length;
   const reason = room > 0 ? cutText(cause.reason, room).trimEnd() : "";
   return reason ? `${head} · ${reason}${tail}` : `${head}${tail}`;
 }
@@ -359,7 +393,7 @@ export function insightFailureLines(
   causes: readonly TurnFailure[],
   limit = 10,
 ): string[] {
-  const lines = causes.slice(0, limit).map(insightLine);
+  const lines = causes.slice(0, limit).map((cause) => insightLine(cause));
   if (causes.length > limit)
     lines.push(`… and ${causes.length - limit} more causes`);
   return lines;

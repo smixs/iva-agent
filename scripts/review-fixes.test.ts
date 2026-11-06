@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-floating-promises -- Node's test runner owns registrations. */
-// Регрессии на находки независимого ревью: квалификаторы идентичности, SUPERSEDE через
+// Регрессии на находки независимого ревью: SUPERSEDE через
 // replace_body, ownership-токен card-лока, symlink-обход write_file, права карантина,
 // лок в несуществующем каталоге (свежая установка).
 import "./lib/ts-esm-hooks.ts";
@@ -24,11 +24,8 @@ import { settled } from "./fixtures/tool-result.ts";
 
 // TS — только динамическим импортом: resolve-хук (.js→.ts) не действует на статические
 // импорты, слинкованные до его регистрации.
-const {
-  acquireLock: cardLock,
-  mergeCard,
-  resolveCard,
-} = await import("../agent/lib/card-store.ts");
+const { acquireLock: cardLock, mergeCard } =
+  await import("../agent/lib/card-store.ts");
 const { acquireLock: jsonLock, releaseLock: jsonRelease } =
   await import("../agent/lib/json-store.ts");
 
@@ -51,28 +48,6 @@ function testToolContext(toolName: string): ToolContext {
     requireAuth: unavailable,
   };
 }
-
-function makeCard(dir: string, name: string, h1: string): void {
-  writeFileSync(
-    join(dir, `${name}.md`),
-    `---\ntype: contact\nstatus: active\n---\n# ${h1}\n\nтело\n`,
-  );
-}
-
-test("голое имя находит квалифицированную карточку, но чужой квалификатор — новая сущность", () => {
-  const dir = mkdtempSync(join(tmpdir(), "cards-"));
-  makeCard(dir, "alex-us", "Alex (US)");
-  // «Alex» без скобок — это та же сущность, что «Alex (US)» (единственный кандидат).
-  assert.equal(resolveCard(dir, "Alex").matchedBy, "title");
-  // «Alex (UK)» — ДРУГАЯ сущность: не должен слиться в alex-us.md.
-  const uk = resolveCard(dir, "Alex (UK)");
-  assert.equal(
-    uk.matchedBy,
-    "new",
-    "квалифицированный промах обязан завести новый файл",
-  );
-  assert.ok(uk.file.endsWith("alex-uk.md"), uk.file);
-});
 
 test("replace_body: SUPERSEDE переписывает body, сохраняя неизвестный frontmatter", () => {
   const existing =

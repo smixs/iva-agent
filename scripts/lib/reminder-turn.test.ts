@@ -6,6 +6,7 @@
 // не загрузился бы на установке без agent/.
 import assert from "node:assert/strict";
 import test from "node:test";
+import fc from "fast-check";
 import type {
   CreateClient,
   ReminderClient,
@@ -296,6 +297,35 @@ for (const mark of ["cancel", "limit", "cancel-and-limit"] as const) {
         ? "the turn hit the eve session token limit"
         : "intermediate",
     );
+  });
+}
+
+for (const kind of [
+  "reminder",
+  "signal",
+  "watch",
+  "brief",
+  "insight",
+  "alert",
+] as const) {
+  void test(`${kind} delivers the final ceiling outcome as a successful turn`, async () => {
+    const message = "Остановилась на 40 шагах. Вот что успела: нашла документ.";
+    const spy = spyTurn(async function* () {
+      yield { type: "message.completed", data: { message } };
+      yield { type: "turn.completed", data: { reason: "step-limit" } };
+      yield { type: "session.waiting" };
+    });
+    const turn = await runReminderTurn(
+      "fixture",
+      { ...OPTIONS, headers: { "x-iva-turn": kind } },
+      {
+        createClient: spy.createClient,
+      },
+    );
+    assert.equal(turn.message, message);
+    assert.equal(turn.status, "waiting");
+    assert.equal(turn.cancelled, false);
+    assert.deepEqual(spy.resets, ["Reminder finished"]);
   });
 }
 
@@ -1000,4 +1030,245 @@ void test("waiting for late sessions ends at its cap even when create never come
   t.mock.timers.tick(1);
   await settling;
   assert.deepEqual(spy.calls, ["client", "create"]);
+});
+
+const requestedTool = (
+  callId: string,
+  timeoutMs = 240_000,
+): TurnStreamEvent => ({
+  type: "actions.requested",
+  data: {
+    actions: [
+      { kind: "tool-call", callId, toolName: "bash", input: { timeoutMs } },
+    ],
+  },
+});
+const toolResult = (callId: string): TurnStreamEvent => ({
+  type: "action.result",
+  data: { result: { callId } },
+});
+const drainEvents = async () => {
+  for (let i = 0; i < 12; i += 1) await flush();
+};
+
+void test("tool timeouts above the bash maximum use 120 seconds (seed=20261021)", async (t) => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"] });
+  await fc.assert(
+    fc.asyncProperty(
+      fc.oneof(
+        fc.constant(9e15),
+        fc.integer({ min: 2_147_483_648, max: Number.MAX_SAFE_INTEGER }),
+      ),
+      async (timeout) => {
+        const controller = new AbortController();
+        const spy = spyTurn(async function* (cancelled) {
+          yield requestedTool("oversized", timeout);
+          await cancelled;
+        });
+        const outcome = runReminderTurn("oversized", OPTIONS, {
+          createClient: spy.createClient,
+          signal: controller.signal,
+        }).catch((error: unknown) => error);
+        try {
+          await drainEvents();
+          t.mock.timers.tick(299_999);
+          await drainEvents();
+          assert.deepEqual(spy.sessionCalls, []);
+          t.mock.timers.tick(1);
+          await drainEvents();
+          assert.deepEqual(spy.sessionCalls, ["cancel tasks=true", "reset"]);
+          assert.ok((await outcome) instanceof ReminderTurnError);
+        } finally {
+          controller.abort();
+          await outcome;
+        }
+      },
+    ),
+    { seed: 20261021, numRuns: 50, examples: [[2_147_483_648], [9e15]] },
+  );
+});
+
+for (const { name, event, waitMs } of [
+  {
+    name: "missing actions",
+    event: { type: "actions.requested", data: {} },
+    waitMs: 180_000,
+  },
+  {
+    name: "missing tool input",
+    event: {
+      type: "actions.requested",
+      data: {
+        actions: [{ kind: "tool-call", callId: "no-input", toolName: "bash" }],
+      },
+    },
+    waitMs: 300_000,
+  },
+]) {
+  void test(`tool events with ${name} retain the default silence deadline`, async (t) => {
+    t.mock.timers.enable({ apis: ["Date", "setTimeout"] });
+    const spy = spyTurn(async function* (cancelled) {
+      yield event;
+      await cancelled;
+    });
+    const outcome = runReminderTurn(name, OPTIONS, {
+      createClient: spy.createClient,
+    }).catch((error: unknown) => error);
+    await drainEvents();
+    t.mock.timers.tick(waitMs - 1);
+    await drainEvents();
+    assert.deepEqual(spy.sessionCalls, []);
+    t.mock.timers.tick(1);
+    assert.ok((await outcome) instanceof ReminderTurnError);
+    assert.deepEqual(spy.sessionCalls, ["cancel tasks=true", "reset"]);
+  });
+}
+
+void test("a four-minute command returns the reminder result after the ordinary silence window", async (t) => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"] });
+  let finish = () => {};
+  const command = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  const spy = spyTurn(async function* () {
+    yield requestedTool("long");
+    await command;
+    yield toolResult("long");
+    yield {
+      type: "message.completed",
+      data: { message: "command result delivered" },
+    };
+    yield { type: "session.waiting" };
+  });
+  const running = runReminderTurn("four minutes", OPTIONS, {
+    createClient: spy.createClient,
+  });
+  const outcome = running.catch((error: unknown) => error);
+  await drainEvents();
+  t.mock.timers.tick(240_000);
+  await drainEvents();
+  assert.deepEqual(spy.sessionCalls, [], "the command still owns its timeout");
+  finish();
+  const turn = await outcome;
+  assert.ok(!(turn instanceof Error));
+  assert.equal(
+    (turn as { message: string }).message,
+    "command result delivered",
+  );
+  assert.deepEqual(spy.sessionCalls, ["reset"]);
+});
+
+void test("a tool that never returns is cancelled at its timeout plus the silence grace", async (t) => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"] });
+  const spy = spyTurn(async function* (cancelled) {
+    yield requestedTool("hung");
+    await cancelled;
+  });
+  const outcome = runReminderTurn("hung", OPTIONS, {
+    createClient: spy.createClient,
+  }).catch((error: unknown) => error);
+  await drainEvents();
+  t.mock.timers.tick(419_999);
+  await drainEvents();
+  assert.deepEqual(spy.sessionCalls, []);
+  t.mock.timers.tick(1);
+  assert.ok((await outcome) instanceof ReminderTurnError);
+  assert.deepEqual(spy.sessionCalls, ["cancel tasks=true", "reset"]);
+});
+
+void test("a result removes only its callId; after all results the ordinary silence window applies", async (t) => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"] });
+  let finish = () => {};
+  const command = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  const spy = spyTurn(async function* (cancelled) {
+    yield requestedTool("long");
+    yield requestedTool("short", 100);
+    yield toolResult("short");
+    yield toolResult("unknown");
+    await command;
+    yield toolResult("long");
+    await cancelled;
+  });
+  const outcome = runReminderTurn("parallel", OPTIONS, {
+    createClient: spy.createClient,
+  }).catch((error: unknown) => error);
+  await drainEvents();
+  t.mock.timers.tick(240_000);
+  await drainEvents();
+  assert.deepEqual(spy.sessionCalls, []);
+  finish();
+  await drainEvents();
+  t.mock.timers.tick(179_999);
+  await drainEvents();
+  assert.deepEqual(spy.sessionCalls, []);
+  t.mock.timers.tick(1);
+  assert.ok((await outcome) instanceof ReminderTurnError);
+});
+
+void test("the job deadline cancels a tool even while its command timeout is running", async (t) => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"] });
+  const controller = new AbortController();
+  const spy = spyTurn(async function* (cancelled) {
+    yield requestedTool("long");
+    await cancelled;
+  });
+  const running = runReminderTurn("deadline", OPTIONS, {
+    createClient: spy.createClient,
+    signal: controller.signal,
+  });
+  await drainEvents();
+  controller.abort();
+  assert.equal((await running).message, DEADLINE);
+  assert.deepEqual(spy.sessionCalls, ["cancel tasks=true", "reset"]);
+});
+
+void test("tool deadlines preserve random timeouts, duplicate calls and timer overflow (seed=20261020)", async (t) => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"] });
+  await fc.assert(
+    fc.asyncProperty(
+      fc.oneof(
+        fc.integer({ min: 100, max: 500_000 }),
+        fc.constant(2_147_483_647),
+      ),
+      async (timeout) => {
+        const spy = spyTurn(async function* (cancelled) {
+          yield requestedTool("same", timeout);
+          yield requestedTool("same", timeout * 2);
+          await cancelled;
+        });
+        const outcome = runReminderTurn("property", OPTIONS, {
+          createClient: spy.createClient,
+        }).catch((error: unknown) => error);
+        await drainEvents();
+        t.mock.timers.tick(timeout);
+        await drainEvents();
+        assert.deepEqual(spy.sessionCalls, []);
+        t.mock.timers.tick(179_999);
+        await drainEvents();
+        assert.deepEqual(spy.sessionCalls, []);
+        t.mock.timers.tick(1);
+        assert.ok((await outcome) instanceof ReminderTurnError);
+      },
+    ),
+    { seed: 20261020, numRuns: 50 },
+  );
+});
+
+// Лиза, 03.11.2026: «no Telegram tools» модель прочла как запрет и на чтение, сводка вышла без чатов.
+// Промпт держит обе половины: запись в Telegram запрещена, чтение через telegram-userbot разрешено.
+void test("reminder prompt forbids Telegram writes and allows Telegram reads", async () => {
+  const { reminderPrompt } = await import("./reminder-turn.ts");
+  const prompt = reminderPrompt({ text: "начало дня" }, (en) => en);
+  assert.match(prompt, /Do not send anything yourself/u);
+  assert.match(
+    prompt,
+    /no Telegram tool that writes \(send, reply, forward, edit, delete, react, mark read\)/u,
+  );
+  assert.match(
+    prompt,
+    /Reading Telegram with the read-only tools of telegram-userbot/u,
+  );
+  assert.doesNotMatch(prompt, /no Telegram tools/u);
 });

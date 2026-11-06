@@ -112,11 +112,11 @@ for (const mode of ["conversation", "task"] as const)
       assert.deepEqual(calls.at(-1)?.tools ?? [], []);
       assert.match(
         JSON.stringify(calls.at(-1)?.prompt),
-        /Step limit reached: no tools are available now/,
+        /Step limit reached \(3 steps\)\. No tools are available now/,
       );
       assert.doesNotMatch(
         JSON.stringify(resumed.session.history),
-        /Step limit reached: no tools are available now/,
+        /Step limit reached \(3 steps\)\. No tools are available now/,
       );
     });
     for (const schema of [

@@ -70,7 +70,7 @@ const MEDIA_EXTENSIONS = new Set([
   ".m4a",
 ]);
 
-export type PostArguments = {
+type PostArguments = {
   readonly md?: string;
   readonly mdFile?: string;
   readonly chat?: string;
@@ -196,7 +196,7 @@ export function imageRoots(
 }
 
 /** Абсолютный путь из ссылки `file:/…` или `file:///…`. */
-export function localImagePath(reference: string): string {
+function localImagePath(reference: string): string {
   return resolve(
     reference.startsWith("file://")
       ? reference.slice("file://".length)
@@ -245,7 +245,7 @@ function looksLikeMedia(path: string): boolean {
   return read >= 2 && head[0] === 0xff && (head[1] & 0xe0) === 0xe0; // mp3 frame
 }
 
-export type LocalImage = {
+type LocalImage = {
   /** Путь так, как он написан в посте. */
   readonly reference: string;
   /** Путь после разрешения симлинков — грузится ровно он, и ничто другое. */
@@ -259,7 +259,7 @@ export type LocalImage = {
  * постом можно вынести секрет через публичный хост. Возвращает разрешённые реальные
  * пути — загрузка обязана взять именно то, что проверено (подмена симлинка не поможет).
  */
-export function validateLocalImages(
+function validateLocalImages(
   markdown: string,
   roots: readonly string[],
 ): LocalImage[] {
@@ -297,7 +297,7 @@ export function validateLocalImages(
 }
 
 /** Подставить публичные URL вместо проверенных ссылок `file:`. */
-export function substituteImages(
+function substituteImages(
   markdown: string,
   uploaded: ReadonlyMap<string, string>,
 ): string {

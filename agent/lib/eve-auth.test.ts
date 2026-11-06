@@ -8,6 +8,7 @@ import {
   assistantBearerAuth,
   createEveAuth,
   isHelperTurn,
+  usesHelperModel,
   TURN_KINDS,
 } from "./eve-auth.ts";
 
@@ -36,6 +37,7 @@ test("helper detection tolerates missing context, session, auth and attributes",
     },
   ]) {
     assert.equal(isHelperTurn(ctx), false);
+    assert.equal(usesHelperModel(ctx), false);
   }
 });
 
@@ -56,7 +58,7 @@ const turnRequest = (token: string, turn: string) =>
     headers: { authorization: `Bearer ${token}`, "x-iva-turn": turn },
   });
 
-test("a turn names its kind: the bearer puts each of the six kinds into the iva_turn attribute", async () => {
+test("every background kind carries its step and cumulative input ceilings", async () => {
   const auth = assistantBearerAuth(TOKEN);
   for (const turn of [
     "watch",
@@ -67,7 +69,11 @@ test("a turn names its kind: the bearer puts each of the six kinds into the iva_
     "alert",
   ]) {
     assert.deepEqual(await auth(turnRequest(TOKEN, turn)), {
-      attributes: { iva_turn: turn },
+      attributes: {
+        iva_turn: turn,
+        iva_max_steps: turn === "brief" ? "60" : "40",
+        iva_max_input_tokens: "4000000",
+      },
       authenticator: "iva-bearer",
       principalId: "iva-internal-client",
       principalType: "service",
@@ -109,7 +115,11 @@ test(`a kind outside the list gets no attribute (PBT, seed ${SEED})`, async () =
       const result = await auth(request);
       assert.ok(result);
       if (TURN_KINDS.has(sent))
-        assert.deepEqual(result.attributes, { iva_turn: sent });
+        assert.deepEqual(result.attributes, {
+          iva_turn: sent,
+          iva_max_steps: sent === "brief" ? "60" : "40",
+          iva_max_input_tokens: "4000000",
+        });
       else assert.deepEqual(result.attributes, {});
     }),
     { seed: SEED, numRuns: 300 },
@@ -204,6 +214,7 @@ test(`helper ids are strict and invalid requests return 401 (PBT, seed ${SEED})`
               iva_turn: "helper",
               iva_helper: good,
               iva_max_steps: "80",
+              iva_max_input_tokens: "4000000",
             });
           } else {
             assert.ok(result instanceof Response);
@@ -217,4 +228,36 @@ test(`helper ids are strict and invalid requests return 401 (PBT, seed ${SEED})`
   await assert.rejects(async () =>
     assistantBearerAuth(TOKEN)(turnRequest(TOKEN, "helper")),
   );
+});
+
+test("background model choice preserves helper-only rights and requires an exact kind", () => {
+  for (const kind of [
+    "helper",
+    "watch",
+    "brief",
+    "insight",
+    "reminder",
+    "signal",
+    "alert",
+    null,
+    ["watch"],
+    { toString: () => "watch" },
+  ]) {
+    const ctx = {
+      session: {
+        auth: {
+          current: {
+            authenticator: "iva-bearer",
+            attributes: { iva_turn: kind },
+          },
+        },
+      },
+    };
+    assert.equal(isHelperTurn(ctx), kind === "helper");
+    assert.equal(
+      usesHelperModel(ctx),
+      typeof kind === "string" &&
+        ["helper", "watch", "brief", "insight"].includes(kind),
+    );
+  }
 });

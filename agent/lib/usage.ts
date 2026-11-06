@@ -21,6 +21,9 @@ import {
 import { dirname, join } from "node:path";
 import { dataDir } from "./data-dir.ts";
 
+export type UsageRequest = Record<"system" | "cache" | "tools", string> & {
+  toolCount: number;
+};
 export interface UsageRecord {
   ts: string;
   source: string;
@@ -29,6 +32,7 @@ export interface UsageRecord {
   sessionId: string;
   turnId: string;
   step: number;
+  request?: UsageRequest;
   subagent?: string;
   // Строка ребёнка, запущенного встроенным `agent`: чей ход его породил. eve отдаёт это в
   // ctx.session.parent; у строк основной сессии полей нет, JSON.stringify их опускает.
@@ -69,6 +73,24 @@ export type UsageMeta = Omit<
 >;
 
 const defaultDir = dataDir;
+
+type StepKey = Pick<UsageRecord, "sessionId" | "turnId" | "step">;
+const requests = new Map<string, UsageRequest>();
+const requestKey = (step: StepKey) =>
+  JSON.stringify([step.sessionId, step.turnId, step.step]);
+
+/** Bounded metadata only: failed/stopped calls may never emit step.completed. */
+export function setUsageRequest(step: StepKey, request: UsageRequest): void {
+  requests.set(requestKey(step), request);
+  if (requests.size > 256) requests.delete(requests.keys().next().value!);
+}
+
+export function takeUsageRequest(step: StepKey): UsageRequest | undefined {
+  const key = requestKey(step);
+  const request = requests.get(key);
+  requests.delete(key);
+  return request;
+}
 
 export function usageFilePath(dataDir = defaultDir()): string {
   return join(dataDir, "usage.jsonl");
@@ -201,11 +223,13 @@ export function usageRecord(
   meta: UsageMeta,
   tokens: UsageTokens,
 ): UsageRecord | null {
+  const request = meta.request ?? takeUsageRequest(meta);
   const { in: inT, out, cacheRead, cacheWrite } = tokens;
   if (inT + out + cacheRead + cacheWrite === 0) return null;
   return {
     ts: new Date().toISOString(),
     ...meta,
+    ...(request ? { request } : {}),
     in: inT,
     out,
     cacheRead,

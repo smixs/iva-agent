@@ -136,7 +136,7 @@ function restoreAgentSummary(backup: string | null): void {
     renameSync(backup, join(ROOT, ".eve/agent-summary.json"));
 }
 
-export function buildWithCustomLayer(): void {
+function buildWithCustomLayer(): void {
   const nightTime = resolveMemoryNightTime(process.env.MEMORY_NIGHT_TIME);
   mkdirSync(BUILD_ROOT, { recursive: true });
   const staging = mkdtempSync(join(BUILD_ROOT, "staging-"));

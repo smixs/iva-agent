@@ -6,7 +6,7 @@ import { requestTelegramCancel } from "./telegram-cancel-client.ts";
 import { verifyTelegramRequest } from "eve/channels/telegram";
 import { localCancelUrl } from "./telegram-cancel-route.ts";
 import { allowedTelegramUsers } from "./telegram-allowlist.ts";
-import { chatKeyOf, getChatStatus } from "./run-status.ts";
+import { chatKeyOf, getChatStatus, setChatStatusIf } from "./run-status.ts";
 import { tr } from "./i18n.ts";
 import { isPrivateTelegramChat } from "./telegram-private-chat.ts";
 import { traceStop } from "./trace.ts";
@@ -160,12 +160,27 @@ async function cancelTurnAndConfirm(
     runtime.logImpl("turn cancel failed: no TELEGRAM_WEBHOOK_SECRET_TOKEN");
     return traceStopOutcome(chatKey, status, "failed");
   }
+  // Факт явного Стопа, до POST: terminal-событие может прийти раньше ответа.
+  if (status?.compacting !== true)
+    setChatStatusIf(
+      chatKey,
+      { sessionId, turnId: status?.turnId },
+      { wasCancelled: true },
+      { touch: false },
+    );
   const outcome = await sendTurnCancel({
     ...runtime,
     secret,
     sessionId,
     turnId: status?.turnId,
   });
+  if (outcome === "idle")
+    setChatStatusIf(
+      chatKey,
+      { sessionId, turnId: status?.turnId },
+      { wasCancelled: null },
+      { touch: false },
+    );
   return traceStopOutcome(chatKey, status, outcome);
 }
 

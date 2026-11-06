@@ -1,13 +1,13 @@
-// Попытки дня. Отметка ставится ПОСЛЕ хода и только за отказ самого дня: обрез пределом,
-// ход кончился без отчёта, отчёт есть, а день не закрыт. Сбой eve, срок, сигнал, отказ хода
-// или сессии попыткой дня не считаются. Процесс, упавший до отметки, её не оставит: правило —
-// «три наблюдённых отказа». Три — день ждёт человека (`iva jobs skip`), успех стирает день.
+// Попытки дня: ответ A после повтора не по форме или незавершённая запись дня.
+// Обрез пределом ночи, временный сбой, срок, сигнал и падение сохраняют попытки;
+// старые cut читаются для отката и пропускаются при подсчёте. Три отказа — день
+// ждёт человека (`iva jobs skip`), успешный разбор стирает попытки дня.
 // data/rollup-attempts.json: `{ "<date>": [{ "at": "<ISO>", "reason": "<причина>" }, …] }`.
 import { readFileSync } from "node:fs";
 import { writeFileAtomicSync } from "#lib/fs-atomic.ts";
 
-export type AttemptReason = "cut" | "no-report" | "day-unfinished";
-type Attempt = { readonly at: string; readonly reason: AttemptReason };
+export type AttemptReason = "no-report" | "day-unfinished";
+type Attempt = { readonly at: string; readonly reason: AttemptReason | "cut" };
 export type Attempts = Readonly<Record<string, readonly Attempt[]>>;
 
 export const MAX_FAILED_ATTEMPTS = 3;
@@ -83,11 +83,12 @@ function write(file: string, attempts: Attempts): void {
 /** День исчерпал попытки: три наблюдённых отказа. */
 export const isExhausted = (
   attempts: readonly Attempt[] | undefined,
-): boolean => (attempts?.length ?? 0) >= MAX_FAILED_ATTEMPTS;
+): boolean =>
+  (attempts?.filter(({ reason }) => reason !== "cut").length ?? 0) >=
+  MAX_FAILED_ATTEMPTS;
 
 const REASON_TEXT: Readonly<Record<AttemptReason, readonly [string, string]>> =
   {
-    cut: ["the turn hit the night ceiling", "ход остановлен пределом ночи"],
     "no-report": ["the turn ended without a report", "ход кончился без отчёта"],
     "day-unfinished": [
       "the report came, the day stayed unfinished",
@@ -103,7 +104,10 @@ export function dayPausedAlert(
 ): string {
   const lines = dates
     .map((date) => {
-      const last = attempts[date]?.at(-1)?.reason;
+      const last = attempts[date]
+        ?.map(({ reason }) => reason)
+        .filter((reason) => reason !== "cut")
+        .at(-1);
       const cause = last ? `${tr(...REASON_TEXT[last])}\n` : "";
       return `${date}: ${cause}iva jobs skip memory-night ${date}`;
     })

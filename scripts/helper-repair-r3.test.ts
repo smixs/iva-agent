@@ -33,6 +33,6 @@ for (const mode of ["conversation", "task"] as const)
       const expected = base.cases[`${mode}/${scenario}`];
       assert.deepEqual(await eventProbe(mode, scenario), {
         ...expected,
-        tools: expected.tools.map((n) => (n ? n - 2 : 0)),
+        tools: expected.tools.map((n) => (n ? n - 1 : 0)),
       });
     });

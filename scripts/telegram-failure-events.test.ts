@@ -865,3 +865,36 @@ test("a turn resumed by an answer to a question takes the sign without the queue
   assert.equal(status?.statusAt, undefined);
   assert.equal(status?.queuedIngressId, undefined);
 });
+
+test("REPAIR1: real Telegram failure returns while its same-chat auth reply is in flight", async (t) => {
+  const { dispatchModelAuth } = await import("#lib/model-auth-dispatch.ts");
+  const beforeProvider = process.env.MODEL_PROVIDER;
+  process.env.MODEL_PROVIDER = "claude";
+  t.after(() => {
+    if (beforeProvider === undefined) delete process.env.MODEL_PROVIDER;
+    else process.env.MODEL_PROVIDER = beforeProvider;
+  });
+  const chatId = "9";
+  const before = apiCalls.length;
+  const hold = holdSend(chatId);
+  const turn = emitTurnFailed(
+    { message: "OAuth session expired", turnId: "repair-auth" },
+    { chatId, sessionId: "repair-auth" },
+  );
+  try {
+    const result = await Promise.race([
+      turn.then(() => "returned"),
+      new Promise((resolve) => setTimeout(() => resolve("blocked"), 100)),
+    ]);
+    assert.equal(result, "returned");
+    await hold.started;
+    const replies = callsSince(before, "sendMessage");
+    assert.equal(replies.length, 1);
+    assert.equal(String(replies[0].body?.chat_id), chatId);
+    assert.match(String(replies[0].body?.text), /claude auth login/u);
+  } finally {
+    hold.release();
+    await turn;
+    await dispatchModelAuth();
+  }
+});

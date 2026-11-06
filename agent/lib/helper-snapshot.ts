@@ -1,3 +1,4 @@
+import type { ModelFailure } from "./model-response.ts";
 import assert from "node:assert/strict";
 import { type HelperOutcome, HELPER_SUMMARY_MAX } from "./helper-store.ts";
 export function isQuietReply(text: string): boolean {
@@ -34,11 +35,13 @@ export function foldHelperSnapshot(
     previous = 0,
     ended = false,
     outcome: HelperOutcome = "empty",
-    reason: string | null = null;
+    reason: string | null = null,
+    failureInfo: ModelFailure | undefined;
   for (const event of events) {
     if (!event || typeof event.type !== "string")
       throw Error("invalid helper snapshot");
     const d = (event.data ?? {}) as Record<string, unknown>;
+    if (!ended && event.type === "step.failed") failureInfo = d;
     if (event.type === "session.completed") assert.equal(event.data, undefined);
     if (Object.hasOwn(ends, event.type) && event.type !== "session.completed") {
       assert.equal(Object.getPrototypeOf(event.data), Object.prototype);
@@ -70,13 +73,16 @@ export function foldHelperSnapshot(
     if (!ended && Object.hasOwn(ends, event.type)) {
       ended = true;
       outcome = ends[event.type];
-      if (outcome === "failed") reason = d.message as string;
+      if (outcome === "failed") {
+        reason = d.message as string;
+        failureInfo = { ...failureInfo, ...d };
+      }
       if (event.type === "input.requested") reason = "помощник ждал ответа";
       if (event.type === "authorization.required")
         reason = "помощник ждал авторизации";
       if (outcome === "done" && d.reason === "step-limit") {
         outcome = "ceiling";
-        reason = "предел шагов";
+        reason = "предел работы";
       }
     }
   }
@@ -89,6 +95,7 @@ export function foldHelperSnapshot(
     ended,
     outcome,
     reason,
+    failureInfo,
     model: model ?? started,
     steps,
     tokens,

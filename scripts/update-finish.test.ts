@@ -38,6 +38,7 @@ import {
 } from "./lib/legacy-memory-units.ts";
 import { noticeTranslator, userbotOffAlert } from "./lib/notice-policy.ts";
 import fc from "fast-check";
+import { mcpProxyUnitBody, pluginServiceUnitBody } from "./lib/plugin-units.ts";
 import { layoutFor } from "./lib/version-store.ts";
 import { rewriteRunStatusesForUpdate } from "./lib/wf-store.ts";
 
@@ -1340,14 +1341,69 @@ test("the flip restarts the plugin units that were running, and only those", asy
     "iva-mcp-trace-viewer.service",
     "iva-plugin-trace-web.service",
     "iva-mcp-untrusted-srv.service",
-  ])
-    writeFileSync(join(unitDir, unit), "[Service]\n");
+  ]) {
+    const body =
+      unit === "iva-plugin-trace-web.service"
+        ? pluginServiceUnitBody({
+            plugin: "trace",
+            service: "web",
+            command: "node",
+            args: [],
+            port: 8726,
+            pluginRoot: join(data, "custom/plugins/trace"),
+            pluginData: join(data, "plugin-data/trace"),
+            dataDir: data,
+            nodeBinDir: "/fixture",
+          })
+        : mcpProxyUnitBody({
+            plugin: unit.includes("untrusted") ? "untrusted" : "trace",
+            server: unit.includes("untrusted") ? "srv" : "viewer",
+            port: unit.includes("untrusted") ? 8732 : 8730,
+            tokenFile: join(
+              data,
+              "plugin-data",
+              unit.includes("untrusted") ? "untrusted" : "trace",
+              unit.includes("untrusted") ? "mcp-srv.token" : "mcp-viewer.token",
+            ),
+            root: home,
+            node: "/fixture/node",
+            nodeBinDir: "/fixture",
+            dataDirEnvironment: `"ASSISTANT_DATA_DIR=${data}"`,
+          });
+    writeFileSync(join(unitDir, unit), body);
+  }
+  const query = (...args: string[]) => {
+    const [action, unit] = args;
+    if (action === "is-active") {
+      asked.push(unit);
+      return {
+        code: unit === "iva-plugin-trace-web.service" ? 3 : 0,
+        out: unit === "iva-plugin-trace-web.service" ? "inactive" : "active",
+      };
+    }
+    const file = join(unitDir, unit),
+      body = existsSync(file) ? readFileSync(file, "utf8") : "";
+    const prop = args.find((arg) => arg.startsWith("--property="))?.slice(11);
+    return {
+      code: 0,
+      out:
+        prop === "LoadState"
+          ? body
+            ? "loaded"
+            : "not-found"
+          : (body
+              .split("\n")
+              .find((line) => line.startsWith(`${prop}=`))
+              ?.slice(String(prop).length + 1) ?? ""),
+    };
+  };
 
   const restarted: string[][] = [];
   const asked: string[] = [];
   const runtime = {
     UNIT_DIR: unitDir,
     systemd: {
+      query,
       isActive(unit: string) {
         asked.push(unit);
         // Сервис плагина стоит: его владелец и не просил поднимать.
@@ -1374,6 +1430,7 @@ test("the flip restarts the plugin units that were running, and only those", asy
   const broken = {
     UNIT_DIR: unitDir,
     systemd: {
+      query,
       isActive: () => true,
       restart() {
         throw new Error("job failed");

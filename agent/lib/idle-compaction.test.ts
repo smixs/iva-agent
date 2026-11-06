@@ -68,15 +68,15 @@ const NOTHING = {
 };
 const ASKED = { claimed: true, asked: true, released: false, accepted: true };
 
-test("порог — 60 % окна, но не больше 275 тыс. токенов; страховка внутри хода на четверть выше", () => {
+test("порог — 60 % окна, но не больше 110 тыс. токенов; страховка внутри хода на четверть выше", () => {
   assert.equal(IDLE_COMPACTION_PERCENT, 0.6);
-  assert.equal(IDLE_COMPACTION_MAX_TOKENS, 275_000);
+  assert.equal(IDLE_COMPACTION_MAX_TOKENS, 110_000);
   assert.equal(idleCompactionLimit(100_000), 60_000);
   assert.equal(idleCompactionLimit(131_072), 78_643);
-  assert.equal(idleCompactionLimit(272_000), 163_200);
-  assert.equal(idleCompactionLimit(1_000_000), 275_000);
+  assert.equal(idleCompactionLimit(272_000), 110_000);
+  assert.equal(idleCompactionLimit(1_000_000), 110_000);
   assert.equal(compactionThresholdPercent(100_000), 0.75);
-  assert.equal(compactionThresholdPercent(1_000_000), 0.34375);
+  assert.equal(compactionThresholdPercent(1_000_000), 0.1375);
   fc.assert(
     fc.property(fc.integer({ min: 1_000, max: 5_000_000 }), (window) => {
       const limit = idleCompactionLimit(window);
@@ -512,4 +512,124 @@ test("property: просьба уходит только за порогом и 
       }
     }),
   );
+});
+
+test("ручная просьба ниже автопорога использует тот же захват и POST, открытый ход и повтор отвергаются", async () => {
+  const id = fresh();
+  turn(id, [40_000]);
+  idle.parkIdleCompactionTurn(id);
+  const events: string[] = [];
+  const ask = () =>
+    idle.startIdleCompaction({
+      sessionId: id,
+      manual: true,
+      claimImpl: () => {
+        events.push("claim");
+        return true;
+      },
+      requestImpl: async () => {
+        events.push("POST");
+        return true;
+      },
+      releaseImpl: () => {
+        events.push("release");
+      },
+    });
+  assert.equal(await ask(), true);
+  assert.equal(await ask(), false);
+  assert.deepEqual(events, ["claim", "POST"]);
+  idle.completeIdleCompaction(id);
+  idle.openIdleCompactionTurn(id);
+  idle.recordStepInput(id, 25_000);
+  assert.deepEqual(idle.takeManualCompactionReport(id), {
+    before: 40_000,
+    after: 25_000,
+  });
+  assert.equal(await ask(), false);
+});
+
+test("ручная просьба при малом входе, после отмены и в новой сессии ничего не запускает", async () => {
+  for (const mode of ["small", "cancelled", "new"] as const) {
+    const id = fresh();
+    if (mode !== "new") turn(id, [mode === "small" ? 23_000 : 80_000]);
+    if (mode === "cancelled") idle.dropIdleCompactionTurn(id);
+    idle.parkIdleCompactionTurn(id);
+    assert.equal(
+      await idle.startIdleCompaction({
+        sessionId: id,
+        manual: true,
+        claimImpl: () => {
+          assert.fail("claim");
+        },
+        requestImpl: async () => {
+          assert.fail("POST");
+        },
+        releaseImpl: () => {},
+      }),
+      false,
+    );
+  }
+});
+
+test("два ручных запроса во время захвата дают один POST; начавшийся ход побеждает", async () => {
+  for (const startsTurn of [false, true]) {
+    const id = fresh();
+    turn(id, [40_000]);
+    idle.parkIdleCompactionTurn(id);
+    let releaseClaim!: () => void;
+    let requests = 0;
+    let released = 0;
+    const claim = new Promise<void>((resolve) => {
+      releaseClaim = resolve;
+    });
+    const ask = () =>
+      idle.startIdleCompaction({
+        sessionId: id,
+        manual: true,
+        claimImpl: async () => {
+          await claim;
+          return true;
+        },
+        requestImpl: async () => {
+          requests++;
+          return true;
+        },
+        releaseImpl: () => {
+          released++;
+        },
+      });
+    const pending = ask();
+    assert.equal(await ask(), false);
+    if (startsTurn) idle.openIdleCompactionTurn(id);
+    releaseClaim();
+    assert.equal(await pending, !startsTurn);
+    assert.equal(requests, startsTurn ? 0 : 1);
+    assert.equal(released, startsTurn ? 1 : 0);
+  }
+});
+
+test("новый ход завершился во время ручного захвата: POST ждёт его парковки", async () => {
+  const id = fresh();
+  turn(id, [40_000]);
+  idle.parkIdleCompactionTurn(id);
+  let released = false;
+  assert.equal(
+    await idle.startIdleCompaction({
+      sessionId: id,
+      manual: true,
+      claimImpl: () => {
+        turn(id, [40_000]);
+        return true;
+      },
+      requestImpl: async () => {
+        assert.fail("POST до новой парковки");
+      },
+      releaseImpl: () => {
+        released = true;
+      },
+    }),
+    false,
+  );
+  assert.equal(released, true);
+  assert.equal(idle.idleCompactionAwaitingPark(id), true);
 });

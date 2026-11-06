@@ -106,7 +106,7 @@ test("unknown settings.language falls through to env then default", () => {
   assert.equal(probe({ language: "de" }).lang, "ru");
 });
 
-test("COMMANDS is the single source: menu first, all control commands present", () => {
+test("COMMANDS is the single source: menu first, advertised commands present", () => {
   const { commands } = probe();
   assert.equal(commands[0], "menu");
   const expected = [
@@ -136,6 +136,8 @@ test("helpText renders /menu and respects the language", () => {
   assert.match(ru, /^Команды Iva:/);
   assert.match(ru, /\/menu — меню настроек/);
   assert.match(ru, /\/help — этот список/);
+  assert.doesNotMatch(ru, /\/compact/);
+  assert.doesNotMatch(en, /\/compact/);
 });
 
 test("helpText keeps the argument hints from the original help", () => {

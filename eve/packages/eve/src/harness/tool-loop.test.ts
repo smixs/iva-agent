@@ -810,6 +810,114 @@ function createGatewayModelCallError(input: {
 }
 
 describe("createToolLoopHarness", () => {
+  describe("Iva background work ceilings", () => {
+    const summary = "Остановилась на пределе работы. Вот что успела: нашла документ.";
+    const usage = (inputTokens: number) => ({
+      cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0,
+      inputTokens, outputTokens: 0, sawCost: false,
+    });
+    const context = (initial: Readonly<Record<string, string | readonly string[]>>, current = initial) => {
+      const ctx = new ContextContainer();
+      const auth = { authenticator: "iva-bearer", principalId: "iva", principalType: "service" as const };
+      ctx.set(InitiatorAuthKey, { ...auth, attributes: initial });
+      ctx.set(AuthKey, { ...auth, attributes: current });
+      return ctx;
+    };
+    const activeSession = (overrides?: Partial<HarnessSession>) => setHarnessEmissionState(createTestSession(overrides), {
+      sessionStarted: true, sequence: 0, stepIndex: 1, turnId: "turn_0",
+    });
+    const prepare = () => setupMockAgent({
+      finishReason: "stop", text: summary, toolCalls: [], toolResults: [],
+      response: { messages: [{ role: "assistant", content: summary }] },
+      usage: { inputTokens: 20, outputTokens: 10 },
+    });
+    for (const mode of ["conversation", "task"] as const) {
+      for (const cause of ["steps", "input"] as const) {
+        it(`delivers a successful final summary without tools at the ${cause} ceiling in ${mode}`, async () => {
+          prepare();
+          const { emit, events } = createEventCollector();
+          const run = createToolLoopHarness(createTestConfig(mode, emit));
+          const session = setTurnUsageState(activeSession({
+            state: { "eve.harness.modelCalls": cause === "steps" ? 39 : 2 },
+          }), { ...usage(cause === "input" ? 4_000_000 : 100), session: usage(4_000_000), turnId: "turn_0" });
+          const result = await contextStorage.run(context({
+            iva_max_steps: "40", iva_max_input_tokens: "4000000",
+          }), () => run(session));
+          const settings = vi.mocked(ToolLoopAgent).mock.calls[0]![0];
+          expect(settings.tools).toEqual({});
+          const instance = vi.mocked(ToolLoopAgent).mock.results[0]!.value;
+          const messages = (instance.stream.mock.calls[0] ?? instance.generate.mock.calls[0])[0].messages;
+          expect(messages.at(-1).content).toContain(cause === "input" ? "4000000 input tokens" : "40 steps");
+          expect(messages.at(-1).content).toContain("owner's language");
+          expect(messages.at(-1).content).toContain("never QUIET");
+          expect(events).toContainEqual(expect.objectContaining({
+            type: "message.completed", data: expect.objectContaining({ message: summary }),
+          }));
+          expect(events).toContainEqual(expect.objectContaining({
+            type: "turn.completed", data: expect.objectContaining({ reason: "step-limit" }),
+          }));
+          expect(events.some(e => e.type === "turn.failed" || e.type === "input.requested")).toBe(false);
+          if (mode === "task") expect(result.next).toMatchObject({ done: true, output: summary });
+          else expect(result.next).toBeNull();
+        });
+      }
+    }
+    it.each([
+      [{ iva_max_input_tokens: "10" }, { iva_max_input_tokens: "100" }, 10, true],
+      [{ iva_max_input_tokens: "100" }, { iva_max_input_tokens: "10" }, 10, true],
+      [{ iva_max_input_tokens: "100" }, { iva_max_input_tokens: "10" }, 9, false],
+      [{ iva_max_input_tokens: "0" }, {}, 1, true],
+      [{ iva_max_input_tokens: "NaN" }, {}, 1, true],
+      [{ iva_max_input_tokens: "2\n" }, {}, 1, true],
+      [{}, {}, 40_000_000, false],
+    ])("uses the stricter authenticated input ceiling: %j / %j", async (initial, current, tokens, capped) => {
+      prepare();
+      const run = createToolLoopHarness(createTestConfig());
+      const session = setTurnUsageState(activeSession(), {
+        ...usage(tokens), session: usage(tokens), turnId: "turn_0",
+      });
+      await contextStorage.run(context(initial, current), () => run(session));
+      expect(Object.keys(vi.mocked(ToolLoopAgent).mock.calls[0]![0].tools ?? {})).toEqual(capped ? [] : ["add"]);
+    });
+    it("counts every paid input across durable steps even when history shrinks", async () => {
+      const { emit, events } = createEventCollector();
+      const run = createToolLoopHarness(createTestConfig("conversation", emit));
+      const ctx = context({ iva_max_input_tokens: "4000000" });
+      let session = activeSession();
+      for (const inputTokens of [2_500_000, 2_000_000]) {
+        setupMockAgent({
+          finishReason: "tool-calls", text: "", usage: { inputTokens, outputTokens: 1 },
+          toolCalls: [{ input: {}, toolCallId: "add-1", toolName: "add" }],
+          toolResults: [{ toolCallId: "add-1", toolName: "add", output: "42" }],
+          response: { messages: [
+            { role: "assistant", content: [{ type: "tool-call", input: {}, toolCallId: "add-1", toolName: "add" }] },
+            { role: "tool", content: [{ type: "tool-result", toolCallId: "add-1", toolName: "add", output: { type: "text", value: "42" } }] },
+          ] },
+        });
+        const step = await contextStorage.run(ctx, () => run(session));
+        expect(typeof step.next).toBe("function");
+        // Compaction replaces history; the durable token totals still belong to this turn.
+        session = { ...step.session, history: [{ role: "user", content: "Compacted history" }] };
+      }
+      expect(getSessionTokenUsage(session).inputTokens).toBe(4_500_000);
+      prepare();
+      await contextStorage.run(ctx, () => run(session));
+      expect(vi.mocked(ToolLoopAgent).mock.calls.map(([settings]) => Object.keys(settings.tools ?? {})))
+        .toEqual([["add"], ["add"], []]);
+      expect(events).toContainEqual(expect.objectContaining({ type: "turn.completed", data: expect.objectContaining({ reason: "step-limit" }) }));
+    });
+    it("starts a fresh input counter for a new turn", async () => {
+      prepare();
+      const run = createToolLoopHarness(createTestConfig());
+      const session = setTurnUsageState(activeSession(), {
+        ...usage(4_000_000), session: usage(4_000_000), turnId: "old-turn",
+      });
+      const result = await contextStorage.run(context({ iva_max_input_tokens: "4000000" }),
+        () => run(session, { message: "new work" }));
+      expect(Object.keys(vi.mocked(ToolLoopAgent).mock.calls[0]![0].tools ?? {})).toEqual(["add"]);
+      expect(getSessionTokenUsage(result.session).inputTokens).toBe(4_000_020);
+    });
+  });
   it("uses one projected history view for step consumers while preserving raw history", async () => {
     setupMockAgent({
       finishReason: "stop",

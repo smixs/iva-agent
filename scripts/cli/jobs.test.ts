@@ -232,3 +232,16 @@ test("skip closes a day whose old marker sits mid-file: the night sees the day a
 
   assert.equal(markedDone(readFileSync(raw, "utf8")), true);
 });
+
+test("skip replaces the night completion marker with an explicit owner skip", async (t) => {
+  const { skip, raw } = skipHarness(t);
+  writeFileSync(
+    raw,
+    "## 10:00 [text]\nФакт\n\n<!-- processed: memory-night 2026-09-24 -->\n",
+  );
+  await skip();
+  assert.match(
+    readFileSync(raw, "utf8"),
+    /<!-- processed: skipped by owner .*-->\s*$/u,
+  );
+});

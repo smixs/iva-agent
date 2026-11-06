@@ -11,6 +11,7 @@ import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { systemdEnvironmentWords, systemdExecWords } from "./systemd-values.ts";
+import { markPluginUnit, readPluginUnitMarker } from "./plugin-unit-scope.ts";
 
 type UnitBody = { unit: string; body: string };
 type PlistOptions = {
@@ -102,6 +103,49 @@ function escapeXml(value: string): string {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&apos;");
+}
+
+/** Only the fixed fields emitted for plugin ownership, not a general plist parser. */
+export function pluginPlistFields(body: string): {
+  workingDirectory: string;
+  exec: string[];
+  environment: Record<string, string>;
+} {
+  const text = (value: string) =>
+    value.replace(
+      /&(amp|lt|gt|quot|apos);/gu,
+      (_, entity: string) =>
+        ({ amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" })[entity]!,
+    );
+  const one = (key: string, tag: string): string => {
+    const matches = [
+      ...body.matchAll(
+        new RegExp(`<key>${key}</key>\\s*<${tag}>([\\s\\S]*?)</${tag}>`, "gu"),
+      ),
+    ];
+    if (matches.length !== 1)
+      throw new Error(`missing or duplicate plist ${key}`);
+    return matches[0][1];
+  };
+  const environment: Record<string, string> = {};
+  const env = one("EnvironmentVariables", "dict");
+  for (const match of env.matchAll(
+    /<key>([^<]+)<\/key>\s*<string>([^<]*)<\/string>/gu,
+  )) {
+    const key = text(match[1]);
+    if (Object.hasOwn(environment, key))
+      throw new Error(`duplicate plist environment ${key}`);
+    environment[key] = text(match[2]);
+  }
+  return {
+    workingDirectory: text(one("WorkingDirectory", "string")),
+    environment,
+    exec: [
+      ...one("ProgramArguments", "array").matchAll(
+        /<string>([^<]*)<\/string>/gu,
+      ),
+    ].map((match) => text(match[1])),
+  };
 }
 
 function zonedParts(date: Date, timeZone: string): Record<string, number> {
@@ -352,7 +396,9 @@ export function unitToPlist(
       throw new Error(`${timer.unit}: ${String(error)}`, { cause: error });
     }
   }
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">${xml(plist)}</plist>\n`;
+  const payload = `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">${xml(plist)}</plist>\n`;
+  const identity = readPluginUnitMarker(service.body, service.unit);
+  return identity ? markPluginUnit(payload, identity) : payload;
 }
 
 export function launchdPlan(

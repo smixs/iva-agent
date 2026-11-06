@@ -6,6 +6,7 @@
 // The context is built for one invocation: it carries the parsed arguments and the already
 // loaded core (`loadPluginCore()`), so a command group takes one parameter and nothing else.
 import { existsSync, readdirSync, rmSync, statSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import type { PluginReport } from "#lib/plugin-reader.ts";
@@ -32,7 +33,7 @@ const REPLACED_PREFIX = ".replaced-";
 const LEFTOVER_GRACE_MS = 60 * 60 * 1000;
 
 /** Чем кончилась сборка версии, ради которой команду и позвали. */
-export type CodeBuild = {
+type CodeBuild = {
   /** Причина отказа, из-за которой команда обязана отменить сделанное; иначе null. */
   readonly failure: string | null;
   /**
@@ -66,7 +67,7 @@ export function pluginReadProblem(report: PluginReport): string {
   return report.diagnostics.at(-1) ?? "not a usable plugin folder";
 }
 
-export type PluginCliOptions = {
+type PluginCliOptions = {
   readonly runtime: CliRuntime;
   /** Всё из authored tree приходит уже загруженным: команда стартует и без него. */
   readonly core: PluginCore;
@@ -242,7 +243,20 @@ export function createPluginCliContext(options: PluginCliOptions) {
     return entry;
   }
 
+  async function checkDescriptions(report: PluginReport) {
+    for (const { name, dir } of report.skills) {
+      const { truncatedFrom } = core.skills.describeSkill(
+        name,
+        await readFile(join(dir, "SKILL.md"), "utf8"),
+      );
+      if (truncatedFrom === null) continue;
+      const problem = `описание скилла ${name} — ${truncatedFrom} знаков, предел ${core.skills.DESCRIPTION_CAP}; сократи до триггера "Use when…"`;
+      warn(problem);
+    }
+  }
+
   return {
+    checkDescriptions,
     runtime,
     core,
     argv,

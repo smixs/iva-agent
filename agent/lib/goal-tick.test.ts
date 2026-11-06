@@ -230,7 +230,8 @@ test("owner helpers are claimed first; maximum task fits the session request", a
   assert.equal(f.state.creates[0].headers.get("x-iva-helper"), owner.row.id);
   const check = (await s.readHelpers()).rows.find((r) => r.goal === f.goal.id)!;
   assert.ok(check.task.length <= 2000);
-  assert.ok(!check.run);
+  assert.ok(check.run);
+  assert.equal(f.state.creates.length, 2);
 });
 
 test("C4 P2 owner arriving after the tick snapshot prevents the goal claim and starts on the next tick", async (t) => {
@@ -268,11 +269,10 @@ test("C4 P2 owner arriving after the tick snapshot prevents the goal claim and s
   );
   assert.equal(f.state.creates.length, 0);
   await f.tick(now + 2);
-  assert.equal(f.state.creates.length, 1);
+  assert.equal(f.state.creates.length, 2);
   assert.equal(f.state.creates[0].headers.get("x-iva-helper"), owner.id);
-  assert.equal(
+  assert.ok(
     (await s.readHelpers()).rows.find((r) => r.goal === f.goal.id)?.run,
-    null,
   );
 });
 

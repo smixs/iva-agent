@@ -4,6 +4,8 @@ import { dirname } from "node:path";
 import { OWNER_STARTED_AT } from "./schedule-runner.ts";
 import * as s from "./helper-store.ts";
 import { traceHelper } from "./trace.ts";
+import { isEmptyModelResponse, stepLimitNotice } from "./model-response.ts";
+import { tr } from "./i18n.ts";
 import {
   foldHelperSnapshot,
   helperSummary,
@@ -43,7 +45,10 @@ export async function runHelperTick(
     row: s.HelperRow,
     state: ReturnType<typeof foldHelperSnapshot>,
     outcome = state.outcome,
-    reason = state.reason,
+    reason = stepLimitNotice(state.failureInfo, tr) ??
+      (isEmptyModelResponse(state.failureInfo)
+        ? "модель не дала ответа"
+        : state.reason),
   ) => {
     const { text, model, steps, tokens } = state;
     const data = { model, steps, tokens };

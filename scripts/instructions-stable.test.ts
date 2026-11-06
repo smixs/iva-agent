@@ -8,7 +8,7 @@
 // до динамического import. Часы подменяются mock.timers, моменты перебирает fast-check;
 // seed печатается (IVA_INSTRUCTIONS_PBT_SEED, прогонов IVA_INSTRUCTIONS_PBT_RUNS).
 import assert from "node:assert/strict";
-import { mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -23,6 +23,22 @@ const TIME_ZONE = "Asia/Tashkent";
 /** Полночь 23.09.2026 в Ташкенте (UTC+5, без перехода на летнее время). */
 const LOCAL_MIDNIGHT = Date.UTC(2026, 8, 22, 19, 0, 0);
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+test("long commands stay in the helper turn; later Reminders require the owner's request", () => {
+  const skills = readFileSync(join(INSTRUCTIONS, "15-skills.md"), "utf8")
+    .split("### Delegate long work from the owner's chat")[1]
+    .replace(/\s+/gu, " ");
+  assert.doesNotMatch(
+    skills,
+    /\bbackground\b(?!-check)|nohup|setsid|disown|detach|\s&\s|scheduled check/iu,
+  );
+  assert.match(skills, /Delegate commands[^.]*to a helper/u);
+  assert.match(
+    skills,
+    /helper waits[^.]*with bash `timeoutMs` covering the expected duration[^.]*45-minute/u,
+  );
+  assert.match(skills, /Reminder[^.]*only[^.]*owner asks/u);
+});
 
 type Resolved = { content: string; role: string };
 type Resolver = () => unknown;

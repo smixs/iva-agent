@@ -6,6 +6,7 @@ vars == <<s>>
 Deadline == 2
 Grace == 1
 Ceiling == Deadline + Grace
+RunningLimit == 3 \* HELPER_MAX_RUNNING in helper-store.ts
 Terms == {"none", "completed", "failed", "question", "authorization", "cancelled", "step-limit"}
 Stops == {"none", "closed", "deadline", "ceiling"}
 Texts == 0..3 \* 0: empty, 1/2: distinct messages, 3: quiet reply
@@ -16,6 +17,7 @@ Empty == [status |-> "pending", run |-> FALSE, claimed |-> FALSE,
   stop |-> "none", stops |-> <<>>, stopOnEnd |-> FALSE, missedCancel |-> FALSE,
   outcome |-> "none", saved |-> 0, steps |-> 0, work |-> 0,
   attempts |-> 0, delivered |-> FALSE, resetQueued |-> FALSE, commits |-> <<>>]
+\* Capacity configs use four candidates to test the running guard separately from HELPER_MAX_OPEN admission (three pending rows in code).
 Init == s = [rows |-> [h \in Helpers |-> Empty], owner |-> 1, now |-> 0,
   lastTick |-> -1, phase |-> "idle", todo |-> {}, reminderBusy |-> TRUE]
 Running == {h \in Helpers : s.rows[h].run}
@@ -56,7 +58,7 @@ Finished(row, event, text, usage, startFault, delivered, outcome) ==
 
 Claim(h) ==
   /\ s.now = 0 /\ s.rows[h].status = "pending" /\ ~s.rows[h].claimed
-  /\ Cardinality(Running) < 1
+  /\ (Cardinality(Running) < RunningLimit \/ Mutant = "no-running-cap")
   /\ s' = [s EXCEPT !.rows[h].run = TRUE, !.rows[h].claimed = TRUE,
        !.rows[h].creating = TRUE, !.rows[h].owner = s.owner, !.rows[h].fired = s.now]
 Create(h) ==
@@ -115,7 +117,8 @@ Close(h) ==
 
 \* A minute advances only after its finite tick pass. Each HTTP operation returns or times out
 \* within HELPER_CHECK_MS; the atomic row step represents these bounded calls, not a successful RPC.
-\* v7.3: a separate Schedule remains runnable while a reminder turn never returns.
+\* v7.3: the minute dispatcher returns after admission; it remains runnable while
+\* a reminder turn never returns. The shared-schedule mutant waits for that turn.
 TickStart ==
   /\ (Mutant # "shared-schedule" \/ ~s.reminderBusy)
   /\ s.phase = "idle" /\ s.lastTick < s.now
@@ -195,7 +198,12 @@ TypeOK == /\ s.reminderBusy \in BOOLEAN
   /\ \A h \in Helpers : /\ s.rows[h].status \in {"pending", "finished", "closed"}
       /\ s.rows[h].event \in Terms /\ s.rows[h].stop \in Stops /\ s.rows[h].text \in Texts
       /\ s.rows[h].run \in BOOLEAN /\ Len(s.rows[h].usage) <= 2
-OneRun == Cardinality(Running) <= 1
+RunningBounded == Cardinality(Running) <= RunningLimit
+\* Claim-only projection isolates admission from per-row outcome state space.
+CapacitySpec == Init /\ [][\E h \in Helpers : Claim(h)]_vars
+CapacityAvailable == Cardinality(Running) < RunningLimit =>
+  \A h \in Helpers : ~s.rows[h].claimed => ENABLED Claim(h)
+CapacityNotFull == Cardinality(Running) < RunningLimit
 OutcomeOnce == \A h \in Helpers : Len(s.rows[h].commits) <= 1
 StopOnce == \A h \in Helpers : s.rows[h].stop = FirstStop(s.rows[h].stops)
 StopOnlyWhileRunning == \A h \in Helpers : ~s.rows[h].stopOnEnd

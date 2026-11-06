@@ -1747,6 +1747,116 @@ const OK_CHUNK = {
   choices: [{ index: 0, delta: { content: "ok" }, finish_reason: "stop" }],
 };
 
+await test("usage fingerprints follow the provider request, not the final user text (seed 101820)", async (t) => {
+  await import("../scripts/lib/ts-esm-hooks.ts");
+  const hook = (await import("./hooks/usage.ts")).default as unknown as {
+    events: Record<string, (event: unknown, ctx: unknown) => void>;
+  };
+  const { readEntries, summarize } = await import("../scripts/lib/usage.ts");
+  const dir = mkdtempSync(join(tmpdir(), "iva-usage-fingerprint-"));
+  const previous = process.env.ASSISTANT_DATA_DIR;
+  process.env.ASSISTANT_DATA_DIR = dir;
+  t.after(() => {
+    if (previous === undefined) delete process.env.ASSISTANT_DATA_DIR;
+    else process.env.ASSISTANT_DATA_DIR = previous;
+    rmSync(dir, { recursive: true, force: true });
+  });
+  const answers: (() => Response)[] = [];
+  const bodies = captureRequests(t, answers);
+  const marker = { anthropic: { cacheControl: { type: "ephemeral" } } };
+  let step = 0;
+  async function request(
+    system: string,
+    user: string,
+    cached = "stable",
+    toolName = "lookup",
+    streaming = true,
+  ) {
+    const label = { sessionId: "fingerprint", turnId: "turn_0", step: step++ };
+    answers.push(() => (streaming ? sse([OK_CHUNK]) : chatCompletion()));
+    const model = makeTextModelOllama({
+      chatModelSeesImages: blindToImages,
+      usage: label,
+    });
+    const params = {
+      prompt: [
+        { role: "system", content: system, providerOptions: marker },
+        {
+          role: "assistant",
+          content: [{ type: "text", text: cached }],
+          providerOptions: marker,
+        },
+        {
+          role: "user",
+          content: [{ type: "text", text: user }],
+          providerOptions: marker,
+        },
+      ],
+      tools: [
+        {
+          type: "function",
+          name: toolName,
+          inputSchema: { type: "object", properties: {} },
+        },
+      ],
+    } satisfies Parameters<typeof model.doStream>[0];
+    if (streaming) {
+      const { stream } = await model.doStream(params);
+      await stream.pipeTo(new WritableStream());
+    } else await model.doGenerate(params);
+    hook.events["step.completed"](
+      {
+        data: {
+          turnId: label.turnId,
+          stepIndex: label.step,
+          usage: { inputTokens: 12, outputTokens: 1 },
+        },
+      },
+      { session: { id: label.sessionId }, channel: { kind: "http" } },
+    );
+    return readEntries(dir).at(-1)!;
+  }
+  const first = await request("system A", "user A");
+  assert.equal(first.request?.toolCount, 1);
+  for (const key of ["system", "cache", "tools"] as const)
+    assert.match(first.request[key], /^[a-f0-9]{8}$/u);
+  assert.deepEqual(
+    (await request("system A", "user B")).request,
+    first.request,
+  );
+  assert.deepEqual(
+    (await request("system A", "user C", "stable", "lookup", false)).request,
+    first.request,
+  );
+  const changedSystem = await request("system B", "user A");
+  assert.notEqual(changedSystem.request?.system, first.request?.system);
+  assert.notEqual(changedSystem.request?.cache, first.request?.cache);
+  assert.equal(changedSystem.request?.tools, first.request?.tools);
+  assert.notEqual(
+    (await request("system A", "user A", "changed")).request?.cache,
+    first.request?.cache,
+  );
+  assert.notEqual(
+    (await request("system A", "user A", "stable", "other")).request?.tools,
+    first.request?.tools,
+  );
+  console.error("[usage fingerprint property] seed 101820, runs 30");
+  await fc.assert(
+    fc.asyncProperty(fc.string(), async (user) => {
+      assert.deepEqual(
+        (await request("system A", user)).request,
+        first.request,
+      );
+    }),
+    { seed: 101820, numRuns: 30 },
+  );
+  assert.equal(bodies.length, step);
+  assert.equal(
+    summarize(readEntries(dir), { window: "today" }).totals.total,
+    step * 13,
+  );
+});
+
 void test("повтор после отказа схемы тоже уходит с проводными именами", async (t) => {
   const go = await loadOpencodeProvider();
   const bodies = captureRequests(t, [

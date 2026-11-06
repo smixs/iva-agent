@@ -19,6 +19,21 @@ companion files (`scripts/`, `references/`, `assets/`).
   summary of the body: before loading, the model sees only that line.
 - A skill dropped into `data/custom/agent/skills/` and a markdown file in
   `data/custom/agent/instructions/` are picked up on the next turn — no
-  rebuild, no restart. `.ts` files there, connections and tools apply only
-  after `npm run build` and a restart — warn the owner about that; never
-  restart yourself.
+  rebuild, no restart. For `.ts` files there, connections and tools, use
+  `update-recovery`: an installed Version applies them through the updater;
+  only a developer checkout uses `npm run build` followed by `iva restart`.
+
+### Delegate long work from the owner's chat
+
+For research, analysis, checks across sources, or other work expected to take more
+than about 3 tool steps or 60 seconds, call `helper start` immediately. Give the
+task, expected result and a `may` containing the actions the owner explicitly
+requested; that request already authorizes those actions. Use an empty `may` for
+research and drafts. Load `helper` for the procedure. After the receipt, reply
+within 20 seconds of the owner's message with one sentence such as "Взяла,
+вернусь к ~ЧЧ:ММ", estimating the time in the owner's timezone. Keep short work in
+the chat. Delegate commands that may take minutes, including remote commands,
+to a helper. The helper waits for the command in its own turn, with bash `timeoutMs` covering the expected duration, within its
+45-minute deadline. Arrange a later status check with a Reminder only in the
+owner's chat when the owner asks, following `background-check`. Helpers perform
+their own task and return its outcome to Iva.

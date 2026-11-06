@@ -20,6 +20,7 @@ import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import { isBrandedToolEntry, type DynamicToolSet } from "#tools/dynamic.js";
 import type { DynamicResolveContext } from "#dynamic/definition.js";
 import { readDurableDynamicToolCallbacks } from "#tools/durable-callbacks.js";
+import telegramCatalog from "./fixtures/telegram-tools-catalog.json" with { type: "json" };
 
 function connection(name: string): ResolvedConnectionDefinition {
   return {
@@ -201,6 +202,72 @@ describe("connection dynamic tools", () => {
 });
 
 describe("connection_search", () => {
+  it.each([
+    {
+      keywords: "records",
+      name: "get_record",
+      description: "Read entries",
+      expected: "get_record",
+    },
+    { keywords: "issues", name: "archive", description: "Read issue", expected: "archive" },
+    { keywords: "issu", name: "archive", description: "Read issues", expected: "archive" },
+    { keywords: "history", name: "is", description: "or to id", expected: undefined },
+    { keywords: "history", name: "archive", description: "is", expected: undefined },
+  ])(
+    "preserves useful partial matches without reverse infixes: $keywords / $name / $description",
+    async ({ keywords, name, description, expected }) => {
+      const result = (await executeConnectionSearch(
+        registry({
+          connections: [connection("fixture")],
+          loadTools: {
+            fixture: async () => [{ name, description, inputSchema: { type: "object" } }],
+          },
+        }),
+        { keywords },
+      )) as { tool?: string }[];
+
+      expect(result[0]?.tool).toBe(expected);
+    },
+  );
+
+  it.each([
+    "get_history read chat messages history",
+    "telegram history read messages chat get_history",
+  ])("ranks the literal tool name first on all pinned metadata: %s", async (keywords) => {
+    const tools = telegramCatalog.tools.map(({ name, description }) => ({
+      name,
+      description,
+      inputSchema: { type: "object" },
+    }));
+    const result = (await executeConnectionSearch(
+      registry({
+        connections: [connection("telegram-userbot")],
+        loadTools: { "telegram-userbot": async () => tools },
+      }),
+      { connection: "telegram-userbot", keywords, limit: 5 },
+    )) as { tool: string }[];
+
+    expect(tools).toHaveLength(116);
+    expect(result[0]?.tool).toBe("get_history");
+  });
+
+  it("finds get_chats in the first three results for expanded list chats", async () => {
+    const tools = telegramCatalog.tools.map(({ name, description }) => ({
+      name,
+      description,
+      inputSchema: { type: "object" },
+    }));
+    const result = (await executeConnectionSearch(
+      registry({
+        connections: [connection("telegram-userbot")],
+        loadTools: { "telegram-userbot": async () => tools },
+      }),
+      { connection: "telegram-userbot", keywords: "list chats", limit: 3 },
+    )) as { tool: string }[];
+
+    expect(result.map((item) => item.tool)).toContain("get_chats");
+  });
+
   it("fails when every targeted connection fails to load", async () => {
     const incident = connection("incident");
     const connectionRegistry = registry({

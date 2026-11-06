@@ -8,6 +8,8 @@ import {
   stepInputTokens,
   subagentTurnId,
   usageRecord,
+  takeUsageRequest,
+  type UsageRequest,
   type ParentLike,
 } from "../lib/usage.js";
 import {
@@ -33,6 +35,7 @@ import {
 const { name: PROVIDER, model: TEXT_MODEL } = resolveModelProvider();
 
 interface StepData {
+  request?: UsageRequest;
   providerModelId?: string;
   stepIndex: number;
   turnId: string;
@@ -106,6 +109,7 @@ function record(data: StepData, owner: StepOwner): void {
       turnId: data.turnId ?? "",
       step: data.stepIndex ?? 0,
       subagent, // undefined для top-level — JSON.stringify его опускает
+      request: data.request,
       ...parentFields(parent),
     },
     tokens,
@@ -149,6 +153,11 @@ export default defineHook({
         record(
           {
             ...inner.data,
+            request: takeUsageRequest({
+              sessionId: ctx.session.id,
+              turnId: inner.data.turnId ?? "",
+              step: inner.data.stepIndex ?? 0,
+            }),
             turnId: subagentTurnId(
               ctx.session.turn,
               event.data.subagentName,

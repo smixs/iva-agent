@@ -17,13 +17,61 @@ import { createCliRuntime } from "./runtime.ts";
 const RUNS = { numRuns: 500 };
 const ROOT = "/tmp/iva-cli-remind-test";
 
+void test("iva remind delivers model buttons through sendRichMessage", async () => {
+  const { sendTelegramHtml } = await import("../lib/telegram-send.ts");
+  const text =
+    '<tg-button-row><tg-button type="callback_data" data="Да">Да</tg-button></tg-button-row>';
+  const requests: { url: string; body: unknown }[] = [];
+  const remind = createRemindCommand(createCliRuntime(ROOT), {
+    readEnv: () =>
+      Promise.resolve({
+        TELEGRAM_BOT_TOKEN: "test-bot",
+        TELEGRAM_DIGEST_CHAT_ID: "555",
+        ASSISTANT_BEARER: "test-bearer",
+      }),
+    runAgentTurn: () =>
+      Promise.resolve({
+        status: "completed",
+        message: text,
+        feedback: () => Promise.resolve(),
+      }),
+    send: (bot, chat, reply, options) =>
+      sendTelegramHtml(bot, chat, reply, {
+        ...options,
+        fetchImpl: (url, init) => {
+          const address =
+            typeof url === "string"
+              ? url
+              : url instanceof URL
+                ? url.href
+                : url.url;
+          const body = init?.body;
+          assert.ok(typeof body === "string");
+          requests.push({
+            url: address,
+            body: JSON.parse(body),
+          });
+          return Promise.resolve(new Response("", { status: 200 }));
+        },
+      }),
+  });
+  await remind(["Пришли кнопку Да"]);
+  assert.deepEqual(requests, [
+    {
+      url: "https://api.telegram.org/bottest-bot/sendRichMessage",
+      body: { chat_id: "555", rich_message: { markdown: text } },
+    },
+  ]);
+});
+
 type AgentOutcome = "ok" | "empty" | "failed" | "throw";
 type SendResult = { ok: boolean; fellBack: boolean; error: string };
 type SendCall = readonly [
   bot: string,
   chat: string,
   text: unknown,
-  options: { readonly retryTransient?: boolean } | undefined,
+  options:
+    { readonly retryTransient?: boolean; readonly rich?: boolean } | undefined,
 ];
 
 // The turn reads its client's response as a stream, so a fake client answers with an async
@@ -144,7 +192,12 @@ void test("a failed agent turn sends the raw Reminder once", async () => {
     /Reminder fired[\s\S]*Do not send anything yourself/u,
   );
   assert.deepEqual(remind.sent, [
-    ["bot-token", "555", "⏰ Позвонить врачу", { retryTransient: true }],
+    [
+      "bot-token",
+      "555",
+      "⏰ Позвонить врачу",
+      { retryTransient: true, rich: true },
+    ],
   ]);
   assert.deepEqual(remind.messages, ["Reminder sent to Telegram"]);
 });
@@ -262,7 +315,12 @@ void test("a session reset failure does not fail a delivered Reminder", async ()
 
   assert.deepEqual(resetReasons, ["Reminder finished"]);
   assert.deepEqual(sent, [
-    ["bot-token", "555", "Короткое напоминание", { retryTransient: true }],
+    [
+      "bot-token",
+      "555",
+      "Короткое напоминание",
+      { retryTransient: true, rich: true },
+    ],
   ]);
   assert.deepEqual(messages, ["Reminder sent to Telegram"]);
 });
@@ -325,7 +383,12 @@ void test("the eve client is built from .env, not process.env", async () => {
     assert.equal(captured[0].host, "http://127.0.0.1:2222");
     assert.equal(await captured[0].auth.bearer(), "bearer-from-dotenv");
     assert.deepEqual(sent, [
-      ["bot-token", "555", "Короткое напоминание", { retryTransient: true }],
+      [
+        "bot-token",
+        "555",
+        "Короткое напоминание",
+        { retryTransient: true, rich: true },
+      ],
     ]);
     assert.deepEqual(messages, ["Reminder sent to Telegram"]);
   } finally {
@@ -390,7 +453,12 @@ void test("a lost agent turn names its cause on stderr and still delivers the ra
     assert.match(line, /^remind: agent turn failed: /u);
     assert.match(line, cause);
     assert.deepEqual(remind.sent, [
-      ["bot-token", "555", "⏰ Позвонить врачу", { retryTransient: true }],
+      [
+        "bot-token",
+        "555",
+        "⏰ Позвонить врачу",
+        { retryTransient: true, rich: true },
+      ],
     ]);
     assert.deepEqual(remind.messages, ["Reminder sent to Telegram"]);
   }

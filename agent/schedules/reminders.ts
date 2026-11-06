@@ -7,9 +7,25 @@ import { defineSchedule } from "eve/schedules";
 import { REMINDER_TICK_CRON } from "../lib/schedule-table.js";
 import { runReminderTick } from "../lib/reminder-tick.js";
 
+import { runHelperTick } from "../lib/helper-tick.js";
+
+import { dispatchModelAuth } from "../lib/model-auth-dispatch.js";
+
+let helperStep: Promise<void> | null = null;
 export default defineSchedule({
   cron: REMINDER_TICK_CRON,
   run({ waitUntil }) {
-    waitUntil(runReminderTick());
+    waitUntil(
+      Promise.allSettled([
+        dispatchModelAuth(),
+        runReminderTick({ dispatchOnly: true }),
+        runReminderTick({ command: true, dispatchOnly: true }),
+      ]),
+    );
+    helperStep ??= runHelperTick()
+      .catch((error) => console.error("helper tick:", error))
+      .finally(() => {
+        helperStep = null;
+      });
   },
 });

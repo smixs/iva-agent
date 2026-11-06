@@ -13,7 +13,6 @@ import { join } from "node:path";
 import test from "node:test";
 import {
   GITHUB_BLOB_GUARD_BYTES,
-  classifyGitPushError,
   ensureVaultGitignore,
   memoryReportProblems,
   readMemoryMaintenanceReport,
@@ -68,33 +67,6 @@ void test("oversize scan fails closed when git cannot enumerate the working tree
         }),
       }),
     /git ls-files failed: fatal: not a git repository/,
-  );
-});
-
-void test("git push errors distinguish oversize history, credentials, and other failures", () => {
-  assert.equal(
-    classifyGitPushError("remote: error: GH001: Large files detected.").kind,
-    "oversize",
-  );
-  assert.equal(
-    classifyGitPushError(
-      "remote: error: File cards/x.md exceeds GitHub's file size limit",
-    ).kind,
-    "oversize",
-  );
-  for (const stderr of [
-    "fatal: Authentication failed for 'https://github.com/x/y.git/'",
-    "fatal: could not read Username for 'https://github.com': terminal prompts disabled",
-    "git@github.com: Permission denied (publickey).",
-  ]) {
-    assert.equal(classifyGitPushError(stderr).kind, "auth");
-  }
-  assert.deepEqual(
-    classifyGitPushError("\nerror: failed to push some refs\nmore detail"),
-    {
-      kind: "other",
-      firstLine: "error: failed to push some refs",
-    },
   );
 });
 

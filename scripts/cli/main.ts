@@ -1,3 +1,4 @@
+import * as deferred from "../lib/deferred-command.ts";
 import { serviceManager } from "../lib/service-manager.ts";
 import { createAccountCommands } from "./account.ts";
 import { createConfigCommand } from "./config.ts";
@@ -8,6 +9,7 @@ import { createNotifyCommand } from "./notify.ts";
 import { createPluginCommands } from "./plugin.ts";
 import { createPostCommand } from "./post.ts";
 import { createProactiveCommand } from "./proactive.ts";
+import { createNightCommand } from "./night.ts";
 import { createRemindCommand } from "./remind.ts";
 import { createSignalCommand } from "./signal.ts";
 import { createCliRuntime } from "./runtime.ts";
@@ -118,7 +120,8 @@ ${C.b}Commands:${C.x}
   ${C.c}iva jobs skip memory-night${C.x} <date>  close a night-memory day without processing it
   ${C.c}iva remind${C.x} <text>    let the agent judge one Reminder, then send it to Telegram
   ${C.c}iva proactive${C.x} show|on|off|set <key> <value>  Watch, Brief and Insight settings
-  ${C.c}iva signal${C.x} <source> <text>  pass a plugin's Signal to Iva (a one-off Reminder now)
+  ${C.c}iva night${C.x} show|set <key> <value>  Night memory limits and ceilings
+  ${C.c}iva signal${C.x} <source> <text> [--key <k>]  pass a plugin's Signal to Iva; the same key is skipped while pending
   ${C.c}iva post${C.x} --md-file <p>  rich Telegram post to the digest chat or an allowlisted --chat
   ${C.c}iva userbot${C.x} [creds|setup|status|diagnose --json|off]  personal-account userbot proxy
   ${C.c}iva logs${C.x} [poll]     agent logs (or the Telegram bridge) -f
@@ -144,14 +147,15 @@ export function createCliMain(root: string) {
       }),
   });
   const cmdConfig = createConfigCommand(runtime, systemdLifecycle);
-  const cmdDoctor = createDoctorCommand(runtime, systemdLifecycle);
+  const cmdDoctor = createDoctorCommand(runtime, systemdLifecycle, {
+    readOnly: process.env.IVA_AGENT_TURN === "1",
+  });
   const cmdDiagnose = createDiagnoseCommand(runtime, systemdLifecycle);
   const trace = createTraceCommands(runtime);
   const cmdNotify = createNotifyCommand(runtime);
   const cmdJobs = createJobsCommand(runtime);
   const cmdRemind = createRemindCommand(runtime);
   const cmdPost = createPostCommand(runtime);
-  const cmdProactive = createProactiveCommand(runtime);
   const cmdSignal = createSignalCommand(runtime);
   const versionUpdate = createVersionUpdateCommand(runtime, systemdLifecycle);
   // The code of a plugin is built into a version, on exactly the updater's rails
@@ -182,7 +186,8 @@ export function createCliMain(root: string) {
     remind: cmdRemind,
     jobs: cmdJobs,
     post: cmdPost,
-    proactive: cmdProactive,
+    proactive: createProactiveCommand(runtime),
+    night: createNightCommand(runtime),
     signal: cmdSignal,
     start: services.cmdStart,
     stop: services.cmdStop,
@@ -210,6 +215,7 @@ export function createCliMain(root: string) {
     commands,
     cmdHelp,
     dispatch: (argv: readonly string[]) =>
+      deferred.fromTurn(runtime.dataDirAbs(), argv) ??
       dispatchCli(argv, commands, { bad, help: cmdHelp }),
   };
 }
@@ -218,5 +224,9 @@ export function main(
   root: string,
   argv: readonly string[] = process.argv.slice(2),
 ): Promise<unknown> {
+  if (argv[0] === "_deferred") {
+    const dir = createCliRuntime(root).dataDirAbs();
+    return deferred.executeDeferred(dir, root, argv[1]);
+  }
   return createCliMain(root).dispatch(argv);
 }

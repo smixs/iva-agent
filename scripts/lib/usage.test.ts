@@ -29,6 +29,30 @@ const step = (over: Partial<UsageRecord> = {}): UsageRecord => ({
   ...over,
 });
 
+void test("old and fingerprinted rows round-trip together without changing totals", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "iva-usage-compatible-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const old = step({ in: 10, out: 2, total: 12 });
+  const recent = step({
+    step: 1,
+    in: 20,
+    out: 3,
+    total: 23,
+    request: {
+      system: "12345678",
+      cache: "23456789",
+      tools: "34567890",
+      toolCount: 0,
+    },
+  });
+  appendUsage(old, dir);
+  appendUsage(recent, dir);
+  const rows = readEntries(dir);
+  assert.deepEqual(rows, [old, recent]);
+  assert.equal(summarize(rows, { window: "last" }).last?.total, 35);
+  assert.equal("request" in rows[0], false);
+});
+
 void test("last turn reports the current context, not the sum of steps", () => {
   const entries = [
     step({ step: 0, in: 104_632, out: 160, total: 104_792 }),

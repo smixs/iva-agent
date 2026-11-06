@@ -30,6 +30,7 @@ import {
   proposalFolder,
   proposalsDir,
   proposalText,
+  proposalReadmeLines,
   staleReason,
   stagingPrefix,
   sweepProposals,
@@ -132,6 +133,7 @@ export function createPluginProposalCommands(
         throw new Error(`${raw} is not a usable Agent Plugins folder`);
       }
       const name = report.manifest.name;
+      await context.checkDescriptions(report);
       // Черновик, у которого читатель что-то выбросил, владельцу не уходит: после тапа он
       // встал бы без этой части. Строки возвращаются модели — она чинит и зовёт propose снова.
       if (report.diagnostics.length > 0) {
@@ -164,6 +166,7 @@ export function createPluginProposalCommands(
       }).map(escapeRichText);
       const text = [
         proposalText(translate, escapeRichText(name), commands, files),
+        ...(await proposalReadmeLines(translate, target)),
         button(
           installButtonLabel(translate),
           `${PROPOSAL_CALLBACK_PREFIX}${digest12}`,

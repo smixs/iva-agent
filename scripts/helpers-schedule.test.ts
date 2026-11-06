@@ -4,37 +4,29 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-test("v7 helpers schedule completes while the reminder task is still waiting, with separate Nitro task names", async () => {
-  const { default: helper } = await import("../agent/schedules/helpers.ts");
-  assert.equal(helper.cron, "* * * * *");
+test("one minute Schedule keeps helpers runnable during a pending reminder turn", async () => {
   const run = promisify(execFile);
   const script = `
     import './scripts/lib/ts-esm-hooks.ts';
     import { registerHooks } from 'node:module';
     registerHooks({ load(url, ctx, next) {
-      if (url.endsWith('/agent/lib/reminder-tick.ts')) return { format:'module', source:'export const runReminderTick = () => new Promise(() => {});', shortCircuit:true };
-      if (url.endsWith('/agent/lib/helper-tick.ts')) return { format:'module', source:'export const runHelperTick = () => Promise.resolve("helper tick completed");', shortCircuit:true };
+      if (url.endsWith('/agent/lib/reminder-tick.ts')) return { format:'module', source:'export const runReminderTick = (o) => o.dispatchOnly ? Promise.resolve() : new Promise(() => {});', shortCircuit:true };
+      if (url.endsWith('/agent/lib/helper-tick.ts')) return { format:'module', source:'export const runHelperTick = () => { globalThis.helperTicks = (globalThis.helperTicks ?? 0) + 1; return Promise.resolve(); };', shortCircuit:true };
       return next(url, ctx);
     }});
-    const reminder = (await import('./agent/schedules/reminders.ts')).default;
-    const helper = (await import('./agent/schedules/helpers.ts')).default;
-    let held, done;
-    reminder.run({ waitUntil: p => held=p }); helper.run({ waitUntil: p => done=p });
-    if (helper.cron !== '* * * * *') throw Error('cron changed');
-    if (await done !== 'helper tick completed') throw Error('helper waited for reminder');
-    const { createScheduleRegistrations } = await import('./node_modules/eve/dist/src/runtime/schedules/register.js');
-    const entries = createScheduleRegistrations(['helpers','reminders'].map(name => ({ name, sourceId:'agent/schedules/'+name, logicalPath:'agent/schedules/'+name+'.ts', cron:'* * * * *' })));
-    if (entries.length !== 2 || entries[0].taskName === entries[1].taskName) throw Error('Nitro task shared');
-    console.log(JSON.stringify(entries.map(e=>e.taskName)));
+    const schedule = (await import('./agent/schedules/reminders.ts')).default;
+    for (let n=0;n<2;n++) {
+      let work; schedule.run({waitUntil:p=>work=p}); await work; await new Promise(setImmediate);
+    }
+    if (schedule.cron !== '* * * * *' || globalThis.helperTicks !== 2) throw Error('minute stalled');
+    console.log('helpers completed two ticks');
   `;
-  const result = await run(process.execPath, [
-    "--input-type=module",
-    "-e",
-    script,
-  ]);
-  const names: unknown = JSON.parse(result.stdout);
-  assert.ok(Array.isArray(names));
-  assert.equal(names.length, 2);
+  const result = await run(
+    process.execPath,
+    ["--input-type=module", "-e", script],
+    { timeout: 10000 },
+  );
+  assert.match(result.stdout, /helpers completed two ticks/);
 });
 test("v7 owner epoch is process-wide across duplicate module loads", async (t) => {
   const { OWNER_STARTED_AT: a } =
@@ -95,4 +87,22 @@ test("v7 helper header uses the common reminder client and preserves R1 failure"
   assert.equal(turn.message, "ход упал");
   assert.equal(turn.cancelled, false);
   assert.deepEqual(resets, ["Reminder finished"]);
+});
+test("R4 a pending helper step cannot hold later reminder/command minutes", async () => {
+  const script = `
+ import './scripts/lib/ts-esm-hooks.ts';import {registerHooks} from 'node:module';
+ registerHooks({load(url,ctx,next){
+ if(url.endsWith('/agent/lib/reminder-tick.ts'))return{format:'module',shortCircuit:true,source:'export const runReminderTick = o => {globalThis.ticks=(globalThis.ticks??0)+1;return Promise.resolve();}'};
+ if(url.endsWith('/agent/lib/helper-tick.ts'))return{format:'module',shortCircuit:true,source:'export const runHelperTick = () => new Promise(()=>{});'};
+ return next(url,ctx);}});
+ const schedule=(await import('./agent/schedules/reminders.ts')).default;
+ for(let n=0;n<2;n++){let work;schedule.run({waitUntil:p=>work=p});
+ const result=await Promise.race([work,new Promise(r=>setTimeout(()=>r('held'),150))]);
+ if(result==='held')throw Error('helper held the minute');}
+ if(globalThis.ticks!==4)throw Error('reminder/command minute lost');`;
+  await promisify(execFile)(
+    process.execPath,
+    ["--input-type=module", "-e", script],
+    { timeout: 2000 },
+  );
 });

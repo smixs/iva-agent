@@ -34,7 +34,7 @@ type TelegramUpdatesResponse = {
   result?: TelegramUpdate[];
 };
 
-export type NetworkChecks = Pick<
+type NetworkChecks = Pick<
   SetupBackend,
   | "ollamaModels"
   | "opencodeCheck"

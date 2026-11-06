@@ -25,7 +25,7 @@ import {
   type SetupState,
 } from "./steps.ts";
 
-export type WizardDeps = {
+type WizardDeps = {
   readonly ctx: SetupContext;
   readonly setLang: (lang: string) => void;
   /** Текущий .env (пустой, если файла нет). */
@@ -39,7 +39,7 @@ export type WizardDeps = {
   readonly closeInput: () => void;
 };
 
-export type ExistingConfiguration = {
+type ExistingConfiguration = {
   readonly prov0: string;
   readonly cat0: ProviderCatalogEntry | undefined;
   readonly provModel: string;

@@ -27,12 +27,24 @@ import { openFailures } from "#lib/open-failures.ts";
 import { childEnv, gwsBin } from "../lib/menu/gws-auth.ts";
 import { alertDue, alertResolved } from "../lib/notice-policy.ts";
 
+/** ДР Google Контактов: общие поля источника и metadata пункта Watch. */
+export type Birthday = {
+  readonly key: string;
+  readonly name: string;
+  readonly date: string;
+  readonly daysUntil: number;
+};
+
 /** Пункт Watch: ключ в `seen`, счётчик, кто прислал; у `check:` и сбоя — что сломалось (строка промпта). */
 export type WatchItem = {
   readonly key: string;
   readonly unread: number;
   readonly from: Sender;
   readonly note?: string;
+  /** Поля ДР до обработки промпта; в seen не сохраняются. */
+  readonly birthday?: Birthday;
+  readonly message_id?: number;
+  readonly topic_id?: number;
   /**
    * Сбой регулярной задачи (T3): пределы и тумблер его не держат. `essence` — существо для
    * дросселя Alert, `at` — время выхода (сдвигает `failuresSeenUpToMs` в заявке).
@@ -190,10 +202,54 @@ async function listChats(
     );
     if (rows.length >= limit)
       log(`proactive: telegram ${chatType} chats hit the limit ${limit}`);
-    for (const item of rows.map((row) => chatItem(row, botId)))
-      if (item) items.set(item.key, item);
+    for (const item of rows.map((row) => chatItem(row, botId))) {
+      if (!item) continue;
+      const metadata =
+        chatType === "group" ? await groupMessage(call, item, log) : {};
+      items.set(item.key, { ...item, ...metadata });
+    }
   }
   return [...items.values()];
+}
+
+/** Последнее сообщение группы; тему берём из канонической ссылки, обычный reply_to ей не является. */
+async function groupMessage(
+  call: CallTool,
+  item: WatchItem,
+  log: (line: string) => void,
+) {
+  let message_id: number | undefined;
+  try {
+    const chat_id = Number(item.key.slice(3));
+    const result = parseJson(
+      await call("list_messages", { chat_id, limit: 1 }),
+    ) as { results?: Array<{ id?: unknown }> } | undefined;
+    message_id = count(result?.results?.[0]?.id) || undefined;
+    if (message_id === undefined) return {};
+    const link = await call("get_message_link", { chat_id, message_id });
+    const topic_id = topicOfLink(link, item, message_id);
+    return { message_id, ...(topic_id === undefined ? {} : { topic_id }) };
+  } catch {
+    log(`proactive: telegram message metadata unavailable for ${item.key}`);
+    return message_id === undefined ? {} : { message_id };
+  }
+}
+
+/** ExportMessageLink возвращает маршрут темы. Сверяем чат и сообщение перед передачей id. */
+function topicOfLink(link: string, item: WatchItem, message_id: number) {
+  const exported = /^Link: (https:\/\/t\.me\/\S+)(?:\n|$)/u.exec(link)?.[1];
+  if (!exported) return undefined;
+  const url = new URL(exported);
+  const path = url.pathname.slice(1).split("/");
+  const peer = path.shift();
+  const matches =
+    peer === "c"
+      ? `-100${path.shift()}` === item.key.slice(3)
+      : peer === item.from.username;
+  if (!matches || path.length > 2 || Number(path.at(-1)) !== message_id)
+    return undefined;
+  const topic = path.length === 2 ? path[0] : url.searchParams.get("thread");
+  return count(Number(topic)) || undefined;
 }
 
 /** Личные чаты и группы с упоминаниями; нет токена прокси — не подключён. */
@@ -237,7 +293,11 @@ export const MAIL_QUERY =
 export type GwsRun = (
   args: readonly string[],
   timeoutMs: number,
-) => Promise<{ code: number | "missing" | "timeout"; stdout: string }>;
+) => Promise<{
+  code: number | "missing" | "timeout";
+  stdout: string;
+  stderr?: string;
+}>;
 
 function exitCode(
   error: (Error & { code?: unknown; killed?: boolean }) | null,
@@ -248,11 +308,15 @@ function exitCode(
   return typeof error.code === "number" ? error.code : 1;
 }
 
-const runGws: GwsRun = (args, timeoutMs) =>
+export const runGws: GwsRun = (args, timeoutMs) =>
   new Promise((resolve) => {
     const options = { timeout: timeoutMs, env: childEnv(), maxBuffer: 4 << 20 };
-    execFile(gwsBin(), [...args], options, (error, stdout) =>
-      resolve({ code: exitCode(error), stdout: String(stdout) }),
+    execFile(gwsBin(), [...args], options, (error, stdout, stderr) =>
+      resolve({
+        code: exitCode(error),
+        stdout: String(stdout),
+        stderr: String(stderr),
+      }),
     );
   });
 

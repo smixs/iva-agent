@@ -51,6 +51,8 @@ export type TelegramMediaPart = {
   readonly context: string[];
 };
 
+const DOWNLOAD_TIMEOUT_MS = 300_000;
+
 // getFile → скачивание байтов. Возвращает байты, либо признак >20MB, либо null.
 async function fetchTelegramFile(
   request: TelegramMediaEffects["request"],
@@ -68,11 +70,22 @@ async function fetchTelegramFile(
     return null;
   }
   const token = process.env.TELEGRAM_BOT_TOKEN ?? "";
-  const dl = await fetch(
-    `https://api.telegram.org/file/bot${token}/${filePath}`,
-  );
-  if (!dl.ok) return null;
-  return { bytes: await dl.arrayBuffer() };
+  const signal = AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS);
+  try {
+    const dl = await fetch(
+      `https://api.telegram.org/file/bot${token}/${filePath}`,
+      { signal },
+    );
+    if (!dl.ok) return null;
+    return { bytes: await dl.arrayBuffer() };
+  } catch (error) {
+    if (signal.aborted)
+      throw new Error(
+        `Telegram не отдал файл за ${DOWNLOAD_TIMEOUT_MS / 60_000} минут`,
+        { cause: error },
+      );
+    throw error;
+  }
 }
 
 export async function processMediaPart(
@@ -82,6 +95,7 @@ export async function processMediaPart(
   { dropSilent = false } = {},
 ): Promise<TelegramMediaPart> {
   const tag = `[${media.tag}]`;
+  const failures: string[] = [];
   const caption = readTelegramMessageText(raw, "").text.trim();
   const capSuffix = caption ? `\n\n${caption}` : "";
   try {
@@ -212,6 +226,8 @@ export async function processMediaPart(
               "[telegram] vision упал, оставляю файл без описания:",
               error,
             );
+            if (error instanceof Error && error.cause instanceof DOMException)
+              failures.push(sanitizeInbound(redactNotice(error.message)).text);
           }
         }
       }
@@ -225,6 +241,8 @@ export async function processMediaPart(
             "[telegram] Deepgram упал, оставляю только файл:",
             error,
           );
+          if (error instanceof Error && error.cause instanceof DOMException)
+            failures.push(sanitizeInbound(redactNotice(error.message)).text);
         }
       }
       if (media.fileUniqueId) {
@@ -298,7 +316,7 @@ export async function processMediaPart(
           : "";
     const saved = tr(`${tag} saved: ${path}`, `${tag} сохранено: ${path}`);
     const lead = fact ? `${saved}. ${fact}` : saved;
-    const context = [lead];
+    const context = [lead, ...failures];
     if (gatedVision) {
       if (visionFlagged) {
         console.error(

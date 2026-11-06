@@ -197,7 +197,6 @@ async function buildPeriod(
     description: answer.gist || id,
     topics: answer.topics,
     tags: answer.topics.length ? answer.topics : [period],
-    source: "night",
     input_hash: hash,
     ...(fallback ? { mode: "fallback" } : {}),
   };

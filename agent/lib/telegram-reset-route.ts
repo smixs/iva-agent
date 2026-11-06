@@ -7,7 +7,7 @@ export type TelegramSessionAddress = {
   conversationId?: string;
 };
 
-type ResetTarget =
+export type ResetTarget =
   | { sessionId: string; address?: never }
   | { sessionId?: never; address: TelegramSessionAddress };
 
@@ -58,7 +58,7 @@ function addressKey(address: TelegramSessionAddress): string {
   return `${address.chatId}:${address.messageThreadId ?? ""}:${address.conversationId ?? ""}`;
 }
 
-function parseTarget(value: unknown): ResetTarget | null {
+export function parseTelegramResetTarget(value: unknown): ResetTarget | null {
   if (!isRecord(value)) return null;
   const hasSessionId = Object.hasOwn(value, "sessionId");
   const hasAddress = Object.hasOwn(value, "address");
@@ -88,7 +88,7 @@ export async function handleTelegramResetRequest(
 
   let target;
   try {
-    target = parseTarget(JSON.parse(raw));
+    target = parseTelegramResetTarget(JSON.parse(raw));
   } catch {
     return new Response("invalid JSON", { status: 400 });
   }

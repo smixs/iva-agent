@@ -227,6 +227,26 @@ void test("installation settings preserve documents while listed credentials ref
   assert.equal(sent.length, 4);
 });
 
+void test("Watch proxy credentials refuse file delivery", async (t) => {
+  const before = process.env.TELEGRAM_WATCH_TOKEN;
+  const token = "fixtureWatchValueWithoutPrefix";
+  process.env.TELEGRAM_WATCH_TOKEN = token;
+  t.after(() => {
+    if (before === undefined) delete process.env.TELEGRAM_WATCH_TOKEN;
+    else process.env.TELEGRAM_WATCH_TOKEN = before;
+  });
+  const fetch = t.mock.method(globalThis, "fetch", () =>
+    Promise.resolve(new Response('{"ok":true}')),
+  );
+  const path = join(root, "attachments", "watch.txt");
+  writeFileSync(path, token);
+  const result = await sendFile({ path }, chat);
+  assert.equal(result.ok, false);
+  assert.match(result.ok ? "" : result.error, /TELEGRAM_WATCH_TOKEN/u);
+  assert.equal(JSON.stringify(result).includes(token), false);
+  assert.equal(fetch.mock.callCount(), 0);
+});
+
 void test("secret length boundaries 11, 12 and 13 apply to actual file delivery", async (t) => {
   t.mock.method(globalThis, "fetch", () =>
     Promise.resolve(new Response('{"ok":true}')),

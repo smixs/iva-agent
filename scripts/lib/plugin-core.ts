@@ -8,6 +8,7 @@
  * import here means there is one such import in the tree instead of one per command.
  */
 export type PluginCore = {
+  readonly skills: typeof import("#lib/custom-skills.ts");
   readonly reader: typeof import("#lib/plugin-reader.ts");
   readonly store: typeof import("#lib/plugin-store.ts");
   readonly config: typeof import("#lib/plugin-config.ts");
@@ -16,6 +17,7 @@ export type PluginCore = {
 
 export async function loadPluginCore(): Promise<PluginCore> {
   return {
+    skills: await import("#lib/custom-skills.ts"),
     reader: await import("#lib/plugin-reader.ts"),
     store: await import("#lib/plugin-store.ts"),
     config: await import("#lib/plugin-config.ts"),

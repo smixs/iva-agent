@@ -15,6 +15,7 @@
   "TELEGRAM_API_HASH",
   "TELEGRAM_BOT_TOKEN",
   "TELEGRAM_MCP_TOKEN",
+  "TELEGRAM_WATCH_TOKEN",
   "TELEGRAM_WEBHOOK_SECRET_TOKEN",
   "access_token",
   "client_secret",

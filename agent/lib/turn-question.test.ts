@@ -55,3 +55,19 @@ void test("writing the question does not touch updatedAt: it does not say the tu
   rememberTurnQuestion("c-5:", { text: "два", media: false });
   assert.equal(getChatStatus("c-5:")?.updatedAt, before);
 });
+
+void test("the interrupted tap captures its question before another turn can replace it", async () => {
+  const { claimInterruptedTap } = await import("./turn-question.ts");
+  const { setChatStatus } = await import("./run-status.ts");
+  setChatStatus("snapshot:", {
+    status: "idle",
+    turnQuestion: "original",
+    restartRetryData: "token",
+    restartRetryQuestion: "original",
+    restartRetryMedia: false,
+  });
+  const accepted = claimInterruptedTap("snapshot:", "token", 17);
+  setChatStatus("snapshot:", { turnQuestion: "next" });
+  assert.deepEqual(accepted, { text: "original", media: false });
+  assert.equal(claimInterruptedTap("snapshot:", "token", 18), null);
+});

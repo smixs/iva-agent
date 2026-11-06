@@ -77,7 +77,7 @@ await test("обычный финал освобождает запись ход
   assert.equal(calls.length, 0);
 });
 
-await test("отмена переписывает статус и оставляет пометку прерванного хода", async () => {
+await test("отмена освобождает статус без пометки кнопки Стоп", async () => {
   const key = runStatus.chatKeyOf("77", undefined);
   runStatus.setChatStatus(key, {
     status: "running",
@@ -90,7 +90,8 @@ await test("отмена переписывает статус и оставля
     await status.finishTelegramStatus({ telegram: tg }, "s-2", "cancelled"),
     true,
   );
-  assert.equal(runStatus.getChatStatus(key)?.wasCancelled, true);
+  assert.equal(runStatus.getChatStatus(key)?.wasCancelled, undefined);
+  assert.equal(runStatus.getChatStatus(key)?.stopPressed, undefined);
 });
 
 await test("освобождение записи после сбоя хода обходится без Bot API", async () => {

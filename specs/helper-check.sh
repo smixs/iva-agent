@@ -20,6 +20,7 @@ META=$(mktemp -d "$ROOT/.scratch/helper-tla/check.XXXXXX") || exit 2
 trap 'rm -rf "$META"' EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
+selected=${HELPER_CONFIGS:-all}
 ok=0; failed=0
 wait_load() {
   command -v sysctl >/dev/null 2>&1 || return 0
@@ -33,6 +34,7 @@ wait_load() {
 }
 check() {
   cfg=$1; expect=$2; module=${cfg%%-*}; log="$META/$cfg.log"
+  case " $selected " in ' all '|*" $cfg "*) ;; *) return 0;; esac
   workers=$WORKERS; [ "$expect" = none ] || workers=1
   echo "RUN $cfg: expected=$expect; mode=$CHECK_MODE; workers=$workers; timeout=${TLC_TIMEOUT:-600}s"
   # В переднем плане. timeout ограничивает каждый Java-процесс, TERM -> KILL через 5s.
@@ -82,6 +84,9 @@ check HelperRun-v72-snapshot-failure none || exit 2
 check HelperRun-v72-lost-id none || exit 2
 check HelperRun-v72-record-failure none || exit 2
 check HelperRun-v72-capacity none || exit 2
+check HelperRun-capacity3 none || exit 2
+check HelperRun-capacity3-reach CapacityNotFull || exit 2
+check HelperRun-no-running-cap RunningBounded || exit 2
 check HelperRun-v72-reminder-busy none || exit 2
 check HelperRun-v72-cancel-finish OutcomeJustified || exit 2
 check HelperRun-v72-no-ceiling BoundedEnd || exit 2
@@ -94,6 +99,16 @@ check HelperRun-v72-work-output WorkMeasured || exit 2
 check HelperRun-v72-no-ceiling-live NoSilentEnd || exit 2
 check HelperRun-v72-shared-schedule NoSilentEnd || exit 2
 check HelperRun-v72-detached-work NoDetachedWork || exit 2
+check HelperOutcome-slots none || exit 2
+check HelperOutcome-goal-no-eviction GoalAdmissionAvailable || exit 2
+check HelperOutcome-goal-evict-unread ProtectedKept || exit 2
+check HelperOutcome-evict-closed-blocked ClosedAdmissionAvailable || exit 2
+check HelperOutcome-evict-unread ProtectedKept || exit 2
+check HelperOutcome-evict-goal ProtectedKept || exit 2
+check HelperOutcome-evict-newest OldestEvicted || exit 2
+check HelperOutcome-close-goal ProtectedKept || exit 2
+check HelperOutcome-admission NoAdmission || exit 2
+check HelperOutcome-delivered-close NoDeliveredClose || exit 2
 check HelperOutcome-foreign-read AuthorizedReads || exit 2
 check HelperOutcome-offline-event OfflineEvent || exit 2
 check HelperOutcome-bridge-recovery none || exit 2
@@ -111,5 +126,11 @@ check HelperOutcome-early-close ClosedKept || exit 2
 check HelperOutcome-read-write ReadPure || exit 2
 check HelperOutcome-multiple NoTwoReads || exit 2
 check HelperOutcome-restart NoRepeatedRead || exit 2
+[ "$ok" -gt 0 ] || { echo 'helper-check: no configuration selected'; exit 2; }
+if [ "$selected" != all ]; then
+  wanted=0
+  for cfg in $selected; do wanted=$((wanted+1)); done
+  [ "$ok" -eq "$wanted" ] || { echo 'helper-check: unknown or duplicate configuration'; exit 2; }
+fi
 echo "helper-check: ok=$ok failed=$failed"
 [ "$failed" -eq 0 ]

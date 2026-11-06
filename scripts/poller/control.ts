@@ -1,3 +1,5 @@
+import { TELEGRAM_COMPACT_ROUTE } from "#lib/telegram-compact-route.ts";
+import { localChannelUrl } from "#lib/telegram-cancel-route.ts";
 import { botCommands, helpText, startText, tr } from "#lib/i18n.ts";
 import {
   resetTargetForControl,
@@ -22,9 +24,16 @@ import {
 } from "../lib/telegram-queue.ts";
 import type { TelegramFlowState } from "../lib/tg-flow.ts";
 import { getChatStatus } from "#lib/run-status.ts";
-import { TELEGRAM_BUTTON_TAP_FIELD } from "#lib/telegram-parts.ts";
-import { isBreakNotice, isRetryTap } from "#lib/error-humanizer.ts";
-import { turnQuestion } from "#lib/turn-question.ts";
+import {
+  TELEGRAM_BUTTON_TAP_FIELD,
+  TELEGRAM_BUTTON_TAP_DAILY_TEXT_FIELD,
+} from "#lib/telegram-parts.ts";
+import {
+  isBreakNotice,
+  isRetryTap,
+  isInterruptedTap,
+} from "#lib/error-humanizer.ts";
+import { claimInterruptedTap, turnQuestion } from "#lib/turn-question.ts";
 import { readEnvFresh } from "../lib/env-file.ts";
 import {
   formatUsageReport,
@@ -224,6 +233,7 @@ export const OUT_OF_BAND_COMMANDS = [
   "/usage",
   "/restart",
   "/new",
+  "/compact",
   "/update",
   "/model",
   "/think",
@@ -272,24 +282,33 @@ function isEveCallbackData(data: string): boolean {
 export function applyTelegramButtonTap(
   update: TelegramUpdate,
   callback: ControlCallbackQuery,
+  acceptedQuestion?: string,
 ): boolean {
   const message = callback.message;
   const chat = message?.chat;
   const from = callback.from;
   if (message === undefined || chat === undefined || from === undefined)
     return false;
+  const data = isInterruptedTap(callback.data)
+    ? callback.data.split(":", 1)[0]
+    : callback.data;
+  const context = tapContextText(message);
   const tap: TelegramUpdate = {
     update_id: update.update_id,
     message: {
       message_id: message.message_id,
       chat: { ...chat },
       from: { ...from, is_bot: false },
-      text: tapTurnText(callback.data, message, chatKey(update)),
+      text: tapTurnText(data, context, chatKey(update), acceptedQuestion),
       ...(message.date === undefined ? {} : { date: message.date }),
       ...(message.message_thread_id === undefined
         ? {}
         : { message_thread_id: message.message_thread_id }),
       [TELEGRAM_BUTTON_TAP_FIELD]: true,
+      [TELEGRAM_BUTTON_TAP_DAILY_TEXT_FIELD]: tapText(
+        data,
+        dailyTapContext(context),
+      ),
     },
   };
   if (!isTelegramQueueUpdate(tap)) return false;
@@ -302,6 +321,24 @@ export function applyTelegramButtonTap(
 // («Составить ответ») теряет, кому и о чём, и модель ищет это заново. Текст сообщения —
 // данные, не команда: он уходит ходу тем же входящим текстом и проходит inbound-Gate.
 export const TAP_CONTEXT_LIMIT = 1500;
+const TAP_DAILY_CONTEXT_LIMIT = 200;
+
+function dailyTapContext(context: string): string {
+  const firstLine = context.split(/\r\n|[\n\r\u0085\u2028\u2029]/u, 1)[0];
+  const chars = Array.from(firstLine);
+  if (firstLine === context && chars.length <= TAP_DAILY_CONTEXT_LIMIT)
+    return context;
+  return `${chars
+    .slice(0, TAP_DAILY_CONTEXT_LIMIT - 1)
+    .join("")
+    .trimEnd()}…`;
+}
+
+function tapText(data: string, context: string): string {
+  if (context === "") return data;
+  const label = tr("button under Iva's message", "кнопка под сообщением Ивы");
+  return `${data}\n\n(${label}: «${context}»)`;
+}
 
 // Текст берётся тем же чтением, что и у входящего rich-сообщения: text или caption, иначе
 // блоки rich_message (абзацы, списки, таблицы). Блок кнопок текста не несёт и не читается.
@@ -322,13 +359,12 @@ function clipTapContext(text: string): string {
 /** Текст хода по тапу: `data`, а следом в скобках текст сообщения с кнопкой, если он есть. */
 function tapTurnText(
   data: string,
-  message: TelegramMessage | undefined,
+  context: string,
   key: string | null,
+  acceptedQuestion?: string,
 ): string {
-  const context = tapContextText(message);
   if (context === "") return data;
-  const label = tr("button under Iva's message", "кнопка под сообщением Ивы");
-  return `${data}\n\n(${label}: «${context}»)${fullQuestion(data, context, key)}`;
+  return `${tapText(data, context)}${fullQuestion(data, context, key, acceptedQuestion)}`;
 }
 
 /**
@@ -341,9 +377,10 @@ function fullQuestion(
   data: string,
   context: string,
   key: string | null,
+  acceptedQuestion?: string,
 ): string {
   if (key === null || !isRetryTap(data) || !isBreakNotice(context)) return "";
-  const question = turnQuestion(key)?.text ?? "";
+  const question = acceptedQuestion ?? turnQuestion(key)?.text ?? "";
   if (question === "") return "";
   const label = tr("the question in full", "вопрос целиком");
   return `\n\n(${label}: «${question}»)`;
@@ -919,6 +956,16 @@ async function handleButtonTap(context: CallbackContext) {
 // «Уже выбрано»; тот же апдейт после write-failed проходит как свежий (specs/ButtonTap.tla).
 // Дерево снимается до applyTelegramButtonTap: он удаляет callback_query из апдейта.
 async function handleOwnerTap({ update, callback, io }: CallbackContext) {
+  const restartTap = isInterruptedTap(callback.data);
+  const key = chatKey(update);
+  const accepted =
+    restartTap && key !== null
+      ? claimInterruptedTap(key, callback.data, update.update_id)
+      : null;
+  if (restartTap && accepted === null) {
+    await io.ackImpl(callback.id, alreadyChosenText()).catch(() => {});
+    return true;
+  }
   if (isRepeatTap(tapKey(callback), update.update_id)) {
     await io.ackImpl(callback.id, alreadyChosenText()).catch(() => {});
     return true;
@@ -926,7 +973,7 @@ async function handleOwnerTap({ update, callback, io }: CallbackContext) {
   const snapshot = tapTree(callback.message);
   // Неполный конверт (нет чата, отправителя или номера сообщения) сообщением
   // стать не может: гасим тап здесь, дальше ему делать нечего.
-  if (!applyTelegramButtonTap(update, callback)) {
+  if (!applyTelegramButtonTap(update, callback, accepted?.text)) {
     await io.ackImpl(callback.id).catch(() => {});
     return true;
   }
@@ -1210,6 +1257,7 @@ const COMMAND_HANDLERS: Record<OutOfBandCommand, CommandHandler> = {
   "/usage": reportUsage,
   "/restart": resetConversation,
   "/new": resetConversation,
+  "/compact": compactConversation,
   // /update — check upstream; if newer, offer inline Update/Skip buttons. Out-of-band.
   "/update": ({ chatId, text }) =>
     handleUpdateCheck(chatId, { force: text.split(/\s+/).includes("--force") }),
@@ -1311,6 +1359,52 @@ function usageReportText(text: string): string {
     return formatUsageReport(agg);
   } catch (e: unknown) {
     return "Couldn't read the usage log: " + errorMessage(e);
+  }
+}
+
+// Та же адресация, что /new, включая ответ на сообщение бота в группе.
+async function compactConversation(command: ControlCommand) {
+  const key = chatKey(command.update);
+  const target = resetTargetFor(command.update, key);
+  if (!key || !target)
+    return replyConfirmed(
+      command.io,
+      command.chatId,
+      tr(
+        "Reply to my message to select a conversation, then use /compact.",
+        "Ответь на моё сообщение командой /compact, чтобы выбрать разговор.",
+      ),
+    );
+  try {
+    const response = await fetch(localChannelUrl(TELEGRAM_COMPACT_ROUTE), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-telegram-bot-api-secret-token": SECRET ?? "",
+      },
+      body: JSON.stringify({ chatKey: key, target }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    const result: unknown = await response.json();
+    if (
+      !response.ok ||
+      typeof result !== "object" ||
+      result === null ||
+      !("text" in result) ||
+      typeof result.text !== "string"
+    )
+      throw new Error("compact response missing text");
+    return replyConfirmed(command.io, command.chatId, result.text);
+  } catch (error) {
+    log("compact command failed:", errorMessage(error));
+    return replyConfirmed(
+      command.io,
+      command.chatId,
+      tr(
+        "Compression couldn't be confirmed. Try /compact after the chat is free.",
+        "Подтверждение сжатия пока отсутствует. Повтори /compact, когда чат освободится.",
+      ),
+    );
   }
 }
 

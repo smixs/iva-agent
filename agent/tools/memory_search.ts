@@ -40,7 +40,8 @@ interface Doc {
   path: string;
   title: string;
   meta: string; // ключевые скалярные поля фронтматтера (name/company/role/description/aliases…)
-  body: string;
+  body: string; // тело без раздела «## History»
+  history: string; // раздел «## History»: ищется только с history
   tags: string;
   status: string;
   confidence: string;
@@ -154,11 +155,13 @@ export async function loadDocs(scopeDirs: string[]): Promise<LoadedDocs> {
     const indexed = cardIndex(text, rel);
     if (indexed === null) continue;
     const { fm, meta, body } = indexed;
+    const parts = splitHistory(body);
     const doc: Doc = {
       path: rel,
       title: cardTitle(rel) || rel,
       meta,
-      body: body.slice(0, 8000),
+      body: parts.body.slice(0, 8000),
+      history: parts.history.slice(0, 8000),
       tags: fm.tags || "",
       status: (fm.status || "").toLowerCase(),
       confidence: (fm.confidence || "").toUpperCase(),
@@ -177,12 +180,103 @@ export async function loadDocs(scopeDirs: string[]): Promise<LoadedDocs> {
   return { docs, signature: fingerprint.digest("hex") };
 }
 
+// Раздел «## History» (до следующего «## ») — старые строки карточки. Без history поиск
+// по ним не идёт: иначе карточка находится по тому, что уже неверно.
+const HISTORY_HEADING = /^##[ \t]+(?:history|история)[ \t]*$/im;
+
+export function splitHistory(body: string): { body: string; history: string } {
+  const head = HISTORY_HEADING.exec(body);
+  if (!head) return { body, history: "" };
+  const rest = body.slice(head.index + head[0].length);
+  const next = /^## /m.exec(rest);
+  const end = next ? next.index : rest.length;
+  return {
+    body: body.slice(0, head.index) + rest.slice(end),
+    history: rest.slice(0, end),
+  };
+}
+
+// ё и е — одна буква и в карточке, и в запросе: «Аксёнов» находится по «Аксенов».
+export const normalizeText = (text: string): string =>
+  text.toLowerCase().replaceAll("ё", "е");
+
+// Лёгкий стеммер русского: с конца слова снимается самое длинное окончание, после которого
+// остаётся основа не короче трёх букв (у трёхбуквенного слова — двух: «Ивы» → «ив»). Дальше
+// основа ищется по началу, как и раньше: «Ильёй» → «иль» находит «Илья». Латиница не меняется.
+const RU_ENDINGS = [
+  "иями",
+  "ями",
+  "ами",
+  "ого",
+  "его",
+  "ому",
+  "ему",
+  "ыми",
+  "ими",
+  "ией",
+  "ием",
+  "иях",
+  "ая",
+  "яя",
+  "ое",
+  "ее",
+  "ие",
+  "ые",
+  "ий",
+  "ый",
+  "ой",
+  "ей",
+  "ем",
+  "ом",
+  "ам",
+  "ям",
+  "ах",
+  "ях",
+  "ую",
+  "юю",
+  "ым",
+  "им",
+  "ов",
+  "ев",
+  "ья",
+  "ью",
+  "ия",
+  "ию",
+  "ии",
+  "а",
+  "я",
+  "о",
+  "е",
+  "и",
+  "ы",
+  "у",
+  "ю",
+  "ь",
+  "й",
+];
+
+export function stemRussian(token: string): string {
+  if (!/^[а-я]+$/.test(token)) return token;
+  const min = token.length <= 3 ? 2 : 3;
+  for (const ending of RU_ENDINGS)
+    if (token.endsWith(ending) && token.length - ending.length >= min)
+      return token.slice(0, -ending.length);
+  return token;
+}
+
+// Слова, по которым запрос сам смотрит в прошлое карточек.
+const HISTORY_WORDS = /^(?:раньше|был|была|было|были|до|истори[яиюей]*)$/;
+
 // Токены запроса — язык-АГНОСТИЧНО: любые буквенно-цифровые последовательности (Unicode),
 // уникальные. Никаких стоп-слов и порогов длины: значимость слова определяется его редкостью
 // в самом вольте (IDF, см. searchMemory), а не языковыми списками. Частое слово на любом языке
 // (the / с / 的 / und) само получит нулевой вес.
+function queryWords(query: string): string[] {
+  return normalizeText(query).match(/[\p{L}\p{N}]+/gu) || [];
+}
+
 function contentTokens(query: string): string[] {
-  return [...new Set(query.toLowerCase().match(/[\p{L}\p{N}]+/gu) || [])];
+  return [...new Set(queryWords(query).map(stemRussian))];
 }
 
 // Токены → FTS5 MATCH: каждый как префиксный терм (морфология универсальна — суффиксы русского,
@@ -332,7 +426,7 @@ function rrfFuse(lists: string[][], limit: number, K = 60): string[] {
 }
 
 function snippet(body: string, tokens: string[]): string {
-  const lower = body.toLowerCase();
+  const lower = normalizeText(body);
   let at = -1;
   for (const t of tokens) {
     const i = lower.indexOf(t);
@@ -380,13 +474,18 @@ function ftsIndex(
   const db = new DatabaseSync(":memory:");
   try {
     db.exec(
-      "CREATE VIRTUAL TABLE d USING fts5(path UNINDEXED, title, meta, tags, body)",
+      "CREATE VIRTUAL TABLE d USING fts5(path UNINDEXED, title, meta, tags, body, history)",
     );
     const ins = db.prepare(
-      "INSERT INTO d(path, title, meta, tags, body) VALUES (?, ?, ?, ?, ?)",
+      "INSERT INTO d(path, title, meta, tags, body, history) VALUES (?, ?, ?, ?, ?, ?)",
     );
     for (const doc of docs)
-      ins.run(doc.path, doc.title, doc.meta, doc.tags, doc.body);
+      ins.run(
+        doc.path,
+        ...[doc.title, doc.meta, doc.tags, doc.body, doc.history].map(
+          normalizeText,
+        ),
+      );
   } catch (error) {
     // Недостроенный индекс не кэшируем и старый (рабочий) не трогаем — вызывающий уйдёт
     // в наивный поиск, а следующий вызов попробует собрать заново.
@@ -405,35 +504,42 @@ function bm25Search(
   signature: string,
   ftsQuery: string,
   limit: number,
+  history: boolean,
 ): string[] {
   const db = ftsIndex(docs, signature);
+  const match = history ? ftsQuery : `{title meta tags body} : (${ftsQuery})`;
   // Веса колонок: title/meta важнее tags важнее body (bm25 меньше = релевантнее → ORDER BY asc).
   const rows = db
     .prepare(
       "SELECT path FROM d WHERE d MATCH ? ORDER BY bm25(d, 5.0, 5.0, 2.0, 1.0) LIMIT ?",
     )
-    .all(ftsQuery, limit * 4) as Array<{ path: string }>;
+    .all(match, limit * 4) as Array<{ path: string }>;
   return rows.map((r) => r.path);
 }
 
+// Текст карточки для подстрочных проверок — тот же, что видит FTS при этом history.
+function haystack(doc: Doc, history: boolean): string {
+  return normalizeText(
+    [doc.title, doc.meta, doc.tags, doc.body, history ? doc.history : ""].join(
+      " ",
+    ),
+  );
+}
+
 // Fallback без sqlite: частота токенов, порядок по убыванию (грубо, но ход не падает).
-function naiveSearch(docs: Doc[], tokens: string[]): string[] {
+function naiveSearch(
+  docs: Doc[],
+  tokens: string[],
+  history: boolean,
+): string[] {
   const scored: Array<{ path: string; s: number }> = [];
   for (const doc of docs) {
-    const hay = (
-      doc.title +
-      " " +
-      doc.meta +
-      " " +
-      doc.tags +
-      " " +
-      doc.body
-    ).toLowerCase();
+    const hay = haystack(doc, history);
     let s = 0;
     for (const t of tokens) {
       let idx = hay.indexOf(t);
       while (idx !== -1) {
-        s += doc.title.toLowerCase().includes(t) ? 3 : 1;
+        s += normalizeText(doc.title).includes(t) ? 3 : 1;
         idx = hay.indexOf(t, idx + t.length);
       }
     }
@@ -488,15 +594,24 @@ function rankByBm25(
   signature: string,
   tokens: string[],
   topN: number,
+  history: boolean,
 ): { ranked: string[]; engine: string } {
   try {
     const ftsQuery = toFtsQuery(tokens);
-    const ranked = ftsQuery ? bm25Search(docs, signature, ftsQuery, topN) : [];
+    const ranked = ftsQuery
+      ? bm25Search(docs, signature, ftsQuery, topN, history)
+      : [];
     if (ranked.length > 0) return { ranked, engine: "bm25" };
-    return { ranked: naiveSearch(docs, tokens), engine: "naive-empty-bm25" };
+    return {
+      ranked: naiveSearch(docs, tokens, history),
+      engine: "naive-empty-bm25",
+    };
   } catch (error) {
     console.error(`[memory] BM25 упал, ищу наивно: ${String(error)}`);
-    return { ranked: naiveSearch(docs, tokens), engine: "naive-fallback" };
+    return {
+      ranked: naiveSearch(docs, tokens, history),
+      engine: "naive-fallback",
+    };
   }
 }
 
@@ -535,21 +650,13 @@ type TermWeights = {
   idfTotal: number;
 };
 
-function termWeights(tokens: string[], docs: Doc[]): TermWeights {
+function termWeights(
+  tokens: string[],
+  docs: Doc[],
+  history: boolean,
+): TermWeights {
   const hayByPath = new Map<string, string>();
-  for (const doc of docs)
-    hayByPath.set(
-      doc.path,
-      (
-        doc.title +
-        " " +
-        doc.meta +
-        " " +
-        doc.tags +
-        " " +
-        doc.body
-      ).toLowerCase(),
-    );
+  for (const doc of docs) hayByPath.set(doc.path, haystack(doc, history));
   const idf = new Map<string, number>();
   for (const t of tokens) {
     let dfc = 0;
@@ -594,13 +701,9 @@ function baseScores(
   return baseScore;
 }
 
-const STALE = new Set([
-  "superseded",
-  "archived",
-  "cancelled",
-  "inactive",
-  "reverted",
-]);
+// Отменённое и заменённое видно только с history; неактивное — в выдаче, но ниже.
+const HIDDEN = new Set(["superseded", "archived", "cancelled", "reverted"]);
+const INACTIVE = "inactive";
 
 // Link-distance реранк: якоря = топ-3 BM25-хита; BFS даёт близость каждой карточки к теме.
 function scoreHits(input: {
@@ -609,18 +712,19 @@ function scoreHits(input: {
   docs: Doc[];
   tokens: string[];
   topN: number;
+  history: boolean;
 }): MemoryAnswer {
   const K = 60;
   const graph = loadGraph();
   const anchors = input.ranked.slice(0, 3).map((p) => p.replace(/\.md$/, ""));
   const dist = bfsDistances(graph, anchors, 2);
   const baseScore = baseScores(input.ranked, dist, K);
-  const weights = termWeights(input.tokens, input.docs);
+  const weights = termWeights(input.tokens, input.docs, input.history);
   const byPath = new Map(input.docs.map((d) => [d.path, d]));
   const scored: Hit[] = [];
   for (const [path, s0] of baseScore) {
     const doc = byPath.get(path);
-    if (!doc) continue;
+    if (!doc || (HIDDEN.has(doc.status) && !input.history)) continue;
     const noext = path.replace(/\.md$/, "");
     const incoming = graph[noext]?.incoming?.length ?? 0;
     // Coverage — сильный множитель (0.3..1.3): покрыл весь смысл запроса → буст, один из многих → штраф.
@@ -630,13 +734,16 @@ function scoreHits(input: {
       cov *
       proximityOf(dist.get(noext)) *
       (1 + Math.min(incoming, 10) * 0.03);
-    if (STALE.has(doc.status)) score *= 0.3; // пессимизируем устаревшее/неактивное (findable, но ниже)
+    if (doc.status === INACTIVE) score *= 0.3;
     scored.push({
       file: doc.path,
       score: Number(score.toFixed(6)),
       status: doc.status,
       confidence: doc.confidence,
-      snippet: snippet(doc.body, input.tokens),
+      snippet: snippet(
+        input.history && doc.history ? doc.body + "\n" + doc.history : doc.body,
+        input.tokens,
+      ),
     });
   }
   scored.sort((a, b) => b.score - a.score);
@@ -652,22 +759,26 @@ async function searchMemoryInner(
     query,
     limit,
     scope,
+    history,
   }: {
     query: string;
     limit?: number;
     scope?: string[];
+    history?: boolean;
   },
   signal?: AbortSignal,
 ): Promise<MemoryAnswer> {
   const parsed = tokenizeQuery(query);
   if ("rejected" in parsed) return parsed.rejected;
+  const past =
+    history ?? queryWords(query).some((word) => HISTORY_WORDS.test(word));
   const topN = limit ?? 12;
   const { docs, signature } = await loadDocs(
     scope && scope.length ? scope : DEFAULT_DIRS,
   );
   if (docs.length === 0)
     return { count: 0, hits: [] as Hit[], note: "vault пуст или недоступен" };
-  const bm25 = rankByBm25(docs, signature, parsed.tokens, topN);
+  const bm25 = rankByBm25(docs, signature, parsed.tokens, topN, past);
   const merged = await mergeDense(bm25.ranked, bm25.engine, {
     query,
     docs,
@@ -680,6 +791,7 @@ async function searchMemoryInner(
     docs,
     tokens: parsed.tokens,
     topN,
+    history: past,
   });
 }
 
@@ -688,10 +800,12 @@ export default defineTool({
     "Поиск по долговременной памяти (карточки и саммари) вместо grep — первым делом " +
     "на «что я знаю про X», «как звали…», «когда решили…». Клади в ОДИН запрос все " +
     "известные написания сразу — русское и латинское, транслит, разговорное имя, — и " +
-    "начальную форму слова: слова ищутся по началу, поэтому словоформа и опечатка " +
-    "запросом не лечатся. Возвращает " +
+    "основную форму слова: русские окончания снимаются, ё = е, слово ищется по " +
+    "началу; опечатка запросом не лечится. Раздел «## History» и карточки " +
+    "superseded/archived/cancelled/reverted видны только с history: true " +
+    "(включается сам, если в запросе «раньше», «было», «история», «до»). Возвращает " +
     "{ file, score, status, confidence, snippet }; открывай 1–3 лучших через read_file; " +
-    "superseded/INFERRED — осторожно.",
+    "INFERRED — осторожно.",
   inputSchema: z.object({
     query: z.string().min(1).describe("Запрос: слова/имена/темы (до 64 слов)"),
     limit: z
@@ -707,6 +821,10 @@ export default defineTool({
       .describe(
         "Поддиректории vault (по умолчанию cards, summaries, weekly/monthly/yearly)",
       ),
+    history: z
+      .boolean()
+      .optional()
+      .describe("Искать и в прошлом: раздел History и отменённые карточки"),
   }),
   execute: searchMemory,
 });
@@ -721,6 +839,7 @@ export async function searchMemory(
     query: string;
     limit?: number;
     scope?: string[];
+    history?: boolean;
   },
   ctx?: { abortSignal?: AbortSignal },
 ): Promise<MemoryAnswer> {

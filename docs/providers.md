@@ -1,12 +1,12 @@
 # Providers & cost
 
-Iva runs on your server with your keys. Here is every external service it talks to, with real prices: one paid model subscription, one paid box — everything else fits a free tier. Total: about $9/mo. A subscription you already pay for (ChatGPT Plus/Pro, Claude Pro/Max) works too — then the model line costs nothing extra.
+Iva runs on your server with your keys. Here is every external service it talks to, with real prices: one paid model subscription, one paid box — everything else fits a free tier. Iva herself is free: the model and the server on the standard stack run about $14–15/mo. A subscription you already pay for (ChatGPT Plus/Pro, Claude Pro/Max) works too — then the model line costs $0 extra.
 
 ## Model providers
 
 | Provider                          | Price                        | Text models                                                                                                                                                 | Vision                                                             |
 | --------------------------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| **OpenCode Go** (ex-Zen)          | ~$5/mo                       | ~23 models fetched live at setup — `deepseek-v4-pro` (default), `kimi-k3`, `kimi-k2.7-code`, `glm-5.2`, `minimax-m3`, `qwen3.7-max`, `grok-4.5`…            | `qwen3.7-plus`, override with `OPENCODE_VISION_MODEL`              |
+| **OpenCode Go** (ex-Zen)          | ~$10/mo ($5 first month)     | ~23 models fetched live at setup — `deepseek-v4-pro` (default), `kimi-k3`, `kimi-k2.7-code`, `glm-5.2`, `minimax-m3`, `qwen3.7-max`, `grok-4.5`…            | `qwen3.7-plus`, override with `OPENCODE_VISION_MODEL`              |
 | **Ollama Cloud**                  | ~$20/mo                      | ~19 models fetched live — `deepseek-v4-pro` (default), `kimi-k3`, `glm-5.2`, `minimax-m3`, `gpt-oss:120b`…                                                  | `gemma4:31b`, override with `OLLAMA_VISION_MODEL`                  |
 | **OpenRouter**                    | pay-as-you-go                | 300+ models across vendors — pick any slug (`vendor/model`)                                                                                                 | `google/gemini-2.5-flash`, override with `OPENROUTER_VISION_MODEL` |
 | **OpenAI (ChatGPT subscription)** | your existing Plus/Pro/Team  | the models your plan exposes (`gpt-6.1-sol`, `gpt-6-sol`, `gpt-6-luna`, `gpt-5.x`), fetched live                                                            | same subscription (multimodal), no variable                        |
@@ -27,7 +27,7 @@ Those six names, spelled exactly. Anything else — `ollmaa`, `OLLAMA` — stops
 
 OpenCode Go only serves clients that identify themselves: every request carries Iva's own `User-Agent` (`iva/<version>`) and a stable conversation id in `x-opencode-session` — the eve session id, or one id per process where there is no session (declared nodes, vision). Without them Go answers `MissingSessionID` on every turn ([Go docs](https://opencode.ai/docs/go/#where-can-i-use-it)). Other providers get neither header.
 
-Start with Go: a quarter of the price, ~23 models to switch between (the wizard pulls the live list, so new ones like `kimi-k3` appear on their own). Keys, model pick and context-window settings live in [configuration.md](configuration.md).
+Start with Go: half the price, ~23 models to switch between (the wizard pulls the live list, so new ones like `kimi-k3` appear on their own). Keys, model pick and context-window settings live in [configuration.md](configuration.md).
 
 Two things about the live lists. Both catalogs churn — Ollama Cloud retired `gemma3:12b` on 2026-07-15 and Go dropped `gemini-3-flash`, so a hand-written model id in `.env` can start failing without you touching anything; if the bot goes quiet after weeks of silence on your side, re-run `iva config` and re-pick from the live list. And on Ollama Cloud the frontier tags (`kimi-k3` among them) bill as **extra usage** on top of the plan: with an empty extra-usage balance the API answers `402`, so top it up at [ollama.com/settings](https://ollama.com/settings) or stay on `deepseek-v4-pro`.
 
@@ -140,12 +140,12 @@ Optional hybrid memory search adds one more key (Jina or DeepInfra embeddings) �
 
 ## Total cost
 
-| Service             | Monthly             |
-| ------------------- | ------------------- |
-| VPS                 | $4–5                |
-| OpenCode Go         | ~$5                 |
-| Deepgram voice      | $0 — starter credit |
-| Web search (tavily) | $0 — free tier      |
-| **Total**           | **~$9/mo**          |
+| Service             | Monthly               |
+| ------------------- | --------------------- |
+| VPS                 | $4–5                  |
+| OpenCode Go         | ~$10 ($5 first month) |
+| Deepgram voice      | $0 — starter credit   |
+| Web search (tavily) | $0 — free tier        |
+| **Total**           | **~$14–15/mo**        |
 
 Prefer Ollama Cloud and the same stack lands around $25/mo. Either way the bill is flat, predictable, and paid straight to the providers.

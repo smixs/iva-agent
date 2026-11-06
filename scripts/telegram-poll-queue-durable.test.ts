@@ -15,6 +15,10 @@ import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { parseOffsetFile } from "./lib/offset-store.ts";
 import {
   normalizeQueueDocument,
+  createQueueItem,
+  loadQueueFile,
+  materializeQueueItem,
+  writeQueueFileAtomic,
   type TelegramQueueDocument,
   type TelegramQueueUpdate,
 } from "./lib/telegram-queue.ts";
@@ -692,6 +696,47 @@ test("callback_query delivery stays on the original webhook route", (t: TestCont
   assert.equal(delivery.callback_query.id, "foreign-callback-101");
   assert.deepEqual(result.offset, { offset: 102 });
   assert.deepEqual(result.inbox, { version: 1, queues: {} });
+});
+
+test("button tap daily text survives durable queue reload and materialization", async (t: TestContext) => {
+  const { applyTelegramButtonTap } = await import("./poller/control.ts");
+  const { TELEGRAM_BUTTON_TAP_DAILY_TEXT_FIELD } =
+    await import("#lib/telegram-parts.ts");
+  const dataDir = makeDataDir(t, "tap-daily");
+  const callback = {
+    id: "tap-daily",
+    data: "Keep this data 🚀",
+    from: { id: 42, is_bot: false },
+    message: {
+      message_id: 12,
+      chat: { id: 42, type: "private" },
+      text: "First line\nSecond line",
+    },
+  };
+  const update: Parameters<typeof applyTelegramButtonTap>[0] = {
+    update_id: 123,
+    callback_query: callback,
+  };
+  assert.equal(applyTelegramButtonTap(update, callback), true);
+  const daily = update.message![TELEGRAM_BUTTON_TAP_DAILY_TEXT_FIELD];
+  assert.equal(typeof daily, "string");
+  assert.ok(String(daily).endsWith("«First line…»)"));
+  const file = join(dataDir, "queue.json");
+  await writeQueueFileAtomic(file, {
+    version: 1,
+    queues: { "42:": [createQueueItem(update)] },
+  });
+  const loaded = await loadQueueFile(file, { strict: true });
+  const materialized = materializeQueueItem(
+    "42:",
+    loaded.document.queues["42:"][0],
+  );
+  assert.deepEqual(materialized, update);
+  assert.equal(
+    materialized?.message?.[TELEGRAM_BUTTON_TAP_DAILY_TEXT_FIELD],
+    daily,
+  );
+  assert.ok(materialized?.message?.text?.includes("Second line"));
 });
 
 test("a tap on a model-written button is delivered as the tapper's message on the acceptance route", (t: TestContext) => {

@@ -40,6 +40,8 @@ import {
   shouldQueueBusyUpdate,
   TELEGRAM_QUEUE_ACK_ROLLED_BACK,
   TELEGRAM_QUEUE_FATAL_DURABILITY,
+  TELEGRAM_QUEUE_ITEM_VERSION,
+  TELEGRAM_QUEUE_VERSION,
   writeQueueFileAtomic,
   type TelegramQueueDocument,
   type TelegramQueueUpdate,
@@ -275,6 +277,138 @@ void test("invalid Telegram update diagnostics identify the item without logging
   assert.equal(
     JSON.stringify(diagnostic).includes("secret message text"),
     false,
+  );
+});
+
+void test("newer queue documents refuse loading and migration without changing bytes", async (t) => {
+  const file = await queueFile(t);
+  const raw = Buffer.from(
+    '{ "version": 2, "queues": { "1:": ["сохранить"] } }\n',
+  );
+  for (const strict of [true, false]) {
+    for (const load of [loadQueueFile, migrateQueueFile]) {
+      await writeFile(file, raw);
+      await assert.rejects(
+        load(file, { strict }),
+        /записано более новой Ивой.*версия 2.*понимает 1.*обновите Иву или верните файл/,
+      );
+      assert.deepEqual(await readFile(file), raw);
+      assert.deepEqual(await readdir(dirname(file)), ["telegram-queue.json"]);
+    }
+  }
+});
+
+for (const seed of [18102026, 18102027]) {
+  void test(`PROPERTY: newer queue versions preserve arbitrary bytes (seed=${seed})`, async (t) => {
+    const file = await queueFile(t);
+    await fc.assert(
+      fc.asyncProperty(
+        fc.integer({
+          min: TELEGRAM_QUEUE_VERSION + 1,
+          max: Number.MAX_SAFE_INTEGER,
+        }),
+        fc.jsonValue(),
+        fc.boolean(),
+        async (version, queues, strict) => {
+          const raw = Buffer.from(`  ${JSON.stringify({ version, queues })}\n`);
+          for (const load of [loadQueueFile, migrateQueueFile]) {
+            await writeFile(file, raw);
+            await assert.rejects(
+              load(file, { strict }),
+              /записано более новой Ивой/,
+            );
+            assert.deepEqual(await readFile(file), raw);
+            assert.deepEqual(await readdir(dirname(file)), [
+              "telegram-queue.json",
+            ]);
+          }
+        },
+      ),
+      { seed, numRuns: 100 },
+    );
+  });
+}
+
+void test("newer queue documents preserve both files during pending acknowledgement recovery", async (t) => {
+  const file = await queueFile(t);
+  const pendingFile = `${file}.ack-pending`;
+  const current = JSON.stringify({
+    version: TELEGRAM_QUEUE_VERSION,
+    queues: {},
+  });
+  const newer = JSON.stringify({
+    version: TELEGRAM_QUEUE_VERSION + 1,
+    queues: { "1:": ["keep"] },
+  });
+  for (const strict of [true, false]) {
+    for (const [main, pending] of [
+      [current, newer],
+      [newer, current],
+    ]) {
+      await writeFile(file, main);
+      await writeFile(pendingFile, pending);
+      await assert.rejects(
+        migrateQueueFile(file, { strict }),
+        /записано более новой Ивой/,
+      );
+      assert.equal(await readFile(file, "utf8"), main);
+      assert.equal(await readFile(pendingFile, "utf8"), pending);
+      assert.deepEqual((await readdir(dirname(file))).sort(), [
+        "telegram-queue.json",
+        "telegram-queue.json.ack-pending",
+      ]);
+    }
+  }
+});
+
+void test("a newer queue item is preserved whole in the existing record quarantine", async (t) => {
+  const file = await queueFile(t);
+  const future = {
+    version: TELEGRAM_QUEUE_ITEM_VERSION + 1,
+    updateId: 10,
+    futurePayload: { text: "сохранить", extra: [1, true, null] },
+  };
+  const good = createQueueItem(privateUpdate(11, "keep working"), 1);
+  const raw = JSON.stringify({
+    version: TELEGRAM_QUEUE_VERSION,
+    queues: { "1:": [future, good] },
+  });
+  await writeFile(file, raw);
+  const logs: unknown[][] = [];
+  for (const strict of [true, false]) {
+    assert.deepEqual(
+      (
+        await loadQueueFile(file, {
+          strict,
+          logImpl: (...parts) => logs.push(parts),
+        })
+      ).document.queues,
+      { "1:": [good] },
+    );
+    assert.equal(await readFile(file, "utf8"), raw);
+  }
+  const copies = (await readdir(dirname(file))).filter((name) =>
+    name.includes(".damaged-"),
+  );
+  assert.equal(copies.length, 1);
+  const copy = JSON.parse(
+    await readFile(join(dirname(file), copies[0]), "utf8"),
+  ) as { record: unknown; reason: string };
+  assert.deepEqual(copy.record, future);
+  assert.match(copy.reason, /записано более новой Ивой.*версия 2.*понимает 1/);
+  assert.equal(logs.length, 1);
+  await enqueueQueueFile(file, "1:", privateUpdate(12, "next"), {
+    strict: true,
+  });
+  assert.deepEqual(
+    JSON.parse(await readFile(join(dirname(file), copies[0]), "utf8")),
+    copy,
+  );
+  assert.deepEqual(
+    (await loadQueueFile(file, { strict: true })).document.queues["1:"].map(
+      (item) => item.updateId,
+    ),
+    [11, 12],
   );
 });
 

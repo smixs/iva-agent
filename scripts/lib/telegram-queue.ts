@@ -301,6 +301,14 @@ export const TELEGRAM_QUEUE_FATAL_DURABILITY =
   "ETELEGRAM_QUEUE_FATAL_DURABILITY";
 export const TELEGRAM_QUEUE_ACK_PENDING_SUFFIX = ".ack-pending";
 
+class NewerQueueVersionError extends Error {
+  constructor(version: number, supported: number) {
+    super(
+      `Telegram queue: записано более новой Ивой (версия ${version}, эта Ива понимает ${supported}): обновите Иву или верните файл`,
+    );
+  }
+}
+
 export function emptyQueueDocument(): TelegramQueueDocument {
   return { version: TELEGRAM_QUEUE_VERSION, queues: Object.fromEntries([]) };
 }
@@ -330,6 +338,14 @@ function normalizeItem(
     };
   }
   const candidate = item as Record<string, unknown>;
+  if (
+    typeof candidate?.version === "number" &&
+    candidate.version > TELEGRAM_QUEUE_ITEM_VERSION
+  )
+    throw new NewerQueueVersionError(
+      candidate.version,
+      TELEGRAM_QUEUE_ITEM_VERSION,
+    );
   if (
     typeof item !== "object" ||
     item === null ||
@@ -423,6 +439,9 @@ export function normalizeQueueDocument(
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new Error("Telegram queue does not contain an object");
   }
+  const version = (value as Record<string, unknown>).version;
+  if (typeof version === "number" && version > TELEGRAM_QUEUE_VERSION)
+    throw new NewerQueueVersionError(version, TELEGRAM_QUEUE_VERSION);
   if (
     (value as Record<string, unknown>).version === TELEGRAM_QUEUE_VERSION &&
     Object.hasOwn(value, "queues")
@@ -856,7 +875,7 @@ export async function loadQueueFile(
         damaged,
       }).document;
     } catch (error) {
-      if (strict) throw error;
+      if (strict || error instanceof NewerQueueVersionError) throw error;
       const backup = `${pendingFile}.corrupt-${Date.now()}-${quarantineNonce()}`;
       await renameImpl(pendingFile, backup);
       (options.logImpl ?? console.error)(
@@ -864,6 +883,12 @@ export async function loadQueueFile(
       );
     }
     if (recovered) {
+      // Pending recovery must also preserve a newer main document.
+      try {
+        normalizeQueueDocument(JSON.parse(await readFileImpl(file, "utf8")));
+      } catch (error) {
+        if (error instanceof NewerQueueVersionError) throw error;
+      }
       await quarantineQueueRecords(file, damaged, options);
       const recoveryOptions = { ...options };
       if (typeof recoveryOptions.nonce === "function")
@@ -902,7 +927,7 @@ export async function loadQueueFile(
   try {
     normalized = normalizeQueueDocument(JSON.parse(raw), { damaged });
   } catch (error) {
-    if (strict) throw error;
+    if (strict || error instanceof NewerQueueVersionError) throw error;
     const backup = `${file}.corrupt-${Date.now()}-${quarantineNonce()}`;
     await renameImpl(file, backup);
     return {

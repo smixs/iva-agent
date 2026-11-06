@@ -17,6 +17,8 @@ import {
   utimesSync,
 } from "node:fs";
 import { join } from "node:path";
+import { escapeRichText } from "./telegram-buttons.ts";
+import { redactNotice } from "./notice.ts";
 
 type Translate = (english: string, russian: string) => string;
 
@@ -259,6 +261,42 @@ export function proposalText(
     `Plugin ${name} asks to be installed. It will run: ${run}. Files: ${files}. Installing will restart me for a minute.`,
     `Плагин ${name} просит установку. Будет запускать: ${run}. Файлов: ${files}. Установка перезапустит меня на минуту.`,
   );
+}
+
+/** Optional plain README sections; their text follows the proposal's screen and Gate. */
+export async function proposalReadmeLines(
+  tr: Translate,
+  root: string,
+): Promise<string[]> {
+  let readme: string;
+  try {
+    readme = readFileSync(join(root, "README.md"), "utf8");
+  } catch {
+    return [];
+  }
+  const lines: string[] = [];
+  for (const [en, ru] of [
+    ["Keys", "Ключи"],
+    ["Network", "Сеть"],
+  ]) {
+    const section = new RegExp(
+      `^## ${en}\\r?\\n([\\s\\S]*?)(?=^#{1,6}[ \\t]+|(?![\\s\\S]))`,
+      "mu",
+    ).exec(readme)?.[1];
+    // Drop tag/link delimiters before escaping: classic screens also parse button tags.
+    const plain = (section ?? "")
+      .replace(/[\\`<>[\]]/gu, "")
+      .replace(/\s+/gu, " ")
+      .trim();
+    const chars = Array.from(await redactNotice(plain));
+    const value = escapeRichText(
+      chars.length > MAX_LINE
+        ? `${chars.slice(0, MAX_LINE - 1).join("")}…`
+        : chars.join(""),
+    );
+    if (value) lines.push(tr(`${en}: ${value}`, `${ru}: ${value}`));
+  }
+  return lines;
 }
 
 export function installButtonLabel(tr: Translate): string {

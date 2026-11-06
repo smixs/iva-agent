@@ -159,6 +159,216 @@ test("input rejection before directory; empty may; capacity counts pending, max 
   assert.equal(new Set(rows.map((r) => r.id)).size, 3);
   await assert.rejects(stat(join(dir, "helpers")), { code: "ENOENT" });
 });
+test("full table evicts the oldest delivered helper and its directory", async (t) => {
+  const dir = await data(t);
+  const rows = [];
+  for (let i = 0; i < 20; i++) rows.push(await ready(1000 + i));
+  // Delivery order differs from insertion order.
+  for (let i = 0; i < 20; i++)
+    await s.markHelperDelivered(rows[i].id, chat, 3000 + ((i + 7) % 20));
+  const oldest = rows[13];
+  await mkdir(join(dir, "helpers", oldest.id, "out"), { recursive: true });
+  await writeFile(s.helperResultPath(oldest.id), "old result");
+  const result = await s.addHelper({ task: "next", may: "", chat }, 4000);
+  assert.ok(result.ok);
+  const state = await s.readHelpers();
+  assert.equal(state.rows.length, 20);
+  assert.equal(await s.getHelper(oldest.id), null);
+  for (const row of rows.filter((r) => r.id !== oldest.id))
+    assert.ok(state.rows.some((r) => r.id === row.id));
+  await assert.rejects(stat(join(dir, "helpers", oldest.id)), {
+    code: "ENOENT",
+  });
+});
+
+test("19 delivered and one unread keep the unread outcome on admission", async (t) => {
+  const dir = await data(t);
+  const unread = await ready();
+  await mkdir(join(dir, "helpers", unread.id), { recursive: true });
+  await writeFile(join(dir, "helpers", unread.id, "keep"), "unread");
+  const delivered = [];
+  for (let i = 0; i < 19; i++) {
+    const row = await ready(1100 + i);
+    await s.markHelperDelivered(row.id, chat, 2000 + i);
+    delivered.push(row);
+  }
+  assert.ok((await s.addHelper({ task: "next", may: "", chat }, 3000)).ok);
+  assert.equal(await s.getHelper(delivered[0].id), null);
+  assert.equal((await s.getHelper(unread.id))?.deliveredAt, null);
+  assert.equal(
+    await readFile(join(dir, "helpers", unread.id, "keep"), "utf8"),
+    "unread",
+  );
+});
+
+test("delivered close frees its row and directory, foreign chat cannot close it", async (t) => {
+  const dir = await data(t);
+  const row = await ready();
+  await s.markHelperDelivered(row.id, chat, 2000);
+  for (let i = 0; i < 19; i++) await ready(1100 + i);
+  await mkdir(join(dir, "helpers", row.id, "out"), { recursive: true });
+  await writeFile(s.helperResultPath(row.id), "delivered");
+  assert.equal((await s.closeHelper(row.id, other, 2100)).ok, false);
+  assert.ok(await s.getHelper(row.id));
+  const closed = await s.closeHelper(row.id, chat, 2100);
+  assert.ok(closed.ok);
+  assert.equal(closed.branch, "finished");
+  assert.equal(await s.getHelper(row.id), null);
+  await assert.rejects(stat(join(dir, "helpers", row.id)), { code: "ENOENT" });
+  assert.equal((await s.readHelpers()).rows.length, 19);
+  assert.ok((await s.addHelper({ task: "next", may: "", chat }, 2200)).ok);
+  assert.equal((await s.readHelpers()).rows.length, 20);
+});
+
+test("admission preserves pending, unread and Goal rows and reuses closed rows; seed 20261020", async (t) => {
+  const dir = await data(t);
+  const template = await added();
+  const { changeGoal } = await import("./goal-store.ts");
+  const goal = await changeGoal(
+    { action: "start", text: "watch", may: "" },
+    chat,
+    null,
+    1000,
+  );
+  await fc.assert(
+    fc.asyncProperty(
+      fc.array(
+        fc.record({
+          kind: fc.constantFrom(
+            "delivered",
+            "unread",
+            "goal",
+            "pending",
+            "closed",
+          ),
+          at: fc.integer({ min: 1, max: 100 }),
+        }),
+        { minLength: 20, maxLength: 20 },
+      ),
+      async (items) => {
+        const rows: s.HelperRow[] = items.map(({ kind, at }, i) => {
+          const pending = kind === "pending" && i < 3;
+          return {
+            ...template,
+            id: `h-${i.toString(16).padStart(6, "0")}`,
+            createdAt: 1000 + i,
+            goal: kind === "goal" ? goal.id : null,
+            status: pending
+              ? "pending"
+              : kind === "closed"
+                ? "closed"
+                : "finished",
+            run:
+              pending && i === 0
+                ? {
+                    firedAt: 2000,
+                    ownerStartedAt: 1,
+                    deadlineAtMs: 3000,
+                    sessionId: "s",
+                  }
+                : null,
+            outcome: pending ? null : "done",
+            finishedAt: pending ? null : 2000,
+            deliveredAt: kind === "delivered" || kind === "goal" ? at : null,
+          };
+        });
+        await writeFile(
+          join(dir, "helpers.json"),
+          JSON.stringify({ schemaVersion: 1, rows, goals: [goal] }),
+        );
+        await rm(join(dir, "helpers"), { force: true, recursive: true });
+        for (const row of rows)
+          await mkdir(join(dir, "helpers", row.id), { recursive: true });
+        const eligible = rows.filter(
+          (r) =>
+            (r.deliveredAt !== null || r.status === "closed") &&
+            r.goal === null,
+        );
+        const oldest = eligible.reduce<s.HelperRow | null>(
+          (a, b) =>
+            !a ||
+            (b.deliveredAt ?? b.finishedAt!) < (a.deliveredAt ?? a.finishedAt!)
+              ? b
+              : a,
+          null,
+        );
+        const canStart =
+          oldest !== null &&
+          rows.filter((r) => r.status === "pending").length < 3;
+        const result = await s.addHelper({ task: "next", may: "", chat }, 4000);
+        assert.equal(result.ok, canStart);
+        const state = await s.readHelpers();
+        assert.deepEqual(state.goals, [goal]);
+        assert.equal(state.rows.length, 20);
+        for (const row of rows) {
+          if (canStart && row.id === oldest.id) {
+            assert.equal(await s.getHelper(row.id), null);
+            await assert.rejects(stat(join(dir, "helpers", row.id)), {
+              code: "ENOENT",
+            });
+          } else {
+            assert.deepEqual(
+              state.rows.find((r) => r.id === row.id),
+              row,
+            );
+            assert.ok((await stat(join(dir, "helpers", row.id))).isDirectory());
+          }
+        }
+        const owned = rows.find((r) => r.goal !== null);
+        if (owned) {
+          const before = await readFile(join(dir, "helpers.json"), "utf8");
+          assert.equal((await s.closeHelper(owned.id, chat, 5000)).ok, false);
+          assert.equal(
+            await readFile(join(dir, "helpers.json"), "utf8"),
+            before,
+          );
+        }
+      },
+    ),
+    {
+      seed: 20261020,
+      numRuns: 30,
+      examples: [
+        [Array.from({ length: 20 }, () => ({ kind: "pending", at: 1 }))],
+        [Array.from({ length: 20 }, () => ({ kind: "goal", at: 1 }))],
+        [Array.from({ length: 20 }, () => ({ kind: "closed", at: 1 }))],
+        [
+          Array.from({ length: 20 }, (_, i) => ({
+            kind: i < 3 ? "pending" : "delivered",
+            at: 1,
+          })),
+        ],
+      ],
+    },
+  );
+});
+
+test("three concurrent claims survive reload, reject a fourth and reuse a finished slot", async (t) => {
+  await data(t);
+  const rows = await Promise.all([added(), added(), added()]);
+  const owner = { ownerStartedAt: 10 };
+  const claims = await Promise.all(
+    rows.flatMap((row) => [
+      s.claimHelper(row.id, owner, 1100),
+      s.claimHelper(row.id, owner, 1100),
+    ]),
+  );
+  assert.equal(claims.filter(Boolean).length, 3);
+  assert.equal((await s.readHelpers()).rows.filter((r) => r.run).length, 3);
+  assert.equal(
+    (await s.addHelper({ task: "fourth", may: "", chat }, 1200)).ok,
+    false,
+  );
+  await s.finalizeHelper(
+    rows[0].id,
+    { kind: "running", firedAt: 1100 },
+    finish,
+    1300,
+  );
+  const next = await added(1400);
+  assert.ok(await s.claimHelper(next.id, owner, 1500));
+  assert.equal((await s.readHelpers()).rows.filter((r) => r.run).length, 3);
+});
 test("claim/fired CAS, repeated client T3, first stop and finalize cannot resurrect/overwrite", async (t) => {
   const dir = await data(t);
   const a = await added();
@@ -168,7 +378,7 @@ test("claim/fired CAS, repeated client T3, first stop and finalize cannot resurr
     s.claimHelper(a.id, owner, 1100),
     s.claimHelper(b.id, owner, 1100),
   ]);
-  assert.equal(claims.filter(Boolean).length, 1);
+  assert.equal(claims.filter(Boolean).length, 2);
   const row = claims.find(Boolean)!;
   assert.equal(await s.recordHelperSession(row.id, 1099, "stale"), false);
   assert.equal(await s.recordHelperSession(row.id, 1100, "server"), true);
@@ -299,7 +509,7 @@ test("command sequences preserve capacity, stop, receipts and undelivered lifeti
           assert.ok(
             state.rows.filter((r) => r.status === "pending").length <= 3,
           );
-          assert.ok(state.rows.filter((r) => r.run).length <= 1);
+          assert.ok(state.rows.filter((r) => r.run).length <= 3);
           for (const row of state.rows) {
             assert.equal(row.may, "opaque");
             if (row.outcome) assert.equal(row.run, null);
@@ -578,4 +788,22 @@ test("REPAIR3 orphan helper survives a damaged or missing goal without quarantin
     await s.mutateHelpers(() => ({ save: true, value: null }));
     assert.deepEqual(JSON.parse(await readFile(file, "utf8")), expected);
   }
+});
+
+test("closed undelivered rows can be evicted after repeated close", async (t) => {
+  const dir = await data(t);
+  const rows = [];
+  for (let i = 0; i < 20; i++) {
+    const row = await ready(1000 + i);
+    assert.ok((await s.closeHelper(row.id, chat, 2000 + i)).ok);
+    rows.push(row);
+  }
+  assert.ok((await s.closeHelper(rows[0].id, chat, 3000)).ok);
+  await mkdir(join(dir, "helpers", rows[0].id), { recursive: true });
+  assert.ok((await s.addHelper({ task: "next", may: "", chat }, 4000)).ok);
+  assert.equal(await s.getHelper(rows[0].id), null);
+  await assert.rejects(stat(join(dir, "helpers", rows[0].id)), {
+    code: "ENOENT",
+  });
+  assert.equal((await s.readHelpers()).rows.length, 20);
 });

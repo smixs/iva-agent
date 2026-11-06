@@ -288,3 +288,61 @@ test("v7 close preserves existing stop and tells the truth; immediately requests
   assert.equal(ticks, 1);
   assert.equal((await s.getHelper(added.row.id))?.stop, "ceiling");
 });
+
+test("delivered close tells the model it is closed and removes the row", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "iva-helper-tool-delivered-"));
+  const prev = process.env.ASSISTANT_DATA_DIR;
+  process.env.ASSISTANT_DATA_DIR = dir;
+  t.after(async () => {
+    if (prev === undefined) delete process.env.ASSISTANT_DATA_DIR;
+    else process.env.ASSISTANT_DATA_DIR = prev;
+    await rm(dir, { recursive: true, force: true });
+  });
+  const s = await import("./helper-store.ts");
+  const deps = { now: 1000, tick: () => Promise.resolve() };
+  const chat = { id: "42", threadId: null };
+  for (let i = 0; i < 20; i++) {
+    assert.match(
+      await helperExecute(
+        { action: "start", task: "task", may: "" },
+        ctx(),
+        deps,
+      ),
+      /background/,
+    );
+    const row = (await readHelpers()).rows.find((r) => r.status === "pending")!;
+    await s.finalizeHelper(
+      row.id,
+      { kind: "pending", createdAt: 1000 },
+      {
+        outcome: "done",
+        summary: "result",
+        reason: null,
+        model: null,
+        steps: 1,
+        tokens: 1,
+      },
+      1001,
+    );
+    await s.markHelperDelivered(row.id, chat, 1002 + i);
+  }
+  const row = (await readHelpers()).rows[0];
+  assert.match(
+    await helperExecute(
+      { action: "start", task: "next", may: "" },
+      ctx(),
+      deps,
+    ),
+    /background/,
+  );
+  assert.equal(await s.getHelper(row.id), null);
+  const delivered = (await readHelpers()).rows.find(
+    (r) => r.deliveredAt !== null,
+  )!;
+  assert.match(
+    await helperExecute({ action: "close", id: delivered.id }, ctx(), deps),
+    /закрыто/iu,
+  );
+  assert.equal(await s.getHelper(delivered.id), null);
+  assert.equal((await readHelpers()).rows.length, 19);
+});

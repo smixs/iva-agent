@@ -31,6 +31,7 @@ A check observes a job; it does not keep a model turn open until the job finishe
    back. Restore the configured provider, then check the next run. `iva jobs ack`
    acknowledges a failure; it does not perform the missing work. If bytes are
    actually missing, preserve the files and Git evidence and load `report-problem`.
+   The night raises its own model limits and Git wait within `iva night show`; leave caches and limits intact, and at a ceiling ask the owner to raise it with `iva night set`.
 
 Existing Watch and Brief read failures of user timer services and installed
 plugin/MCP services. They do not supervise arbitrary detached processes, detect

@@ -74,6 +74,19 @@ const buttonsOf = (text: string): Array<[string, string]> =>
 
 const labels = (view: View) => buttonsOf(view.text);
 
+test("proactive skills read current times and menu keeps time constants in proactive-config", () => {
+  const skill = (name: string) =>
+    readFileSync(`agent/skills/${name}/SKILL.md`, "utf8");
+  for (const name of ["brief", "watch", "insight"])
+    assert.match(skill(name), /iva proactive show/u);
+  assert.doesNotMatch(skill("brief").split("\n")[2], /\d{2}:\d{2}/u);
+  assert.doesNotMatch(skill("watch").split("## Settings")[1], /\d{2}:\d{2}/u);
+  assert.doesNotMatch(
+    readFileSync("scripts/lib/menu/notices.ts", "utf8"),
+    /["'`]\d{2}:\d{2}["'`]/u,
+  );
+});
+
 test("reports render off and Watch on on a fresh installation, in either language", () => {
   rmSync(settingsPath, { force: true });
 
@@ -479,4 +492,79 @@ test("classic menu: [reports, writes], [Insight], the times row, [‹ Menu]; eve
     for (const [, data] of labels(view))
       assert.ok(Buffer.byteLength(data) <= 64, data);
   }
+});
+
+test("settings drive CLI, menu and tick despite legacy state times (seed 20261019)", async (t) => {
+  const { parseProactive } = await import("#lib/proactive-config.ts");
+  const { createProactiveCommand } = await import("../../cli/proactive.ts");
+  const { initialState } = await import("../../proactive/state.ts");
+  const { runProactiveTick } = await import("../../proactive/tick.ts");
+  const out: string[] = [];
+  t.mock.method(console, "log", (line: string) => out.push(line));
+  const cmd = createProactiveCommand({
+    ok: () => {},
+    dataDirAbs: () => dataDir,
+    readEnv: () => ({ ASSISTANT_TIMEZONE: "UTC" }),
+  });
+  await fc.assert(
+    fc.asyncProperty(
+      fc.constantFrom("brief", "insight"),
+      fc.integer({ min: 8, max: 20 }),
+      fc.constantFrom(0, 30),
+      fc.jsonValue(),
+      async (kind, hour, minute, legacy) => {
+        const time = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+        const settings = {
+          proactive: {
+            briefTimes: kind === "brief" ? [time] : [],
+            insightTimes: kind === "insight" ? [time] : [],
+          },
+        };
+        writeSettingsFile(settings);
+        const now = Date.UTC(2026, 9, 19, hour, minute);
+        const state = initialState(now);
+        writeFileSync(
+          proactivePath,
+          JSON.stringify({
+            ...state,
+            briefTimes: legacy,
+            insightTimes: legacy,
+          }),
+        );
+        out.length = 0;
+        await cmd(["show"]);
+        assert.ok(out.includes(`${kind}Times: ${time}`));
+        const text = screen.render({ page: 0 }, makeContext("en")).text;
+        assert.ok(
+          text.includes(
+            `${kind === "brief" ? "Daily brief:" : "Insight: every day at"} ${time}`,
+          ),
+        );
+        const turns: string[] = [];
+        assert.equal(
+          await runProactiveTick(now, {
+            config: () => parseProactive(settings),
+            timeZone: "UTC",
+            statePath: proactivePath,
+            sources: [],
+            runTurn: (_prompt, source) => {
+              turns.push(source);
+              return Promise.resolve({
+                status: "completed",
+                message: "QUIET",
+                feedback: () => Promise.resolve(),
+              });
+            },
+            send: () => Promise.resolve({ ok: true, error: "" }),
+            translate: () => Promise.resolve((en) => en),
+            log: () => {},
+          }),
+          0,
+        );
+        assert.deepEqual(turns, [kind]);
+      },
+    ),
+    { seed: 20261019, numRuns: 50 },
+  );
+  rmSync(proactivePath, { force: true });
 });

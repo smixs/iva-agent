@@ -553,6 +553,12 @@ const INTERNAL_PATH_PATTERNS: readonly Pattern[] = [
   ["dot_env_content", /^\w+_(?:KEY|TOKEN|SECRET|PASSWORD)\s*=\s*.+$/gm],
 ];
 
+// Spark tokens open a message only in the owner's Spark app and account.
+const NON_SECRET_DEEP_LINK_PREFIXES = ["sparkmailapp.com/dpl/"];
+const NON_SECRET_DEEP_LINK_PATTERN = NON_SECRET_DEEP_LINK_PREFIXES.map(
+  (prefix) => prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+).join("|");
+
 const EXFIL_PATTERNS: readonly Pattern[] = [
   [
     "markdown_image_exfil",
@@ -564,7 +570,10 @@ const EXFIL_PATTERNS: readonly Pattern[] = [
   ],
   [
     "url_with_secret_param",
-    /https?:\/\/[^\s]*[?&](?:token|key|secret|api_key|password|auth)=[^\s&]{8,}/gi,
+    new RegExp(
+      String.raw`https?://(?!(?:${NON_SECRET_DEEP_LINK_PATTERN}))[^\s]*[?&](?:token|key|secret|api_key|password|auth)=[^\s&]{8,}`,
+      "gi",
+    ),
   ],
 ];
 

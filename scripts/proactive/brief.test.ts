@@ -35,6 +35,34 @@ const MIDNIGHT = Date.UTC(2026, 9, 4, 19, 0);
 const at = (hh: number, mm = 0) => MIDNIGHT + hh * HOUR + mm * MIN;
 const DAY = "2026-10-05";
 
+for (const english of [false, true])
+  test(`empty-response turn.failed gives a readable Brief failure, English=${english}`, async () => {
+    const { reminderFromEvents } =
+      await import("../fixtures/reminder-events.test-fixture.ts");
+    const h = harness();
+    h.english = english;
+    h.reply = await reminderFromEvents([
+      {
+        type: "turn.failed",
+        data: {
+          message: "The model did not return a response",
+          details: { semanticErrorId: "empty-model-response" },
+        },
+      },
+      { type: "session.waiting" },
+    ]);
+    assert.equal(await runProactiveTick(at(8, 30), h.deps), 1);
+    assert.deepEqual(h.sent, [
+      {
+        source: "brief",
+        part: english
+          ? "The model gave no response. The review was not prepared; I'll try next time."
+          : "Модель не дала ответа — обзор не собран, попробую в следующий раз.",
+      },
+    ]);
+    assert.ok(h.logs.some((l) => l.includes("brief turn failed:")));
+  });
+
 type Sent = { readonly part: string; readonly source: string };
 
 type Harness = {
@@ -538,3 +566,21 @@ test(`Brief: one per slot on any sequence of late, skipped and failing ticks (se
     { seed: SEED, numRuns: 60 },
   );
 });
+
+for (const english of [false, true])
+  test(`r339 brief step ceiling reaches the owner, English=${english}`, async () => {
+    const { failedModelEvents, reminderFromEvents } =
+      await import("../fixtures/reminder-events.test-fixture.ts");
+    const h = harness();
+    h.english = english;
+    h.reply = await reminderFromEvents(failedModelEvents());
+    assert.equal(await runProactiveTick(at(8, 30), h.deps), 1);
+    assert.deepEqual(
+      h.sent.map((s) => s.part),
+      [
+        english
+          ? "The review was not prepared. Stopped after 40 steps without a final summary."
+          : "Обзор не собран. Остановилась на 40 шагах и не успела подвести итог.",
+      ],
+    );
+  });

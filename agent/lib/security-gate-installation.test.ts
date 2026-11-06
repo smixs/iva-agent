@@ -1,5 +1,6 @@
 import "../../scripts/fixtures/no-host-env.ts";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import fc from "fast-check";
 import secretKeyInventory from "../skills/security-defense/outbound-sensitive-keys.json" with { type: "json" };
@@ -15,9 +16,37 @@ const env = {
   OLLAMA_API_KEY: "fixtureOllamaValueWithoutPrefix",
   DEEPGRAM_API_KEY: "fixtureDeepgramValueWithoutPrefix",
   TELEGRAM_API_HASH: "fixtureTelegramHashWithoutPrefix",
+  TELEGRAM_WATCH_TOKEN: "fixtureWatchValueWithoutPrefix",
 };
+
+await test("secret-like .env.example keys, including commented keys, are inventoried", () => {
+  const example = readFileSync(
+    new URL("../../.env.example", import.meta.url),
+    "utf8",
+  );
+  const settings = new Map([
+    ["CLAUDE_SESSION_CWD", "CLI working directory for prompt caching"],
+    ["DEEPGRAM_KEYTERMS", "speech-recognition vocabulary"],
+  ]);
+  const keys = [
+    ...example.matchAll(/^\s*(?:#\s*)?([A-Za-z_][A-Za-z\d_]*)\s*=/gmu),
+  ].map((match) => match[1]);
+  assert.ok(keys.length > 30, "read the installation keys");
+  const missing = keys.filter(
+    (key) =>
+      /TOKEN|KEY|SECRET|PASSWORD|BEARER|SESSION|HASH/u.test(key) &&
+      !settings.has(key) &&
+      !secretKeyInventory.includes(key),
+  );
+  assert.deepEqual(
+    missing,
+    [],
+    `missing outbound secrets: ${missing.join(", ")}`,
+  );
+});
+
 function fixture(t: test.TestContext) {
-  for (const name of secretKeyInventory) {
+  for (const name of new Set([...secretKeyInventory, ...Object.keys(env)])) {
     const before = process.env[name];
     const value = env[name as keyof typeof env];
     if (value === undefined) delete process.env[name];
@@ -48,6 +77,22 @@ await test("installation secrets are gated bare, in code and Markdown tables", a
     }
   }
 });
+await test("installation secrets inside Spark deep links are redacted", (t) => {
+  fixture(t);
+  for (const value of Object.values(env)) {
+    const input = `https://sparkmailapp.com/dpl/bl?token=${value}`;
+    const result = scanOutbound(input);
+    assert.equal(result.clean, false);
+    assert.equal(
+      result.text,
+      "https://sparkmailapp.com/dpl/bl?token=[REDACTED]",
+    );
+    assert.ok(
+      result.findings.some((finding) => finding.name === "installation_secret"),
+    );
+  }
+});
+
 await test("ordinary replies survive installation-secret checks (seed 101301)", (t) => {
   fixture(t);
   const before = process.env.IVA_QA_ORDINARY_OUTPUT;

@@ -14,10 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import fc from "fast-check";
-import { readCustomSkills } from "./custom-skills.ts";
-
-// Тот же предел, что в agent/lib/custom-skills.ts:43.
-const DESCRIPTION_CAP = 120;
+import { DESCRIPTION_CAP, readCustomSkills } from "./custom-skills.ts";
 const SEED = 20_260_912;
 
 function hasLoneSurrogate(value: string): boolean {

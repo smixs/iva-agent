@@ -83,7 +83,7 @@ void test("draft starts with Thinking, can_stop and a numeric id; typing pulses 
     { callId: "a", toolName: "bash", input: { command: "sleep 60" } },
   ]);
   await f.advance(1000);
-  assert.match(f.text(), /⚙ <code>bash: sleep 60<\/code>/u);
+  assert.match(f.text(), /⚙ <code>bash: sleep<\/code>/u);
   for (let i = 0; i < 4; i++) await f.advance(4500);
   await f.advance(2000);
   assert.equal(f.drafts().length, 3);
@@ -92,6 +92,114 @@ void test("draft starts with Thinking, can_stop and a numeric id; typing pulses 
   const count = f.calls.length;
   await f.advance(40_000);
   assert.equal(f.calls.length, count);
+});
+
+void test("d15: hints keep only tool and program names, including shell prefixes", async (t) => {
+  const f = setup(t);
+  await f.advance(0);
+  const cases: Array<[string, Record<string, unknown>, string]> = [
+    [
+      "read_file",
+      { path: "/tmp/private-contract.pdf", query: "private request" },
+      "read_file",
+    ],
+    [
+      "web_search",
+      { query: "private request", url: "https://private.example/query" },
+      "web_search",
+    ],
+    [
+      "bash",
+      {
+        command:
+          "TOKEN='private value' curl --data private https://private.example",
+      },
+      "bash: curl",
+    ],
+    [
+      "bash",
+      { command: 'cd "/tmp/private dir" && /usr/bin/curl private' },
+      "bash: curl",
+    ],
+    [
+      "bash",
+      {
+        command:
+          "env -i TOKEN=private timeout --foreground 10s sudo -n -u nobody /usr/bin/curl private",
+      },
+      "bash: curl",
+    ],
+    [
+      "bash",
+      {
+        command:
+          'TOKEN=private cd -- /tmp/private && env NEXT=value "curl" private',
+      },
+      "bash: curl",
+    ],
+    ["bash", { command: '"/usr/bin/curl" private' }, "bash: curl"],
+    ["bash", { command: "curl; private" }, "bash: curl"],
+    ["bash", { command: '"https://private.example/secret" private' }, "bash"],
+    ["bash", { command: "sudo --unknown private curl" }, "bash"],
+    ["bash", { command: "env -u private curl" }, "bash"],
+    ["bash", { command: "timeout -s private 3 curl" }, "bash"],
+    ["bash", { command: "$PROGRAM private" }, "bash"],
+    ["bash", { command: "TOKEN=private" }, "bash"],
+    ["bash", { command: "cd /tmp/private" }, "bash"],
+  ];
+  for (const [toolName, input, expected] of cases) {
+    f.stream.requested(0, [{ callId: "private", toolName, input }]);
+    await f.advance(1000);
+    assert.equal(f.text(), `⚙ <code>${expected}</code>`, JSON.stringify(input));
+  }
+});
+
+void test("d15: arbitrary arguments cannot change the hint (seed 101815)", async (t) => {
+  const f = setup(t);
+  await f.advance(0);
+  const seed = Number(process.env.FC_SEED ?? 101815);
+  console.error(`[draft-hint] seed ${seed}`);
+  await fc.assert(
+    fc.asyncProperty(
+      fc.constantFrom("curl", "rg", "python3", "node"),
+      fc.constantFrom(
+        "",
+        "A=value ",
+        "cd /tmp/private && ",
+        "env -i A=value ",
+        "timeout 3s ",
+        "sudo -n ",
+        "sudo -u nobody env timeout 3s ",
+      ),
+      fc.string({ maxLength: 200 }),
+      async (program, prefix, argument) => {
+        f.stream.requested(0, [
+          {
+            callId: "private",
+            toolName: "bash",
+            input: {
+              command: `${prefix}${program} ${JSON.stringify(argument)}`,
+              path: `/tmp/${argument}`,
+              url: `https://private.example/${argument}`,
+              query: argument,
+            },
+          },
+        ]);
+        await f.advance(1000);
+        assert.equal(f.text(), `⚙ <code>bash: ${program}</code>`);
+        f.stream.requested(0, [
+          {
+            callId: "private",
+            toolName: "web_search",
+            input: { query: argument, pattern: argument },
+          },
+        ]);
+        await f.advance(1000);
+        assert.equal(f.text(), "⚙ <code>web_search</code>");
+      },
+    ),
+    { seed, numRuns: 100 },
+  );
 });
 
 void test("latest frame wins at one second; identical frames wait for refresh; tools leave on their callId", async (t) => {
@@ -113,7 +221,7 @@ void test("latest frame wins at one second; identical frames wait for refresh; t
   assert.doesNotMatch(f.text(), /two/u);
   f.stream.result("a");
   await f.advance(1000);
-  assert.match(f.text(), /read_file: two/u);
+  assert.equal(f.text(), "first second\n\n⚙ <code>read_file</code>");
   f.stream.result("b");
   await f.advance(1000);
   assert.equal(f.text(), "first second");
@@ -148,7 +256,7 @@ void test("secret fragmented across deltas and secret tool arguments are scanned
   ]);
   await f.advance(1000);
   assert.doesNotMatch(f.text(), /sk-ant/u);
-  assert.match(f.text(), /&lt;tg-button&gt;&#96;&amp;/u);
+  assert.equal(f.text(), "hello [REDACTED] done\n\n⚙ <code>bash</code>");
 });
 
 void test("partial silent marker and buttons stay hidden; tail reopens a code fence", () => {
@@ -174,19 +282,19 @@ void test("partial silent marker and buttons stay hidden; tail reopens a code fe
   assert.equal(draftText("tail", true), "tail");
 });
 
-void test("quoted secrets in decoded tool arguments are redacted before the hint reaches Telegram", async (t) => {
+void test("quoted secrets in decoded tool arguments stay out of the hint", async (t) => {
   const f = setup(t);
   await f.advance(0);
-  for (const command of [
-    'export DB_PASSWORD="hunter2hunter2" && psql',
-    'curl -d api_key="abcdefghijklmnopqrstuvwxyz0123" x',
+  for (const [command, program] of [
+    ['export DB_PASSWORD="hunter2hunter2" && psql', "export"],
+    ['curl -d api_key="abcdefghijklmnopqrstuvwxyz0123" x', "curl"],
   ]) {
     f.stream.requested(0, [
       { callId: "quoted", toolName: "bash", input: { command } },
     ]);
     await f.advance(1000);
     assert.doesNotMatch(f.text(), /hunter2hunter2|abcdefghijklmnopqrstuvwxyz/u);
-    assert.match(f.text(), /REDACTED/u);
+    assert.equal(f.text(), `⚙ <code>bash: ${program}</code>`);
   }
 });
 
@@ -207,19 +315,19 @@ void test("ordinary less-than signs and entities survive partial and completed f
   }
 });
 
-void test("a tool hint keeps whole Unicode characters at its 60-unit boundary", async (t) => {
+void test("a tool name keeps whole Unicode characters at its 60-unit boundary", async (t) => {
   const f = setup(t);
   await f.advance(0);
   f.stream.requested(0, [
     {
       callId: "unicode",
-      toolName: "bash",
+      toolName: "a".repeat(59) + "😀",
       input: { command: "a".repeat(53) + "😀 tail" },
     },
   ]);
   await f.advance(1000);
   assert.doesNotMatch(f.text(), /[\uD800-\uDFFF]/u);
-  assert.match(f.text(), /bash: a+<\/code>$/u);
+  assert.equal(f.text(), `⚙ <code>${"a".repeat(59)}</code>`);
 });
 
 void test("an unchanged refresh rejected with 429 repeats at retry_after", async (t) => {
@@ -488,7 +596,7 @@ void test("typing repeats every 4.5 seconds while its preceding request is still
   assert.equal(f.calls.length, count);
 });
 
-void test("tool hint is one escaped line after CR, tabs and repeated spaces", async (t) => {
+void test("shell metacharacters and argument markup stay out of the hint", async (t) => {
   const f = setup(t);
   await f.advance(0);
   f.stream.requested(0, [
@@ -499,10 +607,7 @@ void test("tool hint is one escaped line after CR, tabs and repeated spaces", as
     },
   ]);
   await f.advance(1000);
-  assert.equal(
-    f.text(),
-    "⚙ <code>bash: &lt;evil&gt; &#96; &amp; something</code>",
-  );
+  assert.equal(f.text(), "⚙ <code>bash</code>");
 });
 
 void test("quoted and backslash-containing installation secrets are redacted from full tool arguments", async (t) => {
@@ -524,7 +629,7 @@ void test("quoted and backslash-containing installation secrets are redacted fro
   ]);
   await f.advance(1000);
   assert.doesNotMatch(f.text(), /installation/u);
-  assert.match(f.text(), /REDACTED/u);
+  assert.equal(f.text(), "⚙ <code>bash: echo</code>");
 });
 
 void test("PBT tail preserves fence type and width (seed 101417)", () => {

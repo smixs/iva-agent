@@ -169,25 +169,6 @@ export function ensureVaultGitignore(vaultPath: string): boolean {
   }
 }
 
-export function classifyGitPushError(stderr: string): {
-  kind: "oversize" | "auth" | "other";
-  firstLine: string;
-} {
-  const text = String(stderr ?? "");
-  const firstLine = firstNonEmptyLine(text) || "unknown git error";
-  if (/GH001|exceeds\s+GitHub(?:\.com)?['’]s\s+file size limit/i.test(text)) {
-    return { kind: "oversize", firstLine };
-  }
-  if (
-    /Authentication failed|could not read (?:Username|Password)|Permission denied/i.test(
-      text,
-    )
-  ) {
-    return { kind: "auth", firstLine };
-  }
-  return { kind: "other", firstLine };
-}
-
 export function memoryReportProblems(report: unknown): MemoryReportProblem[] {
   if (!report || typeof report !== "object" || Array.isArray(report)) return [];
   const fields = report as Record<string, unknown>;

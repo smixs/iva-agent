@@ -98,6 +98,12 @@ export function chatTakeOverPatch(
     draftId: null,
     latencyLogged: null,
     resetAt: null,
+    // Принятая реплика заберёт Стоп в inbound; новый фоновый ход его снимает.
+    ...(fields.ingressId === undefined ? { wasCancelled: null } : {}),
+    restartRetryData: null,
+    restartRetryUpdate: null,
+    restartRetryQuestion: null,
+    restartRetryMedia: null,
     ...fields,
   };
 }
@@ -381,6 +387,7 @@ export async function publishTelegramTurnStarted({
           sessionId,
           turnId,
           draftId,
+          wasCancelled: null,
           compacting: null,
           turnAt: now(),
           latencyLogged: null,

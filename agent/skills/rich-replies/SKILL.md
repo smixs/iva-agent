@@ -188,6 +188,9 @@ If the turn after a tap failed, the same button stays closed: ask the user to ty
 Private chats only: in a group a tap is not an address to the bot (only a
 mention, a command or a reply is), so don't put `callback_data` buttons in group
 replies. `url` and `copy_text` buttons work anywhere.
+For Telegram chat links, follow `watch`: use a message link for a group, with
+its forum topic when present. A person without a username gets their name in
+text and no Open chat URL button; `tg://user?id=...` mentions depend on privacy.
 
 ## Limits and gotchas
 

@@ -28,12 +28,20 @@ import {
   launchdPlan,
   writeLaunchdUnits,
   calendarInterval,
+  pluginPlistFields,
 } from "./launchd-plist.ts";
 import {
   systemdExecArgument,
+  systemdExecWords,
   systemdEnvironmentSegment,
 } from "./systemd-values.ts";
 import { mcpProxyUnitBody, pluginServiceUnitBody } from "./plugin-units.ts";
+import {
+  pluginUnitScope,
+  scopedPluginUnitName,
+  markPluginUnit,
+  readPluginUnitMarker,
+} from "./plugin-unit-scope.ts";
 import { classifyLsofListeners } from "./listener-security.ts";
 import { bindProbe, lsofProbe, PortChecker, PortSelector } from "./ports.ts";
 
@@ -675,5 +683,96 @@ void test(`lsof exposes wildcard listeners and treats garbage conservatively (se
       assert.notEqual(classifyLsofListeners(value, 8723), "loopback"),
     ),
     { seed },
+  );
+});
+
+void test("plugin ownership survives plist translation with the exact data anchor", () => {
+  const scope = pluginUnitScope("/data/a");
+  const identity = {
+    scope,
+    kind: "service",
+    plugin: "trace",
+    part: "web",
+    layout: "scoped",
+  } as const;
+  const unit = scopedPluginUnitName(identity);
+  const body = pluginServiceUnitBody({
+    plugin: "trace",
+    service: "web",
+    port: 9000,
+    pluginRoot: "/data/a/custom/plugins/trace",
+    command: "node",
+    args: ["web.ts"],
+    pluginData: "/data/a/plugin-data/trace",
+    dataDir: "/data/a",
+    nodeBinDir: "/node/bin",
+  });
+  const xml = unitToPlist(
+    { unit, body: markPluginUnit(body, identity) },
+    undefined,
+    { root: "/code/a" },
+  );
+  assert.deepEqual(readPluginUnitMarker(xml, unit), identity);
+  assert.equal(
+    pluginPlistFields(xml).workingDirectory,
+    "/data/a/custom/plugins/trace/sh.iva/services/web",
+  );
+  assert.equal(
+    pluginPlistFields(xml).environment.PLUGIN_DATA,
+    "/data/a/plugin-data/trace",
+  );
+  assert.equal(readPluginUnitMarker(xml.replace("9000", "9001"), unit), null);
+});
+
+void test("plugin loaded proof reads only observable launchctl data fields and fails closed", () => {
+  const unit = "iva-mcp-scope-trace-api.service";
+  const calls: string[][] = [];
+  let output = `gui/501/app.iva.iva-mcp-scope-trace-api = {
+\tstate = running
+\tpid = 123
+\tworking directory = /data/a
+\targuments = {
+\t\t/node
+\t\t/proxy.ts
+\t\t--token-file
+\t\t/data/a/plugin-data/trace/mcp-api.token
+\t\t--port
+\t\t9000
+\t}
+\tenvironment = {
+\t\tASSISTANT_DATA_DIR => /data/a
+\t}
+}
+`;
+  const query = (property: string) =>
+    runLaunchd(["show", unit, `--property=${property}`, "--value"], {
+      uid: 501,
+      run: (args) => {
+        calls.push([...args]);
+        return { code: 0, out: args[1] === "gui/501" ? "" : output };
+      },
+    });
+  assert.equal(query("LoadState").out, "loaded");
+  assert.equal(query("WorkingDirectory").out, "/data/a");
+  assert.deepEqual(systemdExecWords(query("ExecStart").out), [
+    "/usr/bin/env",
+    "ASSISTANT_DATA_DIR=/data/a",
+    "/node",
+    "/proxy.ts",
+    "--token-file",
+    "/data/a/plugin-data/trace/mcp-api.token",
+    "--port",
+    "9000",
+  ]);
+  output = print("running", true);
+  assert.equal(query("WorkingDirectory").code, 1);
+  assert.equal(query("ExecStart").code, 1);
+  assert.ok(calls.every((args) => args[0] === "print"));
+  assert.deepEqual(
+    runLaunchd(["show", unit, "--property=LoadState", "--value"], {
+      uid: 501,
+      run: (args) => ({ code: args[1] === "gui/501" ? 0 : 113, out: "" }),
+    }),
+    { code: 0, out: "not-found" },
   );
 });

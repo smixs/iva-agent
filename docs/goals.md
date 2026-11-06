@@ -13,8 +13,8 @@ waiting. You can change the boundary, wording or Plan later.
 Checks normally run every two hours, between quiet hours set in proactive
 settings. A Goal permits eight checks per owner day; five Goals can be open
 per installation. Checks use the usual Helper limits: 80 steps, one million
-tokens of work and a 45-minute deadline with two minutes of grace. One Helper
-runs at a time, with waiting places reserved for your own Helper requests.
+tokens of work and a 45-minute deadline with two minutes of grace. Up to three
+Helpers run at a time, with waiting places reserved for your own Helper requests.
 The next check may be scheduled from thirty minutes to seven days away.
 
 An unchanged check stays quiet. A result, meaningful change, performed action
@@ -36,5 +36,4 @@ has no Verdict. Iva can repeat an Outcome after a crash around delivery.
 
 The format extends `helpers.json` with Goals. An older build refuses the new
 keys and leaves the file preserved. Return to a compatible build, or restore
-a saved older-format file for rollback with loss of Goals. Goal stays in beta
-until the owner's word to release it.
+a saved older-format file for rollback with loss of Goals.

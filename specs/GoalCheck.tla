@@ -20,6 +20,7 @@ Goals == {1, 2}
 None == "none"
 FailuresToPause == 2
 DayMax == 2
+RunningLimit == 3 \* HELPER_MAX_RUNNING; pending admission remains MaxOpen=3
 Verdicts == {"quiet", "news", "done", "blocked"}
 Outcomes == {"ok", "bad", "interrupted", "stopped"}
 ASSUME ActiveGoals \subseteq Goals /\ ActiveGoals # {} /\ RowIds \subseteq 1..4 /\ RowIds # {}
@@ -113,7 +114,7 @@ Due(g) ==
    !.g[g].allocated=@+1, !.g[g].due="auto", !.g[g].arrived=FALSE, !.g[g].ownerNext=FALSE,
    !.actual[g]=@+1, !.r[r]=[EmptyRow EXCEPT !.goal=g, !.phase="pending", !.bornEdit=s.g[g].edits]],"Due",g,r)
 Claim(r) ==
- /\ Running(s)={} /\ s.ownerPending=0
+ /\ Cardinality(Running(s))<RunningLimit /\ s.ownerPending=0
  /\ ((s.r[r].phase="pending" /\ s.r[r].stop=None) \/
   (Mutant="claim-detached" /\ s.r[r].phase="closed" /\ Detached(s,r)))
  /\ Commit([s EXCEPT !.r[r].phase="running", !.r[r].stop=None, !.r[r].claimed=TRUE],"Claim",s.r[r].goal,r)

@@ -11,7 +11,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import fc from "fast-check";
-import { TELEGRAM_BUTTON_TAP_FIELD } from "#lib/telegram-parts.ts";
+import {
+  TELEGRAM_BUTTON_TAP_FIELD,
+  TELEGRAM_BUTTON_TAP_DAILY_TEXT_FIELD,
+} from "#lib/telegram-parts.ts";
 
 type Event = string | [string, string, number | undefined, string | undefined];
 type CaptureMessage = { message_id?: number };
@@ -162,6 +165,7 @@ function runningTurn(overrides: Record<string, unknown> = {}) {
     sessionId: "session-1",
     turnId: "turn-1",
     draftId: 41,
+    wasCancelled: null,
     ...overrides,
   });
 }
@@ -478,6 +482,7 @@ test("the legacy iva_cancel button stays out of the inbox and cancels the record
   assert.equal(cancels.length, 1);
   assert.equal(cancels[0].sessionId, "session-1");
   assert.equal(cancels[0].turnId, "turn-1");
+  assert.equal(status.getChatStatus("7:")?.wasCancelled, true);
   assert.deepEqual(acks, [["cq-5", undefined]]);
 });
 
@@ -546,13 +551,12 @@ test("an untrusted tap on someone else's Stop button is swallowed", async () => 
   assert.deepEqual(acks, []);
 });
 
-// Терминальное событие отмены глазами моста: такую запись оставляет turn.cancelled.
+// Терминальное событие освобождает пару, сохраняя факт кнопки из настоящего пути.
 function stopTurn(key: string) {
   status.setChatStatus(key, {
     status: "idle",
     sessionId: null,
     turnId: null,
-    wasCancelled: true,
   });
 }
 
@@ -861,6 +865,8 @@ test("тап по кнопке модели уходит дальше обычн
     text: "Отложи на час\n\n(кнопка под сообщением Ивы: «Напомнить?»)",
     // Пометка тапа: слив очереди отдаёт его отдельным ходом, не склеивая с соседями.
     [TELEGRAM_BUTTON_TAP_FIELD]: true,
+    [TELEGRAM_BUTTON_TAP_DAILY_TEXT_FIELD]:
+      "Отложи на час\n\n(кнопка под сообщением Ивы: «Напомнить?»)",
   });
 });
 
@@ -3308,12 +3314,15 @@ test("native stop is handled before admission and leaves the next turn and compa
   const { cancels, replies, acks, deps } = recordingDeps();
   assert.equal(await handleControl(nativeStop(), deps), true);
   assert.equal(cancels.length, 1);
+  assert.equal(status.getChatStatus("7:")?.wasCancelled, true);
   runningTurn({ turnId: "turn-new", draftId: 42 });
   assert.equal(await handleControl(nativeStop(), deps), true);
   assert.equal(cancels.length, 1);
-  runningTurn({ turnId: null, draftId: 41, compacting: true });
+  assert.equal(status.getChatStatus("7:")?.wasCancelled, undefined);
+  runningTurn({ turnId: "turn-compacting", draftId: 41, compacting: true });
   assert.equal(await handleControl(nativeStop(), deps), true);
-  assert.equal(cancels.length, 1);
+  assert.equal(cancels.length, 2);
+  assert.equal(status.getChatStatus("7:")?.wasCancelled, undefined);
   assert.deepEqual(replies, []);
   assert.deepEqual(acks, []);
 });

@@ -25,6 +25,7 @@ import {
   PROPOSAL_TTL_MS,
   proposalFolder,
   proposalText,
+  proposalReadmeLines,
   returnProposal,
   sweepProposals,
   takenDir,
@@ -44,6 +45,79 @@ function proposals(): string {
   const dir = mkdtempSync(join(tmpdir(), "iva-proposal-"));
   dirs.push(dir);
   return dir;
+}
+
+test("d22 README: optional sections translate labels and stop at the next heading", async () => {
+  const root = proposals();
+  assert.deepEqual(await proposalReadmeLines(ru, root), []);
+  writeFileSync(
+    join(root, "README.md"),
+    "## Keys\r\nSERVICE_KEY\r\n### Details\r\nnot a key\r\n## Network\r\napi.example.org\r\n# Usage\r\nnot a host\r\n",
+  );
+  assert.deepEqual(await proposalReadmeLines(ru, root), [
+    "Ключи: SERVICE\\_KEY",
+    "Сеть: api.example.org",
+  ]);
+  assert.deepEqual(await proposalReadmeLines(en, root), [
+    "Keys: SERVICE\\_KEY",
+    "Network: api.example.org",
+  ]);
+  writeFileSync(
+    join(root, "README.md"),
+    "# Keys\nnot a section\n## Usage\nold draft\n",
+  );
+  assert.deepEqual(await proposalReadmeLines(ru, root), []);
+  writeFileSync(join(root, "README.md"), "## Keys\n\n## Network\nnone\n");
+  assert.deepEqual(await proposalReadmeLines(ru, root), ["Сеть: none"]);
+  rmSync(join(root, "README.md"));
+  mkdirSync(join(root, "README.md"));
+  assert.deepEqual(await proposalReadmeLines(ru, root), []);
+});
+
+test("d22 README: long Unicode data is clipped without breaking a surrogate pair", async () => {
+  const root = proposals();
+  writeFileSync(
+    join(root, "README.md"),
+    `## Keys\n${"🙂".repeat(200)}\n## Network\n${"<tg-button>".repeat(200)}\n`,
+  );
+  const lines = await proposalReadmeLines(en, root);
+  assert.equal(lines[0], `Keys: ${"🙂".repeat(119)}…`);
+  assert.ok(Array.from(lines[1].slice("Network: ".length)).length <= 120);
+  assert.doesNotMatch(lines[1], /[<>]/u);
+});
+
+for (const seed of [182201, 182202]) {
+  test(`d22 PROPERTY: README sections round-trip declarations and ignore unrelated content (seed=${seed})`, async () => {
+    const root = proposals();
+    await fc.assert(
+      fc.asyncProperty(
+        fc.array(fc.stringMatching(/^[A-Z][A-Z0-9]{0,8}$/u), {
+          minLength: 1,
+          maxLength: 6,
+        }),
+        fc.array(fc.stringMatching(/^[a-z][a-z0-9]{0,8}\.example\.org$/u), {
+          minLength: 1,
+          maxLength: 3,
+        }),
+        fc.string({ unit: "grapheme", maxLength: 100 }),
+        async (keys, hosts, noise) => {
+          const sections = `## Keys\n${keys.join(", ")}\n## Network\n${hosts.join(", ")}\n`;
+          writeFileSync(join(root, "README.md"), sections);
+          const expected = [
+            `Keys: ${keys.join(", ")}`,
+            `Network: ${hosts.join(", ")}`,
+          ];
+          assert.deepEqual(await proposalReadmeLines(en, root), expected);
+          writeFileSync(
+            join(root, "README.md"),
+            `# Readme\ntext\n${sections}## Other\n${noise.replace(/^#/gmu, "x")}\n`,
+          );
+          assert.deepEqual(await proposalReadmeLines(en, root), expected);
+        },
+      ),
+      { seed, numRuns: 60 },
+    );
+  });
 }
 
 /** Предложение на диске, как его кладёт `propose`: папка `<name>-<digest12>`. */

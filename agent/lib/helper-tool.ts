@@ -96,6 +96,7 @@ export async function helperExecute(
       void (deps.tick ?? runHelperTick)().catch(console.error);
       if (r.branch === "running" && r.row.stop !== "closed")
         return "Уже останавливается, исход придёт сам.";
+      if (r.row.deliveredAt !== null) return "Закрыто, место освобождено.";
       return r.branch === "pending"
         ? "Задание закрыто до запуска. Исход доступен через outcome."
         : r.branch === "running"

@@ -266,8 +266,14 @@ deadline=2, grace=1. `TickStart` фиксирует строки прохода,
 Перекрытие трёх тиков, гонку тика с перезапуском и замок/CAS проверяют тесты
 `agent/lib/helper-tick.test.ts`; модель представляет последовательные проходы.
 Реальные 15 секунд и порядок отдельных awaits относятся к проверкам реализации.
-Один слот относится к строкам таблицы: `OneRun` считает `run`, а не durable
-сессии. Durable work после interrupted/границы/lost-id — принятое следствие;
+Предел трёх одновременно идущих помощников относится к строкам таблицы:
+`RunningBounded` считает `run`. `HelperRun-capacity3` перебирает claim четырёх
+кандидатов, `capacity3-reach` достигает трёх, `no-running-cap` допускает четвёртого
+и нарушает предел. Остальные конфигурации проверяют жизненный цикл.
+`HelperOutcome-slots` моделирует заполненную таблицу из двух сохранённых строк
+и резерв для goal; число одновременно идущих ходов в её переходах отсутствует.
+В `GoalCheck` claim использует тот же предел 3; `MaxOpen=3` ограничивает сумму
+ожидающих и идущих строк и сохраняет место для помощника владельца. Durable work после interrupted/границы/lost-id — принятое следствие;
 `NoDetachedWork` даёт ожидаемый красный свидетель на обычной модели.
 
 Свойства `HelperRun` читают состояние и независимую историю входов CAS:
@@ -304,9 +310,9 @@ seed 20261013/fingerprint 1. Simulation отделена от полного п�
 Trap удаляет metadir/states; LOG_DIR сохраняет журналы и results.tsv.
 Ожидаемый invariant отказ требует exit12 и точное имя; temporal отказ — exit13
 и единственное свойство конфигурации. Инфраструктурная ошибка не убивает мутант.
-Всего 41 конфигурация: 24 HelperRun (10 зелёных, 12 разных мутантов,
+Всего 48 конфигураций: 24 HelperRun (10 зелёных, 12 разных мутантов,
 дополнительная temporal проверка «нет потолка», свидетель durable-хвоста)
-и 17 прежних HelperOutcome. Все прогоны выполняются на Mac mini.
+и 24 HelperOutcome, включая семь проверок освобождения мест. Все прогоны выполняются на Mac mini.
 
 | Конфигурация                                                                   | Ожидаемый результат       |
 | ------------------------------------------------------------------------------ | ------------------------- |
@@ -335,8 +341,29 @@ Trap удаляет metadir/states; LOG_DIR сохраняет журналы и
 | [HelperRun-v73-stop-needs-snapshot.cfg](HelperRun-v73-stop-needs-snapshot.cfg) | RED: StopCancelSent       |
 | [HelperRun-v73-end-cutoff.cfg](HelperRun-v73-end-cutoff.cfg)                   | RED: SnapshotFolded       |
 
-HelperOutcome: `-safety`, `-bridge-recovery` — PASS; остальные конфиги
-проверяют прежние отрицательные свидетели, перечисленные в `helper-check.sh`.
+`HelperOutcome.SlotSpec` описывает полный список, новый запуск и проверку Goal. Две старые
+строки представляют заполненный список, `admitted` представляет нового
+помощника. Перебираются ждущие строки, неотданные исходы, сданные строки с разным
+временем доставки, закрытые строки и принадлежность Goal. `ProtectedKept` сохраняет неотданные
+исходы и строки Goal, `OldestEvicted` проверяет выбор самой старой записи по доставке или окончанию,
+`AdmissionAvailable` проверяет доступность запуска при подходящей записи,
+`GoalAdmissionAvailable` проверяет доступность проверки Goal с резервом места владельцу;
+`ClosedAdmissionAvailable` проверяет вытеснение закрытых строк. `SlotCapacity` проверяет вместимость с резервом. Закрытие сданной строки без Goal сразу
+удаляет её. Работа и завершение хода в `HelperRun` сохраняют прежние переходы.
+
+| Конфигурация HelperOutcome                    | Ожидаемый результат                       |
+| --------------------------------------------- | ----------------------------------------- |
+| `-slots`                                      | PASS                                      |
+| `-evict-unread`, `-evict-goal`, `-close-goal` | RED: ProtectedKept                        |
+| `-evict-newest`                               | RED: OldestEvicted                        |
+| `-admission`                                  | RED: NoAdmission, свидетель запуска       |
+| `-delivered-close`                            | RED: NoDeliveredClose, свидетель закрытия |
+| `-goal-no-eviction`                           | RED: GoalAdmissionAvailable               |
+| `-goal-evict-unread`                          | RED: ProtectedKept                        |
+| `-evict-closed-blocked`                       | RED: ClosedAdmissionAvailable             |
+
+HelperOutcome: `-safety`, `-bridge-recovery` — PASS; остальные прежние конфиги
+проверяют отрицательные свидетели, перечисленные в `helper-check.sh`.
 
 ## GoalCheck
 

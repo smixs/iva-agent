@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { launchdLabel, nextCalendarRun } from "./launchd-plist.ts";
+import { systemdExecArgument } from "./systemd-values.ts";
 export { launchdLabel };
 
 export const GUI_REQUIRED =
@@ -61,6 +62,28 @@ export function parseLaunchctlPrint(out: string): LaunchdState {
     pid: pid !== null && pid > 0 ? pid : null,
     lastExit: integer(fields["last exit code"]),
   };
+}
+
+function pluginLoadedField(output: string, property: string): string {
+  if (property === "WorkingDirectory") {
+    const values = [...output.matchAll(/^\tworking directory = (.+)$/gmu)];
+    if (values.length !== 1)
+      throw new Error("plugin loaded WorkingDirectory unavailable");
+    return values[0][1];
+  }
+  if (property !== "ExecStart")
+    throw new Error("unsupported plugin ownership property");
+  const args = /\targuments = \{\n([\s\S]*?)\n\t\}/u.exec(output)?.[1];
+  const data = /^\t\tASSISTANT_DATA_DIR => (.+)$/mu.exec(output)?.[1];
+  if (args === undefined || data === undefined)
+    throw new Error("plugin loaded data arguments unavailable");
+  const words = args
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  return ["/usr/bin/env", `ASSISTANT_DATA_DIR=${data}`, ...words]
+    .map(systemdExecArgument)
+    .join(" ");
 }
 
 function launchctl(args: readonly string[]): Result {
@@ -149,9 +172,21 @@ class LaunchdUnit {
       );
     return { loaded: true, state };
   }
-  show(): Result {
+  show(property?: string): Result {
+    if (property && /^iva-(mcp|plugin)-/u.test(this.unit))
+      return this.pluginProperty(property);
     return { code: 0, out: existsSync(this.path) ? "loaded" : "not-found" };
   }
+  pluginProperty(property: string): Result {
+    const result = this.run(["print", this.target]);
+    if (result.code === 113)
+      return { code: 0, out: property === "LoadState" ? "not-found" : "" };
+    if (result.code !== 0 || !parseLaunchctlPrint(result.out).valid)
+      throw new Error("plugin loaded definition is unavailable");
+    if (property === "LoadState") return { code: 0, out: "loaded" };
+    return { code: 0, out: pluginLoadedField(result.out, property) };
+  }
+
   enabled(): Result {
     if (!existsSync(this.path)) return { code: 1, out: "" };
     const result = this.run(["print-disabled", this.domain]);
@@ -348,6 +383,7 @@ export function runLaunchd(
       new LaunchdUnit(unit, options),
       action,
       args.includes("--now"),
+      args.find((arg) => arg.startsWith("--property="))?.slice(11),
     );
   } catch (error) {
     return {
@@ -365,9 +401,10 @@ function dispatchLaunchd(
   control: LaunchdUnit,
   action: string,
   now: boolean,
+  property?: string,
 ): Result {
   const queries: Record<string, () => Result> = {
-    show: () => control.show(),
+    show: () => control.show(property),
     "is-enabled": () => control.enabled(),
     "is-active": () => control.active(),
     "is-failed": () => control.failed(),

@@ -132,7 +132,10 @@ export async function dueGoals(now: number) {
           { task, may: g.may, chat: g.chat, goal: g.id },
           now,
         );
-        if (!row.ok) continue;
+        if (!row.ok) {
+          console.error(`goal check ${g.id}: ${row.reason}: ${row.text}`);
+          continue;
+        }
         g.check = row.row.id;
         g.checks.count++;
         g.nextCheckAtMs = now + r.GOAL_DEFAULT_INTERVAL_MS;

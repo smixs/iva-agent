@@ -25,6 +25,8 @@ function git(cwd: string, ...args: string[]): string {
     env: {
       ...process.env,
       GIT_CONFIG_GLOBAL: "/dev/null",
+      // Чужая среда (агентная сессия) может подменять адреса через GIT_CONFIG_*.
+      GIT_CONFIG_COUNT: "0",
       GIT_AUTHOR_NAME: "iva",
       GIT_AUTHOR_EMAIL: "iva@example.invalid",
       GIT_COMMITTER_NAME: "iva",
@@ -84,6 +86,8 @@ function checkout(t: TestContext): {
         env: {
           ...process.env,
           GIT_CONFIG_GLOBAL: "/dev/null",
+          // Чужая среда (агентная сессия) может подменять адреса через GIT_CONFIG_*.
+          GIT_CONFIG_COUNT: "0",
           PATH: `${fakeBin}:${process.env.PATH ?? ""}`,
           IVA_INSTALL_DIR: install,
           IVA_TEST_HANDOFF: handoff,

@@ -153,6 +153,7 @@ test("the authored tree has only its explicit shared-package edges", () => {
       "agent/lib/context-window.ts -> ../../packages/context-window/index.ts",
       "agent/lib/data-dir.ts -> ../../packages/data-dir/index.ts",
       "agent/lib/job-facts.ts -> ../../packages/secret-redaction/index.ts",
+      "agent/lib/model-auth-alert.ts -> ../../packages/alert-state/index.ts",
       "agent/lib/model-provider.ts -> @iva/opencode-protocol",
       "agent/lib/security-gate.ts -> ../../packages/secret-redaction/index.ts",
       "agent/lib/telegram-media-cache.ts -> @iva/vault-dir",

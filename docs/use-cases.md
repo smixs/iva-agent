@@ -75,7 +75,7 @@ The author's own install has grown past 80 skills: Iva runs a Telegram channel, 
 
 ## Honest limits
 
-Everything that arrives on its own runs on a schedule inside Iva: the Brief twice a day, night reports, and Watch, which checks Telegram and mail once an hour without the model and writes first only when a chat or a letter has waited for you or a regular job failed — never at night (23:00–08:00) unless the sender is on your urgent list, and at most five such messages a day. Reminders live in her own table on your server, which she fills when you ask (see [Reminders](reminders.md)). `iva proactive off` (or the toggle in /menu → Notices) stops Watch, the Brief and Insight; failures still reach you. The model and voice transcription are cloud APIs you choose and pay for directly, with no markup. The userbot mode (acting from your personal account) is a beta, at your own risk.
+Everything that arrives on its own runs on a schedule inside Iva: the Brief twice a day, night reports, and Watch, which checks Telegram and mail once an hour without the model and writes first only when a chat or a letter has waited for you or a regular job failed — never at night (23:00–08:00) unless the sender is on your urgent list, and at most five such messages a day. Reminders live in her own table on your server, which she fills when you ask (see [Reminders](reminders.md)). `iva proactive off` (or the toggle in /menu → Notices) stops Watch, the Brief and Insight; failures still reach you. The model and voice transcription are cloud APIs you choose and pay for directly, with no markup. The userbot mode (acting from your personal account) is opt-in and at your own risk.
 
 ## Try it
 

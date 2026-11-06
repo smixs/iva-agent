@@ -13,7 +13,7 @@ type TreeColorCell = {
   readonly b: number;
   readonly bg?: false;
 };
-export type TreeCell = TreeBackgroundCell | TreeColorCell;
+type TreeCell = TreeBackgroundCell | TreeColorCell;
 export type TreeGrid = TreeCell[][];
 
 type TreeOutput = {

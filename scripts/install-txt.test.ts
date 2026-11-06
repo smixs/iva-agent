@@ -15,18 +15,24 @@ const phrases = {
 
 void test("install.txt pins every link to an existing file in the current or next patch release", () => {
   const { version } = JSON.parse(read("package.json")) as { version: string };
-  const [major, minor, patch] = version.split(".").map(Number);
+  // A beta prerelease (0.5.6-beta.1) already names its coming release.
+  const [core = "", prerelease] = version.split("-");
+  const [major, minor, patch] = core.split(".").map(Number);
   const unreleased = /^## (?:\[Unreleased\]|Unreleased)$/mu.test(
     read("CHANGELOG.md"),
   );
-  const tag = unreleased ? `v${major}.${minor}.${patch + 1}` : `v${version}`;
+  const tags = [`v${core}`];
+  if (prerelease === undefined && unreleased)
+    tags.push(`v${major}.${minor}.${patch + 1}`);
   const links = read("docs/install.txt").match(/https?:\/\/[^\s<>]+/gu) ?? [];
   assert.ok(links.length > 0);
   for (const link of links) {
     const url = new URL(link);
     assert.equal(url.origin, "https://raw.githubusercontent.com");
-    const prefix = `/smixs/iva-agent/${tag}/`;
-    assert.ok(url.pathname.startsWith(prefix), `${link} must use ${tag}`);
+    const prefix = tags
+      .map((tag) => `/smixs/iva-agent/${tag}/`)
+      .find((candidate) => url.pathname.startsWith(candidate));
+    assert.ok(prefix, `${link} must use ${tags.join(" or ")}`);
     const path = url.pathname.slice(prefix.length);
     assert.ok(resolve(ROOT, path).startsWith(ROOT));
     assert.ok(existsSync(join(ROOT, path)), `missing ${path}`);
@@ -93,8 +99,11 @@ for (const lang of ["en", "ru"] as const) {
       )?.[1];
       assert.ok(promptText);
       const source = { textContent: promptText, hidden: true };
+      const label = { textContent: "Install" };
       const button = {
         textContent: "Install",
+        querySelector: (selector: string) =>
+          selector === ".lbl" ? label : null,
         classList: { add: () => {}, remove: () => {} },
         addEventListener: (_event: string, listener: () => void) => {
           click = listener;
@@ -137,6 +146,7 @@ for (const lang of ["en", "ru"] as const) {
       assert.ok(click);
       click();
       await new Promise((done) => setImmediate(done));
+      assert.notEqual(label.textContent, "Install");
       if (clipboard === "available") assert.equal(copied, phrases[lang]);
       else {
         assert.equal(selected, true);

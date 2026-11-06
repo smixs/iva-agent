@@ -1,3 +1,5 @@
+import "../../scripts/fixtures/no-host-anthropic.ts";
+import { modelAuthText, modelAuthProvider } from "./model-auth.ts";
 /* eslint-disable @typescript-eslint/no-floating-promises -- Node's test runner owns registrations. */
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -6,6 +8,7 @@ import {
   humanizeProviderError,
   isBreakNotice,
   isRetryTap,
+  isInterruptedTap,
 } from "./error-humanizer.ts";
 
 const REAL_LIMIT_ERROR =
@@ -61,20 +64,25 @@ test("refused credentials say who refused and where to fix it, without repeats",
   for (const input of [
     { message: "Invalid API key" },
     { message: "Unauthorized" },
-    { message: "Request rejected", details: '{"statusCode":403}' },
+    {
+      message: "Request rejected",
+      details: '{"statusCode":403,"apiErrorMessage":"invalid key"}',
+    },
     {
       message: "api.anthropic.com did not finish the response (HTTP 401)",
       details: { attempts: 1 },
     },
   ]) {
     assert.deepEqual(humanizeProviderError({ ...input, provider: "claude" }), {
-      en: "Anthropic did not accept the key or login. Check it in /menu and write again.",
-      ru: "Anthropic не принял ключ или вход. Проверь его в /menu и напиши ещё раз.",
+      en: modelAuthText("claude", "en", { answers: true }),
+      ru: modelAuthText("claude", "ru", { answers: true }),
     });
   }
   assert.equal(
     humanizeProviderError({ message: "Unauthorized" }).ru,
-    "Провайдер не принял ключ или вход. Проверь его в /menu и напиши ещё раз.",
+    modelAuthText(modelAuthProvider(), "ru", {
+      answers: true,
+    }),
   );
 });
 
@@ -485,9 +493,42 @@ test("a provider named like an Object method is told as «провайдер», 
     assert.deepEqual(
       humanizeProviderError({ message: "Unauthorized", provider }),
       {
-        en: "The provider did not accept the key or login. Check it in /menu and write again.",
-        ru: "Провайдер не принял ключ или вход. Проверь его в /menu и напиши ещё раз.",
+        en: modelAuthText("custom", "en", { answers: true }),
+        ru: modelAuthText("custom", "ru", { answers: true }),
       },
     );
   }
+});
+
+test("interrupted-button data accepts only the localized label and bounded token (seed 211021)", () => {
+  fc.assert(
+    fc.property(
+      fc.uuid(),
+      fc.constantFrom("Try again", "Повторить"),
+      (token, label) => {
+        const data = `${label}:${token}`;
+        assert.equal(isInterruptedTap(data), true);
+        assert.equal(isRetryTap(data), true);
+        assert.ok(Buffer.byteLength(data) <= 64);
+        assert.equal(isInterruptedTap(`${data}x`), false);
+        assert.equal(isInterruptedTap(`other:${token}`), false);
+      },
+    ),
+    { seed: 211021, numRuns: 100 },
+  );
+});
+
+test("REPAIR1: the reply keeps strong auth evidence ahead of incidental status and limit prose", () => {
+  assert.deepEqual(
+    humanizeProviderError({
+      message:
+        "ClaudeCliError: Failed to authenticate: OAuth session expired; 429 requests tried",
+      details: { statusCode: 503 },
+      provider: "claude",
+    }),
+    {
+      en: modelAuthText("claude", "en", { answers: true }),
+      ru: modelAuthText("claude", "ru", { answers: true }),
+    },
+  );
 });

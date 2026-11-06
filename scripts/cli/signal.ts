@@ -12,7 +12,7 @@ import type { createCliRuntime } from "./runtime.ts";
 
 type CliRuntime = ReturnType<typeof createCliRuntime>;
 
-const USAGE = "usage: iva signal <source> <text>";
+const USAGE = "usage: iva signal <source> <text> [--key <k>]";
 const SIGNAL_SOURCE_MAX = 40;
 const SIGNAL_TEXT_MAX = 1000;
 export const SIGNAL_PENDING_MAX = 20;
@@ -37,7 +37,13 @@ export function createSignalCommand(
   const { ok, dataDirAbs, readEnv } = runtime;
 
   return async function cmdSignal(args: readonly string[]): Promise<void> {
-    const [source = "", ...rest] = args;
+    const keyAt = args.indexOf("--key");
+    const key = keyAt < 0 ? undefined : args[keyAt + 1];
+    if (keyAt >= 0 && (key === undefined || !/^[\w.:@/-]{1,120}$/u.test(key)))
+      throw new Error("signal --key: use 1–120 letters, digits or _ . : @ / -");
+    const [source = "", ...rest] = args.filter(
+      (_, i) => keyAt < 0 || (i !== keyAt && i !== keyAt + 1),
+    );
     const input = [source, rest.join(" ")];
     if (input.some((value) => value.trim() === "")) throw new Error(USAGE);
     const max = [SIGNAL_SOURCE_MAX, SIGNAL_TEXT_MAX];
@@ -75,17 +81,39 @@ export function createSignalCommand(
     );
     const warn = gated.some(hasInboundAttackSignal);
     const [at, text] = [now(), warn ? `${warning}\n\n${row}` : row];
-    const id = `signal-${at}-${suffix()}`;
+    // Existing id accepts this reversible suffix in older readers; the row schema stays unchanged.
+    const keySuffix =
+      key === undefined ? "" : `.${Buffer.from(key).toString("base64url")}`;
+    const id = `signal-${at}-${suffix()}${keySuffix}`;
     // Адресат — личный чат владельца (первый id Allowlist), не notificationChat(): тот может быть
     // группой TELEGRAM_DIGEST_CHAT_ID. Allowlist пуст — null, адресата выберет диспетчер.
     const owner = ownerChat(env);
     const chat = owner === "" ? null : { id: owner, threadId: null };
     // Счёт ждущих и добавление — один шаг под замком таблицы: параллельные плагины предел не обходят.
     const { add } = await import("#lib/reminder-store.ts");
+    const duplicate = new Error();
     await add(
       { id, text, chat, schedule: { kind: "at", atMs: at } },
-      { refuse: overLimit },
-    );
-    ok(`signal queued: ${id}`);
+      {
+        refuse: (rows) => {
+          const pending =
+            keySuffix &&
+            rows.find(
+              (row) =>
+                row.status === "pending" &&
+                row.id.startsWith("signal-") &&
+                row.id.endsWith(keySuffix),
+            );
+          if (pending) {
+            duplicate.message = `уже ждёт: ${pending.id}`;
+            throw duplicate;
+          }
+          return overLimit(rows);
+        },
+      },
+    ).catch((error: unknown) => {
+      if (error !== duplicate) throw error;
+    });
+    ok(duplicate.message || `signal queued: ${id}`);
   };
 }

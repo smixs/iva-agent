@@ -48,7 +48,7 @@ import type { createCliSystemd } from "./systemd.ts";
 type CliRuntime = ReturnType<typeof createCliRuntime>;
 type SystemdLifecycle = ReturnType<typeof createCliSystemd>;
 
-export type DiagnoseDependencies = {
+type DiagnoseDependencies = {
   readonly now?: () => Date;
 };
 
@@ -61,9 +61,9 @@ export {
   redact,
   secretValuesFromEnv,
 } from "../../packages/secret-redaction/index.ts";
-export const JOURNAL_LINES = 200;
+const JOURNAL_LINES = 200;
 /** Потолок списка на раздел: пакет должен читаться, а не весить мегабайт. */
-export const SECTION_ITEM_LIMIT = 100;
+const SECTION_ITEM_LIMIT = 100;
 
 /** Размер раздела `## Turn`: скелет одного хода, а не его текст. */
 const TURN_SECTION_CHARS = 3000;

@@ -11,9 +11,8 @@ export const HELPER_MAX_OPEN = 3,
   HELPER_MAX_ROWS = 20;
 export const HELPER_DEADLINE_MS = 2700000,
   HELPER_GRACE_MS = 120000;
-export const HELPER_MAX_STEPS = 80,
-  HELPER_CEILING_TOKENS = 1000000;
-export const HELPER_MAX_RUNNING = 1;
+export const HELPER_CEILING_TOKENS = 1000000;
+export const HELPER_MAX_RUNNING = 3;
 export const HELPER_CHECK_MS = 15000;
 export const HELPER_SUMMARY_MAX = 1500,
   HELPER_KEEP_MS = 86400000;
@@ -112,7 +111,6 @@ const stateSchema = documentSchema
 export type HelperRow = z.infer<typeof rowSchema>;
 export type HelpersState = z.infer<typeof stateSchema>;
 export type HelperChat = HelperRow["chat"];
-export type HelperRun = z.infer<typeof runSchema>;
 export type HelperStatus = HelperRow["status"];
 export type HelperStop = NonNullable<HelperRow["stop"]>;
 export type HelperOutcome = NonNullable<HelperRow["outcome"]>;
@@ -158,20 +156,20 @@ export function helperResultPath(id: string): string {
     throw new HelperStoreError("invalid helper id");
   return join(root(), id, "out", "result.md");
 }
-export async function readHelpers(): Promise<HelpersState> {
+export async function readHelpers(path = file()): Promise<HelpersState> {
   let raw: string;
   try {
-    raw = await readFile(file(), "utf8");
+    raw = await readFile(path, "utf8");
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT")
       return { schemaVersion: 1, rows: [], goals: [] };
-    throw new HelperStoreError(`${file()}: ${String(error)}`);
+    throw new HelperStoreError(`${path}: ${String(error)}`);
   }
   try {
     const document = documentSchema.parse(JSON.parse(raw));
     const state: HelpersState = { ...document, rows: [], goals: [] };
     const damaged = (label: string, record: unknown) =>
-      quarantineDamagedRecord(file(), {
+      quarantineDamagedRecord(path, {
         reason: "invalid or inconsistent row",
         record,
         label: `helpers ${label}`,
@@ -213,7 +211,7 @@ export async function readHelpers(): Promise<HelpersState> {
     stateSchema.parse(state);
     return state;
   } catch (error) {
-    throw new HelperStoreError(`${file()}: ${String(error)}`);
+    throw new HelperStoreError(`${path}: ${String(error)}`);
   }
 }
 async function locked<T>(fn: (s: HelpersState) => Promise<T>): Promise<T> {
@@ -221,7 +219,16 @@ async function locked<T>(fn: (s: HelpersState) => Promise<T>): Promise<T> {
   const path = `${file()}.lock`,
     token = await acquireLock(path);
   try {
-    return await fn(await readHelpers());
+    const state = await readHelpers(),
+      before = [...state.rows];
+    const result = await fn(state);
+    for (const row of before.filter(
+      (r) => !state.rows.some((v) => v.id === r.id),
+    ))
+      await rm(join(root(), row.id), { recursive: true, force: true }).catch(
+        (error: unknown) => console.error(`helper cleanup ${row.id}:`, error),
+      );
+    return result;
   } finally {
     releaseLock(path, token);
   }
@@ -244,16 +251,28 @@ export function insertRow(
 ) {
   const reserved = Number(input.goal !== null);
   const pending = s.rows.filter((r) => r.status === "pending");
-  if (s.rows.length >= HELPER_MAX_ROWS - reserved)
-    return refuse(
-      "max-rows",
-      `20 helper rows: ${s.rows.map((r) => r.id).join(", ")}. Read or close outcomes.`,
-    );
   if (pending.length >= HELPER_MAX_OPEN - reserved)
     return refuse(
       "capacity",
       `${pending.filter((r) => r.run).length} running, ${pending.filter((r) => !r.run).length} waiting, ${s.rows.filter(ready).length} outcomes; pending maximum 3. Wait, read or close.`,
     );
+  const needed = Math.max(0, s.rows.length - HELPER_MAX_ROWS + reserved + 1);
+  const oldest = s.rows
+    .filter(
+      (r) =>
+        r.goal === null && (r.deliveredAt !== null || r.status === "closed"),
+    )
+    .sort(
+      (a, b) =>
+        (a.deliveredAt ?? a.finishedAt!) - (b.deliveredAt ?? b.finishedAt!),
+    )
+    .slice(0, needed);
+  if (oldest.length < needed)
+    return refuse(
+      "max-rows",
+      `20 helper rows: ${s.rows.map((r) => r.id).join(", ")}. All helper slots are occupied by running tasks or unread outcomes.`,
+    );
+  s.rows = s.rows.filter((r) => !oldest.includes(r));
   let id: string;
   do id = `h-${randomBytes(3).toString("hex")}`;
   while (s.rows.some((r) => r.id === id));
@@ -324,6 +343,7 @@ export const claimHelper = (
         s.rows.some(
           (row) => row.goal === null && row.status === "pending" && !row.run,
         )) ||
+      // Today HELPER_MAX_OPEN enforces this cap; helper-constants-docs.test.ts guards their relation.
       s.rows.filter((r) => r.run).length >= HELPER_MAX_RUNNING
     )
       return false;
@@ -424,8 +444,13 @@ export async function closeHelper(
     if (!row) return refuse("not-found", "Helper not found.");
     if (!sameChat(row.chat, chat))
       return refuse("foreign-chat", "Helper belongs to another chat.");
-    if (row.deliveredAt !== null)
-      return refuse("already-delivered", "Outcome already delivered.");
+    if (row.deliveredAt !== null) {
+      if (row.goal !== null)
+        return refuse("already-delivered", "Outcome already delivered.");
+      s.rows = s.rows.filter((r) => r.id !== id);
+      await save(s);
+      return { ok: true, row, branch: "finished", rule: null };
+    }
     const result = closeRow(s, row, now);
     await save(s);
     return { ok: true, row, ...result };
@@ -477,8 +502,6 @@ export async function sweepHelpers(now: number): Promise<string[]> {
       s.rows = s.rows.filter((r) => !removed.includes(r.id));
       await save(s);
     }
-    for (const id of removed)
-      await rm(join(root(), id), { recursive: true, force: true });
     return removed;
   });
 }

@@ -146,10 +146,7 @@ void test("every schedule file takes its cron from the table", async () => {
     .filter((entry) => entry.endsWith(".ts") && !entry.endsWith(".test.ts"))
     .map((entry) => entry.replace(/\.ts$/, ""))
     .sort();
-  assert.deepEqual(
-    files,
-    [...NAMES, "proactive", "reminders", "helpers"].sort(),
-  );
+  assert.deepEqual(files, [...NAMES, "proactive", "reminders"].sort());
 
   for (const name of NAMES) {
     const module = (await import(`../schedules/${name}.ts`)) as {
@@ -162,8 +159,6 @@ void test("every schedule file takes its cron from the table", async () => {
     readonly default: { readonly cron: string };
   };
   assert.equal(reminders.default.cron, REMINDER_TICK_CRON);
-  const helpers = await import("../schedules/helpers.ts");
-  assert.equal(helpers.default.cron, REMINDER_TICK_CRON);
 
   // Тик Watch и Brief тоже вне SCHEDULE_CRON: точки догона у него нет.
   const proactive = (await import("../schedules/proactive.ts")) as {

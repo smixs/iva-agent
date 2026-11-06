@@ -141,34 +141,47 @@ export function toAuth(
   };
 }
 
+const AUTH_TIMEOUT_MS = 30_000;
+
 async function refresh(
   refreshToken: string | undefined,
 ): Promise<TokenResponse> {
-  const res = await fetch(TOKEN_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      client_id: CLIENT_ID,
-      grant_type: "refresh_token",
-      refresh_token: refreshToken,
-    }),
-  });
-  if (!res.ok)
-    throw new Error(
-      `token refresh failed: ${res.status} ${(await res.text()).slice(0, 300)}`,
-    );
-  const body = (await res.json()) as TokenResponse; // { id_token?, access_token, refresh_token? }
-  // Ответ без access_token — ОТКАЗ обновления, а не новый вход: записать его значит
-  // стереть рабочий файл входа, потребовать `iva login` на следующем вызове и отправить
-  // провайдеру заголовок "Bearer undefined" (PBT-DS1-P F2). Пустая строка — такой же
-  // отказ: заголовок без токена не работает.
-  const accessToken =
-    typeof body?.access_token === "string" ? body.access_token.trim() : "";
-  if (!accessToken)
-    throw new Error(
-      "token refresh returned no access_token; the stored login was kept — run `iva login` if this repeats",
-    );
-  return { ...body, access_token: accessToken };
+  const signal = AbortSignal.timeout(AUTH_TIMEOUT_MS);
+  try {
+    const res = await fetch(TOKEN_URL, {
+      signal,
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        client_id: CLIENT_ID,
+        grant_type: "refresh_token",
+        refresh_token: refreshToken,
+      }),
+    });
+    if (!res.ok)
+      throw new Error(
+        `token refresh failed: ${res.status} ${(await res.text()).slice(0, 300)}`,
+      );
+    const body = (await res.json()) as TokenResponse; // { id_token?, access_token, refresh_token? }
+    // Ответ без access_token — ОТКАЗ обновления, а не новый вход: записать его значит
+    // стереть рабочий файл входа, потребовать `iva login` на следующем вызове и отправить
+    // провайдеру заголовок "Bearer undefined" (PBT-DS1-P F2). Пустая строка — такой же
+    // отказ: заголовок без токена не работает.
+    const accessToken =
+      typeof body?.access_token === "string" ? body.access_token.trim() : "";
+    if (!accessToken)
+      throw new Error(
+        "token refresh returned no access_token; the stored login was kept — run `iva login` if this repeats",
+      );
+    return { ...body, access_token: accessToken };
+  } catch (error) {
+    if (signal.aborted)
+      throw new Error(
+        `Codex не ответил при обновлении токена за ${AUTH_TIMEOUT_MS / 1000} с`,
+        { cause: error },
+      );
+    throw error;
+  }
 }
 
 // ── getAccessToken: свежий токен для каждого запроса ────────────────────────

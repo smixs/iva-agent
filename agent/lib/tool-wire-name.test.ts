@@ -332,3 +332,45 @@ test("имя в истории кодируется одинаково, есть
     SETTINGS,
   );
 });
+
+test("MCP schema defaults preserve constraints and leave the source unchanged (seed=20261020)", async () => {
+  await fc.assert(
+    fc.asyncProperty(
+      fc.dictionary(
+        fc.string({ minLength: 1, maxLength: 10 }),
+        fc.constant({ type: "string" as const }),
+      ),
+      fc.boolean(),
+      async (properties, present) => {
+        const inputSchema = present
+          ? {
+              type: "object" as const,
+              properties,
+              required: Object.keys(properties),
+              additionalProperties: false,
+            }
+          : {
+              properties,
+              required: Object.keys(properties),
+              additionalProperties: false,
+            };
+        const before = JSON.stringify(inputSchema);
+        const { model, sent } = wiredModel(TOOL_NAME_MAX);
+        await streamParts(model, {
+          prompt: [],
+          tools: [{ ...tool("connection__search"), inputSchema }],
+        });
+        const sentTool = sent[0].tools?.[0];
+        assert.ok(sentTool?.type === "function");
+        assert.deepEqual(sentTool.inputSchema, {
+          ...inputSchema,
+          type: "object",
+          properties,
+        });
+        assert.equal(JSON.stringify(inputSchema), before);
+        assert.equal(inputSchema.properties, properties);
+      },
+    ),
+    { seed: 20261020, numRuns: 100 },
+  );
+});

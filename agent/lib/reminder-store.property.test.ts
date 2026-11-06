@@ -24,7 +24,7 @@ const root = mkdtempSync(join(tmpdir(), "iva-reminders-pbt-"));
 process.env.ASSISTANT_DATA_DIR = join(root, "data");
 mkdirSync(process.env.ASSISTANT_DATA_DIR, { recursive: true });
 
-const { add, fireDue, list, reminderFile, sweepFired } =
+const { add, fireDue, list, reminderFile, sweepFired, recordDelivery } =
   await import("./reminder-store.ts");
 const { saveJsonAtomic } = await import("./json-store.ts");
 
@@ -192,6 +192,11 @@ test(`P2: повторяющаяся строка на каждом сроке �
           );
           // Пока срок в будущем, строка не берётся.
           assert.deepEqual(await fireDue(current.nextRunAtMs - 1, 10), []);
+          await recordDelivery(current.id, {
+            firedAt: current.firedAt,
+            delivered: true,
+            error: null,
+          });
           previous = current.nextRunAtMs;
         }
         return true;

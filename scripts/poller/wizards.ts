@@ -17,6 +17,7 @@ import {
 } from "../lib/model-validation.ts";
 import { getAccessToken } from "#lib/codex-auth.ts";
 import {
+  claudeContextWindow,
   claudeModelLabel,
   claudeReasoningLevels,
   claudeStatus,
@@ -439,7 +440,14 @@ async function handleModelCmd(
       "| --- | --- | --- |",
       `| ${escapeRichText(providerLabel)} | ${escapeRichText(model)} | ${escapeRichText(effortLabel(effort))} |`,
     ].join("\n"),
-    `${button(tr("Helper model", "Модель помощника"), "iva_model:helper")}: ${escapeRichText(helperModel)}`,
+    button(
+      `${tr("Helper and background model", "Модель помощника и фона")}: ${escapeRichText(helperModel)}`,
+      "iva_model:helper",
+    ),
+    tr(
+      "Used by helpers, Watch, Brief and Insight.",
+      "Для помощников, Watch, Brief и Insight.",
+    ),
     `${button(tr("Change", "Сменить"), "iva_model:chg")} — ${tr(
       "pick another provider or model.",
       "выбрать другого провайдера или модель.",
@@ -1181,6 +1189,15 @@ function wizardSelection(st: WizardState, env: Record<string, string>) {
     ...(base ? { base } : {}),
   };
 }
+function wizardModelUpdates(st: WizardState): Record<string, string> {
+  return {
+    [CATALOG[st.provider].modelVar]: st.model,
+    ...(st.provider === "claude"
+      ? { CLAUDE_CONTEXT_WINDOW: claudeContextWindow(st.model) }
+      : {}),
+  };
+}
+
 function wizardUpdates(
   st: WizardState,
   env: Record<string, string>,
@@ -1191,7 +1208,7 @@ function wizardUpdates(
   updates.MODEL_PROVIDER = st.provider;
   if (st.provider !== (env.MODEL_PROVIDER ?? "ollama"))
     updates.HELPER_MODEL = null;
-  updates[cat.modelVar] = st.model;
+  Object.assign(updates, wizardModelUpdates(st));
   if (cat.baseVar && st.pendingBase) updates[cat.baseVar] = st.pendingBase;
   if (cat.keyVar && st.pendingKey) updates[cat.keyVar] = st.pendingKey;
   else if (cat.keyVar && st.dropKey) updates[cat.keyVar] = null;

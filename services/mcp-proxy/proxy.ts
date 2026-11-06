@@ -45,7 +45,7 @@ const HOST = "127.0.0.1";
 /** Потолок тела запроса: аргументы тула, а не файловый поток. */
 const MAX_BODY_BYTES = 16 * 1024 * 1024;
 
-export type ProxySpec = {
+type ProxySpec = {
   /** Имя плагина: и запись в `plugins.json`, и папка в Custom layer. */
   readonly plugin: string;
   /** Имя сервера в `mcp.json` этого плагина. */
@@ -67,7 +67,7 @@ export type RunningProxy = {
 };
 
 /** Env дочернего процесса: закрытый список, собранный из файлов плагина. */
-export function childEnvironment({
+function childEnvironment({
   declared,
   fromEnvFile,
   paths,

@@ -38,7 +38,7 @@ type TraceCore = Pick<
   "traceDay" | "traceDir" | "traceFilePath"
 >;
 
-export type TraceDependencies = {
+type TraceDependencies = {
   readonly log?: (...args: unknown[]) => void;
   readonly now?: () => Date;
   readonly translate?: Translate;
@@ -51,9 +51,9 @@ export type TraceDependencies = {
 };
 
 /** The viewer's default port — `sh.iva/services/viewer/service.json` may name another. */
-export const TRACE_VIEWER_PORT = 8726;
+const TRACE_VIEWER_PORT = 8726;
 /** The plugin that carries the viewer (spec `.scratch/trace/spec.md`, ADR-0010). */
-export const TRACE_PLUGIN = "trace";
+const TRACE_PLUGIN = "trace";
 /** The day-file name of the contract; anything else in the folder is not ours. */
 const DAY_FILE = /^\d{4}-\d{2}-\d{2}\.jsonl$/u;
 const TAIL_INTERVAL_MS = 500;
@@ -203,7 +203,7 @@ export function parseTraceLine(raw: string, index = 0): TraceLine | null {
 }
 
 /** Every day file of the journal, oldest first. Retention caps the folder at 30 files. */
-export function readTraceLines(dir: string): TraceLine[] {
+function readTraceLines(dir: string): TraceLine[] {
   let names: string[];
   try {
     names = readdirSync(dir)
@@ -443,7 +443,7 @@ function lastMatch(
   return undefined;
 }
 
-export type TurnOutcome =
+type TurnOutcome =
   | "failed"
   | "stopped"
   | "blocked"
@@ -486,7 +486,7 @@ export function turnOutcome(turn: StitchedTurn): TurnOutcome {
  * they belong to the subagent, and counting them here would make one planner call look
  * like extra work by the turn itself.
  */
-export function countSteps(turn: StitchedTurn): number {
+function countSteps(turn: StitchedTurn): number {
   let started = 0;
   let finished = 0;
   for (const { kind, name, turn: key } of turn.events) {
@@ -502,7 +502,7 @@ export function countSteps(turn: StitchedTurn): number {
  * seam every chat turn passes and `unknown` is an eve event with no channel kind, so
  * neither answers the question a reader is asking.
  */
-export function turnSource(turn: StitchedTurn): string {
+function turnSource(turn: StitchedTurn): string {
   return (
     turn.sources.find(
       (source) => source !== "bridge" && source !== "unknown",
@@ -513,7 +513,7 @@ export function turnSource(turn: StitchedTurn): string {
 }
 
 /** Tools the turn called, first mention first. */
-export function turnTools(turn: StitchedTurn): string[] {
+function turnTools(turn: StitchedTurn): string[] {
   const names: string[] = [];
   const add = (value: unknown): void => {
     const name = scalarText(value);
@@ -585,7 +585,7 @@ function stepLabel(steps: number): string {
  * `name` but does not strip line breaks from them, and a chat title or an id that arrived
  * with a newline would otherwise print as two events.
  */
-export function shortTurn(key: string, width = 14): string {
+function shortTurn(key: string, width = 14): string {
   const text = sanitize(key);
   if (!text) return "-";
   return text.length <= width
@@ -651,7 +651,7 @@ export function oneLine(value: unknown, limit: number): string {
 }
 
 /** The one or two `data` fields worth a column, plus the duration when there is one. */
-export function eventFacts(event: TraceLine): string {
+function eventFacts(event: TraceLine): string {
   const data = event.data;
   const facts: string[] = [];
   if (Array.isArray(data.actions)) {
@@ -704,7 +704,7 @@ function contentFields(event: TraceLine): [string, unknown][] {
 }
 
 /** The first content field the event carries, capped — or the writer's marker instead. */
-export function eventPreview(event: TraceLine, limit: number): string {
+function eventPreview(event: TraceLine, limit: number): string {
   const [first] = contentFields(event);
   if (first) return `${first[0]}: ${oneLine(first[1], limit)}`;
   if (event.data.traceTrimmed === true) return "content: …[trimmed]";
@@ -860,7 +860,7 @@ export function formatTurnList(
 
 // --- tail: following the day file ---
 
-export type TraceTail = {
+type TraceTail = {
   /** Events that appeared since the previous call. Rollover and truncation are inside. */
   drain(): TraceLine[];
   /** The day file being followed. */
@@ -1028,11 +1028,11 @@ export function sshHost(
   return host && !LOOPBACK.has(host) ? host : fallback();
 }
 
-export function sshTunnel(port: number, user: string, host: string): string {
+function sshTunnel(port: number, user: string, host: string): string {
   return `ssh -N -L ${String(port)}:127.0.0.1:${String(port)} ${user}@${host}`;
 }
 
-export function viewerUrl(port: number): string {
+function viewerUrl(port: number): string {
   return `http://127.0.0.1:${String(port)}`;
 }
 
@@ -1045,7 +1045,7 @@ function currentUser(): string {
 }
 
 /** `--since 20` or `--since=20`; anything else means no history. */
-export function flagCount(argv: readonly string[], flag: string): number {
+function flagCount(argv: readonly string[], flag: string): number {
   for (let at = 0; at < argv.length; at += 1) {
     const value = argv[at];
     const raw = value.startsWith(`${flag}=`)

@@ -40,6 +40,15 @@ test("the reminders dispatcher ticks every minute through waitUntil", async () =
   assert.equal(started.length, 1, "the tick is handed to waitUntil");
   const result = await started[0];
   // Таблицы в свежем каталоге нет: тик ничего не забирает, но пульс о себе пишет.
-  assert.deepEqual(result, { claimed: 0, spawned: 0, filled: 0, swept: 0 });
+  assert.ok(Array.isArray(result));
+  assert.deepEqual(
+    result.slice(1, 3),
+    Array.from({ length: 2 }, () => ({
+      status: "fulfilled",
+      value: { claimed: 0, spawned: 0, filled: 0, swept: 0 },
+    })),
+  );
+  assert.equal(result.length, 3);
+  assert.deepEqual(result[0], { status: "fulfilled", value: undefined });
   assert.notEqual(readTickPulse(), null);
 });

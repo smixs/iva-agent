@@ -1,14 +1,14 @@
 ---- MODULE RestartRecovery ----
 \* Перезапуск Ивы посреди хода (0.4.10). До старта сервиса ExecStartPre смотрит run-status:
 \* есть оборванный ход — хранилище workflow уходит в карантин (замок входящих сессии исчезает
-\* вместе с ним), запись хода помечается (updatedAt = 0), Bridge закрывает её одной строкой
+\* вместе с ним), запись хода помечается (updatedAt = 0), Bridge закрывает её одним уведомлением
 \* владельцу. Очередь Telegram живёт отдельно и переживает перезапуск. Процесс может упасть на
 \* любом шаге, в том числе посреди восстановления; само восстановление может отказать (нет
 \* прав, диск) на любом из двух шагов. Карантинов хранится Keep, старые вытесняются.
 \*
 \* Fixed = FALSE — поведение кандидата 19fd4bea: помеченный ход снова считается оборванным,
 \* отказ восстановления не даёт сервису стартовать. Fixed = TRUE — поведение после ремонта.
-EXTENDS Naturals
+EXTENDS Naturals, FiniteSets
 
 CONSTANTS MaxMsgs, MaxCrashes, MaxFaults, Keep, Fixed, RecoveryCAS
 
@@ -21,7 +21,17 @@ recoveryVars == <<recoveryPhase, diskStatus, diskGeneration, scanGeneration, che
 vars == <<proc, turn, lock, status, queue, sent, answered, noticed,
           crashes, faults, interrupted, quarantines, origKept, blocked>>
 
+VARIABLES offerPhase, offerToken, offerUpdate, offerPending, offerAdmitted,
+          offerNotices, offerTaps, offerRestarts, offerExpired
+buttonVars == <<offerPhase, offerToken, offerUpdate, offerPending, offerAdmitted,
+               offerNotices, offerTaps, offerRestarts, offerExpired>>
+ButtonInit ==
+  /\ offerPhase = "running" /\ offerToken = FALSE /\ offerUpdate = 0
+  /\ offerPending = {} /\ offerAdmitted = {} /\ offerNotices = 0
+  /\ offerTaps = {} /\ offerRestarts = 0 /\ offerExpired = FALSE
+
 Init ==
+  /\ ButtonInit
   /\ recoveryPhase = "idle" /\ diskStatus = "running" /\ diskGeneration = 1
   /\ scanGeneration = 0 /\ checkedGeneration = 0 /\ checkedStatus = "none"
   /\ statusLock = FALSE /\ bridgeDone = FALSE /\ newTurn = FALSE
@@ -109,7 +119,7 @@ LegacyNext ==
   \/ Send \/ StartTurn \/ FinishTurn \/ Crash \/ Boot
   \/ Quarantine \/ MarkStale \/ Fault \/ Start \/ Notice
 
-Next == LegacyNext /\ UNCHANGED recoveryVars
+Next == LegacyNext /\ UNCHANGED <<recoveryVars, buttonVars>>
 
 \* H2: scan -> repeated read -> publication, with Bridge closing the same chat.
 \* RecoveryCAS uses the same per-chat lock and generation comparison as writers.
@@ -142,7 +152,7 @@ RecoveryPublish ==
        ELSE UNCHANGED <<diskStatus, diskGeneration>>
   /\ UNCHANGED <<scanGeneration, checkedGeneration, checkedStatus, bridgeDone, newTurn>>
 SecondWindowNext == (RecoveryScan \/ RecoveryRead \/ BridgeFinish \/ BridgeStart \/ RecoveryPublish)
-  /\ UNCHANGED vars
+  /\ UNCHANGED <<vars, buttonVars>>
 SecondWindowSpec == Init /\ [][SecondWindowNext]_<<vars, recoveryVars>>
 ClosedStaysClosed == bridgeDone /\ ~newTurn => diskStatus = "idle"
 NewTurnKept == newTurn => diskStatus = "running"
@@ -181,4 +191,64 @@ NeverBlocked == ~blocked
 
 \* Очередь доигрывается.
 QueueDrains == <>[](queue = 0 /\ ~turn /\ status = "none")
+
+\* Кнопка после оборванного хода, модель до кода (21.10.2026).
+\* ReapOffer -> queue.reapStaleRuns: CAS закрывает ход и сохраняет жетон кнопки.
+\* NotifyOffer -> queue.notifyInterruptedTurn: один вызов Outbox после CAS.
+\* TapOffer -> control.handleOwnerTap: CAS запоминает update_id в run-status и берёт вопрос той же generation.
+\* AdmitOffer -> обычный inbound pipeline; повтор того же update_id идемпотентен.
+\* ExpireOffer -> сброс жетона при /new и захвате нового хода.
+\* RestartBridge -> память процесса исчезает, run-status и очередь остаются.
+\* Допущение: вызов Outbox завершается успешно. Сбой отправки и падение между CAS и
+\* отправкой дают at-most-once attempt; атомарность диска с Telegram вне модели.
+\* Fixed = FALSE: мутант сам ставит вопрос в очередь сразу после уведомления.
+\* RecoveryCAS = FALSE: мутант пропускает сверку сохранённого update_id.
+ReapOffer ==
+  /\ offerPhase = "running"
+  /\ offerPhase' = "closed" /\ offerToken' = TRUE
+  /\ UNCHANGED <<offerUpdate, offerPending, offerAdmitted, offerNotices,
+                 offerTaps, offerRestarts, offerExpired>>
+NotifyOffer ==
+  /\ offerPhase = "closed"
+  /\ offerPhase' = "notified" /\ offerNotices' = offerNotices + 1
+  /\ offerPending' = IF Fixed THEN offerPending ELSE {1}
+  /\ UNCHANGED <<offerToken, offerUpdate, offerAdmitted, offerTaps, offerRestarts, offerExpired>>
+TapOffer(u) ==
+  /\ offerPhase = "notified" /\ offerToken /\ ~offerExpired
+  /\ (RecoveryCAS => offerUpdate \in {0, u})
+  /\ offerUpdate' = u /\ offerPending' = offerPending \cup {u}
+  /\ offerTaps' = offerTaps \cup {u}
+  /\ UNCHANGED <<offerPhase, offerToken, offerAdmitted, offerNotices, offerRestarts, offerExpired>>
+AdmitOffer(u) ==
+  /\ u \in offerPending
+  /\ offerPending' = offerPending \ {u} /\ offerAdmitted' = offerAdmitted \cup {u}
+  /\ UNCHANGED <<offerPhase, offerToken, offerUpdate, offerNotices, offerTaps, offerRestarts, offerExpired>>
+ExpireOffer ==
+  /\ ~offerExpired
+  /\ offerExpired' = TRUE /\ offerToken' = FALSE
+  /\ UNCHANGED <<offerPhase, offerUpdate, offerPending, offerAdmitted, offerNotices, offerTaps, offerRestarts>>
+RestartBridge ==
+  /\ offerRestarts < MaxCrashes
+  /\ offerRestarts' = offerRestarts + 1
+  /\ UNCHANGED <<offerPhase, offerToken, offerUpdate, offerPending, offerAdmitted, offerNotices, offerTaps, offerExpired>>
+ButtonNext == ReapOffer \/ NotifyOffer \/ ExpireOffer \/ RestartBridge
+              \/ (\E u \in 1..MaxMsgs: TapOffer(u) \/ AdmitOffer(u))
+ButtonSpec == Init /\ [][ButtonNext /\ UNCHANGED <<vars, recoveryVars>>]_<<vars, recoveryVars, buttonVars>>
+              /\ WF_buttonVars(NotifyOffer)
+\* Mutant: a reaper without the running -> idle CAS takes a notified turn again.
+ReapNotifiedOffer ==
+  /\ offerPhase = "notified" /\ offerNotices < 2
+  /\ offerPhase' = "closed"
+  /\ UNCHANGED <<offerToken, offerUpdate, offerPending, offerAdmitted,
+                 offerNotices, offerTaps, offerRestarts, offerExpired>>
+ButtonDoubleNoticeSpec == Init /\ [][(ButtonNext \/ ReapNotifiedOffer)
+  /\ UNCHANGED <<vars, recoveryVars>>]_<<vars, recoveryVars, buttonVars>>
+  /\ WF_buttonVars(NotifyOffer)
+\* Mutant: closing a turn drops its notification instead of invoking Outbox.
+ButtonLostNoticeSpec == Init /\ [][(ButtonNext /\ offerPhase' # "notified")
+  /\ UNCHANGED <<vars, recoveryVars>>]_<<vars, recoveryVars, buttonVars>>
+OneNoticePerTurn == offerNotices <= 1
+NoticeEventually == offerPhase = "closed" ~> offerNotices = 1
+OnlyOwnerTap == offerPending \cup offerAdmitted \subseteq offerTaps
+OneNewTurn == Cardinality(offerAdmitted) <= 1
 ====

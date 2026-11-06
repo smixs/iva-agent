@@ -756,10 +756,14 @@ test("reapStaleRuns flips one stale run, resets Eve, notifies, and removes worki
   ]);
   assert.equal((calls[0][3] as StatusRecord).status, "idle");
   assert.equal((calls[0][3] as StatusRecord).resetAt, reaperNow);
-  assert.deepEqual(calls.slice(1), [
-    ["reset", "1:", { sessionId: "session-1" }],
-    ["send", "1:", "Предыдущий ход оборвался - повтори запрос или /new"],
-  ]);
+  assert.deepEqual(calls[1], ["reset", "1:", { sessionId: "session-1" }]);
+  assert.equal(calls.length, 3);
+  assert.deepEqual(calls[2].slice(0, 2), ["send", "1:"]);
+  const data = (calls[0][3] as StatusRecord).restartRetryData;
+  assert.equal(
+    calls[2][2],
+    `Предыдущий ход оборвался на твоё сообщение. Повторить?\n\n<tg-button-row><tg-button type="callback_data" data="${String(data)}">Повторить</tg-button></tg-button-row>`,
+  );
 });
 
 test("reapStaleRuns closes an abandoned compaction like a stale turn, but silently", async () => {

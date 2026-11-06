@@ -44,3 +44,39 @@ export function turnQuestion(chatKey: string): TurnQuestion | undefined {
   const media = status?.turnQuestionMedia === true;
   return text === "" && !media ? undefined : { text, media };
 }
+
+/** Жетон, снимок вопроса и update_id живут в одной записи. */
+export function claimInterruptedTap(
+  chatKey: string,
+  data: string,
+  updateId: number,
+): TurnQuestion | null {
+  const current = getChatStatus(chatKey);
+  if (current?.status !== "idle" || current.restartRetryData !== data)
+    return null;
+  if (
+    current.restartRetryUpdate !== undefined &&
+    current.restartRetryUpdate !== updateId
+  )
+    return null;
+  const claimed = setChatStatusIf(
+    chatKey,
+    {
+      generation: current.generation,
+      status: "idle",
+      restartRetryData: data,
+      restartRetryUpdate: current.restartRetryUpdate,
+    },
+    { restartRetryUpdate: updateId },
+    { touch: false },
+  );
+  return claimed === null
+    ? null
+    : {
+        text:
+          typeof current.restartRetryQuestion === "string"
+            ? current.restartRetryQuestion
+            : "",
+        media: current.restartRetryMedia === true,
+      };
+}

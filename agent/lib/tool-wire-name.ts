@@ -54,7 +54,15 @@ function encodeTools(
         `tool names ${JSON.stringify(taken)} and ${JSON.stringify(tool.name)} share the wire name ${JSON.stringify(wire)}`,
       );
     table.set(wire, tool.name);
-    return { ...tool, name: wire };
+    const inputSchema =
+      tool.inputSchema.type === undefined
+        ? {
+            ...tool.inputSchema,
+            type: "object" as const,
+            properties: tool.inputSchema.properties ?? {},
+          }
+        : tool.inputSchema;
+    return { ...tool, name: wire, inputSchema };
   });
   return { tools: encoded, table };
 }

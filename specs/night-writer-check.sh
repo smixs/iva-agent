@@ -16,3 +16,7 @@ check() {
 check NightWriter none
 check NightWriter-save-window HumanEditWins
 check NightWriter-publish-window HumanEditWins
+check NightWriter-summary-reread HumanEditWins
+check NightWriter-summary-unwritten HumanEditWins
+check NightWriter-summary-recomputed PublishedSummaryResumes
+check NightWriter-summary-order PendingSummaryResumes

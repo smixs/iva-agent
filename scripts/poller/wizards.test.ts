@@ -602,6 +602,7 @@ test("picking a claude model asks the thinking level, and saving writes THINKING
     MODEL_PROVIDER: "claude",
     HELPER_MODEL: null,
     CLAUDE_MODEL: "claude-opus-5-5",
+    CLAUDE_CONTEXT_WINDOW: "1000000",
   });
 });
 
@@ -822,4 +823,49 @@ test("R1 switching provider resets helper model and stale helper cannot save", a
     validateAndSaveWizard({ ...st, helperModel: true } as never, options),
     /helper provider changed/,
   );
+});
+
+test("new conversation reports the runtime window for every provider without an override", () => {
+  for (const [provider, expected] of [
+    ["claude", "1M"],
+    ["codex", "272k"],
+    ["ollama", "131,072"],
+    ["opencode", "131,072"],
+    ["openrouter", "131,072"],
+    ["custom", "131,072"],
+  ]) {
+    const copy = resetMessageCopy(
+      "/new",
+      {
+        MODEL_PROVIDER: provider,
+        CUSTOM_MODEL: "local",
+      },
+      "ru",
+    );
+    assert.ok(
+      copy.complete.endsWith(`Контекст очищен · окно ${expected}`),
+      copy.complete,
+    );
+  }
+});
+
+test("model menu saves the selected Claude model window without running setup", async () => {
+  for (const [model, expected] of [
+    ["claude-fable-5-1", "1000000"],
+    ["claude-haiku-4-5-20251001", "200000"],
+  ]) {
+    let written: Record<string, string | null> | undefined;
+    await validateAndSaveWizard(
+      { flow: "model", provider: "claude", model, effort: null } as never,
+      {
+        readEnv: async () => ({ MODEL_PROVIDER: "codex" }),
+        validate: async () => ({ id: model, reasoningLevels: [] }),
+        write: async (updates) => {
+          written = updates;
+        },
+      },
+    );
+    assert.equal(written?.MODEL_PROVIDER, "claude");
+    assert.equal(written?.CLAUDE_CONTEXT_WINDOW, expected);
+  }
 });

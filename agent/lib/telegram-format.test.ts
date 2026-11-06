@@ -40,6 +40,36 @@ await test("markdown conversion retains current Telegram HTML fixtures", () => {
   );
 });
 
+await test("Markdown links preserve plain and escaped query separators", () => {
+  for (const markdown of [
+    "[link](https://example.org/?q=hello&page=2)",
+    "[link](https://example.org/?q=hello\\&page=2)",
+  ]) {
+    const html = toTelegramHtmlChunks(markdown).join("\n");
+    assert.equal(
+      html,
+      '<a href="https://example.org/?q=hello&amp;page=2">link</a>',
+    );
+    assert.doesNotMatch(html, /[\uE000\uE001]/u);
+    const link = html.match(/href="([^"]+)"/u);
+    assert.ok(link);
+    assert.equal(new URL(htmlToPlain(link[1])).searchParams.get("page"), "2");
+  }
+  assert.deepEqual(toTelegramHtmlChunks("[link](https://example.org/path)"), [
+    '<a href="https://example.org/path">link</a>',
+  ]);
+});
+
+await test("HTML fallback retains escaped quotes and button labels beside a query link", () => {
+  const markdown =
+    "> Вопрос: \\*\\*так\\*\\* \\`код\\` \\& ответ?\n\n" +
+    "[link](https://example.org/?q=hello\\&page=2)\n\n" +
+    '<tg-button-row><tg-button type="callback_data" data="retry">Повторить & проверить</tg-button><tg-button type="url" url="https://example.org">Сайт</tg-button></tg-button-row>';
+  assert.deepEqual(toTelegramHtmlChunks(markdown), [
+    '<blockquote>Вопрос: **так** `код` &amp; ответ?</blockquote>\n\n<a href="https://example.org/?q=hello&amp;page=2">link</a>\n\n <b>Повторить &amp; проверить</b> <a href="https://example.org">Сайт</a>',
+  ]);
+});
+
 await test("Wikipedia links retain underscores and balanced parentheses", () => {
   assert.equal(
     mdToTelegramHtml(

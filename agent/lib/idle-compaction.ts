@@ -21,6 +21,10 @@ import { idleCompactionLimit } from "./compaction.ts";
 type Turn = {
   /** Между turn.started и концом хода: пересказ в это время — страховка eve, не наш. */
   open: boolean;
+  /** Парковка завершённого хода обработана: ручная просьба уже безопасна. */
+  parked: boolean;
+  starting: boolean;
+  manualBefore: number | null;
   /** Первый известный и последний вход шага текущего хода; null — провайдер не назвал. */
   first: number | null;
   last: number | null;
@@ -49,6 +53,9 @@ export const ASK_FORGOTTEN_MS = 30 * 60_000;
 export function openIdleCompactionTurn(sessionId: string): void {
   const turn = turns.get(sessionId) ?? {
     open: true,
+    parked: false,
+    starting: false,
+    manualBefore: null,
     first: null,
     last: null,
     due: false,
@@ -58,14 +65,20 @@ export function openIdleCompactionTurn(sessionId: string): void {
     reclaim: null,
     reclaimAt: 0,
   };
-  Object.assign(turn, { open: true, first: null, last: null, due: false });
+  Object.assign(turn, {
+    open: true,
+    parked: false,
+    first: null,
+    last: null,
+    due: false,
+  });
   // Свежая сессия — в конец: вытесняется та, что молчит дольше всех.
   turns.delete(sessionId);
   turns.set(sessionId, turn);
   for (const [stale, kept] of turns) {
     if (turns.size <= TURNS_KEPT) break;
     // Идущий ход, решение и открытая просьба живы: такой счёт не вытесняется.
-    if (kept.open || kept.due || kept.reclaim) continue;
+    if (kept.open || kept.starting || kept.due || kept.reclaim) continue;
     turns.delete(stale);
   }
 }
@@ -115,9 +128,55 @@ export function completeIdleCompaction(sessionId: string): void {
 }
 
 /** Парковка сняла запись пересказа: он кончился (успех, сбой, обрыв) — просьба закрыта. */
-export function endIdleCompaction(sessionId: string): void {
+export function endIdleCompaction(sessionId: string) {
   const turn = turns.get(sessionId);
-  if (turn) turn.reclaim = null;
+  if (!turn) return null;
+  turn.reclaim = null;
+  if (turn.manualBefore === null) return null;
+  const result = { before: turn.manualBefore, completed: turn.compacted };
+  if (!turn.compacted) turn.manualBefore = null;
+  return result;
+}
+
+/** session.waiting обработала освобождение записи завершённого хода. */
+export function parkIdleCompactionTurn(sessionId: string): void {
+  const turn = turns.get(sessionId);
+  if (turn) turn.parked = true;
+}
+
+export const idleCompactionAwaitingPark = (sessionId: string) => {
+  const turn = turns.get(sessionId);
+  return Boolean(turn && !turn.parked);
+};
+
+/** Последний вход известен, ход запаркован, обычная свежая сессия около 23 тыс. */
+export function manualCompactionInput(sessionId: string): number | null {
+  const turn = turns.get(sessionId);
+  return turn &&
+    turn.parked &&
+    !turn.open &&
+    !turn.starting &&
+    !turn.off &&
+    !turn.asked &&
+    turn.last !== null &&
+    turn.last >= 30_000
+    ? turn.last
+    : null;
+}
+
+/** Первый измеренный вход после ручного пересказа, включая системную часть и инструменты. */
+export function takeManualCompactionReport(sessionId: string) {
+  const turn = turns.get(sessionId);
+  if (
+    !turn ||
+    turn.manualBefore === null ||
+    !turn.compacted ||
+    turn.first === null
+  )
+    return null;
+  const report = { before: turn.manualBefore, after: turn.first };
+  turn.manualBefore = null;
+  return report;
 }
 
 /**
@@ -154,9 +213,30 @@ export function dropIdleCompactionTurn(sessionId: string): void {
     Object.assign(turn, {
       open: false,
       due: false,
+      last: null,
+      manualBefore: null,
       asked: false,
       compacted: false,
     });
+}
+
+export const idleCompactionDue = (sessionId: string) =>
+  Boolean(turns.get(sessionId)?.due);
+const compactionTurnReady = (turn: Turn, manual: boolean) =>
+  !turn.open && (!manual || turn.parked);
+
+function canStartCompaction(
+  turn: Turn,
+  manual: boolean,
+  manualInput: number | null,
+  now: () => number,
+): boolean {
+  return (
+    compactionTurnReady(turn, manual) &&
+    !turn.starting &&
+    (manual ? manualInput !== null : turn.due) &&
+    !(turn.reclaim && now() - turn.reclaimAt < ASK_FORGOTTEN_MS)
+  );
 }
 
 /**
@@ -172,6 +252,7 @@ export function dropIdleCompactionTurn(sessionId: string): void {
  */
 export async function startIdleCompaction({
   sessionId,
+  manual = false,
   claimImpl,
   requestImpl,
   releaseImpl,
@@ -179,6 +260,7 @@ export async function startIdleCompaction({
   logImpl = console.error,
 }: {
   sessionId: string;
+  manual?: boolean;
   claimImpl: () => boolean | Promise<boolean>;
   requestImpl: (sessionId: string) => Promise<boolean>;
   releaseImpl: () => unknown;
@@ -186,23 +268,46 @@ export async function startIdleCompaction({
   logImpl?: (...parts: unknown[]) => void;
 }): Promise<boolean> {
   const turn = turns.get(sessionId);
-  if (!turn?.due) return false;
+  if (!turn) return false;
+  const manualInput = manual ? manualCompactionInput(sessionId) : null;
+  const canStart = canStartCompaction(turn, manual, manualInput, now);
   turn.due = false;
-  // Прошлая просьба ещё может стоять в очереди eve: вторую не шлём.
-  if (turn.reclaim && now() - turn.reclaimAt < ASK_FORGOTTEN_MS) return false;
+  if (!canStart) return false;
+  turn.starting = true;
   try {
     if (!(await claimImpl())) return false;
   } catch (error) {
     logImpl("[telegram] чат под свёртку между ходами не занят:", error);
     return false;
+  } finally {
+    turn.starting = false;
   }
+  if (!compactionTurnReady(turn, manual)) {
+    await releaseRefused(releaseImpl, logImpl);
+    return false;
+  }
+  turn.manualBefore = manualInput;
   // До ответа: начало и конец пересказа могут прийти раньше, чем разобран ответ роута.
   turn.asked = true;
   turn.reclaim = claimImpl;
   turn.reclaimAt = now();
+  return askCompaction(
+    turn,
+    () => requestImpl(sessionId),
+    releaseImpl,
+    logImpl,
+  );
+}
+
+async function askCompaction(
+  turn: Turn,
+  requestImpl: () => Promise<boolean>,
+  releaseImpl: () => unknown,
+  logImpl: (...parts: unknown[]) => void,
+): Promise<boolean> {
   let accepted;
   try {
-    accepted = await requestImpl(sessionId);
+    accepted = await requestImpl();
   } catch (error) {
     logImpl(
       "[telegram] свёртка между ходами: исход просьбы неизвестен:",
@@ -212,6 +317,7 @@ export async function startIdleCompaction({
   }
   if (accepted) return true;
   turn.asked = false;
+  turn.manualBefore = null;
   turn.reclaim = null;
   await releaseRefused(releaseImpl, logImpl);
   return false;

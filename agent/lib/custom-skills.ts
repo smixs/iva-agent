@@ -40,7 +40,7 @@ export function customSkillsDir(): string {
 
 // Описание попадает в системный промпт на каждом ходу. Файл без frontmatter, у которого
 // первая строка длиной в абзац, иначе раздувал бы промпт — режем.
-const DESCRIPTION_CAP = 120;
+export const DESCRIPTION_CAP = 120;
 
 type Kind = "package" | "flat";
 
@@ -103,7 +103,7 @@ type Described = {
   readonly truncatedFrom: number | null;
 };
 
-function describe(name: string, markdown: string): Described {
+export function describeSkill(name: string, markdown: string): Described {
   let description: string | null;
   try {
     const { fields, body } = parseFrontmatter(markdown);
@@ -248,7 +248,7 @@ async function readOne(
     );
     return null;
   }
-  const { description, truncatedFrom } = describe(name, markdown);
+  const { description, truncatedFrom } = describeSkill(name, markdown);
   if (truncatedFrom !== null) {
     const key = `description-cap\u0000${label}\u0000${name}\u0000${source}\u0000${truncatedFrom}`;
     if (!reportedDiagnostics.has(key)) {

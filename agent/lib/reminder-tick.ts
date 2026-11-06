@@ -16,6 +16,9 @@ import { join } from "node:path";
 import { dataDir } from "./data-dir.ts";
 import {
   ReminderStoreError,
+  commandFile,
+  commandTimeoutMs,
+  reminderFile,
   fireDue,
   list,
   recordDelivery,
@@ -57,6 +60,9 @@ export function readTickPulse(dir?: string): number | null {
 }
 
 export interface ReminderTickOptions {
+  readonly command?: boolean;
+  /** Finish admission before returning to the minute Schedule, not the child turn. */
+  readonly dispatchOnly?: boolean;
   readonly nowMs?: number;
   readonly limit?: number;
   readonly root?: string;
@@ -131,9 +137,14 @@ async function recordOutcome(
     readonly error: string | null;
   },
   log: (...args: unknown[]) => void,
+  file: string,
 ): Promise<boolean> {
   try {
-    await recordDelivery(row.id, { firedAt: row.firedAt, ...outcome }, { log });
+    await recordDelivery(
+      row.id,
+      { firedAt: row.firedAt, ...outcome },
+      { log, file },
+    );
     return true;
   } catch (error) {
     if (error instanceof ReminderStoreError) {
@@ -171,6 +182,66 @@ function releaseReminderStatus(
   }
 }
 
+async function fireRow(
+  row: Reminder,
+  file: string,
+  command: boolean,
+  { root, nodeBin, runJob, log }: TickWiring,
+): Promise<"spawned" | "filled" | null> {
+  const result = await fireOnce(
+    {
+      name: `reminder-${row.id}`,
+      argv: command
+        ? ["scripts/reminders/command.ts", row.id, String(row.firedAt)]
+        : ["scripts/reminders/fire.ts", row.id],
+      root,
+      nodeBin,
+      // Commands have a deadline; prompt turns keep their inactivity watchdog.
+      timeoutMs: command ? commandTimeoutMs(row) + 10_000 : null,
+      killGraceMs: command ? 0 : undefined,
+      log,
+    },
+    runJob,
+  );
+  const after = (await list(file)).find((candidate) => candidate.id === row.id);
+  if (after === undefined || after.delivered !== null) {
+    log(
+      `reminders: ${row.id} fired (delivered=${after?.delivered ?? "row gone"})`,
+    );
+    return "spawned";
+  }
+  // Ребёнок отработал и вышел 0, а факта нет: текст мог уйти, а запись не состояться
+  // (лок таблицы занят) — сказать «не дошло» про такую строку нельзя. Факт остаётся
+  // невидимым, причина названа явно, и доктор говорит о ней иначе, чем о провале.
+  if (result.ok && !result.skipped) {
+    const recorded = await recordOutcome(
+      row,
+      { delivered: null, error: "delivery fact not recorded" },
+      log,
+      file,
+    );
+    if (!recorded) return null;
+    releaseReminderStatus(after, log);
+    log(`reminders: ${row.id} delivery fact not recorded`);
+    return "filled";
+  }
+  // Ребёнок не сказал факта: причина — по коду выхода. Больше за эту строку не берёмся.
+  const failure =
+    command && Date.now() >= (row.firedAt ?? 0) + commandTimeoutMs(row) + 10_000
+      ? "timeout"
+      : fireFailure(result);
+  const recorded = await recordOutcome(
+    row,
+    { delivered: false, error: failure },
+    log,
+    file,
+  );
+  if (!recorded) return null;
+  releaseReminderStatus(after, log);
+  log(`reminders: ${row.id} not delivered: ${failure}`);
+  return "filled";
+}
+
 /**
  * Один тик. Никогда не бросает наружу: это обработчик расписания, как и runScheduledJob —
  * сбой самого тика не должен ронять ход планировщика.
@@ -178,11 +249,13 @@ function releaseReminderStatus(
 export async function runReminderTick(
   options: ReminderTickOptions = {},
 ): Promise<ReminderTickResult> {
-  const { nowMs, limit, root, nodeBin, runJob, log } = tickWiring(options);
+  const wiring = tickWiring(options);
+  const { nowMs, limit, log } = wiring;
 
+  const file = options.command ? commandFile() : reminderFile();
   let rows: Reminder[];
   try {
-    rows = await fireDue(nowMs, limit);
+    rows = await fireDue(nowMs, limit, file);
   } catch (error) {
     const failure = message(error);
     log(`reminders: tick failed: ${failure}`);
@@ -195,7 +268,7 @@ export async function runReminderTick(
 
   let swept = 0;
   try {
-    swept = await sweepFired(nowMs);
+    swept = options.command ? 0 : await sweepFired(nowMs);
   } catch (error) {
     log(`reminders: sweep failed: ${message(error)}`);
   }
@@ -209,65 +282,21 @@ export async function runReminderTick(
   let spawned = 0;
   let filled = 0;
 
-  const fireRow = async (row: Reminder): Promise<void> => {
-    const result = await fireOnce(
-      {
-        name: `reminder-${row.id}`,
-        argv: ["scripts/reminders/fire.ts", row.id],
-        root,
-        nodeBin,
-        // Срока у ребёнка нет: ход напоминания живёт, пока идут события, и сторожит его
-        // тишина внутри хода (REMINDER_TURN_INACTIVITY_MS). Ночные расписания свой срок
-        // сохраняют — он у них по умолчанию (DEFAULT_TIMEOUT_MS).
-        timeoutMs: null,
-        log,
-      },
-      runJob,
-    );
-    const after = (await list()).find((candidate) => candidate.id === row.id);
-    if (after === undefined || after.delivered !== null) {
-      spawned += 1;
-      log(
-        `reminders: ${row.id} fired (delivered=${after?.delivered ?? "row gone"})`,
-      );
-      return;
-    }
-    // Ребёнок отработал и вышел 0, а факта нет: текст мог уйти, а запись не состояться
-    // (лок таблицы занят) — сказать «не дошло» про такую строку нельзя. Факт остаётся
-    // невидимым, причина названа явно, и доктор говорит о ней иначе, чем о провале.
-    if (result.ok && !result.skipped) {
-      const recorded = await recordOutcome(
-        row,
-        { delivered: null, error: "delivery fact not recorded" },
-        log,
-      );
-      if (!recorded) return;
-      releaseReminderStatus(after, log);
+  const completion = Promise.allSettled(
+    rows.map((row) => fireRow(row, file, options.command ?? false, wiring)),
+  ).then((outcomes) => {
+    outcomes.forEach((outcome, index) => {
+      if (outcome.status === "fulfilled") {
+        if (outcome.value === "spawned") spawned += 1;
+        if (outcome.value === "filled") filled += 1;
+        return;
+      }
       filled += 1;
-      log(`reminders: ${row.id} delivery fact not recorded`);
-      return;
-    }
-    // Ребёнок не сказал факта: причина — по коду выхода. Больше за эту строку не берёмся.
-    const failure = fireFailure(result);
-    const recorded = await recordOutcome(
-      row,
-      { delivered: false, error: failure },
-      log,
-    );
-    if (!recorded) return;
-    releaseReminderStatus(after, log);
-    filled += 1;
-    log(`reminders: ${row.id} not delivered: ${failure}`);
-  };
-
-  const outcomes = await Promise.allSettled(rows.map((row) => fireRow(row)));
-  outcomes.forEach((outcome, index) => {
-    if (outcome.status !== "rejected") return;
-    filled += 1;
-    log(
-      `reminders: ${rows[index]?.id} tick handler threw: ${message(outcome.reason)}`,
-    );
+      log(
+        `reminders: ${rows[index]?.id} tick handler threw: ${message(outcome.reason)}`,
+      );
+    });
   });
-
+  if (!options.dispatchOnly) await completion;
   return { claimed: rows.length, spawned, filled, swept };
 }

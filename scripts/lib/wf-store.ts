@@ -198,9 +198,10 @@ export function rewriteRunStatusesForUpdate(
           !Object.is(parsed.generation, snapshot.generation)
         )
           continue;
-        // An interrupted compaction between turns carried no request from the owner: once
-        // its session is retired the record is simply free again, with a reset tombstone.
-        // Bridge has nothing to close and nothing to tell. A queued sign (queued* fields)
+        // Both automatic and manual compaction use this record. Retiring its session frees
+        // the chat with a reset tombstone. The manual request and size report live in memory:
+        // /compact warns the owner to repeat it after a restart. Recovery has no persisted
+        // manual request to notify through Bridge. A queued sign (queued* fields)
         // stays: there is no Bot API before the start to delete it, and the next turn of
         // the chat deletes it by these fields (specs/IdleCompaction.tla, SignOwned).
         const stamp = Date.now();

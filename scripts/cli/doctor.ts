@@ -1,9 +1,11 @@
+import { noticeLang } from "../lib/notice-policy.ts";
 import { logHint } from "../lib/systemd-control.ts";
 import { unitPath } from "../lib/launchd.ts";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, statfsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
+import { homedir } from "node:os";
 // CLI обязан грузиться без authored tree и без "#lib"-маппинга
 // (scripts/cli/entrypoints.test.ts), поэтому run-status и telegram-queue
 // подгружаются динамически в самой проверке, а здесь — только типы.
@@ -13,9 +15,12 @@ import { pluginDirectory, pluginMount } from "../lib/plugin-build.ts";
 import { tryLoadPluginCore } from "../lib/plugin-core.ts";
 import { leftoverPluginDirs, pluginReadProblem } from "./plugin-cli-context.ts";
 import {
-  installedPluginUnits,
-  mcpUnitName,
-  serviceUnitName,
+  canonicalPluginScope,
+  inspectPluginUnits,
+  pluginUnitKey,
+  type PluginUnitInventory,
+  type PluginUnitScope,
+  resolvedPluginUnitName,
 } from "../lib/plugin-units.ts";
 import { LEGACY_BRAIN_UNITS } from "../lib/legacy-memory-units.ts";
 import {
@@ -72,7 +77,7 @@ type RollupEntry = {
 
 type RollupStatus = Record<string, RollupEntry | null | undefined>;
 
-export interface ScheduleFactsReport {
+interface ScheduleFactsReport {
   readonly lastRuns: readonly string[];
   readonly openFailures: readonly OpenFailure[];
   /** Строки таблицы: пакет diagnose печатает по ним хвосты незакрытых провалов. */
@@ -339,6 +344,18 @@ export function createDoctorCommand(
     if (bearerChanged) ctx.fix();
 
     checkNode(ctx);
+    const localGws = join(homedir(), ".local/bin/gws");
+    const gws = ctx.cap(
+      existsSync(localGws) ? localGws : "gws",
+      ["--version"],
+      {
+        timeout: 5000,
+      },
+    );
+    if (gws.code !== 0 && `${gws.out}${gws.err}`.includes("GLIBC_"))
+      ctx.warn(
+        'Google CLI requires a newer glibc; repair from the Iva version directory: bash install.sh --update-gws "$HOME/.local"',
+      );
     if (await checkEnvFile(ctx)) checkEnvOptions(ctx);
     checkBuild(ctx);
     ctx.install = checkVersionState(ctx);
@@ -565,8 +582,35 @@ async function checkEnvFile(ctx: DoctorContext): Promise<boolean> {
   // Вендора без ключа в .env доктор проверяет там же, где живёт его вход: в чужом CLI
   // на этой же машине. Молчать об этом значило бы объявить .env здоровым перед
   // отказом агента на старте.
-  if (provider.auth === "cli") await checkClaudeCli(ctx);
+  if (!(await checkModelAuth(ctx, rawProvider)) && provider.auth === "cli")
+    await checkClaudeCli(ctx);
   return true;
+}
+
+/** Authored modules are loaded only during the check: doctor also repairs missing trees. */
+async function checkModelAuth(
+  ctx: DoctorContext,
+  provider: string,
+): Promise<boolean> {
+  try {
+    const { pendingModelAuth } = await import("#lib/model-auth-state.ts");
+    const { modelAuthText } = await import("#lib/model-auth.ts");
+    const expired = pendingModelAuth(ctx.dataDirectory).find(
+      (status) => status.provider === provider,
+    );
+    if (!expired) return false;
+    ctx.fail(
+      modelAuthText(provider, await noticeLang(ctx.env), {
+        ...expired,
+        timeZone: ctx.env.ASSISTANT_TIMEZONE,
+      }),
+    );
+    return true;
+  } catch (error) {
+    if (!authoredTreeMissing(error))
+      ctx.warn(`Model login status unreadable: ${String(error)}`);
+    return false;
+  }
 }
 
 /** Статус Claude Code CLI: имя плана при входе и подсказка вместо него при отказе. */
@@ -1384,7 +1428,10 @@ async function checkPlugins(ctx: DoctorContext): Promise<void> {
     : [];
   // Юниты плагинов, которые сейчас на диске: их читаем до раннего выхода, иначе
   // юнит, оставшийся от снятого плагина, на пустой установке никто бы не назвал.
-  const onDisk = ctx.hasSystemd() ? installedPluginUnits(ctx.unitDir) : [];
+  const inspection = pluginInventory(ctx, state);
+  if (!inspection) return;
+  const { inventory } = inspection;
+  const onDisk = [...inventory.actual.values()].map((unit) => unit.unit);
   // Плагинов нет вообще — доктору сказать нечего, и молчание здесь честнее
   // строки «0 плагинов» в отчёте установки, которая их никогда не видела.
   if (
@@ -1394,7 +1441,7 @@ async function checkPlugins(ctx: DoctorContext): Promise<void> {
     onDisk.length === 0
   )
     return;
-  const expected = await checkPluginEntries(ctx, core, state);
+  const expected = await checkPluginEntries(ctx, core, state, inspection);
   await checkPluginUnits(ctx, expected, onDisk);
   reportPluginFolders(ctx, state, folders, leftovers);
 }
@@ -1406,14 +1453,40 @@ async function checkPlugins(ctx: DoctorContext): Promise<void> {
  * connection-файле), поэтому список только по нему обещал бы юнит серверу, которого в
  * `mcp.json` больше нет, — и `sync` не смог бы этого починить.
  */
+function pluginInventory(
+  ctx: DoctorContext,
+  state: PluginsState,
+): PluginInspection | null {
+  if (!existsSync(ctx.dataDirectory)) return null;
+  const scope = canonicalPluginScope(ctx.dataDirectory);
+  const inventory: PluginUnitInventory = ctx.hasSystemd()
+    ? inspectPluginUnits({
+        scope,
+        entries: state.plugins,
+        unitDir: ctx.unitDir,
+        manager: ctx.systemd.manager,
+        systemd: ctx.systemd,
+      })
+    : { actual: new Map(), conflicts: new Set<string>(), failures: [] };
+  for (const failure of inventory.failures) ctx.warn(failure);
+  return { scope, inventory };
+}
+type PluginInspection = {
+  scope: PluginUnitScope;
+  inventory: PluginUnitInventory;
+};
+type PluginExpectations = PluginInspection & {
+  expected: Map<string, { plugin: string; port?: number }>;
+};
 async function checkPluginEntries(
   ctx: DoctorContext,
   core: PluginCore,
   state: PluginsState,
+  inspection: PluginInspection,
 ): Promise<Map<string, { plugin: string; port?: number }>> {
   const expected = new Map<string, { plugin: string; port?: number }>();
   for (const entry of state.plugins)
-    await checkPluginEntry(ctx, core, entry, expected);
+    await checkPluginEntry(ctx, core, entry, { ...inspection, expected });
   return expected;
 }
 
@@ -1421,7 +1494,7 @@ async function checkPluginEntry(
   ctx: DoctorContext,
   core: PluginCore,
   entry: PluginsState["plugins"][number],
-  expected: Map<string, { plugin: string; port?: number }>,
+  inspection: PluginExpectations,
 ): Promise<void> {
   const { readPlugin } = core.reader;
   const { readPluginConfigState } = core.config;
@@ -1459,7 +1532,7 @@ async function checkPluginEntry(
     `plugin ${entry.name}${entry.enabled ? "" : " (disabled)"}: ${parts.join(", ")}`,
   );
   if (entry.enabled && entry.trusted)
-    expectPluginUnits(report, entry, expected);
+    expectPluginUnits(report, entry, inspection);
   // Код плагина живёт в версии, а не в папке (ADR-0009): запись «включён» без
   // сборки в работающей версии значит, что тулов плагина у агента нет.
   if (report.code && entry.enabled) {
@@ -1481,20 +1554,56 @@ async function checkPluginEntry(
 function expectPluginUnits(
   report: Awaited<ReturnType<PluginCore["reader"]["readPlugin"]>>,
   entry: PluginsState["plugins"][number],
-  expected: Map<string, { plugin: string; port?: number }>,
+  { expected, scope, inventory }: PluginExpectations,
 ): void {
   for (const [server, ports] of Object.entries(entry.mcp ?? {})) {
     if (report.mcp[server]?.type !== "stdio") continue;
-    expected.set(mcpUnitName(entry.name, server), {
+    const key = pluginUnitKey({
+      kind: "mcp",
       plugin: entry.name,
-      port: ports.port,
+      part: server,
     });
+    if (inventory.conflicts.has(key)) continue;
+    expected.set(
+      resolvedPluginUnitName(
+        {
+          scope,
+          kind: "mcp",
+          plugin: entry.name,
+          part: server,
+          layout: "scoped",
+        },
+        inventory,
+      )!,
+      {
+        plugin: entry.name,
+        port: ports.port,
+      },
+    );
   }
   for (const service of Object.keys(entry.services ?? {})) {
     if (!report.services[service]) continue;
-    expected.set(serviceUnitName(entry.name, service), {
+    const key = pluginUnitKey({
+      kind: "service",
       plugin: entry.name,
+      part: service,
     });
+    if (inventory.conflicts.has(key)) continue;
+    expected.set(
+      resolvedPluginUnitName(
+        {
+          scope,
+          kind: "service",
+          plugin: entry.name,
+          part: service,
+          layout: "scoped",
+        },
+        inventory,
+      )!,
+      {
+        plugin: entry.name,
+      },
+    );
   }
 }
 

@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { interruptedTurnText, RETRY_LABEL } from "#lib/error-humanizer.ts";
 import { join } from "node:path";
 import {
   acknowledgeQueueItems,
@@ -34,7 +36,7 @@ import {
 } from "#lib/run-status.ts";
 import { tr } from "#lib/i18n.ts";
 import { appendTrace, type TraceInput } from "#lib/trace.ts";
-import { DATA_DIR, SECRET, RESET_ROUTE, log } from "./config.ts";
+import { DATA_DIR, SECRET, RESET_ROUTE, TOKEN, log } from "./config.ts";
 import { tg } from "./transport.ts";
 
 type ErrorLike = {
@@ -354,6 +356,10 @@ export async function completeScopedResetState(
     wasCancelled: null,
     compacting: null,
     retiredSessionId: null,
+    restartRetryData: null,
+    restartRetryUpdate: null,
+    restartRetryQuestion: null,
+    restartRetryMedia: null,
     ...QUEUED_STATUS_CLEARED,
     resetAt: Date.now(),
   });
@@ -673,6 +679,23 @@ async function sendStaleRunNotice(chatKey: string, text: string) {
     );
 }
 
+export async function sendInterruptedTurnNotice(chatKey: string, text: string) {
+  // Bridge стартует и с повреждённым outbound-Gate; Outbox нужен при отправке.
+  const { sendTelegramHtml } = await import("../lib/telegram-send.ts");
+  const target = telegramTargetOf(chatKey);
+  if (!target) throw new Error(`invalid Telegram chat key: ${chatKey}`);
+  const signal = AbortSignal.timeout(30_000);
+  const result = await sendTelegramHtml(TOKEN ?? "", target.chat_id, text, {
+    rich: true,
+    trace: { source: "restart-notice" },
+    fetchImpl: (input, init) => fetch(input, { ...init, signal }),
+    ...(target.message_thread_id === undefined
+      ? {}
+      : { threadId: String(target.message_thread_id) }),
+  });
+  if (!result.ok) throw new Error(result.error);
+}
+
 function clearFailedDirectIngress(
   chatKey: string,
   {
@@ -926,14 +949,15 @@ async function notifyInterruptedTurn(
   safeLog: (...args: unknown[]) => void,
 ): Promise<void> {
   if (status.compacting === true) return;
+  const text = interruptedTurnText({
+    question:
+      typeof status.turnQuestion === "string" ? status.turnQuestion : "",
+    media: status.turnQuestionMedia === true,
+    group: !/^\d+:$/u.test(key),
+    data: String(status.restartRetryData),
+  });
   try {
-    await sendImpl(
-      key,
-      trImpl(
-        "The previous turn was interrupted - repeat your request or use /new",
-        "Предыдущий ход оборвался - повтори запрос или /new",
-      ),
-    );
+    await sendImpl(key, trImpl(text.en, text.ru));
   } catch (error) {
     safeLog(`stale run notification failed for ${key}:`, errorMessage(error));
   }
@@ -943,7 +967,7 @@ export async function reapStaleRuns({
   listStatusesImpl = listChatStatuses,
   setStatusIfImpl = setChatStatusIf,
   resetImpl = releaseScopedSession,
-  sendImpl = sendStaleRunNotice,
+  sendImpl = sendInterruptedTurnNotice,
   deleteMessageImpl = deleteLegacyMessage,
   now = Date.now,
   inFlight = queueInFlight,
@@ -1000,6 +1024,7 @@ export async function reapStaleRuns({
 
     let flipped;
     const reapedAt = now();
+    const restartRetryData = `${trImpl(RETRY_LABEL.en, RETRY_LABEL.ru)}:${randomUUID()}`;
     try {
       flipped = setStatusIfImpl(
         key,
@@ -1022,6 +1047,10 @@ export async function reapStaleRuns({
           compacting: null,
           ...QUEUED_STATUS_CLEARED,
           resetAt: reapedAt,
+          restartRetryData,
+          restartRetryUpdate: null,
+          restartRetryQuestion: status.turnQuestion,
+          restartRetryMedia: status.turnQuestionMedia,
         },
       );
     } catch (error) {
@@ -1042,7 +1071,13 @@ export async function reapStaleRuns({
       safeLog(`stale run ${key} has no session id`);
     }
 
-    await notifyInterruptedTurn(key, status, sendImpl, trImpl, safeLog);
+    await notifyInterruptedTurn(
+      key,
+      { ...status, restartRetryData },
+      sendImpl,
+      trImpl,
+      safeLog,
+    );
   }
   return reaped;
 }

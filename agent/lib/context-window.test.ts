@@ -6,6 +6,8 @@ import {
   CONTEXT_WINDOW_CONFIGURATION_ERROR,
   ContextWindowConfigurationError,
   resolveContextWindow,
+  providerContextWindow,
+  claudeContextWindow,
 } from "./context-window.ts";
 
 const VARIABLE = "OLLAMA_CONTEXT_WINDOW";
@@ -74,4 +76,68 @@ test("property: arbitrary strings resolve to a positive safe integer or the type
     }),
     { seed: 18802, numRuns: 1_000 },
   );
+});
+
+test("provider windows share defaults, explicit overrides and blank handling", () => {
+  const providers = [
+    "claude",
+    "codex",
+    "ollama",
+    "opencode",
+    "openrouter",
+    "custom",
+  ];
+  fc.assert(
+    fc.property(
+      fc.constantFrom(...providers),
+      fc.integer({ min: 1, max: 2_000_000 }),
+      (provider, override) => {
+        const variable = `${provider.toUpperCase()}_CONTEXT_WINDOW`;
+        assert.equal(
+          providerContextWindow(provider, "claude-fable-5-1", {
+            [variable]: String(override),
+          }),
+          override,
+        );
+        const fallback =
+          provider === "claude"
+            ? 1_000_000
+            : provider === "codex"
+              ? 272_000
+              : 131_072;
+        assert.equal(
+          providerContextWindow(provider, "claude-fable-5-1", {}),
+          fallback,
+        );
+        assert.equal(
+          providerContextWindow(provider, "claude-fable-5-1", {
+            [variable]: "",
+          }),
+          fallback,
+        );
+      },
+    ),
+    { seed: 10312026, numRuns: 150 },
+  );
+});
+
+test("Claude windows preserve runtime aliases, old Haiku and the safe unknown-model default", () => {
+  for (const model of [
+    "fable",
+    "opus[1m]",
+    "sonnet",
+    "haiku",
+    "claude-haiku-5-5",
+  ]) {
+    assert.equal(claudeContextWindow(model), 1_000_000);
+    assert.equal(providerContextWindow("claude", model, {}), 1_000_000);
+  }
+  for (const model of [
+    "claude-haiku-4-5",
+    "claude-haiku-4-5-20251001",
+    "future-model",
+  ]) {
+    assert.equal(claudeContextWindow(model), 200_000);
+    assert.equal(providerContextWindow("claude", model, {}), 200_000);
+  }
 });

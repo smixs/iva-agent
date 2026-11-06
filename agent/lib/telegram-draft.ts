@@ -99,14 +99,26 @@ function toolHint(action: Action, cleanArgs: string): string {
   } catch {
     /* redacted JSON can be incomplete */
   }
-  const detail = ["command", "path", "pattern", "url", "query"]
-    .map((k) => args?.[k])
-    .find((v) => typeof v === "string" && v.trim());
-  let line =
-    `${action.toolName ?? action.kind ?? "tool"}${typeof detail === "string" ? `: ${detail.split("\n")[0]}` : ""}`
-      .replace(/\s+/gu, " ")
-      .trim()
-      .slice(0, 60);
+  const name = action.toolName ?? action.kind ?? "tool";
+  const command =
+    name === "bash" && typeof args?.command === "string" ? args.command : "";
+  // Recognize literal prefixes only; unknown syntax keeps just the tool name.
+  const prefix =
+    /^\s*(?:(?:[A-Za-z_]\w*=(?:"[^"\\$`]*"|'[^']*'|[^\s"';&|$`()<>]+)\s+|cd\s+(?:--\s+)?(?:"[^"\\$`]*"|'[^']*'|[^\s"';&|$`()<>]+)\s*&&\s*|(?:[A-Za-z0-9_./+-]+\/)?(?:env(?:\s+-i)?\s+|timeout(?:\s+--foreground)?\s+\d+(?:\.\d+)?[smhd]?\s+|sudo(?:\s+-(?:[nEH]|u\s+[A-Za-z0-9_-]+))*\s+))\s*)*/u;
+  const head =
+    /^\s*(?:"([^"\\$`]+)"|'([^']+)'|([A-Za-z0-9_./+-]+))(?=\s|[;&|]|$)/u.exec(
+      command.replace(prefix, ""),
+    );
+  const word = head?.[1] ?? head?.[2] ?? head?.[3] ?? "";
+  const program = /^[A-Za-z0-9_./ +-]+$/u.test(word)
+    ? (word.split("/").pop() ?? "")
+    : "";
+  const detail = /^(?!(?:cd|env|sudo|timeout)$)[A-Za-z_][\w.+-]*$/u.test(
+    program,
+  )
+    ? `: ${program}`
+    : "";
+  let line = `${name}${detail}`.replace(/\s+/gu, " ").trim().slice(0, 60);
   if (/[\uD800-\uDBFF]$/u.test(line)) line = line.slice(0, -1);
   const escaped = line
     .replace(/&/g, "&amp;")
@@ -488,6 +500,7 @@ export async function finishTelegramStatus(
   sessionId: string,
   mode: "completed" | "cancelled" | "failed",
   turnId?: string,
+  keepBusy = false,
 ): Promise<boolean> {
   await closeTelegramDraftTurn(
     sessionId,
@@ -510,7 +523,7 @@ export async function finishTelegramStatus(
         turnAt: null,
         firstOutputAt: null,
         latencyLogged: null,
-        ...(mode === "cancelled" ? { wasCancelled: true } : {}),
+        ...(keepBusy ? { status: "running", sessionId, compacting: true } : {}),
       },
     ),
   );

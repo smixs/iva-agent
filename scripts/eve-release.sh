@@ -3,7 +3,7 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "$0")/.." && pwd -P)"
 cd "$repo_root"
 [[ -z "$(git status --porcelain --untracked-files=all)" ]] || { echo 'Commit changes before preparing eve.' >&2; exit 1; }
-version="0.51.1-iva.3"
+version="0.51.1-iva.5"
 publish=false
 if [[ "${1:-}" == --publish ]]; then publish=true; shift; fi
 [[ $# -le 1 ]] || { echo "Usage: scripts/eve-release.sh [--publish] [output-directory]" >&2; exit 64; }

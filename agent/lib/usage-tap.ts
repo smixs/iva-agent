@@ -17,11 +17,14 @@
 // Учёт не участвует в основном пути: сбой записи строки уходит в журнал, а компактация,
 // описание картинки и пробник идут дальше, как будто учёта нет.
 import type { LanguageModelMiddleware, LanguageModelUsage } from "ai";
+import { createHash } from "node:crypto";
 import { resolveModelProvider } from "./model-provider.ts";
 import {
   appendUsage,
   readUsageTokens,
   usageRecord,
+  setUsageRequest,
+  takeUsageRequest,
   type UsageTokens,
 } from "./usage.ts";
 
@@ -42,6 +45,7 @@ const { name: PROVIDER, model: TEXT_MODEL } = resolveModelProvider();
 // с текстом eve пинует usage-tap.test.ts, гоняя настоящую компактацию eve.
 const COMPACTION_SYSTEM_PREFIX =
   "You are performing a CONTEXT CHECKPOINT COMPACTION.";
+let fingerprintWarned = false;
 
 /**
  * Чей это вызов: сессия и ход, в котором eve построил модель шага. Родителя тут нет: eve
@@ -119,6 +123,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
+function cacheMarked(block: unknown): boolean {
+  return (
+    isRecord(block) &&
+    isRecord(block.providerOptions) &&
+    Object.values(block.providerOptions).some(
+      (option) =>
+        isRecord(option) &&
+        ("cacheControl" in option || "cachePoint" in option),
+    )
+  );
+}
+
 type TapRow = {
   readonly source: "compaction" | "vision";
   readonly model: string;
@@ -194,6 +210,36 @@ export function compactionUsageMiddleware(
   model = TEXT_MODEL,
 ): LanguageModelMiddleware {
   return {
+    transformParams({ params }) {
+      try {
+        if (label) takeUsageRequest(label);
+        if (label && !isCompactionPrompt(params.prompt)) {
+          const stable = params.prompt.filter(
+            (message, i) =>
+              message.role !== "user" || i !== params.prompt.length - 1,
+          );
+          const blocks = stable.flatMap((message) => [
+            message,
+            ...(Array.isArray(message.content) ? message.content : []),
+          ]);
+          // prettier-ignore
+          const hash = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex").slice(0, 8);
+          const tools = params.tools ?? [];
+          setUsageRequest(label, {
+            system: hash(
+              params.prompt.filter((message) => message.role === "system"),
+            ),
+            cache: hash([...blocks, ...tools].filter(cacheMarked)),
+            tools: hash(tools),
+            toolCount: tools.length,
+          });
+        }
+      } catch {
+        if (!fingerprintWarned) console.error("[usage] fingerprint skipped");
+        fingerprintWarned = true;
+      }
+      return Promise.resolve(params);
+    },
     async wrapGenerate({ doGenerate, params }) {
       const result = await doGenerate();
       if (isCompactionPrompt(params.prompt))

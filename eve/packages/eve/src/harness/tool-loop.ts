@@ -1181,15 +1181,21 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
     // Direct harness unit tests may run without an ambient context.
     const ctx = store;
-    const limits = [ctx?.get(InitiatorAuthKey), ctx?.get(AuthKey)].flatMap(auth => {
+    const limitsFor = (attribute: string) => [ctx?.get(InitiatorAuthKey), ctx?.get(AuthKey)].flatMap(auth => {
       const attrs = auth?.attributes;
-      if (!attrs || !Object.hasOwn(attrs, "iva_max_steps")) return [];
-      const value = attrs.iva_max_steps;
+      if (!attrs || !Object.hasOwn(attrs, attribute)) return [];
+      const value = attrs[attribute];
       return [typeof value === "string" && /^[1-9][0-9]{0,8}$/.test(value) && !value.endsWith("\n") ? Number(value) : 1];
     });
+    const limits = limitsFor("iva_max_steps");
     const maxSteps = limits.length ? Math.min(...limits) : undefined;
+    const inputLimits = limitsFor("iva_max_input_tokens");
+    const maxInputTokens = inputLimits.length ? Math.min(...inputLimits) : undefined;
+    const turnUsage = getTurnUsageState(session.state);
+    const inputTokens = turnUsage?.turnId === emissionState.turnId ? turnUsage.inputTokens : 0;
+    const inputCeiling = maxInputTokens !== undefined && inputTokens >= maxInputTokens;
     const modelCalls = (session.state?.["eve.harness.modelCalls"] as number | undefined) ?? 0;
-    const lastIvaStep = maxSteps !== undefined && modelCalls + 1 >= maxSteps;
+    const lastIvaStep = inputCeiling || (maxSteps !== undefined && modelCalls + 1 >= maxSteps);
     let resolvedModel: Awaited<ReturnType<typeof resolveActiveRuntimeModel>>;
     try {
       if (ctx !== undefined && config.dispatchDynamicModelEvent !== undefined) {
@@ -1402,7 +1408,9 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             { role: "user" as const, content: opts.trailingUserNote },
           ]
         : [...modelMessages];
-      if (lastIvaStep) callMessages.push({ role: "user", content: "Step limit reached: no tools are available now. Write your final answer from what you already have." });
+      if (lastIvaStep) callMessages.push({ role: "user", content:
+        `${inputCeiling ? `Turn input token ceiling reached (${inputTokens} input tokens)` : `Step limit reached (${modelCalls + 1} steps)`}. No tools are available now. ` +
+        "Write your final answer from what you already have. In the owner's language, start by saying which work ceiling stopped this turn and what you accomplished. Return a useful partial outcome, never QUIET." });
       const harnessTools = buildHarnessToolsWithDynamicSubagents(
         config.tools,
         ctx,

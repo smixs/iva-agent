@@ -7,6 +7,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { setUsageRequest } from "./usage.ts";
 
 await import("../../scripts/lib/ts-esm-hooks.ts");
 const HOOK = (await import("../hooks/usage.ts")).default as unknown as {
@@ -66,6 +67,27 @@ function rowsAfter(
 const bearer = (iva_turn: string): Initiator => ({
   authenticator: "iva-bearer",
   attributes: { iva_turn },
+});
+
+test("step fingerprints survive inline-subagent turn naming and are consumed once", () => {
+  const request = {
+    system: "12345678",
+    cache: "23456789",
+    tools: "34567890",
+    toolCount: 2,
+  };
+  for (const name of ["step.completed", "subagent.event"] as const) {
+    setUsageRequest(
+      {
+        sessionId: "s1",
+        turnId: name === "step.completed" ? "turn_0" : "",
+        step: name === "step.completed" ? 0 : 1,
+      },
+      request,
+    );
+    assert.deepEqual(rowsAfter(name, bearer("helper"))[0]?.request, request);
+    assert.equal(rowsAfter(name, bearer("helper"))[0]?.request, undefined);
+  }
 });
 
 test("a step of Iva's own turn is written under its kind, the subagent's step too", () => {

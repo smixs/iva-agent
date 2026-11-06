@@ -59,7 +59,11 @@ For `codex` there is no API key in `.env`: run `iva login` (device code, headles
 
 For `claude` there is no API key either: install the CLI on the server as the service user (`npm install -g --prefix ~/.local @anthropic-ai/claude-code`, no root) and sign it in once (`claude auth login`). Iva never sees a key — it calls that CLI, and `iva doctor` reports the plan from `claude auth status`. Keep `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_FOUNDRY_API_KEY`, `ANTHROPIC_BASE_URL` and any `CLAUDE_CODE_USE_*` out of `.env`: each of them sends the CLI somewhere other than your subscription, so Iva refuses to use this provider and says which variable is in the way rather than quietly ignoring it. Full flow: [providers.md](./providers.md#claude-by-promax-subscription-claude).
 
-**Don't inflate the context window.** Iva compacts the conversation between turns once a turn's input reaches 60% of this number (or 275,000 tokens, whichever is smaller), and inside a turn a quarter above that as a safety net. Set it above the model's real window and the compactor fires too late — the request overflows before the conversation gets trimmed. When you switch models, enter the new model's actual window, not a rounder bigger one.
+If Claude's access token comes from an external synchronization service, Iva can wait through its rotation after HTTP 401 and safely repeat the same call once, before any useful output or tool action in the current turn. Set `claude.authRotationWaitMs` in `data/settings.json` (for example, `{"claude":{"authRotationWaitMs":120000}}`); the default window is 120 seconds. Iva watches `.credentials.json` in `CLAUDE_CONFIG_DIR`, otherwise `~/.claude`, and makes one final call when the access changes or the window ends. Each active attempt retains its usual first-output deadline. A successful repeat stays silent; a final authentication failure with an access-only token asks you to check the external synchronization service. The service that owns the credentials continues to manage refresh.
+
+**Don't inflate the context window.** Iva compacts the conversation between turns once a turn's input reaches 60% of this number (or 110,000 tokens, whichever is smaller), and inside a turn a quarter above that as a safety net. Set it above the model's real window and the compactor fires too late — the request overflows before the conversation gets trimmed. When you switch models, enter the new model's actual window, not a rounder bigger one.
+
+Use `/compact` to compress an idle conversation with at least 30,000 measured input tokens. Iva confirms completion, then reports the before/after size with the next answer using its first measured model input. During an answer, repeat the command after it finishes. After a restart, one completed turn supplies the input measurement.
 
 ## Telegram
 
@@ -137,3 +141,18 @@ Alerts — problems (memory not backed up, a failed nightly pass) and new versio
 | `AGENT_BROWSER_MAX_OUTPUT` | `24000`                        | Character cap on agent-browser output, so one page dump can't eat the context window.                                                                                                                                                                                                                          |
 
 OpenCode Responses does not forward `THINKING_EFFORT`: arbitrary Go models have no verified reasoning contract; `/think` offers no levels in this mode. Existing installations without either protocol variable retain chat/completions, model IDs, keys and data.
+
+## Plugin service ownership
+
+Plugin services belong to the canonical data directory. Two code checkouts using the
+same data directory share one plugin installation, including `plugins.json`, ports and
+the existing lock. Reconciliation updates scoped MCP executors to the selected checkout. An active
+retained legacy keeps its executor during trust/sync; an explicit plugin update
+may replace its payload only when that plugin source changed.
+A different canonical data directory gets a different scope in new service names.
+
+A proven legacy service keeps its existing name. Adding ownership metadata alone keeps
+a running process uninterrupted. Ownership checks include the loaded data directory;
+foreign content, links and unknown ownership are preserved and reported by `iva doctor`.
+Moving the data directory changes the scope: review preserved old services explicitly.
+Older CLI versions lack these ownership checks, including during a rollback.

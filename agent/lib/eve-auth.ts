@@ -20,15 +20,19 @@ const SERVICE_AUTH = {
  * scripts/, поэтому это копия `REMINDER_TURN_KINDS` (scripts/lib/reminder-turn.ts); их
  * совпадение держит scripts/lib/reminder-turn.test.ts.
  */
-export const TURN_KINDS: ReadonlySet<string> = new Set([
-  "watch",
-  "brief",
-  "insight",
-  "reminder",
-  "signal",
-  "alert",
-  "helper",
-]);
+const TURN_MAX_STEPS: Readonly<Record<string, number>> = Object.freeze({
+  watch: 40,
+  brief: 60,
+  insight: 40,
+  reminder: 40,
+  signal: 40,
+  alert: 40,
+  helper: 80,
+});
+const TURN_MAX_INPUT_TOKENS = 4_000_000;
+export const TURN_KINDS: ReadonlySet<string> = new Set(
+  Object.keys(TURN_MAX_STEPS),
+);
 
 export function isHelperTurn(
   ctx?: {
@@ -53,20 +57,42 @@ export function isHelperTurn(
   );
 }
 
+const HELPER_MODEL_TURNS = new Set<unknown>([
+  "helper",
+  "watch",
+  "brief",
+  "insight",
+]);
+
+/** Model selection is shared with isolated background turns; helper rights stay separate. */
+export function usesHelperModel(
+  ctx: Parameters<typeof isHelperTurn>[0],
+): boolean {
+  return [ctx?.session?.auth?.initiator, ctx?.session?.auth?.current].some(
+    (auth) =>
+      auth?.authenticator === "iva-bearer" &&
+      HELPER_MODEL_TURNS.has(auth.attributes?.iva_turn),
+  );
+}
+
 /** Service attributes are accepted only after bearer authentication. */
 function serviceAuth(
   request: Request,
 ): NonNullable<Awaited<ReturnType<AuthFn<Request>>>> {
   const turn = request.headers.get("x-iva-turn");
   if (turn === null || !TURN_KINDS.has(turn)) return SERVICE_AUTH;
-  if (turn !== "helper")
-    return { ...SERVICE_AUTH, attributes: { iva_turn: turn } };
+  const attributes = {
+    iva_turn: turn,
+    iva_max_steps: String(TURN_MAX_STEPS[turn]),
+    iva_max_input_tokens: String(TURN_MAX_INPUT_TOKENS),
+  };
+  if (turn !== "helper") return { ...SERVICE_AUTH, attributes };
   const id = request.headers.get("x-iva-helper");
   if (id === null || !/^h-[0-9a-f]{6}$/.test(id))
     throw new UnauthenticatedError();
   return {
     ...SERVICE_AUTH,
-    attributes: { iva_turn: turn, iva_helper: id, iva_max_steps: "80" },
+    attributes: { ...attributes, iva_helper: id },
   };
 }
 

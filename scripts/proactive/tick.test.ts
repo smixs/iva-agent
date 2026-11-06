@@ -44,6 +44,33 @@ const HOUR = 60 * MIN;
 /** 2026-10-05 12:00 UTC — день, не тихий час. */
 const NOON = Date.UTC(2026, 9, 5, 12, 0);
 const DAY = "2026-10-05";
+const noBirthdays: NonNullable<TickDeps["birthdays"]> = () =>
+  Promise.resolve({ status: "not-connected", items: [] });
+
+test("empty-response turn.failed stays quiet in Watch and logs the cause", async () => {
+  const { reminderFromEvents } =
+    await import("../fixtures/reminder-events.test-fixture.ts");
+  const h = harness();
+  writeState(h, staleSeen(chat(1, 1)));
+  h.tg = { items: [chat(1, 1)], error: null };
+  h.reply = await reminderFromEvents([
+    {
+      type: "turn.failed",
+      data: {
+        message: "The model did not return a response",
+        details: { semanticErrorId: "empty-model-response" },
+      },
+    },
+    { type: "session.waiting" },
+  ]);
+  assert.equal(await runProactiveTick(NOON, h.deps), 1);
+  assert.deepEqual(h.sent, []);
+  assert.ok(
+    h.logs.includes(
+      "proactive: watch turn failed: The model did not return a response",
+    ),
+  );
+});
 
 type Harness = {
   readonly deps: TickDeps;
@@ -322,6 +349,15 @@ test("an unread chat older than staleMinutes wakes the model once and is deliver
   assert.match(h.prompts[0] ?? "", /Follow the watch skill/u);
   assert.match(h.prompts[0] ?? "", /Return QUIET/u);
   assert.match(h.prompts[0] ?? "", /Do not send anything yourself/u);
+  // Запись в Telegram запрещена, чтение разрешено: «no Telegram tools» модель читала как запрет на чтение.
+  assert.match(
+    h.prompts[0] ?? "",
+    /no Telegram tool that writes \(send, reply, forward, edit, delete, react, mark read\)/u,
+  );
+  assert.match(
+    h.prompts[0] ?? "",
+    /Reading Telegram, mail and calendar with read-only tools is allowed/u,
+  );
   // Кнопки пункта о человеке — дословно: «Я в курсе» мост узнаёт по этим же словам.
   assert.match(
     h.prompts[0] ?? "",
@@ -916,6 +952,7 @@ test("IVA_JOB_STOP_AT reaches every turn of the run as one signal; garbage, the 
       {
         sources: [tg],
         timeZone: "UTC",
+        birthdays: noBirthdays,
         config: () => ({ ...PROACTIVE_DEFAULTS, briefTimes: ["12:00"] }),
         statePath,
         runTurn: (_prompt, _kind, signal) => {
@@ -971,6 +1008,7 @@ test(
       {
         sources: [],
         timeZone: "UTC",
+        birthdays: noBirthdays,
         config: () => ({ ...PROACTIVE_DEFAULTS, briefTimes: ["12:00"] }),
         statePath: join(mkdtempSync(join(ROOT, "hang-")), "proactive.json"),
         runTurn: (_prompt, _kind, signal) => hangsUntil(signal),
@@ -1025,6 +1063,7 @@ test(
         {
           sources: [],
           timeZone: "UTC",
+          birthdays: noBirthdays,
           config: () => ({ ...PROACTIVE_DEFAULTS, briefTimes: ["12:00"] }),
           statePath: join(mkdtempSync(join(ROOT, "late-")), "proactive.json"),
           runTurn: (prompt, _kind, signal) =>
@@ -1297,4 +1336,114 @@ test(`spentToday equals a hand filter: today in the owner's zone and a kind of w
     ),
     { seed: SEED, numRuns: 300 },
   );
+});
+
+for (const english of [false, true])
+  test(`r339 watch step ceiling reaches the owner, English=${english}`, async () => {
+    const { failedModelEvents, reminderFromEvents } =
+      await import("../fixtures/reminder-events.test-fixture.ts");
+    const h = harness({
+      translate: () =>
+        Promise.resolve((en: string, ru: string) => (english ? en : ru)),
+    });
+    writeState(h, staleSeen(chat(1, 1)));
+    h.tg = { items: [chat(1, 1)], error: null };
+    h.reply = await reminderFromEvents(failedModelEvents());
+    assert.equal(await runProactiveTick(NOON, h.deps), 1);
+    assert.deepEqual(h.sent, [
+      english
+        ? "The review was not prepared. Stopped after 40 steps without a final summary."
+        : "Обзор не собран. Остановилась на 40 шагах и не успела подвести итог.",
+    ]);
+  });
+
+test("Watch prompt carries the group message, topic and username from the source", async () => {
+  const h = harness();
+  const item = {
+    ...chat(-1004398169447, 1, "Team"),
+    from: { name: "Team", username: "public_team" },
+    message_id: 40,
+    topic_id: 12,
+  };
+  h.tg = { items: [item], error: null };
+  writeState(h, staleSeen(item));
+  await runProactiveTick(NOON, h.deps);
+  assert.match(h.prompts[0] ?? "", /tg:-1004398169447 from Team @public_team/u);
+  assert.match(h.prompts[0] ?? "", /message_id=40, topic_id=12/u);
+});
+
+test("Telegram metadata reaches the Watch turn through precheck and candidate selection", async () => {
+  const { telegramSource } = await import("./precheck.ts");
+  for (const forum of [false, true]) {
+    const h = harness();
+    const item = chat(-1004398169447, 1, "Team");
+    writeState(h, staleSeen(item));
+    const source = telegramSource({}, "", (name, args) =>
+      Promise.resolve().then(() => {
+        if (name === "list_chats")
+          return JSON.stringify({
+            results:
+              args.chat_type === "group"
+                ? [
+                    {
+                      chat_id: -1004398169447,
+                      title: "Team",
+                      type: "Supergroup",
+                      unread_mentions: 1,
+                    },
+                  ]
+                : [],
+          });
+        if (name === "list_messages")
+          return JSON.stringify({ results: [{ id: 40, reply_to: 7 }] });
+        return `Link: https://t.me/c/4398169447/${forum ? "12/" : ""}40`;
+      }),
+    );
+    await runProactiveTick(NOON, { ...h.deps, sources: [source] });
+    assert.match(h.prompts[0] ?? "", /message_id=40/u);
+    if (forum) assert.match(h.prompts[0] ?? "", /topic_id=12/u);
+    else assert.doesNotMatch(h.prompts[0] ?? "", /topic_id=/u);
+  }
+});
+
+test("REPAIR1: Watch and Brief omit obsolete login status from their prompts", async () => {
+  const { modelAuthText } = await import("#lib/model-auth.ts");
+  const wording = modelAuthText("claude", "en", { answers: true });
+  for (const kind of ["watch", "brief"]) {
+    let alerts = 0;
+    const h = harness({
+      ...{ authContext: () => Promise.resolve(`\n${wording}`) },
+      recordAlert: () => {
+        alerts++;
+        return true;
+      },
+    });
+    if (kind === "brief") h.config = { ...h.config, briefTimes: ["12:00"] };
+    else
+      h.tg = {
+        items: [{ key: "tg:1", unread: 1, from: { name: "Test" } }],
+        error: null,
+      };
+    // A new install seeds unread state; put a prior run on disk for Watch.
+    if (kind === "watch")
+      writeFileSync(
+        h.statePath,
+        JSON.stringify({
+          ...initialState(NOON - 2 * HOUR),
+          seen: {
+            "tg:1": {
+              firstSeenMs: NOON - 2 * HOUR,
+              unread: 1,
+              reported: false,
+            },
+          },
+        }),
+      );
+    await runProactiveTick(NOON, h.deps);
+    assert.ok(
+      h.prompts.every((prompt) => !prompt.includes(wording)),
+      kind,
+    );
+    assert.equal(alerts, 0);
+  }
 });

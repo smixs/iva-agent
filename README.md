@@ -86,11 +86,11 @@ The bridge long-polls Telegram, so no public HTTPS, domain or webhook is needed.
 | ----------- | --------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
 | 🍃 Leaves   | the word-for-word transcript of each day, Iva's replies included                                    | `daily/YYYY-MM-DD.md`                                |
 | 🌿 Branches | summaries folded upward: day → week → month → year                                                  | `summaries/daily/`, `weekly/`, `monthly/`, `yearly/` |
-| 🪵 Trunk    | `CORE.md` (≤1200 chars, in every prompt) + typed cards: contacts, projects, decisions, ideas, notes | `CORE.md`, `cards/`                                  |
+| 🪵 Trunk    | `CORE.md` (≤3600 chars, in every prompt) + typed cards: contacts, projects, decisions, ideas, notes | `CORE.md`, `cards/`                                  |
 
 - Every message lands verbatim in a daily markdown log — nothing is paraphrased on arrival.
 - A nightly rollup at 04:00 distills day → week → month → year into schema-validated cards; facts that change get rewritten, not piled up.
-- One core file, `CORE.md` (≤1,200 chars), rides in every prompt — Iva knows you before it searches anything.
+- One core file, `CORE.md` (≤3,600 chars), rides in every prompt — Iva knows you before it searches anything.
 
 Full architecture and search internals: [docs/memory.md](docs/memory.md).
 
@@ -198,32 +198,34 @@ Iva carries eve 0.51.1 sources from vercel/eve in `eve/`, with our changes under
 ## What's New
 
 <details>
-<summary><b>v0.5.5 · 19.10.2026 — expand the latest releases</b></summary>
+<summary><b>v0.5.9 · 03.11.2026 — expand the latest releases</b></summary>
 
-### 19.10.2026
+### 03.11.2026
 
-#### v0.5.5
+#### v0.5.9
 
-- ✨ **Install with an AI agent**: tell Claude Code, Codex or Claude Desktop: "Install Iva using https://iva-agent.com/install.txt". The agent checks your computer and server, guides setup and helps verify a bot reply.
-- 🔧 **Installation continues after an SSH disconnect**: if the connection drops during setup, repeat the installer command. Completed steps are reused, the wizard offers your saved values, and a hint helps you stop an installer still running. Thanks to Maksim Tigulev for reporting this.
-- 🔧 **Deferred setup completes with autostart**: if setup was postponed, run the installer command again. It completes autostart and sends a confirmation in Telegram. Iva keeps running after you leave the server.
-- 🔧 **Memory changes are saved on a fresh server**: Iva starts tracking changes to your memory right after installation, even when Git has not been configured on the server. Git settings for other projects are preserved.
+- 🔧 **Briefs and reminders read Telegram again**: scheduled turns and fired reminders read chats through the userbot. Iva still never sends, replies, forwards, edits, deletes, reacts or marks as read on her own.
+- 🔧 **Google Contacts birthdays are complete**: Brief keeps the full list, and a birthday counts as mentioned only after its message is delivered.
+- 🔧 **Plugins of different installations keep their services**: service names are tied to the data folder, so removing, syncing or updating one installation leaves the other's services running.
+- 🔧 **Short button quotes in the daily journal**: a tap keeps the button text and the first quoted line, up to 200 characters.
+- 🔧 **Tool search ranks names first**: literal names beat long descriptions, so Telegram history and the chat list are found again.
+- 🔧 **Iva survives a Claude access rotation**: after an early HTTP 401 she waits for the new access and repeats the call once.
+- 🧠 **The night raises its own limits for long days**: within the configured ceilings it keeps going and retries git with a longer wait; `iva night show|set` shows and changes the limits.
 
-### 18.10.2026
+### 31.10.2026
 
-#### v0.5.4
+#### v0.5.8
 
-- ✨ **Iva runs on Mac**: the installer detects your Mac and sets up Iva. The bot works right after installation and starts again after you restart your Mac and log in. Update from Telegram or with `iva update`. Keep your Mac on and awake.
+- 🔧 **Telegram shows the model context window**: `/new` and status use the same window as Iva. Claude model selection saves its window, and helpers respect their own model window.
 
-### 16.10.2026
+### 25.10.2026
 
-#### v0.5.3
+#### v0.5.7
 
-- 🔧 **A tapped stop no longer halts incoming messages**: when Telegram sent an update Iva could not parse (it happened with the ■ button on a reply draft), the whole intake stalled and later messages never arrived. Now such an update is skipped with a log entry and the rest go through; a stop with unexpected fields is checked by the stop handler.
-- 🔧 **One broken record no longer stops intake**: if the inbox or a chat queue held a record Iva could not read, the bridge crashed and crashed again on every start, and a regular queue load quarantined the whole file. Now the broken record is copied to a separate file next to it and skipped, and the other messages are delivered.
-- 🔧 **One damaged record is kept aside**: reminders, helpers, goals and queues keep processing the healthy records; the deduplication and usage ledgers skip damaged entries.
-- 🔎 **Watch skips what you already read, Brief counts from the previous Brief**: right before sending, Iva rechecks chats and mail, and an item you read during the turn is dropped. Brief covers the window since the previous Brief, names an unreadable source in one line and carries over an item still waiting for your reply with the days waited.
-- 🔧 **Installs on Node newer than 24**: Iva accepts Node 24 and newer, and installs on Node 26 no longer warn with EBADENGINE.
+- 🔧 **Quotes survive rich-message rejection**: HTML delivery preserves quoted text and button labels containing markup characters.
+- 🔧 **Iva offers useful next steps on her own**: she can bring a useful proposal without a request.
+- 🧠 **Conflicting events stay dated**: contradictory events about a person remain separate dated facts.
+- 🔧 **Long helper commands wait for results**: helpers set the command timeout to cover the expected duration.
 
 </details>
 
@@ -231,7 +233,7 @@ Full history — [CHANGELOG.md](CHANGELOG.md).
 
 ## Built on
 
-[eve](https://eve.dev/docs/introduction) 0.51.1-iva.3, Vercel's agent framework, runs the agent; Node 24's built-in SQLite runs the search index — no separate database. Iva grew out of [agent-second-brain](https://github.com/smixs/agent-second-brain) and [autograph](https://github.com/smixs/autograph) — that story is in [docs/memory.md](docs/memory.md).
+[eve](https://eve.dev/docs/introduction) 0.51.1-iva.5, Vercel's agent framework, runs the agent; Node 24's built-in SQLite runs the search index — no separate database. Iva grew out of [agent-second-brain](https://github.com/smixs/agent-second-brain) and [autograph](https://github.com/smixs/autograph) — that story is in [docs/memory.md](docs/memory.md).
 
 ## Thanks
 

@@ -19,10 +19,10 @@ import {
 import { LiveStepDynamicModelSelectionKey } from "../node_modules/eve/dist/src/context/keys.js";
 
 const SUMMARY = "Checkpoint: the owner asked about the weather twice.";
-const model = () =>
+const model = (summary = SUMMARY) =>
   new MockLanguageModelV4({
     doGenerate: async () => ({
-      content: [{ type: "text", text: SUMMARY }],
+      content: [{ type: "text", text: summary }],
       finishReason: { unified: "stop", raw: "stop" },
       usage: {
         inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
@@ -39,22 +39,27 @@ const HISTORY: HarnessSession["history"] = [
   { role: "assistant", content: "Rain." },
 ];
 // Агент Ивы: модель динамическая, сохранённой ссылки на модель у сессии нет.
-const session = (): HarnessSession =>
+const session = (history = HISTORY): HarnessSession =>
   ({
     agent: { system: "Reply once.", tools: [], dynamicModel: true },
     compaction: { threshold: 100_000, recentWindowSize: 1 },
     continuationToken: "test",
     sessionId: "test",
-    history: [...HISTORY],
+    history: [...history],
   }) as unknown as HarnessSession;
 
 type Dispatched = { type: string; messages: number };
 
-async function compact(t: TestContext, withResolver: boolean) {
+async function compact(
+  t: TestContext,
+  withResolver: boolean,
+  history = HISTORY,
+  summary = SUMMARY,
+) {
   t.mock.method(console, "error", () => {});
   const events: string[] = [];
   const dispatched: Dispatched[] = [];
-  const used = model();
+  const used = model(summary);
   const step = createToolLoopHarness({
     mode: "conversation",
     tools: new Map(),
@@ -85,7 +90,7 @@ async function compact(t: TestContext, withResolver: boolean) {
       : {}),
   } as unknown as Parameters<typeof createToolLoopHarness>[0]);
   const result = await contextStorage.run(new ContextContainer(), () =>
-    step(session(), undefined),
+    step(session(history), undefined),
   );
   return { events, dispatched, used, history: result.session.history };
 }
@@ -115,4 +120,34 @@ test("без резолвера шага свёртка не падает нар
   assert.equal(used.doGenerateCalls.length, 0);
   assert.deepEqual(events, ["session.waiting"]);
   assert.deepEqual(history, HISTORY);
+});
+
+test("ручной пересказ eve сохраняет последний текст и компактную выжимку далеко под 110 тыс. с базой 23 тыс.", async (t) => {
+  const history: HarnessSession["history"] = [
+    { role: "user", content: "old context ".repeat(44_000) },
+    { role: "assistant", content: "old answer" },
+    {
+      role: "user",
+      content: "Keep the unfinished goal and promised next step.",
+    },
+  ];
+  const summary = "Outstanding goal and next step. ".repeat(750);
+  const result = await compact(t, true, history, summary);
+  assert.equal(result.used.doGenerateCalls.length, 1);
+  assert.ok(result.history.some((message) => message.content === summary));
+  assert.ok(
+    result.history.some(
+      (message) => message.content === history.at(-1)?.content,
+    ),
+  );
+  const estimatedInput =
+    23_000 + Math.ceil(JSON.stringify(result.history).length / 4);
+  t.diagnostic(
+    `estimated input after compaction including 23000 base: ${estimatedInput}`,
+  );
+  assert.ok(estimatedInput < 30_000, String(estimatedInput));
+  assert.ok(
+    estimatedInput < 110_000,
+    "такой пересказ сохраняет автосвёртку включённой",
+  );
 });

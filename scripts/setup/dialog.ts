@@ -13,7 +13,7 @@ import { isYesAnswer } from "./answers.ts";
 import { C, type AskRequiredOptions, type SetupIo } from "./steps.ts";
 
 /** Ввод и вывод мастера: в бою readline и stdout, в тестах сценарий ответов. */
-export type DialogPort = {
+type DialogPort = {
   readonly question: (prompt: string) => Promise<string>;
   readonly print: (...args: unknown[]) => void;
   readonly write: (text: string) => void;
@@ -62,9 +62,7 @@ export function createDialog(
 }
 
 /** Повторяет раунд, пока он не вернёт ответ (null — спросить снова). */
-export async function untilAnswered<T>(
-  round: () => Promise<T | null>,
-): Promise<T> {
+async function untilAnswered<T>(round: () => Promise<T | null>): Promise<T> {
   for (;;) {
     const answer = await round();
     if (answer !== null) return answer;

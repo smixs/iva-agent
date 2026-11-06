@@ -44,7 +44,7 @@ export function htmlToPlain(html: unknown): string {
 }
 
 // ── inline markdown → html ──────────────────────────────────────────────────────
-// Protect inline code first (placeholders), escape the rest, then overlay tags.
+// Protect escaped punctuation and inline code, escape the rest, then overlay tags.
 // Метка code-span — индекс между U+E000 и U+E001 (Unicode Private Use Area).
 // Прежняя метка «два пробела, индекс, два пробела» встречается в обычной прозе:
 // «the price is  50  dollars» и строки таблиц уезжали в чат покалеченными — текст
@@ -53,12 +53,21 @@ export function htmlToPlain(html: unknown): string {
 // подделать метку не может ни модель, ни пользователь.
 function inlineHtml(text: unknown): string {
   const spans: string[] = [];
+  const restoreSpans = (value: string) =>
+    value.replace(/\uE000(\d+)\uE001/g, (_m, i) => spans[Number(i)] ?? "");
   let s = String(text)
     .replace(/[\uE000\uE001]/g, "")
-    .replace(/`([^`]+)`/g, (_m, c) => {
-      spans.push(`<code>${escHtml(c)}</code>`);
-      return `\uE000${spans.length - 1}\uE001`;
-    });
+    .replace(
+      /\\([\\*_#|`[\]()~$&])|`([^`]+)`/g,
+      (_m, escaped: string | undefined, code: string | undefined) => {
+        spans.push(
+          escaped === undefined
+            ? `<code>${escHtml(code)}</code>`
+            : escHtml(escaped),
+        );
+        return `\uE000${spans.length - 1}\uE001`;
+      },
+    );
   s = escHtml(s);
   // links [t](http(s)://url)
   // Границы квантификаторов обязательны: на строке из одних `[` жадный `[^\]]+`
@@ -86,7 +95,7 @@ function inlineHtml(text: unknown): string {
     if (end <= link.lastIndex) continue;
     // Открывающий тег хранится в spans, подпись проходит правила разметки.
     spans.push(
-      `<a href="${escAttr(match[2] + s.slice(link.lastIndex, end))}">`,
+      `<a href="${escAttr(restoreSpans(match[2] + s.slice(link.lastIndex, end)))}">`,
     );
     linked +=
       s.slice(cursor, match.index) +
@@ -110,7 +119,7 @@ function inlineHtml(text: unknown): string {
     .replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, "<i>$1</i>")
     .replace(/(?<!\w)_([^_\n]+)_(?!\w)/g, "<i>$1</i>");
   // restore protected spans
-  return s.replace(/\uE000(\d+)\uE001/g, (_m, i) => spans[Number(i)] ?? "");
+  return restoreSpans(s);
 }
 
 // GFM table separator: |---|:--:|---|

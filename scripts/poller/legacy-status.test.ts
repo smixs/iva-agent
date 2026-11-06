@@ -100,8 +100,11 @@ after(() => {
 });
 
 test("reaping an interrupted 0.4.17 turn deletes both messages at the Bot API boundary", async () => {
+  legacyStatus({ wasCancelled: true });
   assert.equal(await reap(), 1);
   assert.deepEqual(deletions(), expectedDeletes);
+  assert.equal(getChatStatus("42:")?.stopPressed, undefined);
+  assert.equal(getChatStatus("42:")?.wasCancelled, undefined);
   assert.equal(getChatStatus("42:")?.statusMessageId, undefined);
   assert.equal(getChatStatus("42:")?.queuedStatusMessageId, undefined);
 });
@@ -119,10 +122,15 @@ test("a heartbeat retains inherited message IDs until the interrupted turn is re
     1,
   );
   assert.deepEqual(deletions(), expectedDeletes);
+  assert.equal(getChatStatus("42:")?.stopPressed, undefined);
+  assert.equal(getChatStatus("42:")?.wasCancelled, undefined);
 });
 
 test("scoped reset deletes both inherited messages and clears their fields", async () => {
+  legacyStatus({ wasCancelled: true });
   await completeScopedResetState("42:");
+  assert.equal(getChatStatus("42:")?.stopPressed, undefined);
+  assert.equal(getChatStatus("42:")?.wasCancelled, undefined);
   assert.deepEqual(deletions(), expectedDeletes);
   assert.equal(getChatStatus("42:")?.status, "idle");
   assert.equal(getChatStatus("42:")?.statusMessageId, undefined);

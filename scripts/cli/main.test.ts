@@ -21,6 +21,16 @@ class ExitSignal extends Error {
   }
 }
 
+void test("signal --help documents the optional stable event key", () => {
+  const help = execFileSync(
+    process.execPath,
+    ["bin/iva.mjs", "signal", "--help"],
+    { cwd: new URL("../../", import.meta.url), encoding: "utf8" },
+  );
+  assert.match(help, /iva signal.*\[--key <k>\]/u);
+  assert.match(help, /same key.*pending/u);
+});
+
 const exit = (code: number): never => {
   throw new ExitSignal(code);
 };
@@ -181,6 +191,7 @@ void test("main composition exposes the exact legacy command key set without exe
     "jobs",
     "post",
     "proactive",
+    "night",
     "signal",
     "start",
     "stop",

@@ -20,6 +20,10 @@ defines the actions the owner permitted.
    actions. Anchor changes to their source and time.
 3. Compare with Plan. A source you cannot read gives `blocked`, naming its
    source and cause.
+4. For "правка держится", read daily since installation when 7 days have passed.
+   No same owner correction: `done` with dates and sources. A recurrence: `news`
+   with its source; suggest removing or reworking the plugin, with disabling by
+   `iva plugin disable <name>` only after the owner's approval.
 
 ## Act within Allowed
 

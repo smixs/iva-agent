@@ -16,7 +16,6 @@ import test, { type TestContext } from "node:test";
 import { parseLaunchctlPrint, runLaunchd } from "./launchd.ts";
 import { unitToPlist, writeLaunchdUnits } from "./launchd-plist.ts";
 import { logTail } from "./systemd-control.ts";
-import { schedulerBypassViolation } from "../../agent/lib/scheduler-bypass-guard.ts";
 
 const calendar = readFileSync(
   new URL("../fixtures/launchctl-print-calendar.txt", import.meta.url),
@@ -332,23 +331,6 @@ void test(
     }
   },
 );
-void test("repair 14: scheduler guard covers arbitrary LaunchAgents writes and launchctl loading", () => {
-  for (const cmd of [
-    "cp /tmp/x ~/Library/LaunchAgents/x.plist",
-    'echo x > "$HOME/Library/LaunchAgents/x.plist"',
-    "mkdir -p ~/Library/LaunchAgents",
-    "launchctl bootstrap gui/501 /tmp/app.iva.x.plist",
-    "launchctl load /tmp/app.iva.x.plist",
-    "launchctl enable gui/501/app.iva.iva",
-  ])
-    assert.ok(schedulerBypassViolation(cmd), cmd);
-  for (const cmd of [
-    "cat ~/Library/LaunchAgents/x.plist",
-    "launchctl print gui/501/app.iva.iva",
-  ])
-    assert.equal(schedulerBypassViolation(cmd), null, cmd);
-});
-
 void test("repair 6: plist writing reports override and disable failures", (t) => {
   const home = dir(t);
   const unitDir = join(home, "LaunchAgents");

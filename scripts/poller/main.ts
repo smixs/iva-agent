@@ -1,3 +1,6 @@
+import { reconcileDeferred } from "../lib/deferred-command.ts";
+import { listChatStatuses } from "#lib/run-status.ts";
+import { launchIvaCommand } from "./update-flow.ts";
 import { real } from "../lib/version-layout.ts";
 import { createHelperOutcomeScan } from "./helper-outcomes.ts";
 import { fileURLToPath } from "node:url";
@@ -23,7 +26,7 @@ import {
   log,
   sleep,
 } from "./config.ts";
-import { tg } from "./transport.ts";
+import { tg, reply } from "./transport.ts";
 import { noteDroppedBridgeTasks, scheduleBridgeTask } from "./background.ts";
 import { fastForwardOffset, saveOffset } from "./offset.ts";
 import {
@@ -316,6 +319,11 @@ const configuredCollectQuietMs =
     ? rawCollectQuietMs
     : COLLECT_QUIET_MS;
 
+const turnsRunning = () =>
+  listChatStatuses().some(({ status }) => status.status === "running");
+const pollTimeout = (queued: number, collected: number) =>
+  queued > 0 || collected > 0 || turnsRunning() ? 1 : 30;
+
 export async function main({
   acquireProcessLockImpl = acquireTelegramProcessLock,
 }: {
@@ -399,11 +407,23 @@ export async function main({
     } catch (error) {
       log("stale run reaper failed:", errorMessage(error));
     }
+    scheduleBridgeTask("deferred-command", async () => {
+      await reconcileDeferred(DATA_DIR, {
+        busy: turnsRunning,
+        launch: (argv) => launchIvaCommand("iva-deferred", argv),
+        report: async (text) => {
+          const chat = notificationChat();
+          if (!chat || !(await reply(chat, text)))
+            throw new Error("Deferred command report failed");
+        },
+        log,
+      });
+    });
     const pendingInboxCount = await promoteReadyInbox({
       collectorOptions: { quietMs: configuredCollectQuietMs },
     });
     const pendingQueueCount = await drainReadyQueueHeads();
-    const pollSeconds = pendingQueueCount > 0 || pendingInboxCount > 0 ? 1 : 30;
+    const pollSeconds = pollTimeout(pendingQueueCount, pendingInboxCount);
     let data: TelegramResponse;
     try {
       data = (await tg(

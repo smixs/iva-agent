@@ -24,7 +24,7 @@ type CliRuntime = ReturnType<typeof createCliRuntime>;
 
 type ReadEnv = typeof readEnvFresh;
 
-export type JobsDependencies = {
+type JobsDependencies = {
   readonly ack?: typeof ackFacts;
   readonly commit?: typeof commitVaultWrite;
   readonly readEnv?: ReadEnv;
@@ -60,7 +60,14 @@ function markSkipped(
   markedDone: (text: string) => boolean,
 ): void {
   const exists = existsSync(raw);
-  if (exists && markedDone(readFileSync(raw, "utf8"))) return;
+  if (exists) {
+    const text = readFileSync(raw, "utf8");
+    if (
+      markedDone(text) &&
+      /<!-- processed: skipped by owner\b[^\r\n]*-->\s*$/u.test(text)
+    )
+      return;
+  }
   if (!exists) mkdirSync(dirname(raw), { recursive: true });
   appendFileSync(
     raw,

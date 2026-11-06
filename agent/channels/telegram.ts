@@ -81,13 +81,23 @@ import {
   dropIdleCompactionTurn,
   endIdleCompaction,
   openIdleCompactionTurn,
+  parkIdleCompactionTurn,
   startIdleCompaction,
+  idleCompactionDue,
+  takeManualCompactionReport,
 } from "../lib/idle-compaction.js";
+import {
+  handleTelegramCompactRequest,
+  TELEGRAM_COMPACT_ROUTE,
+  compactThousands,
+} from "../lib/telegram-compact-route.ts";
+import { tr } from "../lib/i18n.ts";
 import { providerConfig } from "../provider.js";
 import {
   handleAcceptedTelegramWebhook,
   TELEGRAM_ACCEPTANCE_ROUTE,
   wrapTelegramQueueOnMessage,
+  telegramTurnPolicy,
 } from "../lib/telegram-acceptance.js";
 import {
   abandonTelegramEarlyStatus,
@@ -224,15 +234,20 @@ export async function rememberAccepted<T>(
 function chatQuestion(channel: {
   telegram: Pick<TelegramHandle, "chatId" | "messageThreadId">;
   state: Pick<TelegramChannelState, "chatType">;
-}): { question?: string; media?: boolean; group: boolean } {
+}): {
+  question?: string;
+  media?: boolean;
+  group: boolean;
+  chatId: string | number | undefined;
+} {
   const tg = channel.telegram;
   const group = channel.state.chatType !== "private";
   const asked = tg.chatId
     ? turnQuestion(chatKeyOf(tg.chatId, tg.messageThreadId))
     : undefined;
   return asked === undefined
-    ? { group }
-    : { question: asked.text, media: asked.media, group };
+    ? { group, chatId: tg.chatId }
+    : { question: asked.text, media: asked.media, group, chatId: tg.chatId };
 }
 
 // Сообщение о сбое хода. Простой текст уходит одним sendMessage, как раньше; текст с кнопкой
@@ -272,6 +287,43 @@ function keepTurnAlive(
   });
 }
 
+async function notifyManualCompaction(
+  telegram: Pick<TelegramHandle, "sendMessage">,
+  manual: ReturnType<typeof endIdleCompaction>,
+) {
+  if (!manual) return;
+  await noticeSender((text) => telegram.sendMessage(text))(
+    manual.completed
+      ? tr(
+          `Compressed the conversation: it was ≈${compactThousands(manual.before)}k tokens. I'll measure the new size with the next answer.`,
+          `Сжала разговор: было ≈${compactThousands(manual.before)} тыс. Новый размер измерю со следующим ответом.`,
+        )
+      : tr(
+          "Compression was interrupted. Try /compact again.",
+          "Сжатие прервалось. Повтори /compact.",
+        ),
+  );
+}
+
+function compactTelegramSession(
+  chatKey: string,
+  sessionId: string,
+  manual = false,
+) {
+  const bearer = process.env.ASSISTANT_BEARER?.trim();
+  return startIdleCompaction({
+    sessionId,
+    manual,
+    claimImpl: () => claimChatForCompaction(chatKey, sessionId, bearer),
+    requestImpl: (id) =>
+      requestSessionCompact({
+        url: localSessionCompactUrl(id),
+        bearer: bearer ?? "",
+      }),
+    releaseImpl: () => releaseCompactionClaim(chatKey, sessionId),
+  });
+}
+
 let bearerMissingLogged = false;
 
 // Занять свободный чат под пересказ между ходами — тем же захватом, что ход и напоминание.
@@ -291,6 +343,13 @@ async function claimChatForCompaction(
     bearerMissingLogged = true;
     return false;
   }
+  const own = getChatStatus(chatKey);
+  if (
+    own?.resetAt === undefined &&
+    own?.sessionId === sessionId &&
+    own.compacting === true
+  )
+    return true;
   return takeOverTelegramChat({
     chatKey,
     patch: chatTakeOverPatch({ sessionId, compacting: true }),
@@ -402,16 +461,25 @@ const telegram = telegramChannel({
       try {
         await flushSettledTelegramQuestions(channel.state, channel.telegram);
       } finally {
-        try {
-          await finishTelegramStatus(
-            channel,
-            ctx.session.id,
-            "completed",
-            _data.turnId,
+        const report = takeManualCompactionReport(ctx.session.id);
+        closeIdleCompactionTurn(ctx.session.id, providerConfig.contextWindow);
+        await finishTelegramStatus(
+          channel,
+          ctx.session.id,
+          "completed",
+          _data.turnId,
+          Boolean(
+            process.env.ASSISTANT_BEARER?.trim() &&
+            idleCompactionDue(ctx.session.id),
+          ),
+        );
+        if (report)
+          await noticeSender((text) => channel.telegram.sendMessage(text))(
+            tr(
+              `Compressed the conversation: ≈${compactThousands(report.before)}k → ≈${compactThousands(report.after)}k tokens.`,
+              `Сжала разговор: было ≈${compactThousands(report.before)} тыс. → стало ≈${compactThousands(report.after)} тыс.`,
+            ),
           );
-        } finally {
-          closeIdleCompactionTurn(ctx.session.id, providerConfig.contextWindow);
-        }
       }
     },
     async "turn.cancelled"(_data, channel, ctx) {
@@ -439,25 +507,34 @@ const telegram = telegramChannel({
         channel.telegram.messageThreadId,
       );
       const bearer = process.env.ASSISTANT_BEARER?.trim();
+      let manual: ReturnType<typeof endIdleCompaction> = null;
       try {
         const parked = getChatStatus(chatKey);
         // Парковка застала запись пересказа этой сессии: он кончился.
-        if (parked?.sessionId === sessionId && parked.compacting === true)
-          endIdleCompaction(sessionId);
-        await finishTelegramStatus(channel, sessionId, "completed");
+        if (
+          parked?.sessionId === sessionId &&
+          parked.compacting === true &&
+          !idleCompactionDue(sessionId)
+        ) {
+          manual = endIdleCompaction(sessionId);
+        }
+        await finishTelegramStatus(
+          channel,
+          sessionId,
+          "completed",
+          undefined,
+          Boolean(
+            bearer &&
+            parked?.resetAt === undefined &&
+            idleCompactionDue(sessionId),
+          ),
+        );
+        await notifyManualCompaction(channel.telegram, manual);
       } finally {
         // Ждём ответа eve: она ждёт этот обработчик, поэтому просьба встаёт в её очередь
         // раньше, чем она возьмёт следующее сообщение, и пересказ идёт под записью.
-        await startIdleCompaction({
-          sessionId,
-          claimImpl: () => claimChatForCompaction(chatKey, sessionId, bearer),
-          requestImpl: (id) =>
-            requestSessionCompact({
-              url: localSessionCompactUrl(id),
-              bearer: bearer ?? "",
-            }),
-          releaseImpl: () => releaseCompactionClaim(chatKey, sessionId),
-        });
+        parkIdleCompactionTurn(sessionId);
+        await compactTelegramSession(chatKey, sessionId);
       }
       await flushSettledTelegramQuestions(channel.state, channel.telegram);
     },
@@ -611,6 +688,12 @@ const telegram = telegramChannel({
     const tg = ctx.telegram;
     const chatKey = chatKeyOf(message.chat.id, message.messageThreadId);
     const ingressId = randomUUID();
+    const receivedStatus = getChatStatus(chatKey);
+    const receivedDuringTurn =
+      telegramTurnPolicy() === "steer" &&
+      receivedStatus?.status === "running" &&
+      receivedStatus.compacting !== true &&
+      Date.now() - (receivedStatus.updatedAt ?? 0) < RUN_STALE_MS;
     return rememberAccepted(
       chatKey,
       message,
@@ -641,6 +724,7 @@ const telegram = telegramChannel({
             setStatusIfImpl: setChatStatusIf,
           });
         },
+        receivedDuringTurn,
         consumeCancelledMark: () => {
           if (!getChatStatus(chatKey)?.wasCancelled) return false;
           setChatStatus(chatKey, { wasCancelled: null });
@@ -685,6 +769,14 @@ export default {
         telegramWebhookRoute.handler,
         request,
         args,
+      ),
+    ),
+    POST(TELEGRAM_COMPACT_ROUTE, (req, args) =>
+      handleTelegramCompactRequest(
+        req,
+        args,
+        (key, id) => compactTelegramSession(key, id, true),
+        process.env.TELEGRAM_WEBHOOK_SECRET_TOKEN,
       ),
     ),
     POST("/eve/v1/telegram/reset", (req, args) =>
