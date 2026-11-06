@@ -39,7 +39,7 @@
       },
       {
         "id": "birthday",
-        "title": "Напоминания о днях рождения",
+        "title": "Напоминания о важных событиях",
         "text": "Скажите дату один раз. Ива сохранит её и напомнит о поздравлении.",
         "alt": "Дочь дарит отцу подарок"
       },
@@ -92,7 +92,7 @@
       },
       {
         "id": "birthday",
-        "title": "Birthday reminders",
+        "title": "Reminders for important events",
         "text": "Tell Iva the date once. She saves it and reminds you to send a greeting.",
         "alt": "A daughter giving her father a gift"
       },
