@@ -54,9 +54,6 @@
         "H2": [
           "Бесплатно и навсегда"
         ],
-        "Подзаголовок": [
-          "Личный ассистент раньше был только у миллионеров. Теперь он доступен каждому."
-        ],
         "Условия": [
           "Всё, что нужно: ваш сервер или Mac и подписка Claude, Codex или OpenCode Go."
         ],
@@ -171,9 +168,6 @@
       "groups": {
         "H2": [
           "Free, forever"
-        ],
-        "Подзаголовок": [
-          "A personal assistant used to be for millionaires. Now everyone can have one."
         ],
         "Условия": [
           "All you need is your own server or Mac and a Claude, Codex or OpenCode Go subscription."

@@ -520,13 +520,6 @@ html[data-intro="land"] :is(.header, .consent) {
 .price-forever {
   color: var(--blue);
 }
-.price-line {
-  max-width: 28ch;
-  margin: 0 0 14px;
-  font-size: 22px;
-  line-height: 1.4;
-  letter-spacing: -0.012em;
-}
 .price-note {
   max-width: 46ch;
   margin: 0;
@@ -1096,9 +1089,6 @@ html[data-intro="land"] :is(.header, .consent) {
   }
   .price h2 {
     font-size: clamp(44px, 13.5vw, 64px);
-  }
-  .price-line {
-    font-size: 19px;
   }
 }
 @media (max-width: 600px) {
