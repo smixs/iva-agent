@@ -20,6 +20,9 @@ const random = () => {
 const wave = Array.from({ length: 36 }, (_, i) => Math.max(2.2, (0.16 + 0.84 * Math.pow(Math.sin(Math.PI * (i + .5) / 36), .55) * (.3 + .7 * random())) * 20));
 const escape = (text: string) => text.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 const typed = (text: string, counter: { i: number }) => text.split(/( +)/).map(part => !part || /^ +$/.test(part) ? part : `<span data-word="${counter.i++}">${part === "11:00" ? "<b>11:00</b>" : escape(part)}</span>`).join("");
+// Answers under a card: yes and no, and on Marina's card a third, to open her chat.
+type Choices = { yes: string; no: string; open?: string; accepted: string; declined: string; opened?: string };
+const choices = (action: keyof typeof c.choices): Choices => c.choices[action];
 const prepared = messages.map(message => {
   const counter = { i: 0 };
   const blocks = message.blocks?.map(block => ({
@@ -69,15 +72,17 @@ const prepared = messages.map(message => {
                             {message.doc && <div class="v7-document"><span class="v7-document-icon">PDF</span><span><b>{message.doc[0]}</b><small>{message.doc[1]}</small></span></div>}
                             <div class="v7-swap" data-action={message.action}>
                               <div class="v7-swap-before" data-before><div class="v7-collapse">
-                                <div class="v7-buttons">
-                                  <button type="button" class="v7-choice is-primary" data-choice="yes" disabled>{c.choices[message.action].yes}</button>
-                                  <button type="button" class="v7-choice is-secondary" data-choice="no" disabled>{c.choices[message.action].no}</button>
+                                <div class:list={["v7-buttons", choices(message.action).open && "is-three"]}>
+                                  <button type="button" class="v7-choice is-primary" data-choice="yes" disabled>{choices(message.action).yes}</button>
+                                  <button type="button" class="v7-choice is-secondary" data-choice="no" disabled>{choices(message.action).no}</button>
+                                  {choices(message.action).open && <button type="button" class="v7-choice is-secondary" data-choice="open" disabled>{choices(message.action).open}</button>}
                                 </div>
                               </div></div>
                               <div class="v7-swap-after" data-after hidden><div class="v7-collapse">
                                 <div class="v7-result" data-result>
-                                  <div data-accepted>{message.action === "shopping" ? c.shopping.map(block => <div class="v7-item"><span class="v7-emoji">{block.emoji}</span><span>{block.text}</span></div>) : c.choices[message.action].accepted}</div>
-                                  <div data-declined hidden>{c.choices[message.action].declined}</div>
+                                  <div data-outcome="yes">{message.action === "shopping" ? c.shopping.map(block => <div class="v7-item"><span class="v7-emoji">{block.emoji}</span><span>{block.text}</span></div>) : choices(message.action).accepted}</div>
+                                  <div data-outcome="no" hidden>{choices(message.action).declined}</div>
+                                  {choices(message.action).opened && <div data-outcome="open" hidden>{choices(message.action).opened}</div>}
                                 </div>
                               </div></div>
                             </div>
@@ -236,6 +241,9 @@ const prepared = messages.map(message => {
   .v7-document small { display:block; font-size:calc(14 * var(--vp)); line-height:calc(18 * var(--vp)); color:#17211da3; }
   .v7-swap-before,.v7-swap-after { display:grid; grid-template-rows:1fr; }
   .v7-buttons { display:flex; gap:calc(7 * var(--vp)); padding-top:calc(10 * var(--vp)); padding-bottom:calc(2 * var(--vp)); }
+  /* Three answers: the first across the card, the other two side by side under it. */
+  .v7-buttons.is-three { flex-wrap:wrap; }
+  .v7-buttons.is-three .v7-choice:first-child { flex-basis:100%; }
   .v7-choice { appearance:none; flex:1; min-height:32px; height:max(32px,calc(38 * var(--vp))); padding:0 calc(5 * var(--vp)); border:0; border-radius:calc(19 * var(--vp)); font:inherit; font-size:max(12px,calc(16.5 * var(--vp))); font-weight:600; letter-spacing:calc(-.2 * var(--vp)); white-space:nowrap; cursor:pointer; }
   .v7-choice.is-primary { background:#0589ff; color:#fff; }
   .v7-choice.is-secondary { background:#e7e6e9; color:#17211d; }

@@ -1,7 +1,7 @@
 import { actionFrames, demoCopy, demoMessages, demoProviders, demoMenuEntries, demoMenuInfo, demoMenuCopy, type DemoProvider, type DemoMenuEntry, type ActionId, type DemoLang } from "../data/demo.ts";
 import {
   DEMO_FRAMES, FPS, actions, advance, choose, clamp01, clockAt, demoFrame,
-  easeOut, filmFrame, freshDemo, freshInteractions, menuCommand, selectInstallFromButton, beginInstallCopy, finishInstallCopy, replayInteractions, mariaAt, sceneAt, sceneFrames, springAt, swapAt, tapPhase,
+  easeOut, filmFrame, freshDemo, type Choice, freshInteractions, menuCommand, selectInstallFromButton, beginInstallCopy, finishInstallCopy, replayInteractions, mariaAt, sceneAt, sceneFrames, springAt, swapAt, tapPhase,
 } from "./demo-state.ts";
 
 export function mountDemos() {
@@ -120,8 +120,8 @@ function mountDemo(root: HTMLElement) {
       const id = message.action;
       const row = buttonRows.get(id)!;
       const decision = state.decisions[id];
-      const swapStart = id === "restaurant" && decision?.value ? decision.at + 138 : decision ? decision.at + 18 : Infinity;
-      const swap = reduced && decision && !(id === "restaurant" && decision.value && !mariaAt(state).confirmed)
+      const swapStart = id === "restaurant" && decision?.value === "yes" ? decision.at + 138 : decision ? decision.at + 18 : Infinity;
+      const swap = reduced && decision && !(id === "restaurant" && decision.value === "yes" && !mariaAt(state).confirmed)
         ? { k: 1, a: 0, b: 1 } : swapAt(f, swapStart);
       const before = row.querySelector<HTMLElement>("[data-before]")!;
       const afterSwap = row.querySelector<HTMLElement>("[data-after]")!;
@@ -131,16 +131,13 @@ function mountDemo(root: HTMLElement) {
       afterSwap.hidden = !decision || f < swapStart && !reduced;
       style(afterSwap, "grid-template-rows", `${swap.k}fr`);
       style(afterSwap, "opacity", String(swap.b));
-      row.dataset.decision = decision ? decision.value ? "yes" : "no" : "";
-      if (decision) {
-        row.querySelector<HTMLElement>("[data-accepted]")!.hidden = !decision.value;
-        row.querySelector<HTMLElement>("[data-declined]")!.hidden = decision.value;
-      }
+      row.dataset.decision = decision?.value ?? "";
+      if (decision) for (const outcome of row.querySelectorAll<HTMLElement>("[data-outcome]")) outcome.hidden = outcome.dataset.outcome !== decision.value;
       const pressStart = decision ? decision.at - 12 : actionFrames[id];
       const phase = reduced ? { pressed: 0 } : tapPhase(f, pressStart);
       for (const button of buttons) {
         button.disabled = !!decision || limit < Number(after?.dataset.afterIndex ?? 0) + 6;
-        const selected = decision ? (button.dataset.choice === "yes") === decision.value : button.dataset.choice === "yes";
+        const selected = button.dataset.choice === (decision?.value ?? "yes");
         const pressed = selected ? phase.pressed : 0;
         style(button, "transform", `scale(${1 - .03 * pressed},${1 - .06 * pressed})`);
         const primary = button.dataset.choice === "yes";
@@ -160,7 +157,7 @@ function mountDemo(root: HTMLElement) {
     maria.setAttribute("aria-hidden", String(!mariaActive));
     const share = state.decisions.restaurant;
     // No restaurant choice means no delivery, including in the hidden transcript.
-    arrival(venue, f, share?.value ? share.at + 78 : Infinity);
+    arrival(venue, f, share?.value === "yes" ? share.at + 78 : Infinity);
     setText(get('[data-message-time="restaurant"]'), pushed.confirmed ? "17:42" : "17:41");
     iva.classList.toggle("is-thinking", !!thinking);
     get("[data-bot]").hidden = !!thinking;
@@ -191,7 +188,7 @@ function mountDemo(root: HTMLElement) {
         const decision = state.decisions[id];
         const phase = tapPhase(f, decision ? decision.at - 12 : actionFrames[id]);
         if (phase.opacity <= .001 || phase.d <= 1) continue;
-        const button = buttonRows.get(id)!.querySelector<HTMLElement>(decision?.value === false ? '[data-choice="no"]' : '[data-choice="yes"]')!;
+        const button = buttonRows.get(id)!.querySelector<HTMLElement>(`[data-choice="${decision?.value ?? "yes"}"]`)!;
         const targetBox = button.getBoundingClientRect();
         const screenBox = iva.parentElement!.getBoundingClientRect();
         const scale = screenBox.width / 402;
@@ -209,7 +206,8 @@ function mountDemo(root: HTMLElement) {
     const isPlaying = playing();
     root.dataset.state = interaction.menu !== null ? "paused" : complete ? "complete" : isPlaying ? "playing" : "paused";
     const filmScene = sceneAt(f);
-    const scene = mariaActive ? 7 : filmScene === 7 ? 6 : filmScene;
+    // Maria's chat is its own scene while it is open, and only then.
+    const scene = mariaActive ? 9 : filmScene === 9 ? 8 : filmScene;
     root.dataset.sceneNumber = String(scene);
     if (scene !== previousScene) {
       setText(sceneLabel, copy.scenes[scene]);
@@ -403,10 +401,10 @@ function mountDemo(root: HTMLElement) {
     const f = filmFrame(state.frame);
     // Manual reduced-motion playback settles pending choices before moving on.
     for (const id of actions) {
-      if (!state.decisions[id] && f >= actionFrames[id] - 20) choose(state, id, true, "auto");
+      if (!state.decisions[id] && f >= actionFrames[id] - 20) choose(state, id, "yes", "auto");
     }
     let next = sceneFrames.find(at => at > f + 10);
-    if (next === 3470 && state.decisions.restaurant?.value === false) next = 3780;
+    if (next === 3470 && state.decisions.restaurant && state.decisions.restaurant.value !== "yes") next = 3780;
     advance(state, next === undefined ? DEMO_FRAMES : demoFrame(next), false);
     render();
   }
@@ -464,13 +462,14 @@ function mountDemo(root: HTMLElement) {
     if (!button || button.disabled) return;
     const row = button.closest<HTMLElement>("[data-action]")!;
     const id = row.dataset.action as ActionId;
-    if (!choose(state, id, button.dataset.choice === "yes")) return;
+    if (!choose(state, id, button.dataset.choice as Choice)) return;
     focusPaused = false;
     const decision = state.decisions[id]!;
-    setText(announcement, decision.value
-      ? id === "shopping" ? copy.shopping.map(item => item.text).join(", ") : copy.choices[id].accepted
-      : copy.choices[id].declined);
-    if (reduced && id === "restaurant" && decision.value) advance(state, demoFrame(decision.at + 80), false);
+    const choice: { accepted: string; declined: string; opened?: string } = copy.choices[id];
+    setText(announcement, decision.value === "yes"
+      ? id === "shopping" ? copy.shopping.map(item => item.text).join(", ") : choice.accepted
+      : decision.value === "open" ? choice.opened ?? "" : choice.declined);
+    if (reduced && id === "restaurant" && decision.value === "yes") advance(state, demoFrame(decision.at + 80), false);
     sync();
   }, on);
   root.addEventListener("focusin", event => {

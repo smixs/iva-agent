@@ -3,41 +3,42 @@ import test from "node:test";
 import { demoMessages, demoMenuEntries } from "../data/demo.ts";
 import { DEMO_FRAMES, actions, advance, choose, demoFrame, filmFrame, freshDemo, freshInteractions, menuCommand, selectInstall, selectInstallFromButton, beginInstallCopy, finishInstallCopy, replayInteractions, iosPush, mariaAt, springAt, tapPhase } from "./demo-state.ts";
 
-test("V6 phone footage retains scene order and omits only title/logo/connection interstitials", () => {
+test("phone footage keeps scene order; the team brief and Marina fill the stretch of the film's titles", () => {
   assert.equal(filmFrame(0), 360);
   assert.equal(filmFrame(179), 539);
-  assert.equal(filmFrame(180), 1200);
-  assert.equal(filmFrame(840), 1980);
-  assert.equal(filmFrame(1620), 2880);
+  assert.equal(filmFrame(180), 540);
+  assert.equal(filmFrame(1499), 1859);
+  assert.equal(filmFrame(1500), 1980);
+  assert.equal(filmFrame(2280), 2880);
   assert.equal(filmFrame(DEMO_FRAMES), 6240);
-  for (const frame of [360, 1240, 2060, 2420, 2950, 3220, 3640, 3950, 4226, 4380, 4660, 4950, 5320, 5710, 6000]) assert.equal(filmFrame(demoFrame(frame)), frame);
-  assert.deepEqual(demoMessages("ru").map(m => m.id), ["morning", "voice", "crm", "who-ask", "who", "reminder", "flight-ask", "taxi", "invoice", "restaurant", "shopping", "goal-ask", "goal", "next-day", "done", "ads", "stock", "payment", "contract-ask", "contract", "post-ask", "post", "summary"]);
+  for (const frame of [360, 595, 970, 1240, 2060, 2420, 2950, 3220, 3640, 3950, 4226, 4380, 4660, 4950, 5320, 5710, 6000]) assert.equal(filmFrame(demoFrame(frame)), frame);
+  assert.deepEqual(demoMessages("ru").map(m => m.id), ["morning", "team", "marina", "voice", "crm", "who-ask", "who", "reminder", "flight-ask", "taxi", "invoice", "restaurant", "shopping", "goal-ask", "goal", "next-day", "done", "ads", "stock", "payment", "contract-ask", "contract", "post-ask", "post", "summary"]);
 });
 test("every autoplay contact selects the affirmative branch exactly once", () => {
   const state = freshDemo();
   advance(state, DEMO_FRAMES);
-  assert.equal(Object.keys(state.decisions).length, 10);
+  assert.equal(Object.keys(state.decisions).length, 11);
   for (const id of actions) {
-    assert.equal(state.decisions[id]?.value, true);
+    assert.equal(state.decisions[id]?.value, "yes");
     assert.equal(state.decisions[id]?.source, "auto");
-    assert.equal(choose(state, id, false), false);
+    assert.equal(choose(state, id, "no"), false);
   }
 });
 test("a user decline wins against future automatic clicks, double clicks and opposite clicks", () => {
   const state = freshDemo();
   advance(state, demoFrame(2180));
-  assert.equal(choose(state, "reminder", false), true);
+  assert.equal(choose(state, "reminder", "no"), true);
   const decision = state.decisions.reminder;
-  assert.equal(choose(state, "reminder", true), false);
+  assert.equal(choose(state, "reminder", "yes"), false);
   advance(state, DEMO_FRAMES);
   assert.equal(state.decisions.reminder, decision);
-  assert.equal(decision?.value, false);
+  assert.equal(decision?.value, "no");
   assert.equal(decision?.source, "user");
 });
 test("declining restaurant never opens Maria, delivers a venue or claims confirmation", () => {
   const state = freshDemo();
   advance(state, demoFrame(3300));
-  choose(state, "restaurant", false);
+  choose(state, "restaurant", "no");
   for (const f of [3300, 3392, 3440, 3500, 3530, 3640, 4380]) {
     assert.deepEqual(mariaAt(state, f), { p: 0, venue: false, confirmed: false });
   }
@@ -58,9 +59,9 @@ test("manual reduced-motion advances leave buttons available until the reader ch
   const state = freshDemo();
   advance(state, demoFrame(2190), false);
   assert.deepEqual(state.decisions, {});
-  choose(state, "reminder", false);
+  choose(state, "reminder", "no");
   advance(state, demoFrame(2580), false);
-  assert.equal(state.decisions.reminder?.value, false);
+  assert.equal(state.decisions.reminder?.value, "no");
   assert.equal(state.decisions.taxi, undefined);
 });
 test("replay owns a fresh empty decision set and does not mutate the previous showing", () => {
@@ -68,7 +69,7 @@ test("replay owns a fresh empty decision set and does not mutate the previous sh
   advance(old, DEMO_FRAMES);
   const next = freshDemo();
   assert.deepEqual(next, { frame: 0, decisions: {} });
-  assert.equal(Object.keys(old.decisions).length, 10);
+  assert.equal(Object.keys(old.decisions).length, 11);
 });
 test("film spring, word ramp, iOS push and tap retain exact end states and a small landing overshoot", () => {
   assert.equal(springAt(9, 10, "arrive"), 0);
@@ -84,15 +85,30 @@ test("film spring, word ramp, iOS push and tap retain exact end states and a sma
 test("every negative choice remains negative when the complete autoplay catches up", () => {
   for (const id of actions) {
     const state = freshDemo();
-    const at = { reminder: 2190, taxi: 2580, invoice: 3080, restaurant: 3340, shopping: 3780, ads: 4510, stock: 4790, payment: 5090, contract: 5470, post: 5850 }[id];
+    const at = { marina: 1075, reminder: 2190, taxi: 2580, invoice: 3080, restaurant: 3340, shopping: 3780, ads: 4510, stock: 4790, payment: 5090, contract: 5470, post: 5850 }[id];
     advance(state, demoFrame(at));
-    assert.equal(choose(state, id, false), true);
+    assert.equal(choose(state, id, "no"), true);
     advance(state, DEMO_FRAMES);
-    assert.equal(state.decisions[id]?.value, false);
+    assert.equal(state.decisions[id]?.value, "no");
     assert.equal(state.decisions[id]?.source, "user");
-    assert.equal(choose(state, id, true), false);
-    for (const other of actions.filter(value => value !== id)) assert.equal(state.decisions[other]?.value, true);
+    assert.equal(choose(state, id, "yes"), false);
+    for (const other of actions.filter(value => value !== id)) assert.equal(state.decisions[other]?.value, "yes");
   }
+});
+test("Marina's card takes any of its three answers once, and autoplay answers with the first", () => {
+  for (const pick of ["yes", "no", "open"] as const) {
+    const state = freshDemo();
+    advance(state, demoFrame(1075));
+    assert.equal(state.decisions.marina, undefined);
+    assert.equal(choose(state, "marina", pick), true);
+    assert.equal(choose(state, "marina", pick === "yes" ? "open" : "yes"), false);
+    advance(state, DEMO_FRAMES);
+    assert.equal(state.decisions.marina?.value, pick);
+  }
+  const auto = freshDemo();
+  advance(auto, DEMO_FRAMES);
+  assert.equal(auto.decisions.marina?.value, "yes");
+  assert.equal(auto.decisions.marina?.at, 1097);
 });
 
 test("menu model changes wait for restart confirmation and reject stale or unsupported selections", () => {

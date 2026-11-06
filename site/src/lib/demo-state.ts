@@ -1,11 +1,14 @@
 import { actionFrames, demoProviders, demoMenuEntries, type DemoProvider, type DemoMenuEntry, type DemoLang, type ActionId } from "../data/demo.ts";
 
 export const FPS = 60;
-// Only phone footage remains. Morning starts with the fully readable film card.
-const spans = [[360, 540], [1200, 1860], [1980, 2760], [2880, 6240]] as const;
+// Only phone footage remains. Morning starts with the fully readable film card; the team brief
+// and Marina's message fill the stretch where the film had its titles.
+const spans = [[360, 1860], [1980, 2760], [2880, 6240]] as const;
 export const DEMO_FRAMES = spans.reduce((sum, [a, b]) => sum + b - a, 0);
 export const actions = Object.keys(actionFrames) as ActionId[];
-export type Decision = { value: boolean; at: number; source: "user" | "auto" };
+// Most cards ask yes or no; Marina's also offers to open her chat.
+export type Choice = "yes" | "no" | "open";
+export type Decision = { value: Choice; at: number; source: "user" | "auto" };
 export type DemoState = { frame: number; decisions: Partial<Record<ActionId, Decision>> };
 export const freshDemo = (): DemoState => ({ frame: 0, decisions: {} });
 export const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
@@ -27,7 +30,7 @@ export function demoFrame(film: number): number {
   return DEMO_FRAMES;
 }
 // Single assignment: user input and autoplay race through this one function.
-export function choose(state: DemoState, action: ActionId, value: boolean, source: Decision["source"] = "user"): boolean {
+export function choose(state: DemoState, action: ActionId, value: Choice, source: Decision["source"] = "user"): boolean {
   if (state.decisions[action]) return false;
   state.decisions[action] = { value, at: filmFrame(state.frame), source };
   return true;
@@ -39,7 +42,7 @@ export function advance(state: DemoState, frame: number, automatic = true): void
   for (const action of actions) {
     const at = actionFrames[action] + 12; // film's contact frame, after the ring approaches
     if (!state.decisions[action] && f >= at) {
-      state.decisions[action] = { value: true, at, source: "auto" };
+      state.decisions[action] = { value: "yes", at, source: "auto" };
     }
   }
 }
@@ -97,7 +100,7 @@ export function iosPush(f: number, at: number): number {
 }
 export function mariaAt(state: DemoState, f = filmFrame(state.frame)) {
   const choice = state.decisions.restaurant;
-  if (!choice?.value) return { p: 0, venue: false, confirmed: false };
+  if (choice?.value !== "yes") return { p: 0, venue: false, confirmed: false };
   const push = choice.at + 30, pop = choice.at + 168;
   return {
     p: f < pop ? iosPush(f, push) : 1 - iosPush(f, pop),
@@ -105,15 +108,15 @@ export function mariaAt(state: DemoState, f = filmFrame(state.frame)) {
     confirmed: f >= choice.at + 138,
   };
 }
-export const sceneFrames = [360, 1460, 1710, 2190, 2580, 3080, 3340, 3470, 3780, 4160, 4300, 4510, 4790, 5090, 5470, 5850, 6100];
+export const sceneFrames = [360, 760, 1075, 1460, 1710, 2190, 2580, 3080, 3340, 3470, 3780, 4160, 4300, 4510, 4790, 5090, 5470, 5850, 6100];
 export function sceneAt(f: number): number {
-  const starts = [360, 1240, 1530, 2010, 2330, 2910, 3180, 3392, 3600, 3950, 4220, 4330, 4620, 4910, 5220, 5600, 5950];
+  const starts = [360, 540, 915, 1240, 1530, 2010, 2330, 2910, 3180, 3392, 3600, 3950, 4220, 4330, 4620, 4910, 5220, 5600, 5950];
   let scene = 0;
   starts.forEach((at, i) => { if (f >= at) scene = i; });
   return scene;
 }
 export function clockAt(f: number): string {
-  const marks: [number, string][] = [[0, "9:41"], [1220, "12:04"], [1510, "12:10"], [2000, "13:00"], [2310, "15:20"], [2900, "16:05"], [3170, "17:41"], [3440, "17:42"], [3590, "18:30"], [3930, "19:04"], [4220, "14:31"], [4330, "15:10"], [4620, "16:02"], [4910, "16:40"], [5220, "17:15"], [5600, "18:20"], [5950, "20:00"]];
+  const marks: [number, string][] = [[0, "9:41"], [540, "9:42"], [905, "11:25"], [1220, "12:04"], [1510, "12:10"], [2000, "13:00"], [2310, "15:20"], [2900, "16:05"], [3170, "17:41"], [3440, "17:42"], [3590, "18:30"], [3930, "19:04"], [4220, "14:31"], [4330, "15:10"], [4620, "16:02"], [4910, "16:40"], [5220, "17:15"], [5600, "18:20"], [5950, "20:00"]];
   return marks.reduce((time, [at, value]) => f >= at ? value : time, "9:41");
 }
 

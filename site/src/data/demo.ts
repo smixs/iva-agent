@@ -1,9 +1,10 @@
 // Transcript and event frames from V6 -> v5/Film5.tsx. Titles, logo and connection
 // interstitials are omitted; Telegram content and the five default choices are retained.
 // The next day goes on past the film: ads, stock, a payment, a contract, a post and the day's
-// numbers, each asking before it acts.
+// numbers, each asking before it acts. The morning adds a team brief, and in the meeting Marina
+// writes: three ready answers, the way Iva offers them.
 export type DemoLang = "ru" | "en";
-export type ActionId = "reminder" | "taxi" | "invoice" | "restaurant" | "shopping" | "ads" | "stock" | "payment" | "contract" | "post";
+export type ActionId = "marina" | "reminder" | "taxi" | "invoice" | "restaurant" | "shopping" | "ads" | "stock" | "payment" | "contract" | "post";
 export type DemoBlock = { kind: "title" | "p" | "item"; text: string; emoji?: string };
 export type DemoMessage = {
   id: string; at: number; think?: number; time?: string;
@@ -15,7 +16,7 @@ const NB = "\u00a0";
 const p = (text: string): DemoBlock => ({ kind: "p", text });
 const item = (emoji: string, text: string): DemoBlock => ({ kind: "item", emoji, text });
 export const actionFrames: Record<ActionId, number> = {
-  reminder: 2200, taxi: 2590, invoice: 3090, restaurant: 3350, shopping: 3790,
+  marina: 1085, reminder: 2200, taxi: 2590, invoice: 3090, restaurant: 3350, shopping: 3790,
   ads: 4520, stock: 4800, payment: 5100, contract: 5480, post: 5860,
 };
 export const demoCopy = {
@@ -30,8 +31,9 @@ export const demoCopy = {
     voice: "Голосовое сообщение, 12 секунд", photo: "Осенняя коллекция: пальто, свитер, шапка и ботинки",
     restaurant: "Ресторан «Олива»", address: "Садовая ул., 18",
     map: "Карта расположения ресторана «Олива»",
-    scenes: ["Утро", "Голосовое и CRM", "Кто писал", "Напоминание", "Такси для Алеси", "Счёт Тимуру", "Ресторан для Марии", "Чат с Марией", "Покупки", "Задача про интернет", "Интернет починили", "Реклама в Meta", "Склад", "Платёжка", "Договор", "Пост", "Итоги дня"],
+    scenes: ["Утро", "Сводка по команде", "Марина пишет", "Голосовое и CRM", "Кто писал", "Напоминание", "Такси для Алеси", "Счёт Тимуру", "Ресторан для Марии", "Чат с Марией", "Покупки", "Задача про интернет", "Интернет починили", "Реклама в Meta", "Склад", "Платёжка", "Договор", "Пост", "Итоги дня"],
     choices: {
+      marina: { yes: "Освобожусь через полчаса", no: "Я в курсе", open: "Открыть чат", accepted: "✅ Ответила Марине: «Освобожусь через полчаса»", declined: "✅ Ответила Марине: «Я в курсе»", opened: "Хорошо, ответишь Марине сам." },
       reminder: { yes: "Напомнить", no: "Не надо", accepted: `✅ Напомню завтра в${NB}10:00`, declined: "Хорошо, напоминание пропускаю." },
       taxi: { yes: "Заказать", no: "Не надо", accepted: `✅ Такси будет в${NB}19:15`, declined: "Хорошо, такси пропускаю." },
       invoice: { yes: "Отправить", no: "Не сейчас", accepted: "✅ Отправила Тимуру", declined: "Хорошо, письмо остаётся черновиком." },
@@ -57,8 +59,9 @@ export const demoCopy = {
     voice: "Voice message, 12 seconds", photo: "Autumn collection: a coat, a sweater, a beanie and boots",
     restaurant: "Oliva restaurant", address: "18 Sadovaya St.",
     map: "Map showing Oliva restaurant",
-    scenes: ["Morning", "Voice note and CRM", "Who messaged", "Reminder", "Alesya’s taxi", "Timur’s invoice", "Restaurant for Maria", "Chat with Maria", "Shopping", "Fixing the internet", "Internet fixed", "Meta ads", "Stock", "Payment", "Contract", "Post", "Day in numbers"],
+    scenes: ["Morning", "Team brief", "Marina writes", "Voice note and CRM", "Who messaged", "Reminder", "Alesya’s taxi", "Timur’s invoice", "Restaurant for Maria", "Chat with Maria", "Shopping", "Fixing the internet", "Internet fixed", "Meta ads", "Stock", "Payment", "Contract", "Post", "Day in numbers"],
     choices: {
+      marina: { yes: "Free in 30 minutes", no: "Got it", open: "Open chat", accepted: "✅ Replied to Marina: “Free in 30 minutes”", declined: "✅ Replied to Marina: “Got it”", opened: "Okay, you’ll reply to Marina yourself." },
       reminder: { yes: "Remind me", no: "No thanks", accepted: "✅ I’ll remind you tomorrow at 10:00", declined: "Okay, skipping the reminder." },
       taxi: { yes: "Book it", no: "No thanks", accepted: "✅ The taxi will be there at 19:15", declined: "Okay, skipping the taxi." },
       invoice: { yes: "Send", no: "Not now", accepted: "✅ Sent to Timur", declined: "Okay, the email stays a draft." },
@@ -85,6 +88,17 @@ export function demoMessages(lang: DemoLang): DemoMessage[] {
       item("📅", t(`11:00 встреча с${NB}Тимуром`, "11:00 meeting with Timur")),
       item("✍️", t(`Арсен ждёт подпись в${NB}DocuSign`, "Arsen is waiting for your signature in DocuSign")),
       item("🎂", t(`У${NB}Марии сегодня день рождения`, "It’s Maria’s birthday today")),
+    ] },
+    { id: "team", at: 595, think: 540, kind: "card", time: "9:42", blocks: [
+      { kind: "title", text: t("📋 Сводка по команде", "📋 Team brief") },
+      p(t(`По${NB}Bitrix24 и${NB}чатам команды:`, "From Bitrix24 and the team chats:")),
+      item("⏳", t(`Вчера не${NB}успели смету для${NB}«Альфы»`, "Not done yesterday: the Alfa estimate")),
+      item("👥", t(`В${NB}работе: лендинг у${NB}Дилнозы, отчёт у${NB}Рустама`, "In progress: Dilnoza’s landing page, Rustam’s report")),
+      item("🧱", t(`Застряло: Азиз третий день ждёт доступ к${NB}рекламе`, "Stuck: Aziz has waited three days for ad access")),
+      item("👀", t(`Нужно твоё решение: бюджет на${NB}ноябрь`, "Needs your call: the November budget")),
+    ] },
+    { id: "marina", at: 970, think: 915, kind: "card", action: "marina", time: "11:25", blocks: [
+      p(t(`💬 Марина пишет: «Клиент приехал, ждёт в${NB}переговорке». По${NB}расписанию у${NB}тебя встреча с${NB}Тимуром до${NB}12:00. Что ей ответить?`, "💬 Marina writes: “The client is here, waiting in the meeting room.” Your calendar has you with Timur until 12:00. What should I reply?")),
     ] },
     { id: "voice", at: 1240, kind: "voice", time: "12:04" },
     { id: "crm", at: 1380, think: 1290, kind: "card", time: "12:04", blocks: [
