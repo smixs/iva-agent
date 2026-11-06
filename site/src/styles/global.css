@@ -791,42 +791,7 @@ html[data-intro="land"] :is(.header, .consent) {
   font-size: 15px;
 }
 
-/* Install feedback and consent keep their existing behavior. */
-.toast {
-  position: fixed;
-  inset: auto 0 max(20px, env(safe-area-inset-bottom));
-  z-index: 30;
-  width: fit-content;
-  max-width: min(560px, calc(100vw - 32px));
-  margin: 0 auto;
-  padding: 12px 18px;
-  border-radius: 10px;
-  background: var(--ink);
-  color: #fff;
-  font-size: 15px;
-  line-height: 1.4;
-  text-align: center;
-  text-wrap: balance;
-  box-shadow: 0 8px 28px rgba(20, 26, 23, 0.22);
-  transform: translateY(12px);
-  opacity: 0;
-  visibility: hidden;
-  transition:
-    opacity 180ms ease,
-    transform 180ms ease,
-    visibility 0s 180ms;
-}
-.toast.is-long {
-  overflow-wrap: anywhere;
-}
-.toast.is-on {
-  transform: none;
-  opacity: 1;
-  visibility: visible;
-  transition:
-    opacity 180ms ease,
-    transform 180ms ease;
-}
+/* Consent keeps its existing behavior. */
 .consent {
   position: fixed;
   inset: auto 0 0;

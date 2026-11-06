@@ -6,6 +6,7 @@ import HeroChat from "./HeroChat.astro";
 import Leaves from "./Leaves.astro";
 import Reviews from "./Reviews.astro";
 import Willow from "./Willow.astro";
+import InstallCopied from "./InstallCopied.astro";
 import { homeCopy, rich, phrase, glue, type Lang } from "../lib/copy";
 import { sprite } from "../lib/services";
 const { lang = "en" } = Astro.props as { lang: Lang };
@@ -219,35 +220,6 @@ const schema = [
       </div>
     </details>
   </section>
-  <p class="toast" role="status" aria-live="polite" data-toast></p>
+  <InstallCopied lang={lang} />
   <Fragment set:html={sprite} />
 </Base>
-<script>
-  const ru = document.documentElement.lang === "ru";
-  // Copy the install phrase and say so in a toast that leaves by itself.
-  // If the clipboard is closed, the toast shows the phrase to copy by hand.
-  const toast = document.querySelector<HTMLElement>("[data-toast]")!;
-  let toastTimer = 0;
-  function say(message: string, ms: number, long = false) {
-    toast.textContent = message;
-    toast.classList.toggle("is-long", long);
-    toast.classList.add("is-on");
-    window.clearTimeout(toastTimer);
-    toastTimer = window.setTimeout(() => toast.classList.remove("is-on"), ms);
-  }
-  document.addEventListener("click", async (event) => {
-    const button = (event.target as Element).closest<HTMLButtonElement>("button[data-copy]");
-    if (!button) return;
-    const text = button.dataset.copy!;
-    const inDemo = Boolean(button.closest("[data-demo]"));
-    try {
-      await navigator.clipboard.writeText(text);
-      if (!inDemo) say(ru ? "Фраза скопирована. Отправьте её Claude Code или Codex" : "Phrase copied. Send it to Claude Code or Codex", 3200);
-      button.dispatchEvent(new CustomEvent("iva:copy-result", { bubbles: true, detail: { ok: true, text } }));
-      window.dispatchEvent(new CustomEvent("iva:analytics", { detail: { name: "copy_prompt" } }));
-    } catch {
-      if (!inDemo) say((ru ? "Скопируйте вручную: " : "Copy by hand: ") + text, 9000, true);
-      button.dispatchEvent(new CustomEvent("iva:copy-result", { bubbles: true, detail: { ok: false, text } }));
-    }
-  });
-</script>

@@ -1,0 +1,363 @@
+---
+// The site's install buttons copy the prompt for the visitor's agent; this card then comes up in
+// the middle of the screen and says what to do with it, while Iva's two leaves gather pixel by
+// pixel from the stem up, a check settles on them and a few loose pixels float off. It leaves by
+// itself after a few seconds (not while the pointer rests on it), on a click anywhere else, on
+// Escape or on its close button. When the browser refuses the clipboard, the card shows the prompt
+// selected to copy by hand and stays until dismissed. The phone demo answers its own copy buttons
+// inside the chat (lib/demo.ts) through the iva:copy-result event sent from here.
+import type { Lang } from "../lib/copy";
+const { lang = "en" } = Astro.props as { lang?: Lang };
+const text = lang === "ru"
+  ? {
+      title: "Промпт для агента скопирован",
+      body: "Вставьте его в Claude или Codex на вашем компьютере. Он проведёт вас по всем этапам установки.",
+      manualTitle: "Скопируйте промпт для агента",
+      manualBody: "Браузер не дал скопировать его сам. Выделите текст ниже и вставьте его в Claude или Codex.",
+      close: "Закрыть",
+    }
+  : {
+      title: "Agent prompt copied",
+      body: "Paste it into Claude or Codex on your computer. It will walk you through every step of the install.",
+      manualTitle: "Copy the agent prompt",
+      manualBody: "The browser didn’t let us copy it. Select the text below and paste it into Claude or Codex.",
+      close: "Close",
+    };
+// Iva's mark in pixels, read off brand/mark.svg at 26 px: g the green leaf, b the blue one,
+// x where they meet.
+const art = [
+  ".g..............",
+  ".gg.............",
+  ".gggg...........",
+  "ggggg...........",
+  "gggggg..........",
+  "ggggggg.....b...",
+  "ggggggg....bbb..",
+  "gggggggg..bbbbb.",
+  ".ggggggg.bbbbbb.",
+  ".ggggggggbbbbbb.",
+  ".ggggggggbbbbbbb",
+  ".gggggggxbbbbbbb",
+  "..ggggggxbbbbbbb",
+  "..ggggggxbbbbbbb",
+  "..ggggggxbbbbbb.",
+  "...gggggxbbbbbb.",
+  "...ggggggbbbbbb.",
+  "....gggggbbbbbb.",
+  ".....ggggbbbbbb.",
+  ".....gggggbbbb..",
+  "......ggggbbbb..",
+  "........gggbbb..",
+  ".........ggxb...",
+  "...........gb...",
+];
+// The willow's shades, a little mixed so the leaves look woven (Willow.astro, Footer.astro).
+const GREEN = ["#c9ea96", "#a4dc55", "#86c140"], BLUE = ["#62a2dc", "#368ad2", "#2b6291"];
+const hash = (a: number, b: number) => ((((a * 73856093) ^ (b * 19349663)) >>> 0) % 1000) / 1000;
+const cells = art.flatMap((row, y) =>
+  [...row].flatMap((kind, x) => {
+    if (kind === ".") return [];
+    const h = hash(x + 3, y + 7);
+    const fill = kind === "x" ? "#3f78ab" : (kind === "g" ? GREEN : BLUE)[h < 0.2 ? 0 : h < 0.75 ? 1 : 2];
+    // The leaves grow from the stem up: lower rows first, each row a little scattered.
+    return [{ x: x * 5, y: y * 5, fill, delay: Math.round((art.length - 1 - y) * 16 + hash(x, y) * 40) }];
+  }),
+);
+// Loose pixels that come off the leaf tips and float up, in the art's own pixels.
+const motes = [
+  { x: 5, y: 0, dx: -10, c: GREEN[1], d: 520 },
+  { x: 15, y: 15, dx: 6, c: GREEN[0], d: 700 },
+  { x: 60, y: 25, dx: 9, c: BLUE[1], d: 600 },
+  { x: 70, y: 45, dx: 4, c: BLUE[0], d: 820 },
+];
+---
+<div class="copied" id="copied" popover data-copied data-state="done" role="dialog" aria-labelledby="copied-title">
+  <button class="copied-close" type="button" popovertarget="copied" popovertargetaction="hide" aria-label={text.close}>
+    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5.5 5.5l9 9M14.5 5.5l-9 9" /></svg>
+  </button>
+  <div class="copied-art" aria-hidden="true">
+    <svg viewBox="0 0 80 120" width="72" height="108">
+      {cells.map((c) => <rect x={c.x} y={c.y} width="4.2" height="4.2" rx="0.5" fill={c.fill} style={`--d:${c.delay}ms`} />)}
+    </svg>
+    {motes.map((m) => <i class="copied-mote" style={`--x:${m.x * 0.9}px;--y:${m.y * 0.9}px;--dx:${m.dx}px;--c:${m.c};--d:${m.d}ms`}></i>)}
+    <span class="copied-check"><svg viewBox="0 0 24 24"><path d="M6.6 12.6l3.5 3.5 7.3-7.6" /></svg></span>
+  </div>
+  <p class="copied-title" id="copied-title"><span data-when="done">{text.title}</span><span data-when="manual">{text.manualTitle}</span></p>
+  <p class="copied-body"><span data-when="done">{text.body}</span><span data-when="manual">{text.manualBody}</span></p>
+  <p class="copied-phrase" data-when="manual" data-copied-phrase tabindex="0"></p>
+  <span class="copied-time" data-when="done" data-copied-time aria-hidden="true"></span>
+</div>
+<p class="sr-only" role="status" aria-live="polite" data-copied-status></p>
+<script>
+  const card = document.querySelector<HTMLElement>("[data-copied]")!;
+  const status = document.querySelector<HTMLElement>("[data-copied-status]")!;
+  const phrase = card.querySelector<HTMLElement>("[data-copied-phrase]")!;
+  const time = card.querySelector<HTMLElement>("[data-copied-time]")!;
+  function show(ok: boolean, text: string) {
+    card.dataset.state = ok ? "done" : "manual";
+    phrase.textContent = ok ? "" : text;
+    // A second copy while the card is up runs its countdown from the start.
+    time.style.animation = "none";
+    void time.offsetWidth;
+    time.style.animation = "";
+    if (!card.matches(":popover-open")) card.showPopover();
+    status.textContent = [...card.querySelectorAll(`.copied-title [data-when="${card.dataset.state}"], .copied-body [data-when="${card.dataset.state}"]`)].map((el) => el.textContent).join(" ");
+    if (!ok) {
+      const range = document.createRange();
+      range.selectNodeContents(phrase);
+      getSelection()?.removeAllRanges();
+      getSelection()?.addRange(range);
+    }
+  }
+  time.addEventListener("animationend", () => card.hidePopover());
+  document.addEventListener("click", async (event) => {
+    const button = (event.target as Element).closest<HTMLButtonElement>("button[data-copy]");
+    if (!button) return;
+    const text = button.dataset.copy!;
+    const inDemo = Boolean(button.closest("[data-demo]"));
+    try {
+      await navigator.clipboard.writeText(text);
+      if (!inDemo) show(true, text);
+      button.dispatchEvent(new CustomEvent("iva:copy-result", { bubbles: true, detail: { ok: true, text } }));
+      window.dispatchEvent(new CustomEvent("iva:analytics", { detail: { name: "copy_prompt" } }));
+    } catch {
+      if (!inDemo) show(false, text);
+      button.dispatchEvent(new CustomEvent("iva:copy-result", { bubbles: true, detail: { ok: false, text } }));
+    }
+  });
+</script>
+<style>
+  .copied {
+    --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+    width: min(420px, calc(100vw - 32px));
+    margin: auto;
+    padding: 44px 32px 30px;
+    border: 1px solid rgb(23 37 31 / 0.06);
+    border-radius: 28px;
+    background: #fff;
+    color: var(--ink);
+    box-shadow:
+      0 32px 80px -16px rgb(23 37 31 / 0.3),
+      0 10px 28px rgb(23 37 31 / 0.08);
+    text-align: center;
+    overflow: visible;
+    opacity: 0;
+    transform: translateY(8px) scale(0.97);
+    transition:
+      opacity 180ms var(--ease-out),
+      transform 180ms var(--ease-out),
+      overlay 180ms allow-discrete,
+      display 180ms allow-discrete;
+  }
+  .copied:popover-open {
+    opacity: 1;
+    transform: none;
+    transition:
+      opacity 240ms var(--ease-out),
+      transform 460ms var(--ease-out),
+      overlay 460ms allow-discrete,
+      display 460ms allow-discrete;
+  }
+  @starting-style {
+    .copied:popover-open {
+      opacity: 0;
+      transform: translateY(20px) scale(0.92);
+    }
+  }
+  .copied[data-state="done"] [data-when="manual"],
+  .copied[data-state="manual"] [data-when="done"] {
+    display: none;
+  }
+  .copied-close {
+    position: absolute;
+    top: 14px;
+    right: 14px;
+    display: grid;
+    place-items: center;
+    width: 38px;
+    height: 38px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+    transition:
+      background-color 150ms ease,
+      color 150ms ease;
+  }
+  .copied-close svg {
+    width: 18px;
+    height: 18px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .copied-close:hover {
+      background: var(--panel);
+      color: var(--ink);
+    }
+  }
+  .copied-art {
+    position: relative;
+    width: 72px;
+    height: 108px;
+    margin: 0 auto;
+  }
+  .copied-art svg {
+    display: block;
+  }
+  .copied-art rect {
+    transform-box: fill-box;
+    transform-origin: center;
+  }
+  .copied:popover-open .copied-art rect {
+    animation: copied-pixel 280ms var(--ease-out) var(--d) both;
+  }
+  @keyframes copied-pixel {
+    from {
+      opacity: 0;
+      transform: translateY(4px) scale(0.3);
+    }
+  }
+  .copied-mote {
+    position: absolute;
+    left: var(--x);
+    top: var(--y);
+    width: 5px;
+    height: 5px;
+    border-radius: 1px;
+    background: var(--c);
+    opacity: 0;
+  }
+  .copied:popover-open .copied-mote {
+    animation: copied-mote 1700ms var(--ease-out) var(--d) both;
+  }
+  @keyframes copied-mote {
+    12% {
+      opacity: 0.9;
+    }
+    to {
+      opacity: 0;
+      transform: translate(var(--dx), -44px);
+    }
+  }
+  .copied-check {
+    position: absolute;
+    right: -18px;
+    bottom: -4px;
+    display: grid;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    background: var(--leaf);
+    box-shadow: 0 0 0 4px #fff;
+  }
+  .copied-check svg {
+    width: 22px;
+    height: 22px;
+    fill: none;
+    stroke: var(--ink);
+    stroke-width: 2.4;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .copied-check path {
+    stroke-dasharray: 18;
+  }
+  .copied:popover-open .copied-check {
+    animation: copied-badge 380ms var(--ease-out) 460ms both;
+  }
+  .copied:popover-open .copied-check path {
+    animation: copied-tick 280ms var(--ease-out) 620ms both;
+  }
+  @keyframes copied-badge {
+    from {
+      opacity: 0;
+      transform: scale(0.4) rotate(-24deg);
+    }
+  }
+  @keyframes copied-tick {
+    from {
+      stroke-dashoffset: 18;
+    }
+  }
+  .copied-title {
+    margin: 28px 0 10px;
+    font-size: 26px;
+    font-weight: 650;
+    line-height: 1.2;
+    letter-spacing: -0.025em;
+    text-wrap: balance;
+  }
+  .copied-body {
+    max-width: 32ch;
+    margin: 0 auto;
+    color: var(--muted);
+    font-size: 17px;
+    line-height: 1.5;
+    text-wrap: pretty;
+  }
+  .copied-phrase {
+    margin: 18px 0 0;
+    padding: 12px 14px;
+    border-radius: 12px;
+    background: var(--panel);
+    font-size: 14px;
+    line-height: 1.45;
+    text-align: left;
+    overflow-wrap: anywhere;
+    user-select: all;
+  }
+  .copied-time {
+    display: block;
+    width: 72px;
+    height: 3px;
+    margin: 26px auto 0;
+    border-radius: 2px;
+    background: var(--leaf);
+  }
+  .copied:popover-open .copied-time {
+    animation: copied-time 7s linear 400ms both;
+  }
+  .copied:is(:hover, :focus-within) .copied-time {
+    animation-play-state: paused;
+  }
+  @keyframes copied-time {
+    to {
+      transform: scaleX(0);
+    }
+  }
+  @media (max-width: 600px) {
+    .copied {
+      padding: 40px 22px 26px;
+    }
+    .copied-title {
+      font-size: 23px;
+    }
+    .copied-body {
+      font-size: 16px;
+    }
+  }
+  /* Fewer moves: the card only fades in and out, the leaves and the check are simply there. */
+  @media (prefers-reduced-motion: reduce) {
+    .copied,
+    .copied:popover-open {
+      transform: none;
+    }
+    @starting-style {
+      .copied:popover-open {
+        transform: none;
+      }
+    }
+    .copied:popover-open :is(.copied-art rect, .copied-check, .copied-check path) {
+      animation: none;
+    }
+    .copied-mote {
+      display: none;
+    }
+  }
+</style>
