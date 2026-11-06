@@ -974,7 +974,9 @@ html[data-intro="fly"] :is(.header, .hero ~ :not(.iva-splash)) {
     width: 22px;
     height: 22px;
   }
-  .mobile-toggle:not([hidden]) {
+  /* With scripts on (the head marks html.js before the first paint) the menu starts closed and
+     the toggle shows at once; without scripts the links simply stay open. */
+  html.js .mobile-toggle {
     order: 3;
     display: grid;
     place-items: center;
@@ -1003,7 +1005,8 @@ html[data-intro="fly"] :is(.header, .hero ~ :not(.iva-splash)) {
   .mobile-toggle[aria-expanded="true"] .menu-close-icon {
     display: block;
   }
-  .mobile-nav:not([hidden]) {
+  html:not(.js) .mobile-nav,
+  .mobile-nav.is-open {
     display: block;
     margin: 0 var(--gutter) 20px;
     padding: 8px 22px 16px;
