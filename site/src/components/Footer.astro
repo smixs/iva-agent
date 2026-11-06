@@ -45,12 +45,13 @@ const groups: [string, [string, string, string?][]][] = [
   </div>
 </footer>
 <script>
-  // A wave of square pixels rolls slowly along the bottom of the footer: green at the crest, blue
-  // and darker below. Pixels come off the crest and float up, swaying, fading as they go. The
-  // pointer stirs it: dragged near the surface it lifts the wave behind it and tears pixels off,
-  // and floating pixels shy away from it; a click or tap on the footer splashes. The surface is
-  // a row of columns on springs, each pulled level by its neighbours, so a splash runs out as
-  // ripples. Runs only on screen; with reduced motion the wave stands still.
+  // A wave of square pixels pulses along the bottom of the footer like the outline of a sound,
+  // green at the crest, blue and darker below. Pixels come off the crest and float up, swaying,
+  // fading as they go. The pointer stirs it: dragged near the surface it lifts the wave behind it
+  // and tears pixels off, and floating pixels shy away from it; a click or tap on the footer
+  // splashes. Under the resting shape the surface is a row of columns on springs, each pulled
+  // level by its neighbours, so a splash runs out as ripples. Runs only on screen; with reduced
+  // motion the wave stands still.
   const footer = document.querySelector<HTMLElement>("[data-footer]");
   const canvas = document.querySelector<HTMLCanvasElement>("[data-footer-wave]");
   if (footer && canvas) {
@@ -87,10 +88,28 @@ const groups: [string, [string, string, string?][]][] = [
       if (n !== cols) { cols = n; lift = new Float32Array(n); speed = new Float32Array(n); }
       return true;
     };
-    // Resting surface: three slow swells of different lengths, rolling both ways.
-    const rest = (x: number, t: number) =>
-      band * (0.42 + 0.17 * Math.sin((x / 620) * 6.283 - t * 0.45) + 0.07 * Math.sin((x / 250) * 6.283 + t * 0.8 + 1.3) + 0.03 * Math.sin((x / 96) * 6.283 - t * 1.6 + 2.1));
-    const surface = (i: number, t: number) => Math.max(0, rest(i * cell, t) + lift[i]);
+    // Resting surface: a row of willow leaves, long and short, like the outline of a sound. Each
+    // leaf rises to a point at both ends, widest a little before its middle, and swells and sinks
+    // on its own beat; every column flickers a little on top, so neighbours step rather than
+    // glide; the row drifts slowly along. Leaves are laid out once, in cells, and repeat.
+    const leaves: { at: number; len: number; amp: number; rate: number; phase: number; beat: number }[] = [];
+    let span = 0;
+    while (span < 230) {
+      const len = 5 + Math.floor(rand() * 13);
+      leaves.push({ at: span, len, amp: 0.25 + 0.75 * rand() ** 0.7, rate: 2.6 + rand() * 2.6, phase: rand() * 6.283, beat: rand() * 6.283 });
+      span += len;
+    }
+    const rest = (i: number, t: number) => {
+      const x = (((i + t * 1.2) % span) + span) % span;
+      let k = 0;
+      while (k < leaves.length - 1 && x >= leaves[k + 1].at) k++;
+      const leaf = leaves[k], u = (x - leaf.at) / leaf.len;
+      const shape = Math.sin(Math.PI * u ** 0.8) ** 1.25;
+      const beat = 0.5 + 0.5 * Math.sin(t * leaf.rate + leaf.phase) * Math.sin(t * leaf.rate * 0.37 + leaf.beat);
+      const flicker = 0.78 + 0.22 * (0.5 + 0.5 * Math.sin(t * (4 + 3 * hash(i, 3)) + 6.283 * hash(i, 7)));
+      return band * (0.18 + 0.68 * leaf.amp * (0.45 + 0.55 * beat) * shape * flicker);
+    };
+    const surface = (i: number, t: number) => Math.max(0, rest(i, t) + lift[i]);
 
     type Mote = { x: number; y: number; vx: number; vy: number; age: number; life: number; colour: string; phase: number };
     const motes: Mote[] = [];
@@ -126,8 +145,12 @@ const groups: [string, [string, string, string?][]][] = [
           while (budget >= 1) { budget -= 1; tear(Math.round(ci + (rand() - 0.5) * 4), clock, 90 + rand() * 120, pvx * 0.15); }
         }
       }
-      // Now and then a pixel comes off the crest by itself; a fast-rising crest throws them off.
-      if (rand() < dt * Math.max(2.5, W / 240)) tear(Math.floor(rand() * cols), clock, 34 + rand() * 50);
+      // Now and then a pixel comes off the crest by itself, the more likely off a tall leaf; a
+      // fast-rising crest throws them off.
+      if (rand() < dt * Math.max(2.5, W / 240)) {
+        const a = Math.floor(rand() * cols), b = Math.floor(rand() * cols);
+        tear(surface(a, clock) > surface(b, clock) ? a : b, clock, 34 + rand() * 50);
+      }
       for (let i = 0; i < cols; i++) if (speed[i] > 110 && rand() < (speed[i] - 110) * dt * 0.05) tear(i, clock, speed[i] * 0.6 + rand() * 60);
       // Floating pixels rise faster as they go, sway, drift with the swell and shy from the pointer.
       for (let k = motes.length - 1; k >= 0; k--) {
