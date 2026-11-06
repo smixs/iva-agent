@@ -76,7 +76,7 @@ const tiles = Object.fromEntries(stream.map((id) => [id, [marks[id][1], marks[id
     slot.style.setProperty("--bg", bg);
     slot.style.setProperty("--fg", fg);
     slot.classList.toggle("is-wide", !!isWide);
-    slot.querySelector("use")!.setAttribute("href", `/services.svg#${id}`);
+    slot.querySelector("use")!.setAttribute("href", `#svc-${id}`);
     busy.add(slot);
     flying.add(id);
     waited.set(slot, performance.now());

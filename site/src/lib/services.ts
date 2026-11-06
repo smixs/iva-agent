@@ -89,12 +89,13 @@ export const stream = [
   "airtable", "googleanalytics", "x", "zoom", "threads", "canva", "shopify", "stripe", "hubspot", "figma",
   "miro", "dropbox", "obsidian", "github", "perplexity", "maildotru", "outlook", "teams", "googletasks", "googledocs",
 ];
-// Every mark as a symbol in one file (pages/services.svg.ts): the hero stream and the services
-// section both draw from it, so the page itself carries only the tile colours.
+// Every mark as a symbol, drawn once inside the page (end of Home.astro): the hero stream and the
+// services section both point at it, so a tile never waits on a file and never shows up empty.
+// Kept out of view rather than display:none, which would switch off the marks' gradients.
 const symbol = (id: string, art: string) => {
   const [, attrs, inner] = art.match(/<svg([^>]*)>([\s\S]*)<\/svg>/)!;
   const box = attrs.match(/viewBox="([^"]+)"/)![1];
   const rest = attrs.replace(/\s(viewBox|xmlns|aria-hidden)="[^"]*"/g, "");
-  return `<symbol id="${id}" viewBox="${box}"><g${rest}>${inner}</g></symbol>`;
+  return `<symbol id="svc-${id}" viewBox="${box}"><g${rest}>${inner}</g></symbol>`;
 };
-export const sprite = `<svg xmlns="http://www.w3.org/2000/svg">${Object.entries(marks).map(([id, [art]]) => symbol(id, art)).join("")}</svg>`;
+export const sprite = `<svg xmlns="http://www.w3.org/2000/svg" width="0" height="0" aria-hidden="true" focusable="false" style="position:absolute;overflow:hidden">${Object.entries(marks).map(([id, [art]]) => symbol(id, art)).join("")}</svg>`;

@@ -35,7 +35,7 @@ const items = [
   <ul class="connection-list">
     {items.map(([id, name]) => (
       <li>
-        <span class:list={["connection-mark", wide.has(id) && "is-wide"]} aria-hidden="true" style={`--tile:${marks[id][1]};--mark:${marks[id][2]}`}><svg><use href={`/services.svg#${id}`} /></svg></span>
+        <span class:list={["connection-mark", wide.has(id) && "is-wide"]} aria-hidden="true" style={`--tile:${marks[id][1]};--mark:${marks[id][2]}`}><svg><use href={`#svc-${id}`} /></svg></span>
         <span>{name}</span>
       </li>
     ))}

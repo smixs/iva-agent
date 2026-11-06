@@ -6,6 +6,7 @@ import HeroChat from "./HeroChat.astro";
 import Leaves from "./Leaves.astro";
 import Reviews from "./Reviews.astro";
 import { homeCopy, rich, phrase, glue, type Lang } from "../lib/copy";
+import { sprite } from "../lib/services";
 const { lang = "en" } = Astro.props as { lang: Lang };
 const ru = lang === "ru";
 const c = Object.fromEntries(
@@ -175,6 +176,7 @@ const schema = [
     </details>
   </section>
   <p class="toast" role="status" aria-live="polite" data-toast></p>
+  <Fragment set:html={sprite} />
 </Base>
 <script>
   const ru = document.documentElement.lang === "ru";
