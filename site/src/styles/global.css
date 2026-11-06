@@ -305,9 +305,10 @@ code {
   position: relative;
   z-index: 1;
 }
-/* Three short lines on wide screens, so the services beside the phone keep clear of the heading. */
+/* Two lines, the first one whole ("Personal AI assistant"); the services beside the phone keep
+   clear of it (HeroApps.astro). */
 .hero-heading {
-  max-width: 9.6em;
+  max-width: 10.4em;
   margin: 0 0 28px;
   font-size: var(--display);
   line-height: 1.06;
@@ -1131,9 +1132,10 @@ html[data-intro="land"] :is(.header, .consent) {
     padding-top: 14px;
     padding-bottom: 64px;
   }
+  /* As large as the first line allows on one row of the phone: it is 10.12em long. */
   .hero-heading {
     max-width: 100%;
-    font-size: clamp(34px, 10vw, 40px);
+    font-size: min(40px, calc((100vw - 2 * var(--gutter)) / 10.3));
     line-height: 1.04;
     letter-spacing: -0.035em;
   }
