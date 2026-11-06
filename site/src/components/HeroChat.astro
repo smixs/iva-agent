@@ -1,7 +1,9 @@
 ---
 import Phone from "./Phone.astro";
 import Leaves from "./Leaves.astro";
-import HeroApps from "./HeroApps.astro";
+// The services flying into the phone are switched off for now (06.11.2026): they drew the eye
+// away from the phone. HeroApps.astro stays as it is, to come back to.
+// import HeroApps from "./HeroApps.astro";
 import { demoCopy, demoMessages, demoMenuCopy } from "../data/demo";
 import { phrase, type Lang } from "../lib/copy";
 const { lang = "en" } = Astro.props as { lang?: Lang };
@@ -36,7 +38,7 @@ const prepared = messages.map(message => {
 <figure class="v7-demo" data-demo data-ui="telegram-demo" data-lang={lang} aria-label={c.label}>
   <div class="v7-device-wrap">
   <Leaves />
-  <HeroApps />
+  {/* <HeroApps /> */}
   <Phone>
     {(["iva", "maria", "marina"] as const).map(peer => (
       <div class:list={["v7-screen", peer !== "iva" && "v7-person"]} data-screen={peer} aria-hidden={peer !== "iva" ? "true" : undefined} inert={peer !== "iva"}>

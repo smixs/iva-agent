@@ -305,8 +305,7 @@ code {
   position: relative;
   z-index: 1;
 }
-/* Two lines, the first one whole ("Personal AI assistant"); the services beside the phone keep
-   clear of it (HeroApps.astro). */
+/* Two lines, the first one whole ("Personal AI assistant"). */
 .hero-heading {
   max-width: 10.4em;
   margin: 0 0 28px;
@@ -1023,8 +1022,6 @@ html[data-intro="land"] :is(.header, .consent) {
     width: var(--hero-phone-width);
     max-width: calc(100vw - 44px);
     justify-self: auto;
-    /* Room for the row of services above the phone (HeroApps). */
-    margin-top: 72px;
   }
   .hero .hero-visual .v7-demo {
     width: 100%;
