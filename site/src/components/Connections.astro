@@ -1,8 +1,10 @@
 ---
-// Mail, calendar and the built-in browser first, then services people connect; the last tile
-// says that any other service connects the same way.
+// Every service Iva connects to, in three rows drifting right, left and right across the page:
+// tiles grow in at one edge and shrink away at the other. Mail, calendar and the browser lead,
+// then the hero's mixed list, dealt in turn into the rows so neighbours come from different kinds
+// of work; each row ends with the tile that says any other service connects the same way.
 import type { Lang } from "../lib/copy";
-import { marks, wide } from "../lib/services";
+import { marks, wide, stream } from "../lib/services";
 const { lang, title, line, link } = Astro.props as {
   lang: Lang;
   title: string;
@@ -10,20 +12,9 @@ const { lang, title, line, link } = Astro.props as {
   link: string;
 };
 const ru = lang === "ru";
-const items = [
-  ["mail", ru ? "Почта" : "Mail"],
-  ["googlecalendar", ru ? "Календарь" : "Calendar"],
-  ["browser", ru ? "Браузер" : "Browser"],
-  ["googledrive", "Google Drive"],
-  ["notion", "Notion"],
-  ["slack", "Slack"],
-  ["github", "GitHub"],
-  ["todoist", "Todoist"],
-  ["obsidian", "Obsidian"],
-  ["bitrix24", ru ? "Битрикс24" : "Bitrix24"],
-  ["1c", ru ? "1С" : "1C"],
-  ["more", ru ? "Любые ваши" : "Any of yours"],
-];
+const lead = ["mail", "googlecalendar", "browser"];
+const order = [...lead, ...stream.filter((id) => !lead.includes(id))];
+const rows = [0, 1, 2].map((r) => [...order.filter((_, i) => i % 3 === r), "more"]);
 ---
 
 <section id="connections" class="section connections" aria-labelledby="connections-title">
@@ -32,12 +23,67 @@ const items = [
     {line && <p>{line}</p>}
     <a class="text-link" href={ru ? "/ru/docs/" : "/docs/extending/"}>{link}</a>
   </div>
-  <ul class="connection-list">
-    {items.map(([id, name]) => (
-      <li>
-        <span class:list={["connection-mark", wide.has(id) && "is-wide"]} aria-hidden="true" style={`--tile:${marks[id][1]};--mark:${marks[id][2]}`}><svg><use href={`#svc-${id}`} /></svg></span>
-        <span>{name}</span>
-      </li>
+  <div class="connection-rows" data-connections aria-hidden="true">
+    {rows.map((row) => (
+      <div class="connection-row">
+        {row.map((id) => (
+          <span class:list={["connection-mark", wide.has(id) && "is-wide"]} style={`--tile:${marks[id][1]};--mark:${marks[id][2]}`}><svg><use href={`#svc-${id}`} /></svg></span>
+        ))}
+      </div>
     ))}
-  </ul>
+  </div>
 </section>
+<script>
+  // Without script or with reduced motion the rows stand still, centred and faded at the edges
+  // (CSS). Otherwise each row runs as a loop of its tiles at its own speed, the second one the
+  // other way; near either edge a tile shrinks and fades. Only on screen, by the frame clock.
+  const box = document.querySelector<HTMLElement>("[data-connections]");
+  if (box && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    const rows = [...box.querySelectorAll<HTMLElement>(".connection-row")].map((row, r) => ({
+      row,
+      tiles: [...row.children] as HTMLElement[],
+      way: r % 2 ? -1 : 1,
+      speed: [34, 42, 38][r],
+      offset: r * 29,
+    }));
+    let width = 0, size = 0, step = 0, fade = 0;
+    const measure = () => {
+      width = box.clientWidth;
+      size = rows[0].tiles[0].offsetWidth;
+      step = size + (parseFloat(getComputedStyle(rows[0].row).columnGap) || 24);
+      fade = Math.min(160, Math.max(64, width * 0.14));
+      // A row shorter than the screen gets a second round of its tiles, so the loop never shows a gap.
+      for (const r of rows) {
+        const first = r.tiles.slice();
+        while (r.tiles.length * step < width + 2 * step) for (const tile of first) r.tiles.push(r.row.appendChild(tile.cloneNode(true) as HTMLElement));
+      }
+    };
+    const place = (seconds: number) => {
+      for (const r of rows) {
+        r.offset += r.speed * seconds;
+        const loop = r.tiles.length * step;
+        r.tiles.forEach((tile, i) => {
+          const x = ((((i * step + r.way * r.offset) % loop) + loop) % loop) - step;
+          const edge = Math.min(x + size / 2, width - x - size / 2) / fade;
+          const k = edge <= 0 ? 0 : edge >= 1 ? 1 : edge * edge * (3 - 2 * edge);
+          tile.style.transform = `translate3d(${x.toFixed(1)}px,0,0) scale(${(0.35 + 0.65 * k).toFixed(3)})`;
+          tile.style.opacity = k.toFixed(3);
+        });
+      }
+    };
+    box.dataset.moving = "";
+    measure();
+    place(0);
+    let raf = 0, last = 0, seen = false;
+    const frame = (now: number) => {
+      raf = requestAnimationFrame(frame);
+      place(last ? Math.min(0.1, (now - last) / 1000) : 0);
+      last = now;
+    };
+    const start = () => { if (!raf && seen && !document.hidden) { last = 0; raf = requestAnimationFrame(frame); } };
+    const stop = () => { cancelAnimationFrame(raf); raf = 0; };
+    new ResizeObserver(() => { measure(); place(0); }).observe(box);
+    new IntersectionObserver(([entry]) => { seen = entry.isIntersecting; if (seen) start(); else stop(); }).observe(box);
+    document.addEventListener("visibilitychange", () => (document.hidden ? stop() : start()));
+  }
+</script>

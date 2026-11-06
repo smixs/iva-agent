@@ -452,27 +452,36 @@ html[data-intro="land"] :is(.header, .consent) {
   grid-column: 2;
   justify-self: start;
 }
-.connection-list {
+/* Three rows of tiles from edge to edge of the page (Connections.astro moves them). Standing
+   still they sit centred, faded out towards the edges. */
+.connection-rows {
+  --size: 60px;
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-  align-items: start;
-  gap: 34px 22px;
-  margin: 48px 0 0;
-  padding: 0;
-  list-style: none;
+  gap: 20px;
+  margin: 52px calc(50% - 50vw) 0;
 }
-.connection-list li {
+.connection-row {
+  position: relative;
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-  gap: 12px;
-  font-size: 13px;
-  line-height: 1.4;
+  justify-content: center;
+  gap: 26px;
+  height: calc(var(--size) + 16px);
+  padding-block: 8px;
+  overflow: hidden;
+  mask-image: linear-gradient(90deg, transparent, #000 14%, #000 86%, transparent);
+}
+.connection-rows[data-moving] .connection-row {
+  mask-image: none;
+}
+.connection-rows[data-moving] .connection-mark {
+  position: absolute;
+  top: 8px;
+  left: 0;
+  will-change: transform, opacity;
 }
 /* The same tiles that fly into the hero phone. */
 .connection-mark {
-  --size: 60px;
+  flex: none;
   display: grid;
   place-items: center;
   width: var(--size);
@@ -1092,10 +1101,6 @@ html[data-intro="land"] :is(.header, .consent) {
   .connections-copy {
     gap: 28px 36px;
   }
-  .connection-list {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 30px 20px;
-  }
 }
 @media (max-width: 760px) {
   .use-cases {
@@ -1213,15 +1218,13 @@ html[data-intro="land"] :is(.header, .consent) {
     padding-top: 40px;
     padding-bottom: 56px;
   }
-  .connection-list {
-    margin-top: 32px;
-    gap: 28px 12px;
+  .connection-rows {
+    --size: 50px;
+    gap: 14px;
+    margin-top: 34px;
   }
-  .connection-list li {
-    font-size: 11.5px;
-  }
-  .connection-mark {
-    --size: 52px;
+  .connection-row {
+    gap: 18px;
   }
   .install {
     padding-top: 44px;
