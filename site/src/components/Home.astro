@@ -88,9 +88,10 @@ const schema = [
   <script is:inline>
     // Opening, once per session (decided in Base.astro before the first paint). In order, never
     // overlapping: one leaf sprouts mid-screen and the second opens out of it, turning blue; the
-    // mark crouches, then flies on an arc into its place behind the phone, growing and softening;
-    // only then do the phone and the page come in. The flight is measured after the web fonts
-    // settle, so the target stays put.
+    // mark crouches, then flies on an arc into its place behind the phone, growing, still sharp;
+    // then the phone and the page come in, and only under the risen phone does the mark soften
+    // into the blurred leaves (Leaves.astro). The flight is measured after the web fonts settle,
+    // so the target stays put.
     (() => {
       const root = document.documentElement;
       if (root.dataset.intro !== "play") return;
@@ -119,13 +120,10 @@ const schema = [
       const fly = () => {
         if (root.dataset.intro !== "play") return;
         root.dataset.intro = "fly";
-        // Land exactly on the leaves, with their blur and opacity, so the swap at the end is invisible.
-        // The leaves may be turned (narrow screens), so take their box before the turn and turn with it.
+        // Land exactly on the leaves, which start sharp, so the swap at the end is invisible. The
+        // leaves may be turned (narrow screens), so take their box before the turn and turn with it.
         const from = splash.getBoundingClientRect();
         const wrap = leaves.offsetParent.getBoundingClientRect();
-        const art = getComputedStyle(leaves.firstElementChild);
-        const blur = parseFloat(art.filter.replace(/[^\d.]/g, "")) || 0;
-        const fade = parseFloat(art.opacity);
         const turn = parseFloat(getComputedStyle(leaves).rotate) || 0;
         const w = from.width / 2, h = from.height / 2, end = leaves.offsetHeight / from.height;
         // Centres of the mark: here, after the crouch, and on the leaves. The arc bends upwards.
@@ -167,12 +165,9 @@ const schema = [
           const run = Math.hypot(b[0] - a[0], b[1] - a[1]) / 16;
           const angle = ms < A ? Math.atan2(dir[1], dir[0]) : Math.atan2(b[1] - a[1], b[0] - a[0]);
           const stretch = ms < A ? p.squash : ms === D ? 1 : 1 + Math.min(0.24, (16 * run) / (p.s * from.height));
-          const soft = blur * Math.max(0, (p.x - 0.3) / 0.7) ** 2;
           frames.push({
             offset: ms / D,
             transform: `translate(${p.c[0] - p.s * w - from.left}px, ${p.c[1] - p.s * h - from.top}px) scale(${p.s}) translate(${w}px, ${h}px) rotate(${angle}rad) scale(${stretch}, ${1 / stretch}) rotate(${-angle}rad) rotate(${p.r}deg) translate(${-w}px, ${-h}px)`,
-            filter: `blur(${soft / p.s}px)`,
-            opacity: 1 + (fade - 1) * p.x,
           });
         }
         splash.style.transformOrigin = "0 0";

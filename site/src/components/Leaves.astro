@@ -31,7 +31,8 @@ const { splash = false } = Astro.props as { splash?: boolean };
   /* Phone almost as wide as the screen: the mark turns so both leaves still show beside it. */
   @media (max-width:600px) { .v7-leaves { left:-10cqw; top:-40cqw; width:120cqw; height:182.2cqw; rotate:-20deg; } }
   /* Opening (Home.astro): one leaf sprouts mid-screen, the second unfolds from it, then the mark
-     flies into this place, growing and softening; the phone floats up in front of it after that. */
+     flies into this place, growing, still sharp; the phone floats up in front of it, and only
+     then does the mark soften into the blurred leaves behind the phone. */
   .iva-splash { display:none; }
   :global(html[data-intro="play"]) .iva-splash,
   :global(html[data-intro="fly"]) .iva-splash { display:block; position:fixed; z-index:-1; left:50%; top:50%; height:min(14vh, 112px); aspect-ratio:828 / 1257; translate:-50% -50%; pointer-events:none; }
@@ -71,11 +72,14 @@ const { splash = false } = Astro.props as { splash?: boolean };
   /* The phone floats up in front (HeroChat.astro) and the leaves give way to it and settle; from
      then on they breathe slowly behind it, a little larger and turned, and back. */
   :global(html[data-intro="land"]) .v7-leaves { animation:iva-intro-leaves 1100ms cubic-bezier(.45,0,.55,1) 320ms both; }
+  /* Sharp until the phone (HeroChat.astro, 1150ms) is nearly up, then dissolving behind it. */
+  :global(html[data-intro="land"]) .v7-leaves svg { animation:iva-intro-soften 1000ms cubic-bezier(.45,0,.55,1) 800ms both; }
+  @keyframes iva-intro-soften { from { filter:blur(0); opacity:1; } }
   @keyframes iva-intro-leaves {
     30% { transform:translateY(-1.2%) scale(1.035) rotate(1.1deg); }
     62% { transform:translateY(.3%) scale(.993) rotate(-.35deg); }
   }
   :global(html:not([data-intro="play"], [data-intro="fly"], [data-intro="land"])) .v7-leaves { animation:iva-leaves-breathe 7s cubic-bezier(.37,0,.63,1) infinite; }
   @keyframes iva-leaves-breathe { 50% { transform:translate(.6%, -.8%) scale(1.03) rotate(.8deg); } }
-  @media (prefers-reduced-motion:reduce) { .v7-leaves { animation:none !important; } }
+  @media (prefers-reduced-motion:reduce) { .v7-leaves, .v7-leaves svg { animation:none !important; } }
 </style>
