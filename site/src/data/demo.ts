@@ -154,7 +154,11 @@ export function demoMessages(lang: DemoLang): DemoMessage[] {
 export const demoProviders = {
   codex: { ru: "OpenAI (подписка)", en: "OpenAI (subscription)", models: ["gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna"] },
   claude: { ru: "Claude (подписка Pro/Max)", en: "Claude (Pro/Max subscription)", models: ["claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"] },
+  opencode: { ru: "OpenCode Go", en: "OpenCode Go", models: ["deepseek-v4-pro", "kimi-k3", "glm-5.2", "qwen3.7-max"] },
   ollama: { ru: "Ollama Cloud", en: "Ollama Cloud", models: ["deepseek-v4-pro", "deepseek-v4-flash", "glm-5.2"] },
+  // Any OpenAI-compatible endpoint (custom in the catalog): its models come from the address the
+  // owner sends, so the demo has none to offer and says how it works instead.
+  custom: { ru: "Свой провайдер", en: "Your own provider", models: [] },
 } as const;
 export type DemoProvider = keyof typeof demoProviders;
 // Root labels and descriptions follow scripts/lib/menu/root.ts and docs/menu.md.
@@ -195,7 +199,7 @@ export const demoMenuCopy = {
     installIva: "Установить Иву", open: "Открыть меню Ивы", settings: "⚙️ Настройки", close: "✖ Закрыть", back: "‹ Меню",
     demo: "Демо настроек: изменения действуют только здесь.",
     preview: "Это обзор экрана. Подключения и команды доступны в своей Иве.",
-    now: "Сейчас", provider: "Выбери провайдера:", chooseModel: "Выбери модель:",
+    now: "Сейчас", provider: "Выбери провайдера:", chooseModel: "Выбери модель:", customModels: "Пришли адрес своего OpenAI-совместимого сервиса, и Ива сама подтянет его модели.",
     restart: "Применить и перезапустить?", restartButton: "Перезапустить",
     restartNote: "В демо показан перезапуск. Реальный сервер остаётся без изменений.",
     restarted: "✅ Перезапуск показан в демо. Модель выбрана.",
@@ -212,7 +216,7 @@ export const demoMenuCopy = {
     installIva: "Install Iva", open: "Open Iva’s menu", settings: "⚙️ Settings", close: "✖ Close", back: "‹ Menu",
     demo: "Demo settings: changes apply only here.",
     preview: "This is a screen preview. Connections and commands are available in your own Iva.",
-    now: "Now", provider: "Pick a provider:", chooseModel: "Pick a model:",
+    now: "Now", provider: "Pick a provider:", chooseModel: "Pick a model:", customModels: "Send the address of your OpenAI-compatible service and Iva will pull its models herself.",
     restart: "Apply and restart?", restartButton: "Restart",
     restartNote: "This demo shows the restart. No real server is changed.",
     restarted: "✅ Restart shown in the demo. Model selected.",

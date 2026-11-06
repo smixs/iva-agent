@@ -290,9 +290,10 @@ function mountDemo(root: HTMLElement) {
         button(`${selected ? "✓ " : ""}${demoProviders[id][language]}`, `provider:${id}`, selected);
       }
     } else if (page === "models") {
+      const models: readonly string[] = demoProviders[interaction.browsing].models;
       line(demoProviders[interaction.browsing][language]);
-      line(text.chooseModel);
-      for (const model of demoProviders[interaction.browsing].models) {
+      line(models.length ? text.chooseModel : text.customModels);
+      for (const model of models) {
         const selected = interaction.provider === interaction.browsing && interaction.model === model;
         button(`${selected ? "✓ " : ""}${model}`, `model:${model}`, selected);
       }
