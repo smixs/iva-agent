@@ -50,6 +50,8 @@
   --leaf-hover: #b0e46b;
   --leaf-pressed: #95ce48;
   --leaf-tint: #e8f2db;
+  /* The leaf green deep enough to read as text on the canvas (3.1:1): large headings only. */
+  --leaf-ink: #659f14;
   --blue: #368ad2;
   --link: #2468a8;
   --font: "Geologica", "Avenir Next", sans-serif;
@@ -487,7 +489,7 @@ html[data-intro="land"] :is(.header, .consent) {
 .connection-mark.is-wide svg {
   width: calc(var(--size) * 0.66);
 }
-/* Price: the whole offer in one line, beside a person who owns their Iva. */
+/* Price: the offer as one large heading, beside Iva's willow in the wind (Willow.astro). */
 .price {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.12fr);
@@ -497,17 +499,14 @@ html[data-intro="land"] :is(.header, .consent) {
   padding-bottom: 88px;
 }
 .price h2 {
-  max-width: 12ch;
-  margin: 0 0 22px;
-  font-size: clamp(40px, 4vw, 56px);
-  line-height: 1.04;
+  max-width: 10ch;
+  margin: 0 0 26px;
+  font-size: clamp(56px, 6.2vw, 88px);
+  line-height: 0.98;
+  letter-spacing: -0.045em;
 }
-.price-line {
-  max-width: 30ch;
-  margin: 0 0 16px;
-  font-size: 22px;
-  line-height: 1.45;
-  letter-spacing: -0.012em;
+.price-free {
+  color: var(--leaf-ink);
 }
 .price-note {
   max-width: 40ch;
@@ -515,17 +514,6 @@ html[data-intro="land"] :is(.header, .consent) {
   color: var(--muted);
   font-size: var(--body);
   line-height: 1.55;
-}
-.price-art {
-  display: block;
-  min-width: 0;
-  mix-blend-mode: multiply;
-}
-.price-art img {
-  width: 100%;
-  height: auto;
-  aspect-ratio: 4 / 3;
-  object-fit: contain;
 }
 .install-band {
   background: var(--leaf-tint);
@@ -1147,10 +1135,7 @@ html[data-intro="land"] :is(.header, .consent) {
     padding-bottom: 56px;
   }
   .price h2 {
-    font-size: 38px;
-  }
-  .price-line {
-    font-size: 19px;
+    font-size: clamp(44px, 13.5vw, 64px);
   }
 }
 @media (max-width: 600px) {

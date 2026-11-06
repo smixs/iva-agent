@@ -53,9 +53,6 @@
         "H2": [
           "Бесплатно и навсегда"
         ],
-        "Подзаголовок": [
-          "Ива целиком ваша. Платите только за подписку на модель и за сервер."
-        ],
         "Условия": [
           "Для работы нужен ваш сервер или Mac и подписка Claude, Codex или OpenCode Go."
         ],
@@ -169,9 +166,6 @@
       "groups": {
         "H2": [
           "Free, forever"
-        ],
-        "Подзаголовок": [
-          "Iva is entirely yours. You only pay for your model subscription and your server."
         ],
         "Условия": [
           "You need your own server or Mac and a Claude, Codex or OpenCode Go subscription."

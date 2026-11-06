@@ -1,0 +1,191 @@
+---
+// Iva's willow in the wind for the price section, in the site's pixels (script below).
+---
+<div class="willow" aria-hidden="true"><canvas data-willow></canvas></div>
+<script>
+  // Square pixels on a grid, in the shades of the pixel glitch around the photos. Rounded leaf caps
+  // sit on the limbs; from each, thin branches hang in columns, short over the trunk and long at the
+  // sides. The wind swells and gusts from the left: the whole tree leans a little, the most at the
+  // top; the branches swing further, their tips later than their roots; now and then a pixel comes
+  // off and drifts away. Everything is computed per frame from one seed, so the tree is the same on
+  // every visit. Runs only on screen, about 30 frames a second; with reduced motion it stands still.
+  type Point = [number, number];
+  const willow = (canvas: HTMLCanvasElement) => {
+    const ctx = canvas.getContext("2d")!;
+    const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    let seed = 20260630;
+    const rand = () => {
+      seed = (seed + 0x6d2b79f5) | 0;
+      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    // Light to strong: leaves green up in the caps, blue towards the tips; the wood dark blue.
+    const SHADES = [["#c9ea96", "#a4dc55", "#86c140"], ["#d6e7f5", "#62a2dc", "#368ad2"], ["#3f78ab", "#2b6291", "#1f4d75"]];
+    const GREEN = 0, BLUE = 1, WOOD = 2;
+    const GROUND = 0.93;
+
+    // Leaf caps: [x, y, half width, half height] in unit space (x across, y down).
+    const CAPS = [[0.5, 0.105, 0.128, 0.075], [0.343, 0.165, 0.11, 0.07], [0.66, 0.148, 0.11, 0.07], [0.223, 0.265, 0.095, 0.065], [0.78, 0.253, 0.095, 0.065], [0.145, 0.375, 0.073, 0.058], [0.858, 0.365, 0.073, 0.058]];
+    const leaves: { x: number; y: number; hue: number; phase: number }[] = [];
+    const strands: { ax: number; ay: number; len: number; e: number; back: boolean; tint: number; phase: number; give: number }[] = [];
+    for (const [cx, cy, rx, ry] of CAPS) {
+      for (let i = 0; i < 120; i++) {
+        const a = rand() * 6.283, r = Math.sqrt(rand());
+        const x = cx + rx * r * Math.cos(a), y = cy + ry * r * Math.sin(a) * (Math.sin(a) > 0 ? 0.55 : 1);
+        leaves.push({ x, y, hue: y > cy + ry * 0.2 && rand() < 0.3 ? BLUE : GREEN, phase: rand() * 6.283 });
+      }
+      for (let i = 0; i < 17; i++) {
+        const u = (rand() * 2 - 1) * 0.95;
+        const ax = cx + rx * u, ay = cy + ry * Math.sqrt(1 - u * u) * 0.45;
+        const e = Math.min(1, Math.abs(ax - 0.5) / 0.37);
+        const bottom = 0.38 + 0.44 * e ** 1.3 + 0.08 * rand();
+        strands.push({ ax, ay, len: Math.max(0.05, Math.min(GROUND - 0.06, bottom) - ay), e, back: rand() < 0.3, tint: rand(), phase: rand() * 6.283, give: 0.75 + 0.5 * rand() });
+      }
+    }
+    // A few longer branches in the middle, two of them in front of the trunk: [x, root, tip].
+    const middle = [[0.29, 0.286, 0.7], [0.375, 0.195, 0.71], [0.415, 0.189, 0.63], [0.455, 0.137, 0.62], [0.5, 0.139, 0.6], [0.555, 0.158, 0.64], [0.68, 0.179, 0.67], [0.76, 0.282, 0.72]];
+    for (const [ax, ay, tip] of middle) {
+      strands.push({ ax, ay, len: tip - ay, e: Math.min(1, Math.abs(ax - 0.5) / 0.37), back: false, tint: rand(), phase: rand() * 6.283, give: 0.75 + 0.5 * rand() });
+    }
+    // Wood as discs along curves: a curved trunk, roots, two forks and a limb into every cap.
+    const wood: { x: number; y: number; r: number }[] = [];
+    const curve = (p0: Point, p1: Point, p2: Point, r0: number, r1: number) => {
+      for (let s = 0; s <= 1.0001; s += 0.006) {
+        const a = (1 - s) ** 2, b = 2 * (1 - s) * s, c = s * s;
+        wood.push({ x: a * p0[0] + b * p1[0] + c * p2[0], y: a * p0[1] + b * p1[1] + c * p2[1], r: r0 + (r1 - r0) * s });
+      }
+    };
+    curve([0.5, GROUND], [0.42, 0.735], [0.5, 0.485], 0.055, 0.031);
+    curve([0.49, GROUND - 0.018], [0.445, GROUND - 0.009], [0.4, GROUND + 0.018], 0.027, 0.007);
+    curve([0.51, GROUND - 0.018], [0.565, GROUND - 0.009], [0.605, GROUND + 0.018], 0.027, 0.007);
+    curve([0.5, 0.485], [0.445, 0.415], [0.385, 0.325], 0.031, 0.0185);
+    curve([0.5, 0.485], [0.57, 0.415], [0.625, 0.32], 0.031, 0.0185);
+    const forks: [Point, number][] = [[[0.385, 0.325], 0], [[0.385, 0.325], 1], [[0.385, 0.325], 3], [[0.385, 0.325], 5], [[0.625, 0.32], 2], [[0.625, 0.32], 4], [[0.625, 0.32], 6], [[0.625, 0.32], 0]];
+    for (const [from, cap] of forks) {
+      const [cx, cy] = CAPS[cap];
+      curve(from, [(from[0] + cx) / 2, Math.max(cy, from[1] - 0.035)], [cx, cy + 0.0175], 0.0185, 0.0065);
+    }
+
+    // Wind from the left: a slow swell (0..1) with gusts on top; its front reaches the right later.
+    const swell = (t: number) => 0.5 + 0.5 * Math.sin(t * 0.31 + 0.8) * Math.sin(t * 0.17 + 2.4);
+    const wind = (t: number, x: number) => {
+      const tau = t - x * 1.4;
+      return swell(tau) * (0.55 + 0.45 * Math.sin(tau * 1.05)) + 0.14 * Math.sin(tau * 2.5 + 1.3);
+    };
+    // The whole tree leans with the swell: nothing at the roots, the most at the top of the crown.
+    let lean = 0;
+    const bend = (x: number, y: number) => x + lean * Math.max(0, (GROUND - y) / (GROUND - 0.04)) ** 1.8;
+
+    let cols = 0, rows = 0, px = 0, n = 0;
+    let front = new Float32Array(0), back = new Float32Array(0), bark = new Uint8Array(0), frontH = new Uint8Array(0), backH = new Uint8Array(0);
+    const resize = () => {
+      const box = canvas.getBoundingClientRect();
+      if (!box.width || !box.height) return false;
+      const dpr = Math.min(2, devicePixelRatio || 1);
+      const cell = Math.min(12, Math.max(6.5, box.width / 58));
+      cols = Math.floor(box.width / cell);
+      rows = Math.floor(box.height / cell);
+      px = cell * dpr;
+      canvas.width = Math.round(box.width * dpr);
+      canvas.height = Math.round(box.height * dpr);
+      n = cols * rows;
+      front = new Float32Array(n); back = new Float32Array(n); bark = new Uint8Array(n);
+      frontH = new Uint8Array(n); backH = new Uint8Array(n);
+      return true;
+    };
+    const put = (layer: Float32Array, hues: Uint8Array, x: number, y: number, w: number, hue: number) => {
+      const i = Math.floor(x * cols), j = Math.floor(y * rows);
+      if (i < 0 || j < 0 || i >= cols || j >= rows) return;
+      layer[j * cols + i] += w;
+      hues[j * cols + i] = hue;
+    };
+    const drift: [number, number, number, number][] = [];
+
+    const draw = (t: number) => {
+      lean = 0.006 + 0.024 * swell(t - 0.5);
+      front.fill(0); back.fill(0); bark.fill(0);
+      for (const p of wood) {
+        const x = bend(p.x, p.y) * cols, y = p.y * rows, r = Math.max(0.55, p.r * cols);
+        for (let j = Math.floor(y - r); j <= y + r; j++) for (let i = Math.floor(x - r); i <= x + r; i++) {
+          if (i < 0 || j < 0 || i >= cols || j >= rows || (i + 0.5 - x) ** 2 + (j + 0.5 - y) ** 2 > r * r) continue;
+          bark[j * cols + i] = p.r > 0.03 ? 3 : p.r > 0.012 ? 2 : 1;
+        }
+      }
+      for (const l of leaves) put(front, frontH, bend(l.x, l.y) + 0.0015 * Math.sin(t * 2 + l.phase), l.y, 1.6, l.hue);
+      // Each branch hangs in its own column; the wind reaches its tip later than its root.
+      const step = 0.5 / rows;
+      drift.length = 0;
+      for (let si = 0; si < strands.length; si++) {
+        const b = strands[si];
+        const count = Math.max(2, Math.ceil(b.len / step));
+        const layer = b.back ? back : front, hues = b.back ? backH : frontH;
+        const col = (Math.round(bend(b.ax, b.ay) * cols - 0.5) + 0.5) / cols;
+        for (let k = 0; k <= count; k++) {
+          const s = k / count;
+          const sway = 0.07 * b.give * (wind(t - s * 0.9, b.ax) + 0.12 * Math.sin(t * 1.7 + b.phase)) * s ** 1.6;
+          const y = b.ay + b.len * s - Math.abs(sway) * 0.2 * s;
+          put(layer, hues, col + sway, y, 1, s * 0.9 + b.tint * 0.4 + ((k * 11 + si) % 9) / 40 > 0.78 ? BLUE : GREEN);
+        }
+        // Now and then a pixel comes off an outer branch tip and drifts away downwind.
+        if (!b.back && b.e > 0.35) {
+          const period = 3.2 + (si % 5) * 0.7, age = (t + si * 1.37) % period;
+          if (age < 2.4) drift.push([col + 0.07 * b.give * wind(t, b.ax) + 0.06 * age, b.ay + b.len * (0.75 + (0.2 * ((si * 7) % 3)) / 2) + 0.02 * age - 0.012 * Math.sin(age * 2.2), age / 2.4, si % 2 ? BLUE : GREEN]);
+        }
+      }
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const gap = Math.max(1, px * 0.1);
+      let fill = "", alpha = -1;
+      const square = (i: number, j: number, size: number, color: string, a: number) => {
+        if (color !== fill) ctx.fillStyle = fill = color;
+        if (a !== alpha) ctx.globalAlpha = alpha = a;
+        const o = (px - size) / 2;
+        ctx.fillRect(Math.round(i * px + o), Math.round(j * px + o), Math.round(size), Math.round(size));
+      };
+      // The ground: a short broken line of pale pixels under the roots.
+      const ground = Math.floor((GROUND + 0.02) * rows);
+      for (let i = Math.floor(cols * 0.3); i < cols * 0.7; i++) if ((i * 5) % 7 > 1) square(i, ground, (px - gap) * 0.5, SHADES[BLUE][0], 1);
+      for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) {
+        const k = j * cols + i;
+        // A few pixels dim for a moment, so the tree shimmers.
+        const tick = Math.floor(t * 1.3 + ((k * 0.618) % 1) * 5);
+        const dim = ((k * 73856093) ^ (tick * 19349663)) % 17 === 0 ? 0.55 : 1;
+        if (front[k]) {
+          const d = front[k], level = d >= 2.5 ? 2 : d >= 1.5 ? 1 : 0;
+          square(i, j, (px - gap) * (level === 2 ? 1 : level === 1 ? 0.86 : 0.66), SHADES[frontH[k]][level], dim);
+        } else if (bark[k]) {
+          square(i, j, px - gap, SHADES[WOOD][bark[k] - 1], dim);
+        } else if (back[k]) {
+          square(i, j, (px - gap) * 0.66, SHADES[backH[k]][back[k] >= 2 ? 1 : 0], 0.6 * dim);
+        }
+      }
+      for (const [x, y, life, hue] of drift) {
+        const i = Math.floor(x * cols), j = Math.floor(y * rows);
+        if (i >= 0 && j >= 0 && i < cols && j < rows) square(i, j, (px - gap) * (0.8 - 0.3 * life), SHADES[hue][life < 0.5 ? 2 : 1], Math.min(1, (1 - life) * 2.5));
+      }
+      ctx.globalAlpha = 1;
+    };
+
+    let clock = 3, last = 0, raf = 0, seen = false;
+    const frame = (now: number) => {
+      raf = requestAnimationFrame(frame);
+      if (last && now - last < 31) return;
+      clock += last ? Math.min(0.1, (now - last) / 1000) : 0;
+      last = now;
+      draw(clock);
+    };
+    const start = () => {
+      if (!raf && !reduce && seen && !document.hidden) { last = 0; raf = requestAnimationFrame(frame); }
+    };
+    const stop = () => { cancelAnimationFrame(raf); raf = 0; };
+    new ResizeObserver(() => { if (resize()) draw(clock); }).observe(canvas);
+    new IntersectionObserver(([entry]) => { seen = entry.isIntersecting; if (seen) start(); else stop(); }).observe(canvas);
+    document.addEventListener("visibilitychange", () => (document.hidden ? stop() : start()));
+  };
+  for (const canvas of document.querySelectorAll<HTMLCanvasElement>("canvas[data-willow]")) willow(canvas);
+</script>
+<style>
+  .willow { width:100%; max-width:580px; aspect-ratio:1; min-width:0; justify-self:center; }
+  .willow canvas { display:block; width:100%; height:100%; }
+</style>

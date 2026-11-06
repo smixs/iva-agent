@@ -5,6 +5,7 @@ import Connections from "./Connections.astro";
 import HeroChat from "./HeroChat.astro";
 import Leaves from "./Leaves.astro";
 import Reviews from "./Reviews.astro";
+import Willow from "./Willow.astro";
 import { homeCopy, rich, phrase, glue, type Lang } from "../lib/copy";
 import { sprite } from "../lib/services";
 const { lang = "en" } = Astro.props as { lang: Lang };
@@ -19,6 +20,8 @@ const group = (n: number, k: string) =>
   );
 const t = (n: number, k: string) => group(n, k)[0] || "";
 const title = (n: number) => t(n, "H2");
+// The price heading leads with its first word in green: "Free", "Бесплатно".
+const [, free, forever] = title(7).match(/^(\p{L}+)([\s\S]*)$/u) || ["", "", title(7)];
 const installLabel = t(1, "Кнопки");
 const headline = group(1, "H1");
 const faq = c[10].faq!;
@@ -143,14 +146,10 @@ const schema = [
   <section id="price" class="section price" aria-labelledby="price-title">
     {["configuration", "menu", "security"].map((id) => <span id={id} class="legacy-anchor" aria-hidden="true"></span>)}
     <div class="price-copy">
-      <h2 id="price-title">{title(7)}</h2>
-      <p class="price-line">{t(7, "Подзаголовок")}</p>
+      <h2 id="price-title"><span class="price-free">{free}</span>{forever}</h2>
       <p class="price-note">{t(7, "Условия")}</p>
     </div>
-    <picture class="price-art">
-      <source type="image/avif" srcset="/media/price/home-800.avif 800w, /media/price/home-1024.avif 1024w" sizes="(max-width: 760px) calc(100vw - 44px), 48vw" />
-      <img src="/media/price/home-800.webp" srcset="/media/price/home-800.webp 800w, /media/price/home-1024.webp 1024w" sizes="(max-width: 760px) calc(100vw - 44px), 48vw" width="1024" height="768" alt={ru ? "Мужчина дома радостно держит в руках Mac mini" : "A man at home happily holding up a Mac mini"} loading="lazy" decoding="async" />
-    </picture>
+    <Willow />
   </section>
   <section id="install" class="install-band" aria-labelledby="install-title">
     <div class="section install">
