@@ -31,6 +31,7 @@ import {
   TELEGRAM_RICH_REPLIES,
   type RichReplies,
 } from "../lib/telegram-rich-replies.js";
+import { TELEGRAM_WIDGETS, WIDGET_API_BASE } from "../lib/telegram-widget.ts";
 // Inbound-пайплайн — единственный вход внутрь: allowlist, решение о диспатче,
 // запись в Vault, медиа со зрением и транскрипцией, inbound-Gate и контекст хода.
 // Канал приносит ему эффекты и сам про разбор входящего ничего не знает.
@@ -209,7 +210,61 @@ export function outboxTransport(
                 error: "TELEGRAM_RICH_REPLIES=never",
                 retryPlain: false,
               };
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (TELEGRAM_WIDGETS === "auto" && token)
+    transport.sendWidget = (html, caption) =>
+      sendWidget(token, tg, html, caption, silent);
   return transport;
+}
+
+// sendWidget (Bot API 10.4) живёт пока только в beta Bot API, а request() eve ходит в
+// общий адрес, поэтому вызов свой, как у send_file. Отказ — подпись текстом (шов Outbox).
+async function sendWidget(
+  token: string,
+  tg: Pick<TelegramHandle, "chatId" | "messageThreadId">,
+  html: string,
+  caption: string,
+  silent: boolean,
+): Promise<OutboxAck> {
+  try {
+    const res = await fetch(`${WIDGET_API_BASE}/bot${token}/sendWidget`, {
+      method: "POST",
+      signal: AbortSignal.timeout(30_000),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: tg.chatId,
+        html,
+        ...(caption ? { caption } : {}),
+        ...(tg.messageThreadId !== undefined
+          ? { message_thread_id: tg.messageThreadId }
+          : {}),
+        ...(silent ? { disable_notification: true } : {}),
+      }),
+    });
+    if (res.ok) return { ok: true };
+    const body = (await res.json().catch(() => null)) as {
+      description?: unknown;
+    } | null;
+    const reason =
+      typeof body?.description === "string" ? `: ${body.description}` : "";
+    console.error(
+      "[telegram] sendWidget отвергнут, шлю подпись:",
+      res.status,
+      reason,
+    );
+    return {
+      ok: false,
+      error: `sendWidget ${res.status}${reason}`,
+      retryPlain: false,
+    };
+  } catch (err) {
+    const text = (err instanceof Error ? err.message : String(err)).replaceAll(
+      token,
+      "***",
+    );
+    console.error("[telegram] sendWidget упал, шлю подпись:", text);
+    return { ok: false, error: `sendWidget: ${text}`, retryPlain: false };
+  }
 }
 
 // Вопрос хода для сообщения об обрыве (turn-question.ts): текст принятого сообщения чата и

@@ -19,18 +19,19 @@ This skill is about the reply in the **current chat**. A post to another chat
 
 Use them when they carry meaning the reader would otherwise have to dig out:
 
-| Reader's need                           | Use                                          | Don't                              |
-| --------------------------------------- | -------------------------------------------- | ---------------------------------- |
-| Compare 3+ things by 2+ attributes      | table                                        | a table for two numbers            |
-| Long answer with sections               | `##` headings                                | headings in a three-line reply     |
-| Optional depth (logs, raw data, method) | `<details>` fold                             | hide the answer itself             |
-| Source or aside                         | footnote `[^1]`                              | footnotes instead of a link        |
-| Formula                                 | `$x^2$`, `$$…$$`                             | LaTeX for "2 + 2"                  |
-| Step status, checklist                  | `- [ ]` / `- [x]`                            | task list for prose                |
-| Picture or several by public URL        | image line, `<tg-collage>`, `<tg-slideshow>` | local file paths (use `rich-post`) |
-| Place                                   | `<tg-map>`                                   | a map for a city name              |
-| A moment in the reader's time zone      | `<tg-time>`                                  | for "tomorrow" in prose            |
-| Next step, choice, link, copyable value | **buttons** under a question (below)         | buttons on every reply             |
+| Reader's need                                                       | Use                                                       | Don't                              |
+| ------------------------------------------------------------------- | --------------------------------------------------------- | ---------------------------------- |
+| Compare 3+ things by 2+ attributes                                  | table                                                     | a table for two numbers            |
+| Long answer with sections                                           | `##` headings                                             | headings in a three-line reply     |
+| Optional depth (logs, raw data, method)                             | `<details>` fold                                          | hide the answer itself             |
+| Source or aside                                                     | footnote `[^1]`                                           | footnotes instead of a link        |
+| Formula                                                             | `$x^2$`, `$$…$$`                                          | LaTeX for "2 + 2"                  |
+| Step status, checklist                                              | `- [ ]` / `- [x]`                                         | task list for prose                |
+| Picture or several by public URL                                    | image line, `<tg-collage>`, `<tg-slideshow>`              | local file paths (use `rich-post`) |
+| Place                                                               | `<tg-map>`                                                | a map for a city name              |
+| A moment in the reader's time zone                                  | `<tg-time>`                                               | for "tomorrow" in prose            |
+| Next step, choice, link, copyable value                             | **buttons** under a question (below)                      | buttons on every reply             |
+| Numbers over time, periods to switch, a long list, progress, a quiz | a **widget** (`widgets` skill): a live card in the bubble | a widget for a short answer        |
 
 Short conversational answers stay plain text. Rich formatting is for structure,
 not decoration: one heading level per answer, one table per comparison, one row

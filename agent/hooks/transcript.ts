@@ -3,6 +3,7 @@ import { defineHook } from "eve/hooks";
 // Двусторонний транскрипт: финальный ответ Iva дозаписывается в ТОТ ЖЕ дневной файл
 // vault, что и реплики юзера (agent/lib/telegram-inbound.ts).
 import { appendDaily } from "../lib/vault-daily.js";
+import { withoutWidgetCode } from "../lib/telegram-widget.ts";
 
 export default defineHook({
   events: {
@@ -28,7 +29,8 @@ export default defineHook({
       // QUIET — ответ планового хода Watch или Brief «писать не о чем»: в чат он не уходит
       // и в дневной файл не пишется (ADR-0020).
       if (!text || text === "QUIET") return;
-      appendDaily("[iva]", text);
+      // Код виджета памяти не нужен: в дневной файл идёт его подпись.
+      appendDaily("[iva]", withoutWidgetCode(text));
     },
   },
 });

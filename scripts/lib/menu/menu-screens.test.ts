@@ -328,6 +328,37 @@ test("rich: ✓ на текущем режиме, запись в .env и пре
   assert.match(st._last?.text ?? "", /режим ответов активен/);
 });
 
+test("rich: тумблер виджетов пишет TELEGRAM_WIDGETS и отмечает текущий режим", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "iva-env-widgets-"));
+  const envPath = join(dir, ".env");
+  writeFileSync(envPath, "TELEGRAM_RICH_REPLIES=auto\n");
+  const h = makeCtx({
+    lang: "ru",
+    deps: { envPath, sc: () => Promise.resolve(true) },
+    screens: { rich: richScreen },
+  });
+  const st = newState({ screen: "rich" });
+  h.st = st;
+
+  const labelOf = async (data: string) =>
+    buttonsOf((await richScreen.render(st, h.ctx)).text).find(
+      ([, callback]) => callback === data,
+    )?.[0];
+  assert.ok(
+    (await labelOf("iva_menu:rich:w:auto"))?.endsWith("✓"),
+    "пусто = вкл",
+  );
+
+  await richScreen.on("w", ["never"], st, h.ctx);
+  assert.equal(
+    readFileSync(envPath, "utf8"),
+    "TELEGRAM_RICH_REPLIES=auto\nTELEGRAM_WIDGETS=never\n",
+  );
+  assert.match(st._last?.text ?? "", /виджеты выключены/);
+  assert.ok((await labelOf("iva_menu:rich:w:never"))?.endsWith("✓"));
+  assert.ok(!(await labelOf("iva_menu:rich:set:never"))?.includes("✓"));
+});
+
 test("rich: кривое значение .env названо на экране и ничем не помечено", async () => {
   const dir = mkdtempSync(join(tmpdir(), "iva-env-rich-bad-"));
   const envPath = join(dir, ".env");
@@ -343,12 +374,20 @@ test("rich: кривое значение .env названо на экране 
   const view = await richScreen.render(st, h.ctx);
   assert.match(view.text, /TELEGRAM_RICH_REPLIES=maybe/);
   assert.match(view.text, /не стартует/);
-  assert.ok(!view.text.includes("✓"), "✓ не выдуман при кривом значении");
+  const richLabels = buttonsOf(view.text)
+    .filter(([, callback]) => callback.startsWith("iva_menu:rich:set:"))
+    .map(([label]) => label);
+  assert.ok(
+    richLabels.every((label) => !label.includes("✓")),
+    "✓ не выдуман при кривом значении",
+  );
   // Переключатель всё равно на месте: этим экраном значение и чинится.
   assert.deepEqual(dataOf(view.text).sort(), [
     "iva_menu:r:o",
     "iva_menu:rich:set:auto",
     "iva_menu:rich:set:never",
+    "iva_menu:rich:w:auto",
+    "iva_menu:rich:w:never",
   ]);
 });
 

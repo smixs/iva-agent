@@ -39,6 +39,11 @@ import {
   withButtonTypes,
   toTelegramHtmlChunks,
 } from "./telegram-format.ts";
+import {
+  splitWidgets,
+  widgetProblem,
+  type ReplyPart,
+} from "./telegram-widget.ts";
 
 // Ответ транспорта на одну попытку доставки.
 //   retryPlain=true — Telegram не принял разметку (400 по сущностям), тот же кусок
@@ -56,6 +61,9 @@ export type OutboxTransport = {
   // Только там, где Bot API это умеет (sendRichMessage): таблицы, таск-листы,
   // <details>, блочные формулы. Без него шов сразу идёт HTML-путём.
   sendRich?: (markdown: string) => Promise<OutboxAck>;
+  // Только там, где транспорт умеет sendWidget (Bot API 10.4). Без него шов шлёт
+  // вместо виджета его подпись текстом (agent/lib/telegram-widget.ts).
+  sendWidget?: (html: string, caption: string) => Promise<OutboxAck>;
 };
 
 export type OutboxResult = {
@@ -126,28 +134,16 @@ async function sendRichFirst(
   return false;
 }
 
-export async function sendThroughOutbox(
-  message: string,
+// Один текстовый кусок ответа: rich-путь, затем HTML-чанки с plain-повтором. true —
+// транспорт сказал stop, и остаток ответа шов не шлёт.
+async function deliverText(
+  text: string,
   transport: OutboxTransport,
-  // alwaysRich — путь, где rich выбран вызывающим, а не разметкой: `iva post` шлёт
-  // пост целиком одним сообщением, и в нём может не быть ни одной конструкции, которую
-  // видит needsRichMessage (пост из абзацев и картинок). Решать за такую отправку по
-  // тексту нельзя: HTML-путь картинки не рендерит вовсе.
-  {
-    limit = 4096,
-    alwaysRich = false,
-  }: { limit?: number; alwaysRich?: boolean } = {},
-): Promise<OutboxResult> {
-  const text = redactNotice(message);
-
-  const result: OutboxResult = {
-    ok: true,
-    delivered: 0,
-    fellBack: false,
-    error: "",
-  };
-
-  if (await sendRichFirst(text, transport, alwaysRich, result)) return result;
+  limit: number,
+  alwaysRich: boolean,
+  result: OutboxResult,
+): Promise<boolean> {
+  if (await sendRichFirst(text, transport, alwaysRich, result)) return false;
 
   // Первую ошибку запоминаем, ok=false — этого хватает вызывающим (cron выходит
   // ненулевым кодом, канал не засчитывает латентность).
@@ -167,7 +163,7 @@ export async function sendThroughOutbox(
     }
     if (!sent.retryPlain) {
       fail(sent.error);
-      if (sent.stop) break;
+      if (sent.stop) return true;
       continue;
     }
     // Один повтор тем же куском, но без тегов и parse_mode — по сущностям 400
@@ -179,7 +175,71 @@ export async function sendThroughOutbox(
       continue;
     }
     fail(`plain retry ${plain.error}`);
-    if (plain.stop) break;
+    if (plain.stop) return true;
+  }
+  return false;
+}
+
+// Виджет уходит sendWidget. Не ушёл (транспорт не умеет, HTML не влез, Telegram отказал) —
+// вместо него подпись обычным текстом: худший случай равен ответу без виджета. Потеря
+// видна в Trace (fellBack и причина), кроме транспорта без sendWidget: там подпись — штатный вид.
+async function deliverWidget(
+  widget: Extract<ReplyPart, { kind: "widget" }>,
+  transport: OutboxTransport,
+  limit: number,
+  alwaysRich: boolean,
+  result: OutboxResult,
+): Promise<boolean> {
+  if (transport.sendWidget) {
+    const problem = widgetProblem(widget.html);
+    const sent: OutboxAck = problem
+      ? { ok: false, error: problem, retryPlain: false }
+      : await transport.sendWidget(widget.html, widget.caption);
+    if (sent.ok) {
+      result.delivered++;
+      return false;
+    }
+    if (sent.stop) {
+      if (result.ok) result.error = sent.error;
+      result.ok = false;
+      return true;
+    }
+    result.fellBack = true;
+    if (!result.error) result.error = `widget dropped: ${sent.error}`;
+  }
+  if (!widget.caption) return false;
+  return deliverText(widget.caption, transport, limit, alwaysRich, result);
+}
+
+export async function sendThroughOutbox(
+  message: string,
+  transport: OutboxTransport,
+  // alwaysRich — путь, где rich выбран вызывающим, а не разметкой: `iva post` шлёт
+  // пост целиком одним сообщением, и в нём может не быть ни одной конструкции, которую
+  // видит needsRichMessage (пост из абзацев и картинок). Решать за такую отправку по
+  // тексту нельзя: HTML-путь картинки не рендерит вовсе.
+  {
+    limit = 4096,
+    alwaysRich = false,
+  }: { limit?: number; alwaysRich?: boolean } = {},
+): Promise<OutboxResult> {
+  // Гейт идёт по всему ответу, HTML виджетов включительно: секрет не уедет и в пузыре.
+  const text = redactNotice(message);
+
+  const result: OutboxResult = {
+    ok: true,
+    delivered: 0,
+    fellBack: false,
+    error: "",
+  };
+
+  // Ответ без виджета — один текстовый кусок, ровно прежний путь.
+  for (const part of splitWidgets(text)) {
+    const stop =
+      part.kind === "widget"
+        ? await deliverWidget(part, transport, limit, alwaysRich, result)
+        : await deliverText(part.text, transport, limit, alwaysRich, result);
+    if (stop) break;
   }
   // Пустой результат — провал самого шва, а не «успех с нулём доставок»: рендер
   // схлопнулся в пустоту, и вызывающий, забывший проверить delivered, не должен принять

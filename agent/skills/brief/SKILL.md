@@ -109,6 +109,10 @@ existing overview or action message.
 - The first message is the overview: greeting in one line, the day in 5–7 points,
   one sentence with the focus of the day. Too many tasks — the important ones and
   how many more there are.
+- When the day has a shape — a packed calendar, money that moved, a goal's
+  progress, a week of numbers — the overview carries one widget for it (the
+  `widgets` skill): a timeline of the day, a spend chart, a progress ring. Its
+  caption repeats the point in words.
 - An item already reported in a previous Brief (read its answer in the daily file)
   that still waits for the owner gets one line in the overview with the day of waiting. Leave
   completed items out; do not repeat the earlier item in full.

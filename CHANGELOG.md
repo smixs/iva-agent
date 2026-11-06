@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- 📊 **Виджеты в ответах**: Ива рисует живую карточку прямо в сообщении: график с вкладками, список с сортировкой, прогресс, таймер, чек-лист. Подпись карточки — ответ словами: её видят приложения без виджетов, и она уходит текстом, если карточка не отправилась. Выключаются в /menu → 💬 Богатые ответы. Replies may carry a Telegram widget (Bot API 10.4 via the beta Bot API address); its caption is the text fallback, and `TELEGRAM_WIDGETS=never` turns widgets off.
+
 ## [0.5.9] - 2026-11-03
 
 - 🔧 **Сводки и напоминания снова читают Telegram**: плановый ход и сработавшее напоминание читают чаты через юзербот; отправку, ответ, пересылку, правку, удаление, реакции и отметку о прочтении Ива сама не делает, текст отправляет код. Scheduled turns and fired reminders may read Telegram through the userbot read tools; every Telegram write stays forbidden and the code delivers the final text.
