@@ -1305,9 +1305,12 @@ html[data-intro="land"] :is(.header, .consent) {
   .prose table {
     max-width: 100%;
   }
+  /* The question takes the free space; both answers stay side by side at the right. */
   .consent {
-    justify-content: space-between;
     font-size: 12px;
+  }
+  .consent p {
+    flex: 1;
   }
 }
 @media (prefers-reduced-motion: reduce) {
