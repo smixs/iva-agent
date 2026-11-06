@@ -8,7 +8,8 @@
   // sides. The wind swells and gusts from the left: the whole tree leans a little, the most at the
   // top; the branches swing further, their tips later than their roots; now and then a pixel comes
   // off and drifts away. Everything is computed per frame from one seed, so the tree is the same on
-  // every visit. Runs only on screen, about 30 frames a second; with reduced motion it stands still.
+  // every visit. The pointer stirs the crown and leaves the trunk be. Runs only on screen; with
+  // reduced motion it stands still.
   type Point = [number, number];
   const willow = (canvas: HTMLCanvasElement) => {
     const ctx = canvas.getContext("2d")!;
@@ -78,7 +79,9 @@
     const bend = (x: number, y: number) => x + lean * Math.max(0, (GROUND - y) / (GROUND - 0.04)) ** 1.8;
 
     let cols = 0, rows = 0, px = 0, n = 0;
-    let front = new Float32Array(0), back = new Float32Array(0), bark = new Uint8Array(0), frontH = new Uint8Array(0), backH = new Uint8Array(0);
+    let front = new Float32Array(0), back = new Float32Array(0), bark = new Uint8Array(0), frontH = new Uint8Array(0), backH = new Uint8Array(0), pale = new Uint8Array(0);
+    // Pixels per branch: one for every half cell of its length, so the column has no gaps.
+    let counts = new Int32Array(0);
     const resize = () => {
       const box = canvas.getBoundingClientRect();
       if (!box.width || !box.height) return false;
@@ -91,20 +94,62 @@
       canvas.height = Math.round(box.height * dpr);
       n = cols * rows;
       front = new Float32Array(n); back = new Float32Array(n); bark = new Uint8Array(n);
-      frontH = new Uint8Array(n); backH = new Uint8Array(n);
+      frontH = new Uint8Array(n); backH = new Uint8Array(n); pale = new Uint8Array(n);
+      counts = Int32Array.from(strands, (b) => Math.max(2, Math.ceil(b.len * rows * 2)));
+      const crown = leaves.length + counts.reduce((sum, c) => sum + c + 1, 0);
+      ox = new Float32Array(crown); oy = new Float32Array(crown); vx = new Float32Array(crown); vy = new Float32Array(crown);
+      stirred = false;
       return true;
     };
-    const put = (layer: Float32Array, hues: Uint8Array, x: number, y: number, w: number, hue: number) => {
+    const put = (layer: Float32Array, hues: Uint8Array, x: number, y: number, w: number, hue: number, lit: boolean) => {
       const i = Math.floor(x * cols), j = Math.floor(y * rows);
       if (i < 0 || j < 0 || i >= cols || j >= rows) return;
       layer[j * cols + i] += w;
       hues[j * cols + i] = hue;
+      if (lit) pale[j * cols + i] = 1;
     };
     const drift: [number, number, number, number][] = [];
+    // The pointer stirs the crown: every leaf and branch pixel near it is pushed out of its way and
+    // springs back to its place in the wind, a little past it first, showing its pale side until it
+    // is home. A click or tap shakes the crown around it. The wood stays where it is. Offsets,
+    // speeds and the pointer are in cells; each crown pixel keeps its own slot in the arrays.
+    let ox = new Float32Array(0), oy = new Float32Array(0), vx = new Float32Array(0), vy = new Float32Array(0);
+    let pointer: Point | null = null, kick: Point | null = null, stirred = false, busy = false, h = 0;
+    const REACH = 10, PUSH = 800, KICK_REACH = 10, KICK = 65;
+    const stir = (slot: number, x: number, y: number): [number, number, boolean] => {
+      if (!stirred) return [x, y, false];
+      let a = ox[slot], b = oy[slot];
+      if (h) {
+        let u = vx[slot], v = vy[slot];
+        u += (-90 * a - 11 * u) * h;
+        v += (-90 * b - 11 * v) * h;
+        const cx = x * cols + a, cy = y * rows + b;
+        if (pointer) {
+          const dx = cx - pointer[0], dy = cy - pointer[1], d = Math.hypot(dx, dy);
+          if (d < REACH && d > 0.01) {
+            // Hanging branches give way sideways more readily than up and down.
+            const f = (PUSH * (1 - d / REACH) ** 2) / d;
+            u += dx * f * h; v += 0.6 * dy * f * h;
+          }
+        }
+        if (kick) {
+          const dx = cx - kick[0], dy = cy - kick[1], d = Math.hypot(dx, dy) || 1;
+          if (d < KICK_REACH) {
+            const k = KICK * (1 - d / KICK_REACH) * (0.6 + Math.random() * 0.8);
+            u += (dx / d) * k + (Math.random() - 0.5) * 10;
+            v += (dy / d) * k + (Math.random() - 0.5) * 10 - 6;
+          }
+        }
+        a += u * h; b += v * h;
+        ox[slot] = a; oy[slot] = b; vx[slot] = u; vy[slot] = v;
+        if (Math.abs(u) + Math.abs(v) > 0.4 || Math.abs(a) + Math.abs(b) > 0.08) busy = true;
+      }
+      return [x + a / cols, y + b / rows, Math.abs(a) + Math.abs(b) > 1];
+    };
 
     const draw = (t: number) => {
       lean = 0.006 + 0.024 * swell(t - 0.5);
-      front.fill(0); back.fill(0); bark.fill(0);
+      front.fill(0); back.fill(0); bark.fill(0); pale.fill(0);
       for (const p of wood) {
         const x = bend(p.x, p.y) * cols, y = p.y * rows, r = Math.max(0.55, p.r * cols);
         for (let j = Math.floor(y - r); j <= y + r; j++) for (let i = Math.floor(x - r); i <= x + r; i++) {
@@ -112,20 +157,22 @@
           bark[j * cols + i] = p.r > 0.03 ? 3 : p.r > 0.012 ? 2 : 1;
         }
       }
-      for (const l of leaves) put(front, frontH, bend(l.x, l.y) + 0.0015 * Math.sin(t * 2 + l.phase), l.y, 1.6, l.hue);
+      let slot = 0;
+      for (const l of leaves) {
+        const [x, y, lit] = stir(slot++, bend(l.x, l.y) + 0.0015 * Math.sin(t * 2 + l.phase), l.y);
+        put(front, frontH, x, y, 1.6, l.hue, lit);
+      }
       // Each branch hangs in its own column; the wind reaches its tip later than its root.
-      const step = 0.5 / rows;
       drift.length = 0;
       for (let si = 0; si < strands.length; si++) {
-        const b = strands[si];
-        const count = Math.max(2, Math.ceil(b.len / step));
+        const b = strands[si], count = counts[si];
         const layer = b.back ? back : front, hues = b.back ? backH : frontH;
         const col = (Math.round(bend(b.ax, b.ay) * cols - 0.5) + 0.5) / cols;
         for (let k = 0; k <= count; k++) {
           const s = k / count;
           const sway = 0.07 * b.give * (wind(t - s * 0.9, b.ax) + 0.12 * Math.sin(t * 1.7 + b.phase)) * s ** 1.6;
-          const y = b.ay + b.len * s - Math.abs(sway) * 0.2 * s;
-          put(layer, hues, col + sway, y, 1, s * 0.9 + b.tint * 0.4 + ((k * 11 + si) % 9) / 40 > 0.78 ? BLUE : GREEN);
+          const [x, y, lit] = stir(slot++, col + sway, b.ay + b.len * s - Math.abs(sway) * 0.2 * s);
+          put(layer, hues, x, y, 1, s * 0.9 + b.tint * 0.4 + ((k * 11 + si) % 9) / 40 > 0.78 ? BLUE : GREEN, lit);
         }
         // Now and then a pixel comes off an outer branch tip and drifts away downwind.
         if (!b.back && b.e > 0.35) {
@@ -153,11 +200,11 @@
         const dim = ((k * 73856093) ^ (tick * 19349663)) % 17 === 0 ? 0.55 : 1;
         if (front[k]) {
           const d = front[k], level = d >= 2.5 ? 2 : d >= 1.5 ? 1 : 0;
-          square(i, j, (px - gap) * (level === 2 ? 1 : level === 1 ? 0.86 : 0.66), SHADES[frontH[k]][level], dim);
+          square(i, j, (px - gap) * (level === 2 ? 1 : level === 1 ? 0.86 : 0.66), SHADES[frontH[k]][pale[k] ? 0 : level], dim);
         } else if (bark[k]) {
           square(i, j, px - gap, SHADES[WOOD][bark[k] - 1], dim);
         } else if (back[k]) {
-          square(i, j, (px - gap) * 0.66, SHADES[backH[k]][back[k] >= 2 ? 1 : 0], 0.6 * dim);
+          square(i, j, (px - gap) * 0.66, SHADES[backH[k]][pale[k] || back[k] < 2 ? 0 : 1], 0.6 * dim);
         }
       }
       for (const [x, y, life, hue] of drift) {
@@ -168,12 +215,20 @@
     };
 
     let clock = 3, last = 0, raf = 0, seen = false;
+    // About 30 frames a second in the wind alone, every frame while the crown is stirred.
     const frame = (now: number) => {
       raf = requestAnimationFrame(frame);
-      if (last && now - last < 31) return;
-      clock += last ? Math.min(0.1, (now - last) / 1000) : 0;
+      if (last && now - last < 31 && !stirred) return;
+      const dt = last ? Math.min(0.1, (now - last) / 1000) : 0;
+      clock += dt;
       last = now;
+      h = Math.min(0.034, dt);
+      busy = false;
       draw(clock);
+      if (h) kick = null;
+      h = 0;
+      // Once every pixel is home and the pointer is gone, the crown stops being stirred.
+      if (stirred && !busy && !pointer && !kick) { stirred = false; ox.fill(0); oy.fill(0); vx.fill(0); vy.fill(0); }
     };
     const start = () => {
       if (!raf && !reduce && seen && !document.hidden) { last = 0; raf = requestAnimationFrame(frame); }
@@ -182,10 +237,20 @@
     new ResizeObserver(() => { if (resize()) draw(clock); }).observe(canvas);
     new IntersectionObserver(([entry]) => { seen = entry.isIntersecting; if (seen) start(); else stop(); }).observe(canvas);
     document.addEventListener("visibilitychange", () => (document.hidden ? stop() : start()));
+    if (!reduce) {
+      const at = (e: PointerEvent): Point => {
+        const box = canvas.getBoundingClientRect();
+        return [((e.clientX - box.left) / box.width) * cols, ((e.clientY - box.top) / box.height) * rows];
+      };
+      canvas.addEventListener("pointermove", (e) => { pointer = at(e); stirred = true; });
+      canvas.addEventListener("pointerdown", (e) => { kick = at(e); stirred = true; });
+      canvas.addEventListener("pointerup", (e) => { if (e.pointerType !== "mouse") pointer = null; });
+      for (const type of ["pointerleave", "pointercancel"]) canvas.addEventListener(type, () => { pointer = null; });
+    }
   };
   for (const canvas of document.querySelectorAll<HTMLCanvasElement>("canvas[data-willow]")) willow(canvas);
 </script>
 <style>
   .willow { width:100%; max-width:580px; aspect-ratio:1; min-width:0; justify-self:center; }
-  .willow canvas { display:block; width:100%; height:100%; }
+  .willow canvas { display:block; width:100%; height:100%; touch-action:pan-y; }
 </style>
