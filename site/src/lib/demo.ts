@@ -1,7 +1,7 @@
 import { actionFrames, demoCopy, demoMessages, demoProviders, demoMenuEntries, demoMenuInfo, demoMenuCopy, type DemoProvider, type DemoMenuEntry, type ActionId, type DemoLang } from "../data/demo.ts";
 import {
   DEMO_FRAMES, FPS, actions, advance, choose, clamp01, clockAt, demoFrame,
-  easeOut, filmFrame, freshDemo, type Choice, freshInteractions, menuCommand, selectInstallFromButton, beginInstallCopy, finishInstallCopy, replayInteractions, mariaAt, sceneAt, sceneFrames, springAt, swapAt, tapPhase,
+  easeOut, filmFrame, freshDemo, type Choice, freshInteractions, menuCommand, selectInstallFromButton, beginInstallCopy, finishInstallCopy, replayInteractions, chatAt, chatOf, sceneAt, sceneFrames, springAt, swapAt, tapPhase,
 } from "./demo-state.ts";
 
 export function mountDemos() {
@@ -16,9 +16,8 @@ function mountDemo(root: HTMLElement) {
   const motion = matchMedia("(prefers-reduced-motion: reduce)");
   const get = <T extends HTMLElement = HTMLElement>(selector: string) => root.querySelector<T>(selector)!;
   const iva = get('[data-screen="iva"]');
-  const maria = get('[data-screen="maria"]');
   const view = get('[data-viewport="iva"]');
-  const mariaView = get('[data-viewport="maria"]');
+  const chats = (["maria", "marina"] as const).map(chat => ({ chat, screen: get(`[data-screen="${chat}"]`), view: get(`[data-viewport="${chat}"]`) }));
   const play = get<HTMLButtonElement>("[data-play]");
   const replay = get<HTMLButtonElement>("[data-replay]");
   const playLabel = get("[data-play-label]");
@@ -91,6 +90,7 @@ function mountDemo(root: HTMLElement) {
   }
   function render() {
     const f = filmFrame(state.frame);
+    const open = { maria: chatAt(state, "maria", f), marina: chatAt(state, "marina", f) };
     // The post's photo starts loading a scene ahead, so it is already there when the message arrives.
     if (photo && f >= 5200) photo.loading = "eager";
     let thinking: { start: number; end: number } | undefined;
@@ -120,8 +120,10 @@ function mountDemo(root: HTMLElement) {
       const id = message.action;
       const row = buttonRows.get(id)!;
       const decision = state.decisions[id];
-      const swapStart = id === "restaurant" && decision?.value === "yes" ? decision.at + 138 : decision ? decision.at + 18 : Infinity;
-      const swap = reduced && decision && !(id === "restaurant" && decision.value === "yes" && !mariaAt(state).confirmed)
+      // A card whose answer opens a chat changes while that chat covers it.
+      const name = chatOf[id], chat = name && open[name];
+      const swapStart = decision && chat?.pushed ? decision.at + 138 : decision ? decision.at + 18 : Infinity;
+      const swap = reduced && decision && !(chat?.pushed && !chat.confirmed)
         ? { k: 1, a: 0, b: 1 } : swapAt(f, swapStart);
       const before = row.querySelector<HTMLElement>("[data-before]")!;
       const afterSwap = row.querySelector<HTMLElement>("[data-after]")!;
@@ -144,21 +146,26 @@ function mountDemo(root: HTMLElement) {
         style(button, "background", pressed > .5 ? primary ? "#0473d6" : "#d5d4d8" : primary ? "#0589ff" : "#e7e6e9");
       }
     }
-    const pushed = mariaAt(state);
-    const p = interaction.menu !== null ? 0 : reduced ? pushed.p > .5 ? 1 : 0 : pushed.p;
+    // Maria's or Marina's chat slides in over Iva's, which moves a little aside under a shade.
+    let p = 0, mariaActive = false;
+    for (const { chat, screen } of chats) {
+      const q = interaction.menu !== null ? 0 : reduced ? open[chat].p > .5 ? 1 : 0 : open[chat].p;
+      style(screen, "transform", `translateX(${100 * (1 - q)}%)`);
+      style(screen, "box-shadow", q > 0 && q < 1 ? `calc(-6 * var(--vp)) 0 calc(18 * var(--vp)) rgba(10,20,16,${.22 * (1-q)})` : "none");
+      screen.inert = q <= .5;
+      screen.setAttribute("aria-hidden", String(q <= .5));
+      if (chat === "maria") mariaActive = q > .5;
+      p = Math.max(p, q);
+    }
     style(iva, "transform", `translateX(${-30 * p}%)`);
-    style(maria, "transform", `translateX(${100 * (1 - p)}%)`);
-    style(maria, "box-shadow", p > 0 && p < 1 ? `calc(-6 * var(--vp)) 0 calc(18 * var(--vp)) rgba(10,20,16,${.22 * (1-p)})` : "none");
     style(dim, "opacity", String(.18 * p));
-    const mariaActive = p > .5;
-    iva.inert = mariaActive;
-    iva.setAttribute("aria-hidden", String(mariaActive));
-    maria.inert = !mariaActive;
-    maria.setAttribute("aria-hidden", String(!mariaActive));
+    const chatActive = p > .5;
+    iva.inert = chatActive;
+    iva.setAttribute("aria-hidden", String(chatActive));
     const share = state.decisions.restaurant;
     // No restaurant choice means no delivery, including in the hidden transcript.
     arrival(venue, f, share?.value === "yes" ? share.at + 78 : Infinity);
-    setText(get('[data-message-time="restaurant"]'), pushed.confirmed ? "17:42" : "17:41");
+    setText(get('[data-message-time="restaurant"]'), open.maria.confirmed ? "17:42" : "17:41");
     iva.classList.toggle("is-thinking", !!thinking);
     get("[data-bot]").hidden = !!thinking;
     get("[data-typing]").hidden = !thinking;
@@ -180,10 +187,10 @@ function mountDemo(root: HTMLElement) {
     // Pausing gives the reader a normal, keyboard-accessible scrollable transcript.
     if (interaction.menu === null && (!userPaused && !focusPaused || reduced)) {
       view.scrollTop = view.scrollHeight;
-      mariaView.scrollTop = mariaView.scrollHeight;
+      for (const chat of chats) chat.view.scrollTop = chat.view.scrollHeight;
     }
     tap.hidden = true;
-    if (!reduced && !mariaActive && interaction.menu === null) {
+    if (!reduced && !chatActive && interaction.menu === null) {
       for (const id of actions) {
         const decision = state.decisions[id];
         const phase = tapPhase(f, decision ? decision.at - 12 : actionFrames[id]);
@@ -469,7 +476,8 @@ function mountDemo(root: HTMLElement) {
     setText(announcement, decision.value === "yes"
       ? id === "shopping" ? copy.shopping.map(item => item.text).join(", ") : choice.accepted
       : decision.value === "open" ? choice.opened ?? "" : choice.declined);
-    if (reduced && id === "restaurant" && decision.value === "yes") advance(state, demoFrame(decision.at + 80), false);
+    const chat = chatOf[id];
+    if (reduced && chat && chatAt(state, chat).pushed) advance(state, demoFrame(decision.at + 80), false);
     sync();
   }, on);
   root.addEventListener("focusin", event => {

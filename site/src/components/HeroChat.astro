@@ -38,12 +38,12 @@ const prepared = messages.map(message => {
   <Leaves />
   <HeroApps />
   <Phone>
-    {["iva", "maria"].map(peer => (
-      <div class:list={["v7-screen", peer === "maria" && "v7-maria"]} data-screen={peer} aria-hidden={peer === "maria" ? "true" : undefined} inert={peer === "maria"}>
+    {(["iva", "maria", "marina"] as const).map(peer => (
+      <div class:list={["v7-screen", peer !== "iva" && "v7-person"]} data-screen={peer} aria-hidden={peer !== "iva" ? "true" : undefined} inert={peer !== "iva"}>
         <img class="v7-wall" src="/media/tg-wall.webp" width="402" height="858" alt="" decoding="async" aria-hidden="true" />
-        <div class="v7-viewport" data-viewport={peer} role="log" aria-live="off" aria-label={peer === "iva" ? c.iva : c.maria} tabindex="0">
+        <div class="v7-viewport" data-viewport={peer} role="log" aria-live="off" aria-label={c[peer]} tabindex="0">
           <div class="v7-feed">
-            <div class="v7-date">{peer === "iva" ? c.today : c.yesterday}</div>
+            <div class="v7-date">{peer === "maria" ? c.yesterday : c.today}</div>
             {peer === "iva" ? prepared.map(message => (
               <>
                 {message.think !== undefined && (
@@ -75,7 +75,7 @@ const prepared = messages.map(message => {
                                 <div class:list={["v7-buttons", choices(message.action).open && "is-three"]}>
                                   <button type="button" class="v7-choice is-primary" data-choice="yes" disabled>{choices(message.action).yes}</button>
                                   <button type="button" class="v7-choice is-secondary" data-choice="no" disabled>{choices(message.action).no}</button>
-                                  {choices(message.action).open && <button type="button" class="v7-choice is-secondary" data-choice="open" disabled>{choices(message.action).open}</button>}
+                                  {choices(message.action).open && <button type="button" class="v7-choice is-secondary" data-choice="open" disabled>{choices(message.action).open}<svg class="v7-link" viewBox="0 0 8 8" aria-hidden="true"><path d="M2.5 1.5h4v4M6.5 1.5l-5 5" /></svg></button>}
                                 </div>
                               </div></div>
                               <div class="v7-swap-after" data-after hidden><div class="v7-collapse">
@@ -106,7 +106,7 @@ const prepared = messages.map(message => {
                   </div></div>
                 </div>
               </>
-            )) : (
+            )) : peer === "maria" ? (
               <>
                 <div class="v7-bubble"><svg class="v7-tail" viewBox="-7 -17 14 17" aria-hidden="true"><path d={tail} /></svg>{c.mariaMessages[0]}<span class="v7-time">21:14</span></div>
                 <div class="v7-bubble is-out"><svg class="v7-tail" viewBox="-7 -17 14 17" aria-hidden="true"><path d={tail} /></svg>{c.mariaMessages[1]}<span class="v7-time">21:20<svg viewBox="0 0 17 10" aria-hidden="true"><path d={checks} /></svg></span></div>
@@ -120,6 +120,8 @@ const prepared = messages.map(message => {
                   </div>
                 </div></div></div>
               </>
+            ) : (
+              <div class="v7-bubble"><svg class="v7-tail" viewBox="-7 -17 14 17" aria-hidden="true"><path d={tail} /></svg>{c.marinaMessage}<span class="v7-time">11:24</span></div>
             )}
             {peer === "iva" && (
               <>
@@ -158,8 +160,8 @@ const prepared = messages.map(message => {
         <div class="v7-edge-bottom" aria-hidden="true"></div>
         <div class="v7-header" aria-hidden="true">
           <span class="v7-glass v7-back"><svg viewBox="0 0 24 24"><path d="M15 4.5 7.5 12 15 19.5" /></svg><b>3</b></span>
-          <span class="v7-glass v7-peer"><strong>{peer === "iva" ? c.iva : c.maria}</strong><span class="v7-sub"><span data-bot>{peer === "iva" ? c.bot : c.online}</span><span class="v7-typing" data-typing hidden><i></i><i></i><i></i>{c.typing}</span></span></span>
-          <span class="v7-glass v7-avatar">{peer === "iva" ? <span class="v7-iva-avatar"><img src="/brand/mark.svg" alt="" width="40" height="40" /></span> : <span class="v7-maria-avatar">{lang === "ru" ? "М" : "M"}</span>}</span>
+          <span class="v7-glass v7-peer"><strong>{c[peer]}</strong><span class="v7-sub"><span data-bot>{peer === "iva" ? c.bot : c.online}</span><span class="v7-typing" data-typing hidden><i></i><i></i><i></i>{c.typing}</span></span></span>
+          <span class="v7-glass v7-avatar">{peer === "iva" ? <span class="v7-iva-avatar"><img src="/brand/mark.svg" alt="" width="40" height="40" /></span> : <span class="v7-person-avatar" data-person={peer}>{c[peer][0]}</span>}</span>
         </div>
         <div class="v7-composer">
           <button type="button" class="v7-menu" data-demo-menu-open aria-label={m.open} aria-controls={`v7-settings-${lang}`} aria-expanded="false"><svg viewBox="0 0 17 17" aria-hidden="true"><path d="M3.5 5h10M3.5 8.5h10M3.5 12h10" /></svg></button>
@@ -200,7 +202,7 @@ const prepared = messages.map(message => {
   .v7-demo { width:100%; margin:0; }
   .v7-demo [hidden] { display:none !important; }
   .v7-screen { position:absolute; inset:0; overflow:hidden; font-size:max(14px,calc(17 * var(--vp))); line-height:max(18.5px,calc(22.5 * var(--vp))); letter-spacing:calc(-.15 * var(--vp)); }
-  .v7-maria { transform:translateX(100%); z-index:2; }
+  .v7-person { transform:translateX(100%); z-index:2; }
   .v7-wall { position:absolute; inset:0; width:100%; height:100%; object-fit:fill; pointer-events:none; }
   .v7-viewport { position:absolute; inset:calc(116 * var(--vp)) 0 calc(104 * var(--vp)); overflow:auto; scrollbar-width:none; overscroll-behavior:contain; scroll-behavior:auto; outline-offset:calc(-3 * var(--vp)); }
   .v7-viewport::-webkit-scrollbar { display:none; }
@@ -248,6 +250,9 @@ const prepared = messages.map(message => {
   .v7-choice.is-primary { background:#0589ff; color:#fff; }
   .v7-choice.is-secondary { background:#e7e6e9; color:#17211d; }
   .v7-choice:disabled { cursor:default; }
+  /* A link button, as in Telegram: an arrow in the corner says it leads out of this chat. */
+  .v7-choice[data-choice="open"] { position:relative; }
+  .v7-link { position:absolute; top:calc(7 * var(--vp)); right:calc(10 * var(--vp)); width:calc(8 * var(--vp)); height:calc(8 * var(--vp)); fill:none; stroke:currentColor; stroke-width:1.4; stroke-linecap:round; stroke-linejoin:round; }
   .v7-choice:focus-visible { outline:calc(2 * var(--vp)) solid #17211d; outline-offset:calc(-4 * var(--vp)); }
   .v7-result { padding-top:calc(8 * var(--vp)); }
   .v7-venue { max-width:none; width:calc(268 * var(--vp)); padding:calc(3 * var(--vp)); margin-top:0; }
@@ -269,7 +274,7 @@ const prepared = messages.map(message => {
   .v7-peer { left:50%; transform:translateX(-50%); min-width:calc(92 * var(--vp)); padding:0 calc(22 * var(--vp)); flex-direction:column; white-space:nowrap; }
   .v7-peer strong { font-size:calc(17 * var(--vp)); line-height:calc(20 * var(--vp)); font-weight:600; letter-spacing:calc(-.25 * var(--vp)); }
   .v7-sub { font-size:calc(13 * var(--vp)); line-height:calc(16 * var(--vp)); color:#17211da3; }
-  .v7-maria .v7-sub { color:#0589ff; }
+  .v7-person .v7-sub { color:#0589ff; }
   .v7-typing { display:flex; align-items:center; gap:calc(4 * var(--vp)); color:#0589ff; }
   .v7-typing i { width:calc(4 * var(--vp)); height:calc(4 * var(--vp)); border-radius:50%; background:currentColor; margin-right:calc(-1.8 * var(--vp)); }
   .v7-typing i:last-of-type { margin-right:calc(2 * var(--vp)); }
@@ -277,7 +282,8 @@ const prepared = messages.map(message => {
   .v7-avatar > span { display:grid; place-items:center; width:100%; height:100%; border-radius:50%; overflow:hidden; }
   .v7-iva-avatar { background:#0b1218; }
   .v7-avatar img { width:77%; height:77%; object-fit:contain; }
-  .v7-maria-avatar { background:linear-gradient(#ff8aa8,#e0507a); color:#fff; font-size:calc(16 * var(--vp)); font-weight:600; }
+  .v7-person-avatar { background:linear-gradient(#ff8aa8,#e0507a); color:#fff; font-size:calc(16 * var(--vp)); font-weight:600; }
+  .v7-person-avatar[data-person="marina"] { background:linear-gradient(#b4a3f5,#7464dc); }
   .v7-composer > :is(span,button) { position:absolute; top:calc(768 * var(--vp)); height:calc(36 * var(--vp)); display:flex; align-items:center; justify-content:center; }
   .v7-composer svg { fill:none; stroke:#17211d; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; }
   .v7-menu { appearance:none; border:0; padding:0; color:inherit; cursor:pointer; left:calc(8 * var(--vp)); width:calc(36 * var(--vp)); border-radius:50%; background:#0589ff; box-shadow:0 calc(1.5 * var(--vp)) calc(6 * var(--vp)) #0589ff4d; }

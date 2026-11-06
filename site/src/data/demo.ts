@@ -26,7 +26,7 @@ export const demoCopy = {
     note: "Все действия происходят внутри демонстрации.",
     play: "Продолжить", pause: "Пауза", replay: "Сначала", next: "Следующая сцена",
     end: "Демонстрация завершена", paused: "На паузе", playing: "Воспроизведение",
-    today: "Сегодня", yesterday: "Вчера", iva: "Ива", maria: "Мария", bot: "бот",
+    today: "Сегодня", yesterday: "Вчера", iva: "Ива", maria: "Мария", marina: "Марина", bot: "бот",
     online: "в сети", typing: "печатает", thinking: "Думаю…", message: "Сообщение",
     voice: "Голосовое сообщение, 12 секунд", photo: "Осенняя коллекция: пальто, свитер, шапка и ботинки",
     restaurant: "Ресторан «Олива»", address: "Садовая ул., 18",
@@ -47,6 +47,7 @@ export const demoCopy = {
     },
     shopping: [item("🥦", "Брокколи"), item("🐟", "Рыба"), item("🥚", "Яйца"), item("🍗", "Курица"), item("🥛", "Кефир")],
     mariaMessages: ["Завтра в силе?", "Да, в 19", "Куда ехать?"],
+    marinaMessage: `Клиент приехал, ждёт в${NB}переговорке`,
   },
   en: {
     label: "Interactive Iva demo in Telegram",
@@ -54,7 +55,7 @@ export const demoCopy = {
     note: "Every action takes place inside this demo.",
     play: "Continue", pause: "Pause", replay: "Replay", next: "Next scene",
     end: "Demo complete", paused: "Paused", playing: "Playing",
-    today: "Today", yesterday: "Yesterday", iva: "Iva", maria: "Maria", bot: "bot",
+    today: "Today", yesterday: "Yesterday", iva: "Iva", maria: "Maria", marina: "Marina", bot: "bot",
     online: "online", typing: "typing", thinking: "Thinking…", message: "Message",
     voice: "Voice message, 12 seconds", photo: "Autumn collection: a coat, a sweater, a beanie and boots",
     restaurant: "Oliva restaurant", address: "18 Sadovaya St.",
@@ -75,6 +76,7 @@ export const demoCopy = {
     },
     shopping: [item("🥦", "Broccoli"), item("🐟", "Fish"), item("🥚", "Eggs"), item("🍗", "Chicken"), item("🥛", "Kefir")],
     mariaMessages: ["Still on for tomorrow?", "Yes, at 7", "Where should I go?"],
+    marinaMessage: "The client is here, waiting in the meeting room.",
   },
 } as const;
 

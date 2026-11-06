@@ -98,13 +98,20 @@ export function iosPush(f: number, at: number): number {
   }
   return x === 0 || x === 1 ? x : bezier(t, 0.72, 1);
 }
-export function mariaAt(state: DemoState, f = filmFrame(state.frame)) {
-  const choice = state.decisions.restaurant;
-  if (choice?.value !== "yes") return { p: 0, venue: false, confirmed: false };
+// A chat that slides in over Iva's and back: Maria's once the restaurant is shared with her,
+// Marina's once her chat is opened from her card. The card's answer lands while it is open.
+const chats = { maria: ["restaurant", "yes"], marina: ["marina", "open"] } as const;
+export type Chat = keyof typeof chats;
+export const chatOf: Partial<Record<ActionId, Chat>> = { restaurant: "maria", marina: "marina" };
+export function chatAt(state: DemoState, chat: Chat, f = filmFrame(state.frame)) {
+  const [action, value] = chats[chat];
+  const choice = state.decisions[action];
+  if (choice?.value !== value) return { pushed: false, p: 0, venue: false, confirmed: false };
   const push = choice.at + 30, pop = choice.at + 168;
   return {
+    pushed: true,
     p: f < pop ? iosPush(f, push) : 1 - iosPush(f, pop),
-    venue: f >= choice.at + 78,
+    venue: chat === "maria" && f >= choice.at + 78,
     confirmed: f >= choice.at + 138,
   };
 }

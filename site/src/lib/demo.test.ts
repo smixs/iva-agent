@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { demoMessages, demoMenuEntries } from "../data/demo.ts";
-import { DEMO_FRAMES, actions, advance, choose, demoFrame, filmFrame, freshDemo, freshInteractions, menuCommand, selectInstall, selectInstallFromButton, beginInstallCopy, finishInstallCopy, replayInteractions, iosPush, mariaAt, springAt, tapPhase } from "./demo-state.ts";
+import { DEMO_FRAMES, actions, advance, choose, demoFrame, filmFrame, freshDemo, freshInteractions, menuCommand, selectInstall, selectInstallFromButton, beginInstallCopy, finishInstallCopy, replayInteractions, iosPush, chatAt, springAt, tapPhase } from "./demo-state.ts";
 
 test("phone footage keeps scene order; the team brief and Marina fill the stretch of the film's titles", () => {
   assert.equal(filmFrame(0), 360);
@@ -40,20 +40,20 @@ test("declining restaurant never opens Maria, delivers a venue or claims confirm
   advance(state, demoFrame(3300));
   choose(state, "restaurant", "no");
   for (const f of [3300, 3392, 3440, 3500, 3530, 3640, 4380]) {
-    assert.deepEqual(mariaAt(state, f), { p: 0, venue: false, confirmed: false });
+    assert.deepEqual(chatAt(state, "maria", f), { pushed: false, p: 0, venue: false, confirmed: false });
   }
 });
 test("accepting restaurant follows the film push, delivery and pop relative to the winning contact", () => {
   const state = freshDemo();
   advance(state, demoFrame(3362));
   assert.equal(state.decisions.restaurant?.at, 3362);
-  assert.equal(mariaAt(state, 3392).p, 0);
-  assert.equal(mariaAt(state, 3426).p, 1);
-  assert.equal(mariaAt(state, 3439).venue, false);
-  assert.equal(mariaAt(state, 3440).venue, true);
-  assert.equal(mariaAt(state, 3499).confirmed, false);
-  assert.equal(mariaAt(state, 3500).confirmed, true);
-  assert.equal(mariaAt(state, 3564).p, 0);
+  assert.equal(chatAt(state, "maria", 3392).p, 0);
+  assert.equal(chatAt(state, "maria", 3426).p, 1);
+  assert.equal(chatAt(state, "maria", 3439).venue, false);
+  assert.equal(chatAt(state, "maria", 3440).venue, true);
+  assert.equal(chatAt(state, "maria", 3499).confirmed, false);
+  assert.equal(chatAt(state, "maria", 3500).confirmed, true);
+  assert.equal(chatAt(state, "maria", 3564).p, 0);
 });
 test("manual reduced-motion advances leave buttons available until the reader chooses", () => {
   const state = freshDemo();
@@ -99,7 +99,7 @@ test("Marina's card takes any of its three answers once, and autoplay answers wi
   for (const pick of ["yes", "no", "open"] as const) {
     const state = freshDemo();
     advance(state, demoFrame(1075));
-    assert.equal(state.decisions.marina, undefined);
+    assert.equal("marina" in state.decisions, false);
     assert.equal(choose(state, "marina", pick), true);
     assert.equal(choose(state, "marina", pick === "yes" ? "open" : "yes"), false);
     advance(state, DEMO_FRAMES);
@@ -109,6 +109,27 @@ test("Marina's card takes any of its three answers once, and autoplay answers wi
   advance(auto, DEMO_FRAMES);
   assert.equal(auto.decisions.marina?.value, "yes");
   assert.equal(auto.decisions.marina?.at, 1097);
+});
+test("opening Marina's chat slides it in and back like Maria's, while her card's answer lands", () => {
+  const state = freshDemo();
+  advance(state, demoFrame(1060));
+  assert.equal(choose(state, "marina", "open"), true);
+  assert.equal(chatAt(state, "marina", 1090).p, 0);
+  assert.equal(chatAt(state, "marina", 1124).p, 1);
+  assert.equal(chatAt(state, "marina", 1124).venue, false);
+  assert.equal(chatAt(state, "marina", 1197).confirmed, false);
+  assert.equal(chatAt(state, "marina", 1198).confirmed, true);
+  assert.equal(chatAt(state, "marina", 1262).p, 0);
+  assert.equal(chatAt(state, "maria", 1124).pushed, false);
+  for (const pick of ["yes", "no"] as const) {
+    const other = freshDemo();
+    advance(other, demoFrame(1060));
+    choose(other, "marina", pick);
+    for (const f of [1090, 1124, 1198, 1300]) assert.deepEqual(chatAt(other, "marina", f), { pushed: false, p: 0, venue: false, confirmed: false });
+  }
+  const auto = freshDemo();
+  advance(auto, DEMO_FRAMES);
+  assert.equal(chatAt(auto, "marina", 1124).pushed, false);
 });
 
 test("menu model changes wait for restart confirmation and reject stale or unsupported selections", () => {
