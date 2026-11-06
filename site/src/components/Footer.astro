@@ -45,13 +45,12 @@ const groups: [string, [string, string, string?][]][] = [
   </div>
 </footer>
 <script>
-  // A wave of square pixels pulses along the bottom of the footer like the outline of a sound,
-  // green at the crest, blue and darker below. Pixels come off the crest and float up, swaying,
-  // fading as they go. The pointer stirs it: dragged near the surface it lifts the wave behind it
-  // and tears pixels off, and floating pixels shy away from it; a click or tap on the footer
-  // splashes. Under the resting shape the surface is a row of columns on springs, each pulled
-  // level by its neighbours, so a splash runs out as ripples. Runs only on screen; with reduced
-  // motion the wave stands still.
+  // Along the bottom of the footer lies a band of square pixels, green on top, blue and darker
+  // below, level but for a cell here and there. Out of it thin shoots spring up all the time like
+  // willow twigs, one column of pixels each, tapering to a point; they stand a moment and sink
+  // back, and the tip of many comes off and floats up, swaying and fading. The pointer near the
+  // band makes shoots spring up under it and floating pixels shy away from it; a click or tap on
+  // the footer sends up a burst. Runs only on screen; with reduced motion it stands still.
   const footer = document.querySelector<HTMLElement>("[data-footer]");
   const canvas = document.querySelector<HTMLCanvasElement>("[data-footer-wave]");
   if (footer && canvas) {
@@ -66,7 +65,7 @@ const groups: [string, [string, string, string?][]][] = [
       return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
     };
     const hash = (a: number, b: number) => ((((a * 73856093) ^ (b * 19349663)) >>> 0) % 1000) / 1000;
-    // Colour of a pixel by its depth under the crest, a little mixed so the wave looks woven.
+    // Colour of a pixel by its depth under the top of the band, a little mixed so it looks woven.
     const shade = (depth: number, h: number) =>
       depth === 0 ? GREEN[h < 0.45 ? 0 : 1]
       : depth < 2 ? GREEN[h < 0.6 ? 1 : 2]
@@ -74,8 +73,11 @@ const groups: [string, [string, string, string?][]][] = [
       : depth < 7 ? BLUE[h < 0.55 ? 1 : 2]
       : h < 0.15 ? BLUE[0] : DEEP[h < 0.6 ? 0 : 1];
 
+    // Shoots: a column each, springing up fast, standing a moment, sinking back slower; some bend
+    // a cell aside near the top. Heights are in cells above the band.
+    type Shoot = { i: number; peak: number; born: number; rise: number; hold: number; fall: number; lean: number; bend: number; blue: boolean; tipped: boolean };
+    const shoots: Shoot[] = [];
     let W = 0, H = 0, dpr = 1, cell = 10, band = 150, cols = 0;
-    let lift = new Float32Array(0), speed = new Float32Array(0);
     const resize = () => {
       const box = footer.getBoundingClientRect();
       if (!box.width || !box.height) return false;
@@ -85,74 +87,83 @@ const groups: [string, [string, string, string?][]][] = [
       band = parseFloat(getComputedStyle(footer).getPropertyValue("--wave")) || 150;
       cell = Math.max(7, Math.min(11, W / 140));
       const n = Math.ceil(W / cell) + 1;
-      if (n !== cols) { cols = n; lift = new Float32Array(n); speed = new Float32Array(n); }
+      if (n !== cols) {
+        cols = n;
+        shoots.length = 0;
+        // Standing still, a fixed scatter of shoots at their full height.
+        if (reduce) for (let i = 0; i < cols; i++) if (hash(i, 11) < 0.14) shoots.push({ i, peak: 2 + Math.floor(hash(i, 12) * 8), born: 0, rise: 1, hold: 1, fall: 1, lean: hash(i, 13) < 0.3 ? 1 : 0, bend: 0.6, blue: hash(i, 14) < 0.3, tipped: true });
+      }
       return true;
     };
-    // Resting surface: a row of willow leaves, long and short, like the outline of a sound. Each
-    // leaf rises to a point at both ends, widest a little before its middle, and swells and sinks
-    // on its own beat; every column flickers a little on top, so neighbours step rather than
-    // glide; the row drifts slowly along. Leaves are laid out once, in cells, and repeat.
-    const leaves: { at: number; len: number; amp: number; rate: number; phase: number; beat: number }[] = [];
-    let span = 0;
-    while (span < 230) {
-      const len = 5 + Math.floor(rand() * 13);
-      leaves.push({ at: span, len, amp: 0.25 + 0.75 * rand() ** 0.7, rate: 2.6 + rand() * 2.6, phase: rand() * 6.283, beat: rand() * 6.283 });
-      span += len;
-    }
-    const rest = (i: number, t: number) => {
-      const x = (((i + t * 1.2) % span) + span) % span;
-      let k = 0;
-      while (k < leaves.length - 1 && x >= leaves[k + 1].at) k++;
-      const leaf = leaves[k], u = (x - leaf.at) / leaf.len;
-      const shape = Math.sin(Math.PI * u ** 0.8) ** 1.25;
-      const beat = 0.5 + 0.5 * Math.sin(t * leaf.rate + leaf.phase) * Math.sin(t * leaf.rate * 0.37 + leaf.beat);
-      const flicker = 0.78 + 0.22 * (0.5 + 0.5 * Math.sin(t * (4 + 3 * hash(i, 3)) + 6.283 * hash(i, 7)));
-      return band * (0.18 + 0.68 * leaf.amp * (0.45 + 0.55 * beat) * shape * flicker);
+    // The band: about a third of the wave's room high, a cell up or down here and there that
+    // changes now and then, and a slow rise and fall along it, in whole cells.
+    const ground = (i: number, t: number) =>
+      Math.max(2, Math.round((band * 0.3) / cell + 0.9 * Math.sin((i / 31) * 6.283 + t * 0.4) + (hash(i, Math.floor(t * 0.9 + hash(i, 5) * 9)) < 0.3 ? 1 : 0)));
+    const sprout = (i: number, t: number, tall = 1) => {
+      if (i < 0 || i >= cols || shoots.length > 180) return;
+      shoots.push({ i, peak: Math.max(2, Math.round((2 + 11 * rand() ** 1.6) * tall)), born: t, rise: 0.1 + 0.12 * rand(), hold: 0.05 + 0.25 * rand(), fall: 0.45 + 0.5 * rand(), lean: rand() < 0.35 ? (rand() < 0.5 ? -1 : 1) : 0, bend: 0.5 + 0.3 * rand(), blue: rand() < 0.3, tipped: false });
     };
-    const surface = (i: number, t: number) => Math.max(0, rest(i, t) + lift[i]);
+    // Height of a shoot at a moment, in cells; below zero once it has sunk back.
+    const height = (s: Shoot, t: number) => {
+      if (reduce) return s.peak;
+      const u = t - s.born;
+      if (u < 0) return 0;
+      if (u < s.rise) return s.peak * (1 - (1 - u / s.rise) ** 3);
+      if (u < s.rise + s.hold) return s.peak;
+      const v = (u - s.rise - s.hold) / s.fall;
+      return v < 1 ? s.peak * (1 - v * v) : -1;
+    };
+    const column = (s: Shoot, r: number) => s.i + (s.lean && r >= s.bend * s.peak ? s.lean : 0);
 
     type Mote = { x: number; y: number; vx: number; vy: number; age: number; life: number; colour: string; phase: number };
     const motes: Mote[] = [];
-    const tear = (i: number, t: number, up: number, side = 0) => {
-      if (motes.length > 220 || i < 0 || i >= cols) return;
-      const pick = rand();
-      motes.push({ x: i * cell + rand() * cell * 0.4, y: H - surface(i, t) - cell, vx: side + (rand() - 0.5) * 16, vy: -up, age: 0, life: 2.6 + rand() * 2.6, colour: pick < 0.55 ? GREEN[pick < 0.25 ? 0 : 1] : pick < 0.85 ? BLUE[1] : BLUE[0], phase: rand() * 6.283 });
+    const tear = (x: number, y: number, up: number, side: number, colour: string) => {
+      if (motes.length < 220) motes.push({ x, y, vx: side + (rand() - 0.5) * 16, vy: -up, age: 0, life: 2.6 + rand() * 2.6, colour, phase: rand() * 6.283 });
     };
+    const loose = () => { const pick = rand(); return pick < 0.55 ? GREEN[pick < 0.25 ? 0 : 1] : pick < 0.85 ? BLUE[1] : BLUE[0]; };
 
-    // Pointer in footer pixels, its smoothed velocity, and when it last moved.
-    let pointer: [number, number] | null = null, pvx = 0, pvy = 0, moved = 0, wake = 0, budget = 0;
+    // Pointer in footer pixels, its smoothed velocity, when it last moved by the wall clock and by
+    // the frame clock.
+    let pointer: [number, number] | null = null, pvx = 0, pvy = 0, moved = 0, stirred = -1, wake = 0, budget = 0, spawn = 0;
     let clock = 0;
     const step = (dt: number) => {
       clock += dt;
-      // The surface: springs to rest, pulled level by neighbours, in two half steps for steadiness.
-      for (let s = 0; s < 2; s++) {
-        const h = dt / 2;
-        for (let i = 0; i < cols; i++) {
-          const pull = (lift[i > 0 ? i - 1 : 1] + lift[i < cols - 1 ? i + 1 : cols - 2] - 2 * lift[i]) * 420 - 5 * lift[i] - 1.8 * speed[i];
-          speed[i] += pull * h;
-        }
-        for (let i = 0; i < cols; i++) lift[i] += speed[i] * h;
+      // New shoots all the time: at any moment about one column in five stands up.
+      spawn += dt * cols * 0.24;
+      while (spawn >= 1) {
+        spawn -= 1;
+        const i = Math.floor(rand() * cols);
+        sprout(i, clock);
+        if (rand() < 0.3) sprout(i + (rand() < 0.5 ? -1 : 1), clock + 0.04, 0.6);
       }
-      // The pointer near the surface lifts it and tears pixels off, the faster the more.
-      if (pointer && performance.now() - moved < 120) {
+      for (let k = shoots.length - 1; k >= 0; k--) {
+        const s = shoots[k];
+        if (height(s, clock) < 0) { shoots.splice(k, 1); continue; }
+        // At the top of its rise the tip of many a shoot comes off and flies on up.
+        if (!s.tipped && clock - s.born >= s.rise) {
+          s.tipped = true;
+          if (rand() < 0.55) {
+            const r = ground(s.i, clock) + s.peak - 1;
+            tear(column(s, s.peak - 1) * cell, H - (r + 1) * cell, 70 + rand() * 90, s.lean * 12, (s.blue ? BLUE : GREEN)[0]);
+            s.peak -= 1;
+          }
+        }
+      }
+      // The pointer near the band makes shoots spring up under it, the faster it moves the more.
+      if (pointer && clock - stirred < 0.12) {
         const run = Math.min(900, Math.hypot(pvx, pvy));
-        const ci = pointer[0] / cell;
-        const above = H - surface(Math.round(Math.min(cols - 1, Math.max(0, ci))), clock) - pointer[1];
-        const near = above < 0 ? 1 : Math.max(0, 1 - above / 90);
-        if (near > 0) {
-          for (let i = Math.floor(ci - 3); i <= Math.ceil(ci + 3); i++) if (i >= 0 && i < cols) speed[i] += near * run * 1.6 * Math.exp(-((i - ci) ** 2) / 3) * dt;
-          budget += near * run * 0.035 * dt;
-          while (budget >= 1) { budget -= 1; tear(Math.round(ci + (rand() - 0.5) * 4), clock, 90 + rand() * 120, pvx * 0.15); }
-        }
+        const ci = pointer[0] / cell, c = Math.round(Math.min(cols - 1, Math.max(0, ci)));
+        const above = H - ground(c, clock) * cell - pointer[1];
+        const near = above < 0 ? 1 : Math.max(0, 1 - above / 110);
+        budget += near * (4 + run * 0.04) * dt;
+        while (budget >= 1) { budget -= 1; sprout(Math.round(ci + (rand() - 0.5) * 5), clock, 1.2); }
       }
-      // Now and then a pixel comes off the crest by itself, the more likely off a tall leaf; a
-      // fast-rising crest throws them off.
-      if (rand() < dt * Math.max(2.5, W / 240)) {
-        const a = Math.floor(rand() * cols), b = Math.floor(rand() * cols);
-        tear(surface(a, clock) > surface(b, clock) ? a : b, clock, 34 + rand() * 50);
+      // Now and then a pixel comes off the band by itself.
+      if (rand() < dt * Math.max(1, W / 480)) {
+        const i = Math.floor(rand() * cols);
+        tear(i * cell, H - (ground(i, clock) + 1) * cell, 34 + rand() * 50, 0, loose());
       }
-      for (let i = 0; i < cols; i++) if (speed[i] > 110 && rand() < (speed[i] - 110) * dt * 0.05) tear(i, clock, speed[i] * 0.6 + rand() * 60);
-      // Floating pixels rise faster as they go, sway, drift with the swell and shy from the pointer.
+      // Floating pixels rise faster as they go, sway, drift and shy from the pointer.
       for (let k = motes.length - 1; k >= 0; k--) {
         const m = motes[k];
         m.age += dt;
@@ -167,30 +178,34 @@ const groups: [string, [string, string, string?][]][] = [
         m.y += m.vy * dt;
         if (m.age > m.life || m.y < -cell) motes.splice(k, 1);
       }
-      let busy = false;
-      for (let i = 0; i < cols && !busy; i++) busy = Math.abs(speed[i]) > 6;
-      return busy;
     };
 
     const draw = () => {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       const inner = cell - Math.max(1, cell * 0.14);
       let fill = "", alpha = -1;
-      // Squares stand on the bottom of their cell, so a growing top pixel rises out of the wave.
+      // Squares stand on the bottom of their cell, so a small tip sits on the pixel under it.
       const square = (x: number, y: number, size: number, colour: string, a: number) => {
         if (colour !== fill) ctx.fillStyle = fill = colour;
         if (a !== alpha) ctx.globalAlpha = alpha = a;
         const s = Math.max(1, Math.round(size * dpr));
         ctx.fillRect(Math.round(x * dpr + (inner * dpr - s) / 2), Math.round(y * dpr + (inner * dpr - s)), s, s);
       };
-      const tick = Math.floor(clock * 1.3);
+      const t = reduce ? 0 : clock, tick = Math.floor(t * 1.3);
       for (let i = 0; i < cols; i++) {
-        const h = surface(i, reduce ? 0 : clock) / cell, n = Math.floor(h), part = h - n;
+        const n = ground(i, t);
         for (let r = 0; r < n; r++) {
           const dim = !reduce && hash(i * 7 + r, tick + (i % 5)) < 0.04 ? 0.6 : 1;
           square(i * cell, H - (r + 1) * cell, inner, shade(n - 1 - r, hash(i, r)), dim);
         }
-        if (part > 0.2) square(i * cell, H - (n + 1) * cell, inner * part, GREEN[0], 1);
+      }
+      // Each shoot stands on the band a whole cell at a time; its top two pixels taper to a point.
+      for (const s of shoots) {
+        const h = Math.floor(height(s, t)), g = ground(s.i, t), tone = s.blue ? BLUE : GREEN;
+        for (let r = 0; r < h; r++) {
+          const fromTop = h - 1 - r;
+          square(column(s, r) * cell, H - (g + r + 1) * cell, inner * (fromTop === 0 ? 0.6 : fromTop === 1 ? 0.84 : 1), tone[fromTop === 0 ? 0 : r === 0 ? 2 : 1], 1);
+        }
       }
       for (const m of motes) {
         const fade = m.age / m.life;
@@ -202,9 +217,9 @@ const groups: [string, [string, string, string?][]][] = [
     let raf = 0, last = 0, seen = false;
     const frame = (now: number) => {
       raf = requestAnimationFrame(frame);
-      // Every frame while stirred, about 30 a second when only the swell rolls.
+      // Every frame while the pointer plays with it, about 30 a second otherwise.
       if (last && now - last < 31 && now > wake) return;
-      if (step(last ? Math.min(0.05, (now - last) / 1000) : 0)) wake = now + 400;
+      step(last ? Math.min(0.05, (now - last) / 1000) : 0);
       last = now;
       draw();
     };
@@ -224,15 +239,16 @@ const groups: [string, [string, string, string?][]][] = [
           const k = Math.min(1, (now - moved) / 60), s = 1000 / Math.max(8, now - moved);
           pvx += ((p[0] - pointer[0]) * s - pvx) * k; pvy += ((p[1] - pointer[1]) * s - pvy) * k;
         }
-        pointer = p; moved = now; wake = now + 600;
+        pointer = p; moved = now; stirred = clock; wake = now + 600;
       }, { passive: true });
       footer.addEventListener("pointerleave", () => { pointer = null; pvx = pvy = 0; });
-      // A click or tap on the footer itself, not on a link, splashes: the surface jumps, pixels fly.
+      // A click or tap on the footer itself, not on a link, sends up a burst of tall shoots and
+      // a spray of pixels.
       footer.addEventListener("pointerdown", (e) => {
         if ((e.target as Element).closest("a, button")) return;
-        const ci = at(e)[0] / cell;
-        for (let i = Math.floor(ci - 6); i <= Math.ceil(ci + 6); i++) if (i >= 0 && i < cols) speed[i] += 260 * Math.exp(-((i - ci) ** 2) / 6);
-        for (let k = 0; k < 28; k++) tear(Math.round(ci + (rand() - 0.5) * 6), clock, 140 + rand() * 220, (rand() - 0.5) * 160);
+        const ci = at(e)[0] / cell, c = Math.round(Math.min(cols - 1, Math.max(0, ci)));
+        for (let k = 0; k < 14; k++) sprout(Math.round(ci + (rand() - 0.5) * 12), clock + rand() * 0.15, 1.35);
+        for (let k = 0; k < 18; k++) tear((ci + (rand() - 0.5) * 6) * cell, H - (ground(c, clock) + 1) * cell, 140 + rand() * 200, (rand() - 0.5) * 160, loose());
         wake = performance.now() + 1500;
       });
     }
