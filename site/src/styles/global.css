@@ -517,6 +517,9 @@ html[data-intro="land"] :is(.header, .consent) {
 .price-free {
   color: var(--leaf-ink);
 }
+.price-forever {
+  color: var(--blue);
+}
 .price-line {
   max-width: 28ch;
   margin: 0 0 14px;
