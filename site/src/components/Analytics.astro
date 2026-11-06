@@ -32,7 +32,10 @@ const ru = lang === "ru";
   const settings = document.querySelector<HTMLButtonElement>(
     "[data-analytics-settings]",
   )!;
-  document.querySelector("footer")?.append(settings);
+  // In the footer's site column, as one more link.
+  const item = document.createElement("li");
+  item.append(settings);
+  document.querySelector("[data-footer-group='site']")?.append(item);
   settings.hidden = false;
   let choice: string | null = null,
     loaded = false;

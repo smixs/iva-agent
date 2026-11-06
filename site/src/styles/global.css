@@ -635,59 +635,6 @@ html[data-intro="land"] :is(.header, .consent) {
 .faq details[open] > summary > .faq-toggle::after {
   display: none;
 }
-.footer {
-  max-width: 1280px;
-  margin: auto;
-  padding: 40px var(--gutter) 32px;
-  display: grid;
-  grid-template-columns: 120px 1fr;
-  gap: 18px 40px;
-}
-.footer-brand {
-  grid-row: span 2;
-}
-.footer-brand > a {
-  display: inline-block;
-  padding: 4px 0;
-}
-.footer-brand img {
-  width: 96px;
-  height: auto;
-}
-.footer nav {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 12px 24px;
-}
-.footer nav a {
-  color: var(--ink);
-  font-size: 14px;
-}
-.footer > p {
-  grid-column: 2;
-  margin: 0;
-  color: var(--muted);
-  font-size: 12px;
-}
-.footer .company-link {
-  grid-column: 2;
-  margin-top: 2px;
-}
-.company-link a {
-  font-size: inherit;
-}
-.analytics-settings {
-  grid-column: 2;
-  justify-self: start;
-  min-height: 36px;
-  padding: 4px 0;
-  border: 0;
-  background: none;
-  color: var(--muted);
-  text-decoration: underline;
-  font-size: 13px;
-}
 .skip {
   position: absolute;
   top: -100px;
@@ -1266,26 +1213,6 @@ html[data-intro="land"] :is(.header, .consent) {
   .faq details p {
     font-size: 16px;
     margin-right: 20px;
-  }
-  .footer {
-    padding-top: 28px;
-    padding-bottom: 28px;
-    grid-template-columns: 1fr;
-    gap: 22px;
-  }
-  .footer-brand {
-    grid-row: auto;
-  }
-  .footer > p,
-  .footer .company-link,
-  .analytics-settings {
-    grid-column: 1;
-  }
-  .footer nav {
-    gap: 14px 20px;
-  }
-  .footer nav a {
-    font-size: 13px;
   }
   .prose h1 {
     font-size: 38px;

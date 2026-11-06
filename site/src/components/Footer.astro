@@ -1,0 +1,223 @@
+---
+// The page footer: Iva's logo in the site's pixels to play with, the links in three short
+// columns, and one line on who makes Iva. The logo shapes come from the brand file itself
+// (cwd is site/, as in build.ts).
+import { readFileSync } from "node:fs";
+const { lang = "en", home, other } = Astro.props as { lang?: string; home: string; other: string };
+const ru = lang === "ru";
+const svg = readFileSync("../docs/brand/logo-light.svg", "utf8");
+const [, width, height] = svg.match(/viewBox="[\d.]+ [\d.]+ ([\d.]+) ([\d.]+)"/)!.map(Number);
+const shapes = [...svg.matchAll(/<path fill="(#[0-9A-Fa-f]{6})"(?: fill-rule="(\w+)")? d="([^"]+)"/g)].map((m) => [m[1].toLowerCase(), m[3], m[2] || "nonzero"]);
+const docs = ru ? "/ru" : "";
+const groups: [string, [string, string, string?][]][] = [
+  [ru ? "Ива" : "Iva", [
+    [ru ? "Документация" : "Docs", docs + "/docs/"],
+    [ru ? "Вопросы" : "FAQ", home + "#faq"],
+    [ru ? "История изменений" : "Changelog", "https://github.com/smixs/iva-agent/blob/main/CHANGELOG.md"],
+  ]],
+  [ru ? "Проект" : "Project", [
+    [ru ? "О команде" : "About the team", docs + "/about/"],
+    [ru ? "Бренд" : "Brand", "/docs/brand/"],
+    [ru ? "Лицензия MIT" : "MIT license", "https://github.com/smixs/iva-agent/blob/main/LICENSE"],
+  ]],
+  [ru ? "Сайт" : "Site", [
+    [ru ? "English" : "Русский", other, ru ? "en" : "ru"],
+    [ru ? "Приватность" : "Privacy", "/privacy/"],
+  ]],
+];
+---
+
+<footer class="footer">
+  <div class="footer-art" aria-hidden="true">
+    <canvas data-footer-pixels data-logo={JSON.stringify({ width, height, shapes })}></canvas>
+  </div>
+  <nav class="footer-links" aria-label={ru ? "Ссылки в подвале" : "Footer links"}>
+    {groups.map(([title, links], i) => (
+      <div class="footer-group">
+        <p class="footer-title">{title}</p>
+        <ul data-footer-group={i === groups.length - 1 ? "site" : undefined}>
+          {links.map(([name, href, linkLang]) => <li><a href={href} lang={linkLang}>{name}</a></li>)}
+        </ul>
+      </div>
+    ))}
+  </nav>
+  <div class="footer-base">
+    <p>© {new Date().getFullYear()} Majento · {ru ? "Ташкент" : "Tashkent"}</p>
+    <p>{ru ? "Разработка ИИ-систем для компаний:" : "Custom AI systems for companies:"} <a href="https://majento.ai/?utm_source=iva-agent.com&amp;utm_medium=referral&amp;utm_campaign=ecosystem">Majento</a></p>
+  </div>
+</footer>
+<script>
+  // The logo as square pixels in the shades of the site's pixel glitch. Each pixel hangs on a
+  // spring at its place: the pointer pushes pixels aside and they swing back a little past it;
+  // a click or tap blows them apart for a moment. At rest the logo breathes in a slow wave, a few
+  // pixels shimmer and now and then one comes off the leaves and drifts away on the wind. Runs
+  // only on screen; with reduced motion the logo stands still.
+  type Pixel = { hx: number; hy: number; x: number; y: number; vx: number; vy: number; kind: number; shade: number; free: number };
+  const canvas = document.querySelector<HTMLCanvasElement>("[data-footer-pixels]");
+  if (canvas) {
+    const { width: W, height: H, shapes } = JSON.parse(canvas.dataset.logo!) as { width: number; height: number; shapes: [string, string, CanvasFillRule][] };
+    const ctx = canvas.getContext("2d")!;
+    const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    // Light to strong, per kind of pixel: green leaf, blue leaf, the letters.
+    const SHADES = [["#c9ea96", "#a4dc55", "#86c140"], ["#d6e7f5", "#62a2dc", "#368ad2"], ["#4a5a55", "#1a2327", "#2b6291"]];
+    let seed = 20261106;
+    const rand = () => {
+      seed = (seed + 0x6d2b79f5) | 0;
+      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    let pixels: Pixel[] = [], leaves: Pixel[] = [], cell = 0, dpr = 1, boxW = 0, boxH = 0;
+    // Lay the logo on a grid of cells: one sample per cell, its colour picks the kind of pixel.
+    const build = () => {
+      const box = canvas.getBoundingClientRect();
+      if (!box.width || !box.height) return false;
+      boxW = box.width; boxH = box.height;
+      dpr = Math.min(2, devicePixelRatio || 1);
+      canvas.width = Math.round(boxW * dpr);
+      canvas.height = Math.round(boxH * dpr);
+      const tall = boxH * 0.8;
+      cell = Math.max(4, Math.min(9, tall / 22));
+      const rows = Math.round(tall / cell), cols = Math.round((rows * W) / H);
+      const grid = document.createElement("canvas");
+      grid.width = cols; grid.height = rows;
+      const g = grid.getContext("2d", { willReadFrequently: true })!;
+      g.scale(cols / W, rows / H);
+      for (const [fill, d, rule] of shapes) { g.fillStyle = fill; g.fill(new Path2D(d), rule); }
+      const data = g.getImageData(0, 0, cols, rows).data;
+      const left = Math.round(cell * 0.5), top = Math.round((boxH - rows * cell) / 2);
+      seed = 20261106;
+      pixels = [];
+      for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) {
+        const k = (j * cols + i) * 4;
+        if (data[k + 3] < 110) continue;
+        const [r, gr, b] = [data[k], data[k + 1], data[k + 2]];
+        const kind = b > 150 && r < 120 ? 1 : gr > 170 ? 0 : 2;
+        const roll = rand();
+        const hx = left + i * cell, hy = top + j * cell;
+        pixels.push({ hx, hy, x: hx, y: hy, vx: 0, vy: 0, kind, shade: roll < 0.18 ? 0 : roll < 0.88 ? 1 : 2, free: 0 });
+      }
+      leaves = pixels.filter((p) => p.kind < 2);
+      return true;
+    };
+
+    // Pointer in canvas pixels; null when away.
+    let pointer: [number, number] | null = null;
+    const at = (e: PointerEvent): [number, number] => {
+      const box = canvas.getBoundingClientRect();
+      return [e.clientX - box.left, e.clientY - box.top];
+    };
+    const drift: { x: number; y: number; age: number; kind: number; vx: number; vy: number }[] = [];
+    let clock = 0, wake = 0, nextDrift = 0;
+
+    const step = (dt: number) => {
+      clock += dt;
+      const reach = cell * 9, push = 5200;
+      let moving = false;
+      for (const p of pixels) {
+        if (p.free > 0) p.free -= dt;
+        else {
+          p.vx += (-90 * (p.x - p.hx) - 11 * p.vx) * dt;
+          p.vy += (-90 * (p.y - p.hy) - 11 * p.vy) * dt;
+        }
+        if (pointer) {
+          const dx = p.x - pointer[0], dy = p.y - pointer[1], d = Math.hypot(dx, dy);
+          if (d < reach && d > 0.01) {
+            const f = (push * (1 - d / reach) ** 2) / d;
+            p.vx += dx * f * dt; p.vy += dy * f * dt;
+          }
+        }
+        p.x += p.vx * dt; p.y += p.vy * dt;
+        if (!moving && (Math.abs(p.vx) + Math.abs(p.vy) > 4 || Math.abs(p.x - p.hx) + Math.abs(p.y - p.hy) > 0.6)) moving = true;
+      }
+      // Now and then a leaf pixel comes off and drifts away to the right, sinking and fading.
+      if (clock > nextDrift) {
+        nextDrift = clock + 0.35 + rand() * 0.6;
+        const from = leaves[Math.floor(rand() * leaves.length)];
+        if (from) drift.push({ x: from.x, y: from.y, age: 0, kind: from.kind, vx: 26 + rand() * 30, vy: -6 + rand() * 10 });
+      }
+      for (const d of drift) { d.age += dt; d.vx += 6 * dt; d.vy += 5 * dt; d.x += d.vx * dt; d.y += d.vy * dt + Math.sin(clock * 2.4 + d.age * 3) * 0.25; }
+      while (drift.length && drift[0].age > 3.2) drift.shift();
+      return moving;
+    };
+
+    const draw = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const size = Math.round((cell - Math.max(1, cell * 0.16)) * dpr);
+      let fill = "", alpha = -1;
+      const square = (x: number, y: number, color: string, a: number, scale = 1) => {
+        if (color !== fill) ctx.fillStyle = fill = color;
+        if (a !== alpha) ctx.globalAlpha = alpha = a;
+        const s = Math.max(1, Math.round(size * scale));
+        ctx.fillRect(Math.round(x * dpr + (size - s) / 2), Math.round(y * dpr + (size - s) / 2), s, s);
+      };
+      const tick = Math.floor(clock * 1.4);
+      pixels.forEach((p, n) => {
+        // The resting wave: one or two pixels up and down, running along the logo.
+        const wave = reduce ? 0 : Math.round(Math.sin(clock * 1.5 - p.hx * 0.022) * 1.4);
+        const away = Math.abs(p.x - p.hx) + Math.abs(p.y - p.hy);
+        // Pixels knocked out of place glow in their light shade until they are home.
+        const shade = away > cell * 0.8 ? 0 : p.shade;
+        const dim = !reduce && ((n * 73856093) ^ ((tick + (n % 5)) * 19349663)) % 23 === 0 ? 0.55 : 1;
+        square(p.x, p.y + wave, SHADES[p.kind][shade], dim);
+      });
+      for (const d of drift) square(d.x, d.y, SHADES[d.kind][d.age < 1 ? 1 : 0], Math.max(0, 1 - d.age / 3.2), 0.8 - d.age * 0.12);
+      ctx.globalAlpha = 1;
+    };
+
+    let raf = 0, last = 0, seen = false;
+    const frame = (now: number) => {
+      raf = requestAnimationFrame(frame);
+      const busy = pointer || now < wake;
+      // Full rate while pixels move, half rate for the resting wave.
+      if (!busy && last && now - last < 31) return;
+      const moving = step(last ? Math.min(0.05, (now - last) / 1000) : 0);
+      if (moving) wake = now + 300;
+      last = now;
+      draw();
+    };
+    const start = () => { if (!raf && !reduce && seen && !document.hidden) { last = 0; raf = requestAnimationFrame(frame); } };
+    const stop = () => { cancelAnimationFrame(raf); raf = 0; };
+    new ResizeObserver(() => { if (build()) draw(); }).observe(canvas);
+    if (!reduce) {
+      new IntersectionObserver(([entry]) => { seen = entry.isIntersecting; if (seen) start(); else stop(); }).observe(canvas);
+      document.addEventListener("visibilitychange", () => (document.hidden ? stop() : start()));
+      canvas.addEventListener("pointermove", (e) => { pointer = at(e); wake = performance.now() + 600; });
+      canvas.addEventListener("pointerleave", () => { pointer = null; });
+      canvas.addEventListener("pointercancel", () => { pointer = null; });
+      // A click or tap blows the nearby pixels apart; they fly free for a moment, then swing home.
+      canvas.addEventListener("pointerdown", (e) => {
+        const [px, py] = at(e), reach = cell * 22;
+        for (const p of pixels) {
+          const dx = p.x - px, dy = p.y - py, d = Math.hypot(dx, dy) || 1;
+          if (d > reach) continue;
+          const kick = 520 * (1 - d / reach) * (0.6 + rand() * 0.8);
+          p.vx += (dx / d) * kick + (rand() - 0.5) * 120;
+          p.vy += (dy / d) * kick + (rand() - 0.5) * 120 - 60;
+          p.free = 0.18 + rand() * 0.3;
+        }
+        wake = performance.now() + 1500;
+        if (e.pointerType !== "mouse") pointer = null;
+      });
+    }
+  }
+</script>
+<style>
+  .footer { max-width:1280px; margin:auto; padding:48px var(--gutter) 28px; display:grid; grid-template-columns:minmax(0, 1fr) auto; align-items:end; gap:32px 64px; font-size:13px; line-height:1.45; }
+  .footer-art { min-width:0; height:260px; }
+  .footer-art canvas { display:block; width:100%; height:100%; touch-action:pan-y; cursor:crosshair; }
+  .footer-links { display:grid; grid-template-columns:repeat(3, max-content); gap:24px 56px; padding-bottom:22px; }
+  .footer-title { margin:0 0 10px; color:#66746c; font-size:12px; }
+  .footer-group ul { display:grid; gap:7px; margin:0; padding:0; list-style:none; }
+  .footer-group a, .footer-group :global(.analytics-settings) { padding:0; border:0; background:none; color:var(--ink); font:inherit; font-size:13px; text-decoration:none; cursor:pointer; }
+  .footer-base { grid-column:1 / -1; display:flex; flex-wrap:wrap; justify-content:space-between; gap:6px 24px; padding-top:18px; border-top:1px solid var(--line); color:#66746c; font-size:12px; }
+  .footer-base p { margin:0; }
+  .footer-base a { color:var(--ink); text-decoration:none; }
+  .footer a:hover, .footer-group :global(.analytics-settings:hover) { color:var(--link); text-decoration:none; }
+  @media (max-width:760px) {
+    .footer { grid-template-columns:1fr; padding-top:28px; gap:22px; }
+    .footer-art { height:160px; }
+    .footer-links { grid-template-columns:repeat(2, max-content); gap:22px 40px; padding-bottom:0; }
+    .footer-base { flex-direction:column; }
+  }
+</style>

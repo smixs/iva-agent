@@ -1,6 +1,7 @@
 ---
 import "../styles/global.css";
 import Analytics from "../components/Analytics.astro";
+import Footer from "../components/Footer.astro";
 
 import type { Lang } from "../lib/copy";
 const {
@@ -34,38 +35,6 @@ const nav = isRu
   ? ["Примеры задач", "Сервисы", "Цена", "Установка"]
   : ["Features", "Services", "Price", "Install"];
 const links = ["features", "connections", "price", "install"];
-const footer = isRu
-  ? [
-      "Документация",
-      "Вопросы",
-      "История изменений",
-      "О команде",
-      "Приватность",
-      "Бренд",
-      "MIT",
-      "English",
-    ]
-  : [
-      "Docs",
-      "FAQ",
-      "Changelog",
-      "About the team",
-      "Privacy",
-      "Brand",
-      "MIT",
-      "Русский",
-    ];
-const prefix = isRu ? "/ru" : "";
-const footerLinks = [
-  prefix + "/docs/",
-  home + "#faq",
-  "https://github.com/smixs/iva-agent/blob/main/CHANGELOG.md",
-  prefix + "/about/",
-  "/privacy/",
-  "/docs/brand/",
-  "https://github.com/smixs/iva-agent/blob/main/LICENSE",
-  isRu ? enPath : ruPath,
-];
 ---
 
 <!doctype html>
@@ -201,34 +170,7 @@ const footerLinks = [
     <main id="main">
       <slot />
     </main>
-    <footer class="footer">
-      <div class="footer-brand">
-        <a href={home} aria-label={isRu ? "Ива, главная" : "Iva home"}>
-          <img
-            src="/brand/logo-light.svg"
-            alt="IVA"
-            width="104"
-            height="48"
-            loading="lazy"
-            decoding="async"
-          />
-        </a>
-      </div>
-      <nav aria-label={isRu ? "Ссылки в подвале" : "Footer links"}>
-        {footer.map((n, i) => (
-          <a href={footerLinks[i]}>{n}</a>
-        ))}
-      </nav>
-      <p>© {new Date().getFullYear()} Majento · {isRu ? "Ташкент" : "Tashkent"} · MIT</p>
-      <p class="company-link">
-        {isRu
-          ? "Разработка ИИ-систем для компаний:"
-          : "Custom AI systems for companies:"}{" "}
-        <a href="https://majento.ai/?utm_source=iva-agent.com&amp;utm_medium=referral&amp;utm_campaign=ecosystem">
-          Majento
-        </a>
-      </p>
-    </footer>
+    <Footer lang={lang} home={home} other={isRu ? enPath : ruPath} />
     <Analytics lang={lang} />
     <script>
       const menu = document.querySelector<HTMLElement>("#mobile-nav")!;
