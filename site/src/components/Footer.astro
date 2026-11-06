@@ -47,10 +47,11 @@ const groups: [string, [string, string, string?][]][] = [
 <script>
   // Along the bottom of the footer lies a band of square pixels, green on top, blue and darker
   // below, level but for a cell here and there. Out of it thin shoots spring up all the time like
-  // willow twigs, one column of pixels each, tapering to a point; they stand a moment and sink
-  // back, and the tip of many comes off and floats up, swaying and fading. The pointer near the
-  // band makes shoots spring up under it and floating pixels shy away from it; a click or tap on
-  // the footer sends up a burst. Runs only on screen; with reduced motion it stands still.
+  // willow twigs, one column of pixels each, tapering to a point, a tall one with two or three
+  // shorter ones stepping down beside it; they stand a moment and sink back, and the tip of many
+  // comes off and floats up, slowly, swaying and fading. The pointer near the band makes shoots
+  // spring up under it and floating pixels shy away from it; a click or tap on the footer sends
+  // up a burst. Runs only on screen; with reduced motion it stands still.
   const footer = document.querySelector<HTMLElement>("[data-footer]");
   const canvas = document.querySelector<HTMLCanvasElement>("[data-footer-wave]");
   if (footer && canvas) {
@@ -73,9 +74,10 @@ const groups: [string, [string, string, string?][]][] = [
       : depth < 7 ? BLUE[h < 0.55 ? 1 : 2]
       : h < 0.15 ? BLUE[0] : DEEP[h < 0.6 ? 0 : 1];
 
-    // Shoots: a column each, springing up fast, standing a moment, sinking back slower; some bend
-    // a cell aside near the top. Heights are in cells above the band.
-    type Shoot = { i: number; peak: number; born: number; rise: number; hold: number; fall: number; lean: number; bend: number; blue: boolean; tipped: boolean };
+    // Shoots: a column each, springing up, standing a moment, sinking back slower; some bend a cell
+    // aside near the top, and the tip comes off with its own chance. Heights are in cells above
+    // the band.
+    type Shoot = { i: number; peak: number; born: number; rise: number; hold: number; fall: number; lean: number; bend: number; blue: boolean; tip: number; tipped: boolean };
     const shoots: Shoot[] = [];
     let W = 0, H = 0, dpr = 1, cell = 10, band = 150, cols = 0;
     const resize = () => {
@@ -90,8 +92,11 @@ const groups: [string, [string, string, string?][]][] = [
       if (n !== cols) {
         cols = n;
         shoots.length = 0;
-        // Standing still, a fixed scatter of shoots at their full height.
-        if (reduce) for (let i = 0; i < cols; i++) if (hash(i, 11) < 0.14) shoots.push({ i, peak: 2 + Math.floor(hash(i, 12) * 8), born: 0, rise: 1, hold: 1, fall: 1, lean: hash(i, 13) < 0.3 ? 1 : 0, bend: 0.6, blue: hash(i, 14) < 0.3, tipped: true });
+        // Standing still, a fixed scatter of little staircases at their full height.
+        if (reduce) for (let i = 0; i < cols; i++) if (hash(i, 11) < 0.06) {
+          const blue = hash(i, 14) < 0.3;
+          for (let k = 0, h = 4 + Math.floor(hash(i, 12) * 8); k < 4 && h > 0; k++, h = Math.floor(h * 0.6)) shoots.push({ i: i + k, peak: h, born: 0, rise: 1, hold: 1, fall: 1, lean: 0, bend: 1, blue, tip: 0, tipped: true });
+        }
       }
       return true;
     };
@@ -99,9 +104,25 @@ const groups: [string, [string, string, string?][]][] = [
     // changes now and then, and a slow rise and fall along it, in whole cells.
     const ground = (i: number, t: number) =>
       Math.max(2, Math.round((band * 0.3) / cell + 0.9 * Math.sin((i / 31) * 6.283 + t * 0.4) + (hash(i, Math.floor(t * 0.9 + hash(i, 5) * 9)) < 0.3 ? 1 : 0)));
-    const sprout = (i: number, t: number, tall = 1) => {
-      if (i < 0 || i >= cols || shoots.length > 180) return;
-      shoots.push({ i, peak: Math.max(2, Math.round((2 + 11 * rand() ** 1.6) * tall)), born: t, rise: 0.1 + 0.12 * rand(), hold: 0.05 + 0.25 * rand(), fall: 0.45 + 0.5 * rand(), lean: rand() < 0.35 ? (rand() < 0.5 ? -1 : 1) : 0, bend: 0.5 + 0.3 * rand(), blue: rand() < 0.3, tipped: false });
+    // A burst: one tall shoot and two or three shorter ones beside it, each a step lower than the
+    // last, on one side or on both, so together they stand as a little staircase. The tall one
+    // goes up first and the steps follow it one after another.
+    const burst = (c: number, t: number, tall = 1) => {
+      if (shoots.length > 240) return;
+      const peak = Math.max(5, Math.round((5 + 10 * rand() ** 1.2) * tall)), blue = rand() < 0.3;
+      const add = (i: number, h: number, delay: number, lean: number, tip: number) => {
+        if (i >= 0 && i < cols) shoots.push({ i, peak: h, born: t + delay, rise: 0.22 + 0.2 * rand(), hold: 0.1 + 0.4 * rand(), fall: 0.9 + 0.9 * rand(), lean, bend: 0.5 + 0.3 * rand(), blue, tip, tipped: false });
+      };
+      add(c, peak, 0, rand() < 0.3 ? (rand() < 0.5 ? -1 : 1) : 0, 0.6);
+      const sides = rand() < 0.45 ? [-1, 1] : [rand() < 0.5 ? -1 : 1];
+      for (const side of sides) {
+        let h = peak;
+        const steps = sides.length === 2 ? 1 + Math.floor(rand() * 2) : 2 + Math.floor(rand() * 2);
+        for (let k = 1; k <= steps && h > 1; k++) {
+          h = Math.max(1, Math.min(h - 1, Math.round(h * (0.45 + 0.25 * rand()))));
+          add(c + side * k, h, 0.08 * k, 0, 0.15);
+        }
+      }
     };
     // Height of a shoot at a moment, in cells; below zero once it has sunk back.
     const height = (s: Shoot, t: number) => {
@@ -128,21 +149,16 @@ const groups: [string, [string, string, string?][]][] = [
     let clock = 0;
     const step = (dt: number) => {
       clock += dt;
-      // New shoots all the time: at any moment about one column in five stands up.
-      spawn += dt * cols * 0.24;
-      while (spawn >= 1) {
-        spawn -= 1;
-        const i = Math.floor(rand() * cols);
-        sprout(i, clock);
-        if (rand() < 0.3) sprout(i + (rand() < 0.5 ? -1 : 1), clock + 0.04, 0.6);
-      }
+      // New bursts all the time: at any moment about one column in three stands up.
+      spawn += dt * cols * 0.045;
+      while (spawn >= 1) { spawn -= 1; burst(Math.floor(rand() * cols), clock); }
       for (let k = shoots.length - 1; k >= 0; k--) {
         const s = shoots[k];
         if (height(s, clock) < 0) { shoots.splice(k, 1); continue; }
         // At the top of its rise the tip of many a shoot comes off and flies on up.
         if (!s.tipped && clock - s.born >= s.rise) {
           s.tipped = true;
-          if (rand() < 0.55) {
+          if (rand() < s.tip) {
             const r = ground(s.i, clock) + s.peak - 1;
             tear(column(s, s.peak - 1) * cell, H - (r + 1) * cell, 70 + rand() * 90, s.lean * 12, (s.blue ? BLUE : GREEN)[0]);
             s.peak -= 1;
@@ -155,27 +171,29 @@ const groups: [string, [string, string, string?][]][] = [
         const ci = pointer[0] / cell, c = Math.round(Math.min(cols - 1, Math.max(0, ci)));
         const above = H - ground(c, clock) * cell - pointer[1];
         const near = above < 0 ? 1 : Math.max(0, 1 - above / 110);
-        budget += near * (4 + run * 0.04) * dt;
-        while (budget >= 1) { budget -= 1; sprout(Math.round(ci + (rand() - 0.5) * 5), clock, 1.2); }
+        budget += near * (1.5 + run * 0.012) * dt;
+        while (budget >= 1) { budget -= 1; burst(Math.round(ci + (rand() - 0.5) * 4), clock, 1.15); }
       }
       // Now and then a pixel comes off the band by itself.
-      if (rand() < dt * Math.max(1, W / 480)) {
+      if (rand() < dt * Math.max(0.5, W / 960)) {
         const i = Math.floor(rand() * cols);
         tear(i * cell, H - (ground(i, clock) + 1) * cell, 34 + rand() * 50, 0, loose());
       }
-      // Floating pixels rise faster as they go, sway, drift and shy from the pointer.
+      // Floating pixels rise faster as they go, sway, drift and shy from the pointer, all at half
+      // speed, as if in slow motion; the pointer still pushes them off as briskly as at full speed.
+      const md = dt * 0.5;
       for (let k = motes.length - 1; k >= 0; k--) {
         const m = motes[k];
-        m.age += dt;
-        m.vy -= 16 * dt;
-        m.vx += (6 * Math.sin(clock * 0.45 + m.phase) - m.vx * 0.6) * dt;
+        m.age += md;
+        m.vy -= 16 * md;
+        m.vx += (6 * Math.sin(clock * 0.225 + m.phase) - m.vx * 0.6) * md;
         if (pointer) {
           const dx = m.x - pointer[0], dy = m.y - pointer[1], d = Math.hypot(dx, dy);
-          if (d < 90 && d > 0.01) { const f = (2600 * (1 - d / 90) ** 2) / d; m.vx += dx * f * dt; m.vy += dy * f * dt; }
+          if (d < 90 && d > 0.01) { const f = (10400 * (1 - d / 90) ** 2) / d; m.vx += dx * f * md; m.vy += dy * f * md; }
         }
-        m.vx *= 1 - 0.4 * dt; m.vy *= 1 - 0.15 * dt;
-        m.x += m.vx * dt + Math.sin(m.age * 2.3 + m.phase) * 9 * dt;
-        m.y += m.vy * dt;
+        m.vx *= 1 - 0.4 * md; m.vy *= 1 - 0.15 * md;
+        m.x += m.vx * md + Math.sin(m.age * 2.3 + m.phase) * 9 * md;
+        m.y += m.vy * md;
         if (m.age > m.life || m.y < -cell) motes.splice(k, 1);
       }
     };
@@ -247,7 +265,7 @@ const groups: [string, [string, string, string?][]][] = [
       footer.addEventListener("pointerdown", (e) => {
         if ((e.target as Element).closest("a, button")) return;
         const ci = at(e)[0] / cell, c = Math.round(Math.min(cols - 1, Math.max(0, ci)));
-        for (let k = 0; k < 14; k++) sprout(Math.round(ci + (rand() - 0.5) * 12), clock + rand() * 0.15, 1.35);
+        for (let k = 0; k < 4; k++) burst(Math.round(ci + (rand() - 0.5) * 14), clock + rand() * 0.2, 1.3);
         for (let k = 0; k < 18; k++) tear((ci + (rand() - 0.5) * 6) * cell, H - (ground(c, clock) + 1) * cell, 140 + rand() * 200, (rand() - 0.5) * 160, loose());
         wake = performance.now() + 1500;
       });
