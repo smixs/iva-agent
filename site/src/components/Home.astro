@@ -63,7 +63,9 @@ const schema = [
   en="/"
   ru="/ru/"
   schema={schema}
+  intro
 >
+  <Leaves splash />
   <section class="hero section" aria-labelledby="hero-title">
     <div class="hero-copy">
       <h1 id="hero-title" class="hero-heading">
@@ -80,22 +82,17 @@ const schema = [
       <HeroChat lang={lang} />
     </div>
   </section>
-  <Leaves splash />
   <script is:inline>
-    // Opening, once per session: one leaf grows mid-screen and the second unfolds from it; the mark
-    // then flies into its place behind the phone, growing and softening, while the page floats in.
-    // The flight is measured after the web fonts settle, so the target does not move under it.
+    // Opening, once per session (decided in Base.astro before the first paint). In order, never
+    // overlapping: one leaf grows mid-screen and the second opens out of it, turning blue; the mark
+    // flies into its place behind the phone, growing and softening; only then do the phone and the
+    // page come in. The flight is measured after the web fonts settle, so the target stays put.
     (() => {
       const root = document.documentElement;
-      try {
-        if (sessionStorage.getItem("iva-intro") || scrollY > 0 || location.hash || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-        sessionStorage.setItem("iva-intro", "1");
-      } catch { return; }
+      if (root.dataset.intro !== "play") return;
+      try { sessionStorage.setItem("iva-intro", "1"); } catch {}
       const splash = document.querySelector("[data-intro-mark]");
       const leaves = document.querySelector("[data-leaves]");
-      if (!splash || !leaves || !splash.animate) return;
-      root.dataset.intro = "play";
-      const started = performance.now();
       const input = new AbortController();
       const done = () => {
         if (root.dataset.intro === "done") return;
@@ -105,6 +102,16 @@ const schema = [
       };
       // Any scroll, tap or key ends the opening at once: the page never waits on its own show.
       for (const type of ["wheel", "touchstart", "pointerdown", "keydown", "scroll"]) addEventListener(type, done, { passive: true, signal: input.signal });
+      setTimeout(done, 8000);
+      if (!splash || !leaves || !splash.animate) return done();
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      const ended = (animations) => Promise.all(animations.map((a) => a.finished));
+      const land = () => {
+        if (root.dataset.intro !== "fly") return;
+        root.dataset.intro = "land";
+        // The opening ends when the phone and the page have come in.
+        ended(document.getAnimations().filter((a) => /^(iva-intro|v7-phone-rise|v7-fade-in)/.test(a.animationName || ""))).then(done, done);
+      };
       const fly = () => {
         if (root.dataset.intro !== "play") return;
         root.dataset.intro = "fly";
@@ -122,17 +129,12 @@ const schema = [
         splash.animate([
           { transform: `translate(0px, 0px) scale(1) translate(${half}) rotate(0deg) translate(-${half.replace(", ", ", -")})`, filter: "blur(0px)", opacity: 1 },
           { transform: `translate(${to.left - from.left}px, ${to.top - from.top}px) scale(${scale}) translate(${half}) rotate(${turn === "none" ? "0deg" : turn}) translate(-${half.replace(", ", ", -")})`, filter: `blur(${blur / scale}px)`, opacity: art.opacity },
-        ], { duration: 1150, easing: "cubic-bezier(.65,0,.35,1)", fill: "forwards" });
-        // The opening ends when every finite animation of the page has played out.
-        const finite = document.getAnimations().filter((a) => a.effect && a.effect.getComputedTiming().endTime !== Infinity);
-        Promise.all(finite.map((a) => a.finished)).then(done, done);
+        ], { duration: 1000, easing: "cubic-bezier(.65,0,.35,1)", fill: "forwards" }).finished.then(land, done);
       };
-      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-      // The leaves grow and open first (about a second, Leaves.astro), then the mark takes off.
-      Promise.race([document.fonts ? document.fonts.ready : wait(0), wait(1200)])
-        .then(() => wait(Math.max(0, 1180 - (performance.now() - started))))
-        .then(fly, fly);
-      setTimeout(done, 5000);
+      // The second leaf has opened (Leaves.astro) and held for a moment, and the fonts are in.
+      const opened = ended(splash.querySelector(".iva-leaf-b").getAnimations()).then(() => wait(220));
+      const fonts = Promise.race([document.fonts ? document.fonts.ready : wait(0), wait(2500)]);
+      Promise.all([opened, fonts]).then(fly, done);
     })();
   </script>
   <UseCases lang={lang} />

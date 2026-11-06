@@ -330,25 +330,27 @@ code {
   gap: 18px;
   flex-wrap: wrap;
 }
-/* Opening, once per session (see Home.astro): the page settles in around the mark. */
+/* Opening, once per session (Base.astro decides, Home.astro plays it): only the leaf shows while
+   it grows, opens and flies; the page comes in after the mark has landed behind the phone. */
 main {
   overflow-x: clip;
 }
-html[data-intro="play"] :is(.header, .hero-heading, .hero-intro, .hero ~ :not(.iva-splash)) {
+html:is([data-intro="play"], [data-intro="fly"]) :is(.header, .hero-heading, .hero-intro, .hero ~ *, .consent, .footer) {
   opacity: 0;
 }
 /* The heading leads and rises the most, the intro and its button follow with less, the header
-   and the rest of the page only fade in; each start comes sooner after the one before. */
-html[data-intro="fly"] .hero-heading {
+   and the consent bar only fade in; each start comes sooner after the one before. The rest of
+   the page sits below the fold and simply turns on: fading it too costs a dropped frame. */
+html[data-intro="land"] .hero-heading {
   --rise: 14px;
-  animation: iva-intro-rise 800ms cubic-bezier(0.22, 1, 0.36, 1) 260ms both;
+  animation: iva-intro-rise 800ms cubic-bezier(0.22, 1, 0.36, 1) 120ms both;
 }
-html[data-intro="fly"] .hero-intro {
+html[data-intro="land"] .hero-intro {
   --rise: 6px;
-  animation: iva-intro-rise 700ms cubic-bezier(0.22, 1, 0.36, 1) 360ms both;
+  animation: iva-intro-rise 700ms cubic-bezier(0.22, 1, 0.36, 1) 220ms both;
 }
-html[data-intro="fly"] :is(.header, .hero ~ :not(.iva-splash)) {
-  animation: iva-intro-fade 600ms cubic-bezier(0.22, 1, 0.36, 1) 420ms both;
+html[data-intro="land"] :is(.header, .consent) {
+  animation: iva-intro-fade 600ms cubic-bezier(0.22, 1, 0.36, 1) 300ms both;
 }
 @keyframes iva-intro-rise {
   from {

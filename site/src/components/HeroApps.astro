@@ -108,7 +108,7 @@ const tiles = Object.fromEntries(stream.map((id) => [id, [marks[id][1], marks[id
   // The stream starts once the page opening has finished (Home.astro), or right away.
   if (apps && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
     const intro = document.documentElement.dataset.intro;
-    if (intro === "play" || intro === "fly") window.addEventListener("iva:intro-done", start, { once: true });
+    if (intro === "play" || intro === "fly" || intro === "land") window.addEventListener("iva:intro-done", start, { once: true });
     else start();
   }
 </script>

@@ -31,7 +31,7 @@ const { splash = false } = Astro.props as { splash?: boolean };
   /* Phone almost as wide as the screen: the mark turns so both leaves still show beside it. */
   @media (max-width:600px) { .v7-leaves { left:-10cqw; top:-40cqw; width:120cqw; height:182.2cqw; rotate:-20deg; } }
   /* Opening (Home.astro): one leaf grows mid-screen, the second unfolds from it, then the mark
-     flies into this place, growing and softening, while the phone floats up in front of it. */
+     flies into this place, growing and softening; the phone rises in front of it after that. */
   .iva-splash { display:none; }
   :global(html[data-intro="play"]) .iva-splash,
   :global(html[data-intro="fly"]) .iva-splash { display:block; position:fixed; z-index:-1; left:50%; top:50%; height:min(14vh, 112px); aspect-ratio:828 / 1257; translate:-50% -50%; pointer-events:none; }
@@ -44,7 +44,8 @@ const { splash = false } = Astro.props as { splash?: boolean };
   @keyframes iva-leaf-settle { to { opacity:1; } }
   :global(html[data-intro="play"]) .iva-leaf-b { animation:iva-leaf-open 680ms cubic-bezier(.34,1.28,.64,1) 400ms both; }
   @keyframes iva-leaf-grow { from { opacity:0; transform:rotate(10deg) scale(.3); } 30% { opacity:1; } to { opacity:1; transform:none; } }
-  @keyframes iva-leaf-open { from { opacity:0; transform:rotate(-38deg) scale(.9); } 20% { opacity:1; } to { opacity:1; transform:none; } }
+  /* The second leaf comes out of the first still green and turns blue as it opens. */
+  @keyframes iva-leaf-open { from { opacity:0; transform:rotate(-38deg) scale(.9); fill:#a4dc55; } 20% { opacity:1; } 35% { fill:#a4dc55; } to { opacity:1; transform:none; fill:#368ad2; } }
   :global(html[data-intro="play"]) .v7-leaves,
   :global(html[data-intro="fly"]) .v7-leaves { opacity:0; }
 </style>

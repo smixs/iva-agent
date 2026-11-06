@@ -12,6 +12,7 @@ const {
   schema = [],
   noindex = false,
   ruAlternate = true,
+  intro = false,
 } = Astro.props as {
   title: string;
   description: string;
@@ -21,6 +22,7 @@ const {
   schema?: unknown[];
   noindex?: boolean;
   ruAlternate?: boolean;
+  intro?: boolean;
 };
 const isRu = lang === "ru";
 const home = isRu ? "/ru/" : "/";
@@ -72,6 +74,16 @@ const footerLinks = [
     <script is:inline>
       document.documentElement.classList.add("js");
     </script>
+    {intro && (
+      <script is:inline>
+        // The opening (Home.astro) is decided before the first paint, so nothing shows ahead of the
+        // leaf: once per session, not on a link to a section, not with reduced motion, not going back.
+        try {
+          const nav = performance.getEntriesByType("navigation")[0];
+          if (!sessionStorage.getItem("iva-intro") && !location.hash && !matchMedia("(prefers-reduced-motion: reduce)").matches && (!nav || nav.type !== "back_forward")) document.documentElement.dataset.intro = "play";
+        } catch {}
+      </script>
+    )}
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width" />
     <title>{title}</title>
