@@ -21,10 +21,10 @@ export default defineConfig({
       i18n: { defaultLocale: "en", locales: { en: "en", ru: "ru" } },
       serialize(item) {
         const p = new URL(item.url).pathname;
-        if (item.links?.length) {
-          const en = item.links.find((l) => l.lang === "en");
-          if (en) item.links.push({ lang: "x-default", url: en.url });
-        }
+        // The plugin shares one links array between the pages of a pair: copy, never push.
+        const en = item.links?.find((l) => l.lang === "en");
+        if (en && !item.links!.some((l) => l.lang === "x-default"))
+          item.links = [...item.links!, { lang: "x-default", url: en.url }];
         if (p === "/" || p === "/ru/") {
           // The home page is put together from the components, the copy and the data.
           item.lastmod = new Date(
