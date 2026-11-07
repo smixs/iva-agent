@@ -836,14 +836,28 @@ main {
   }
 }
 @media (max-width: 960px) {
+  /* One column from here down. Between 700px and 600px every size moves from its tablet value
+     to its phone value in step with the width, so narrowing the window never makes the page jump. */
   :root {
-    --gutter: 28px;
-    --section-space: 76px;
-    --heading: 38px;
+    --gutter: clamp(22px, calc(22px + (100vw - 600px) * 0.06), 28px);
+    --section-space: clamp(56px, calc(56px + (100vw - 600px) * 0.2), 76px);
+    --display: clamp(34px, calc(34px + (100vw - 600px) * 0.1), 44px);
+    --heading: clamp(26px, calc(26px + (100vw - 600px) * 0.12), 38px);
+    --subheading: clamp(24px, calc(28px - (100vw - 600px) * 0.04), 28px);
+    --body: clamp(17px, calc(18px - (100vw - 600px) * 0.01), 18px);
+    --small: clamp(14px, calc(16px - (100vw - 600px) * 0.02), 16px);
   }
   .header {
-    min-height: 72px;
-    gap: 12px;
+    min-height: clamp(66px, calc(66px + (100vw - 600px) * 0.06), 72px);
+    gap: clamp(8px, calc(8px + (100vw - 600px) * 0.04), 12px);
+    padding-inline: clamp(14px, calc(14px + (100vw - 600px) * 0.14), 28px);
+  }
+  .logo .full-logo {
+    width: clamp(90px, calc(90px + (100vw - 600px) * 0.14), 104px);
+  }
+  .header .button.small {
+    padding-inline: clamp(10px, calc(10px + (100vw - 600px) * 0.08), 18px);
+    font-size: clamp(12.5px, calc(12.5px + (100vw - 600px) * 0.015), 14px);
   }
   .header nav,
   .header-actions .language,
@@ -852,7 +866,7 @@ main {
   }
   .header-actions {
     order: 2;
-    gap: 8px;
+    gap: clamp(4px, calc(4px + (100vw - 600px) * 0.04), 8px);
     margin-left: auto;
   }
   .header .github {
@@ -940,12 +954,12 @@ main {
     font-weight: 600;
   }
   .hero {
-    --hero-phone-width: min(388px, calc(100vw - 44px));
+    --hero-phone-width: min(calc(100vw - 44px), clamp(360px, calc(360px + (100vw - 600px) * 0.28), 388px));
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 24px;
-    padding-top: 24px;
+    gap: clamp(18px, calc(18px + (100vw - 600px) * 0.06), 24px);
+    padding-top: clamp(14px, calc(14px + (100vw - 600px) * 0.1), 24px);
     padding-bottom: 64px;
   }
   .hero-copy {
@@ -956,7 +970,7 @@ main {
     width: 100%;
     max-width: 650px;
     margin: 0;
-    font-size: 46px;
+    font-size: clamp(40px, calc(40px + (100vw - 600px) * 0.06), 46px);
   }
   .hero .hero-visual {
     order: 1;
@@ -1042,34 +1056,7 @@ main {
 }
 @media (max-width: 600px) {
   :root {
-    --gutter: 22px;
-    --section-space: 56px;
     --display: clamp(29px, 8.3vw, 34px);
-    --heading: 26px;
-    --subheading: 28px;
-    --body: 18px;
-    --small: 16px;
-  }
-  .header {
-    min-height: 66px;
-    gap: 8px;
-    padding: 7px 14px;
-  }
-  .logo .full-logo {
-    width: 90px;
-  }
-  .header-actions {
-    gap: 4px;
-  }
-  .header .button.small {
-    padding: 12px 10px;
-    font-size: 12.5px;
-  }
-  .hero {
-    --hero-phone-width: min(360px, calc(100vw - 44px));
-    gap: 18px;
-    padding-top: 14px;
-    padding-bottom: 64px;
   }
   /* As large as the first line allows on one row of the phone: it is 10.12em long. */
   .hero-heading {
