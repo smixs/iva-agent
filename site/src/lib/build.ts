@@ -11,6 +11,7 @@ import path from "node:path";
 import { imageMetadata } from "astro/assets/utils";
 import type { AstroIntegration } from "astro";
 import { docUrl } from "./doc-links.ts";
+import { markdownDescription, plainMarkdown, textLang } from "./seo.ts";
 export function files(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
     e.isDirectory() ? files(path.join(dir, e.name)) : [path.join(dir, e.name)],
@@ -107,20 +108,80 @@ export function copyLegacy(): AstroIntegration {
         const markdown = files("../docs")
           .filter((f) => f.endsWith(".md"))
           .sort();
+        writeFileSync(path.join(out, "llms.txt"), llmsTxt(markdown));
         writeFileSync(
           path.join(out, "llms-full.txt"),
-          markdown
-            .map(
-              (f) =>
-                `# https://iva-agent.com${docUrl(path.relative("../docs", f))}\n\n${readFileSync(f, "utf8")}`,
-            )
-            .join("\n\n---\n\n"),
-        );
-        writeFileSync(
-          path.join(out, "llms.txt"),
-          `# Iva\n\n> Free personal AI assistant for Telegram. Open source, MIT. By Majento, Tashkent.\n\nPrice: free; about $14-15/mo for model and server on the default stack, $0 on top with an existing ChatGPT or Claude subscription.\nPlatforms: Ubuntu/Debian or Mac.\nSix model providers: ChatGPT subscription, Claude Pro/Max subscription, OpenCode Go, Ollama Cloud, OpenRouter, any OpenAI-compatible endpoint.\nMemory: daily logs, nightly weekly/monthly/yearly summaries and cards, plain markdown in your own git. Voice, reminders, daily brief, Watch, goals and helpers.\n\n## Install\n- [Instructions for an AI agent](https://iva-agent.com/install.txt)\n- [Documentation](https://iva-agent.com/docs/)\n- [Full documentation](https://iva-agent.com/llms-full.txt)\n- [GitHub](https://github.com/smixs/iva-agent)\n\n## Guides\n${markdown.map((f) => `- [${path.relative("../docs", f)}](https://iva-agent.com${docUrl(path.relative("../docs", f))})`).join("\n")}\n`,
+          `# Iva: full documentation\n\n> Every Markdown page of the Iva docs (https://iva-agent.com/docs/), one after another. Summary and index: https://iva-agent.com/llms.txt\n\n---\n\n` +
+            markdown
+              .map(
+                (f) =>
+                  `# https://iva-agent.com${docUrl(path.relative("../docs", f))}\n\n${readFileSync(f, "utf8")}`,
+              )
+              .join("\n\n---\n\n"),
         );
       },
     },
   };
+}
+
+// llms.txt (llmstxt.org): what Iva is, in the words of the home page and the docs, and a map of
+// every docs page with its own one-line summary, for AI assistants that answer about Iva.
+function llmsTxt(markdown: string[]): string {
+  const copy = JSON.parse(readFileSync("src/data/copy.json", "utf8"));
+  const usecases = JSON.parse(readFileSync("src/data/usecases.json", "utf8"));
+  const section = (n: number) => copy.en.find((s: any) => s.number === n);
+  const page = (f: string) => {
+    const source = readFileSync(f, "utf8");
+    const title = plainMarkdown(source.match(/^# (.+)$/m)?.[1] || path.basename(f, ".md"));
+    return {
+      relative: path.relative("../docs", f),
+      title,
+      lang: textLang(source),
+      line: `- [${title}](https://iva-agent.com${docUrl(path.relative("../docs", f))}): ${markdownDescription(source, title)}`,
+    };
+  };
+  const pages = markdown.map(page);
+  // Architecture decisions and the method: why Iva is built so, mostly written in Russian.
+  const decision = (p: (typeof pages)[number]) =>
+    p.relative.startsWith("adr/") || (!p.relative.startsWith("ru/") && p.lang === "ru");
+  const english = pages.filter((p) => !p.relative.startsWith("ru/") && !decision(p));
+  const russian = pages.filter((p) => p.relative.startsWith("ru/"));
+  const decisions = pages.filter(decision);
+  const list = (items: typeof pages) => items.map((p) => p.line).join("\n");
+  return `# Iva
+
+> Iva (in Russian: Ива) is an open-source personal AI assistant in Telegram. ${section(0).groups.Description[0]} MIT license. Made by Majento, Tashkent, Uzbekistan.
+
+- Price: Iva is free. The model and server on the default stack run about $14-15/mo; with a ChatGPT or Claude subscription you already have, the model adds $0 on top.
+- Runs on: your own Ubuntu or Debian server, or a Mac that stays on. You talk to Iva through Telegram.
+- Models: ChatGPT subscription, Claude Pro or Max subscription, OpenCode Go, Ollama Cloud, OpenRouter, any OpenAI-compatible endpoint.
+- Memory: a daily log of every conversation; each night Iva turns it into cards and daily, weekly, monthly and yearly summaries. Plain Markdown files in your own git.\n- Also: voice messages, reminders, a daily brief, Watch, goals and helpers.
+- Install: send an AI coding agent (Claude Code or Codex) on your server or Mac the phrase "Install Iva for me, instructions: https://iva-agent.com/install.txt".
+
+## Site
+- [Iva: personal AI assistant in Telegram](https://iva-agent.com/): the home page in English
+- [Ива: личный AI ассистент в телеграм](https://iva-agent.com/ru/): the home page in Russian
+- [Who builds Iva: Majento](https://iva-agent.com/about/): the team behind Iva
+- [Source code on GitHub](https://github.com/smixs/iva-agent): MIT license, changelog, issues
+
+## What Iva does
+${usecases.en.rows.map((r: any) => `- ${r.title}: ${plainMarkdown(r.text)}`).join("\n")}
+
+## FAQ
+${section(10).faq.map((f: any) => `- ${f.question} ${plainMarkdown(f.answer)}`).join("\n")}
+
+## Install
+- [Instructions for an AI agent](https://iva-agent.com/install.txt): the text Claude Code or Codex follows to install Iva
+- [Install guide](https://iva-agent.com/docs/install/): the same steps for a person
+
+## Docs
+${list(english)}
+
+## Документация на русском
+${list(russian)}
+
+## Optional
+- [Full documentation in one file](https://iva-agent.com/llms-full.txt): every docs page above, in Markdown
+${list(decisions)}
+`;
 }
