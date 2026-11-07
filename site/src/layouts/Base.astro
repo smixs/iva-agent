@@ -14,6 +14,7 @@ const {
   noindex = false,
   ruAlternate = true,
   intro = false,
+  contentLang,
 } = Astro.props as {
   title: string;
   description: string;
@@ -24,13 +25,23 @@ const {
   noindex?: boolean;
   ruAlternate?: boolean;
   intro?: boolean;
+  // The language of the page's text when it differs from the site chrome around it.
+  contentLang?: Lang;
 };
 const isRu = lang === "ru";
 const home = isRu ? "/ru/" : "/";
 const canonical = new URL(Astro.url.pathname, Astro.site);
 const enPath = en || Astro.url.pathname.replace(/^\/ru\//, "/");
 const ruPath = ru || (enPath === "/privacy/" ? "/privacy/" : "/ru" + enPath);
-const og = `/media/og-${lang}.png`;
+const og = new URL(`/media/og-${lang}.png`, Astro.site);
+// The page in the other language, if there is one: hreflang pairs, og:locale:alternate.
+const paired = ruAlternate && !noindex;
+const locale = (l: Lang) => (l === "ru" ? "ru_RU" : "en_US");
+const textLang = contentLang || lang;
+// Describes the share picture (media/og-*.png): the IVA logo and the product line.
+const ogAlt = isRu
+  ? "IVA: личный AI ассистент в телеграм, iva-agent.com"
+  : "IVA: personal AI assistant in Telegram, iva-agent.com";
 const nav = isRu
   ? ["Примеры задач", "Сервисы", "Цена", "Установка"]
   : ["Features", "Services", "Price", "Install"];
@@ -54,30 +65,37 @@ const links = ["features", "connections", "price", "install"];
       </script>
     )}
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{title}</title>
     <meta name="description" content={description} />
     {noindex && <meta name="robots" content="noindex" />}
-    <link rel="canonical" href={canonical} />
-    <link rel="alternate" hreflang="en" href={new URL(enPath, Astro.site)} />
-    {ruAlternate && (
-      <link rel="alternate" hreflang="ru" href={new URL(ruPath, Astro.site)} />
+    {!noindex && <link rel="canonical" href={canonical} />}
+    {paired && (
+      <>
+        <link rel="alternate" hreflang="en" href={new URL(enPath, Astro.site)} />
+        <link rel="alternate" hreflang="ru" href={new URL(ruPath, Astro.site)} />
+        <link rel="alternate" hreflang="x-default" href={new URL(enPath, Astro.site)} />
+      </>
     )}
-    <link
-      rel="alternate"
-      hreflang="x-default"
-      href={new URL(enPath, Astro.site)}
-    />
+    <meta name="theme-color" content="#fbfcf8" />
     <meta property="og:type" content="website" />
+    <meta property="og:site_name" content={isRu ? "Ива" : "Iva"} />
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
-    <meta property="og:url" content={canonical} />
-    <meta property="og:image" content={new URL(og, Astro.site)} />
-    <meta property="og:locale" content={isRu ? "ru_RU" : "en_US"} />
+    {!noindex && <meta property="og:url" content={canonical} />}
+    <meta property="og:image" content={og} />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content={ogAlt} />
+    <meta property="og:locale" content={locale(textLang)} />
+    {paired && <meta property="og:locale:alternate" content={locale(isRu ? "en" : "ru")} />}
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content={title} />
     <meta name="twitter:description" content={description} />
-    <meta name="twitter:image" content={new URL(og, Astro.site)} />
+    <meta name="twitter:image" content={og} />
+    <meta name="twitter:image:alt" content={ogAlt} />
+    <link rel="icon" href="/favicon.ico" sizes="32x32" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/site.webmanifest" />
