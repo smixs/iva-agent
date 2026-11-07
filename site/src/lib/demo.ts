@@ -62,7 +62,7 @@ function mountDemo(root: HTMLElement) {
   const abort = new AbortController();
   const on = { signal: abort.signal };
   // The page opening (Home.astro) runs first; the story starts once the phone has landed.
-  let introHold = ["play", "fly", "land"].includes(document.documentElement.dataset.intro ?? "");
+  let introHold = ["play", "land"].includes(document.documentElement.dataset.intro ?? "");
   if (introHold) {
     const release = () => { if (introHold) { introHold = false; sync(); } };
     window.addEventListener("iva:intro-done", release, { once: true });

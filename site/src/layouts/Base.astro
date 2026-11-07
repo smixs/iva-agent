@@ -45,8 +45,9 @@ const links = ["features", "connections", "price", "install"];
     </script>
     {intro && (
       <script is:inline>
-        // The opening (Home.astro) is decided before the first paint, so nothing shows ahead of the
-        // leaf: once per session, not on a link to a section, not with reduced motion, not going back.
+        // The opening (Home.astro) is decided before the first paint, so the phone waits for its
+        // leaves from the start: once per session, not on a link to a section, not with reduced
+        // motion, not going back.
         try {
           const nav = performance.getEntriesByType("navigation")[0];
           if (!sessionStorage.getItem("iva-intro") && !location.hash && !matchMedia("(prefers-reduced-motion: reduce)").matches && (!nav || nav.type !== "back_forward")) document.documentElement.dataset.intro = "play";

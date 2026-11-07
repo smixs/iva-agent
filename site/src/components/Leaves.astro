@@ -10,20 +10,10 @@ const [green, blue] = [...mark.matchAll(/ d="([^"]+)"/g)].map((m) => m[1]);
 // so once the blue leaf is in place the two read exactly as the mark, with no seam between them.
 const greenLeaf = green.replace(/(438\.24,533\.69)C.+?(642\.28,1256\.71)/, "$1C509.8,773.2 612.2,1008.5 $2");
 if (greenLeaf === green) throw new Error("docs/brand/mark.svg changed: redraw the whole green leaf in Leaves.astro");
-const { splash = false } = Astro.props as { splash?: boolean };
 ---
-{splash ? (
-  <div class="iva-splash" data-intro-mark aria-hidden="true">
-    <svg viewBox="-24 0 828 1257">
-      <path class="iva-leaf-g" fill="#a4dc55" d={greenLeaf} />
-      <path class="iva-leaf-b" fill="#368ad2" d={blue} />
-    </svg>
-  </div>
-) : (
-  <div class="v7-leaves" data-leaves aria-hidden="true">
-    <svg viewBox="-24 0 828 1257"><path fill="#a4dc55" d={green} /><path fill="#368ad2" d={blue} /></svg>
-  </div>
-)}
+<div class="v7-leaves" data-leaves aria-hidden="true">
+  <svg viewBox="-24 0 828 1257"><path class="iva-leaf-g" fill="#a4dc55" d={greenLeaf} /><path class="iva-leaf-b" fill="#368ad2" d={blue} /></svg>
+</div>
 <style>
   /* Placed in the phone wrapper's units: 100cqw is the phone width, the phone is 205cqw tall.
      A large mark stands behind the phone: the green leaf sweeps out on the left and above,
@@ -32,18 +22,13 @@ const { splash = false } = Astro.props as { splash?: boolean };
   .v7-leaves svg { position:absolute; inset:0; width:100%; height:100%; overflow:visible; filter:blur(2.4cqw); opacity:.9; }
   /* Phone almost as wide as the screen: the mark turns so both leaves still show beside it. */
   @media (max-width:600px) { .v7-leaves { left:-10cqw; top:-40cqw; width:120cqw; height:182.2cqw; rotate:-20deg; } }
-  /* Opening (Home.astro): one leaf sprouts mid-screen, the second unfolds from it, then the mark
-     flies into this place, growing, still sharp; the phone floats up in front of it, and only
-     then does the mark soften into the blurred leaves behind the phone. */
-  .iva-splash { display:none; }
-  :global(html[data-intro="play"]) .iva-splash,
-  :global(html[data-intro="fly"]) .iva-splash { display:block; position:fixed; z-index:-1; left:50%; top:50%; height:min(14vh, 112px); aspect-ratio:828 / 1257; translate:-50% -50%; pointer-events:none; }
-  .iva-splash svg { display:block; width:100%; height:100%; overflow:visible; }
-  /* Both leaves turn around the point where their stems meet. Pose to pose, each extreme eased
-     into: the first leaf sprouts from a flat bud, shoots up taller and thinner than its rest,
-     squashes back and settles; the second swings open past its place and back, and the first
-     gives way a little as it does. */
-  .iva-splash path { transform-box:view-box; transform-origin:641px 1256px; }
+  /* Opening, once per session (Home.astro). The page is there from the first frame; only the
+     mark plays, sharp, in its own place before the phone has come: the first leaf sprouts from a
+     flat bud, shoots up taller and thinner than its rest, squashes back and settles; the second
+     swings open past its place and back, turning blue, and the first gives way a little as it
+     does. Both turn around the point where their stems meet. */
+  .v7-leaves path { transform-box:view-box; transform-origin:641px 1256px; }
+  :global(html[data-intro="play"]) .v7-leaves svg { filter:none; opacity:1; }
   :global(html[data-intro="play"]) .iva-leaf-g { animation:iva-leaf-grow 1150ms both; }
   :global(html[data-intro="play"]) .iva-leaf-b { animation:iva-leaf-open 760ms 380ms both; }
   @keyframes iva-leaf-grow {
@@ -66,10 +51,8 @@ const { splash = false } = Astro.props as { splash?: boolean };
     88% { transform:rotate(.8deg); animation-timing-function:cubic-bezier(.45,0,.55,1); }
     100% { opacity:1; transform:none; fill:#368ad2; }
   }
-  :global(html[data-intro="play"]) .v7-leaves,
-  :global(html[data-intro="fly"]) .v7-leaves { opacity:0; }
-  /* The phone floats up in front (HeroChat.astro) and the leaves give way to it and settle; from
-     then on they breathe slowly behind it, a little larger and turned, and back. */
+  /* Then the phone floats up in front (HeroChat.astro) and the leaves give way to it and settle;
+     from then on they breathe slowly behind it, a little larger and turned, and back. */
   :global(html[data-intro="land"]) .v7-leaves { animation:iva-intro-leaves 1100ms cubic-bezier(.45,0,.55,1) 320ms both; }
   /* Sharp until the phone (HeroChat.astro, 1150ms) is nearly up, then dissolving behind it. */
   :global(html[data-intro="land"]) .v7-leaves svg { animation:iva-intro-soften 1000ms cubic-bezier(.45,0,.55,1) 800ms both; }
@@ -78,7 +61,7 @@ const { splash = false } = Astro.props as { splash?: boolean };
     30% { transform:translateY(-1.2%) scale(1.035) rotate(1.1deg); }
     62% { transform:translateY(.3%) scale(.993) rotate(-.35deg); }
   }
-  :global(html:not([data-intro="play"], [data-intro="fly"], [data-intro="land"])) .v7-leaves { animation:iva-leaves-breathe 7s cubic-bezier(.37,0,.63,1) infinite; }
+  :global(html:not([data-intro="play"], [data-intro="land"])) .v7-leaves { animation:iva-leaves-breathe 7s cubic-bezier(.37,0,.63,1) infinite; }
   @keyframes iva-leaves-breathe { 50% { transform:translate(.6%, -.8%) scale(1.03) rotate(.8deg); } }
   @media (prefers-reduced-motion:reduce) { .v7-leaves, .v7-leaves svg { animation:none !important; } }
 </style>

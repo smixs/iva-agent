@@ -326,9 +326,9 @@ const prepared = messages.map(message => {
      tip at the left edge level with the menu button (185cqw); below the phone when centred. */
   .v7-demo { --cue-at:.7s; }
   /* During the page opening the cue and the pulse wait; they start once the phone has landed. */
-  :global(html:is([data-intro="play"], [data-intro="fly"], [data-intro="land"])) .v7-cue { display:none; }
-  :global(html:is([data-intro="play"], [data-intro="fly"], [data-intro="land"])) .v7-demo .v7-menu,
-  :global(html:is([data-intro="play"], [data-intro="fly"], [data-intro="land"])) .v7-demo .v7-menu::after { animation:none; }
+  :global(html:is([data-intro="play"], [data-intro="land"])) .v7-cue { display:none; }
+  :global(html:is([data-intro="play"], [data-intro="land"])) .v7-demo .v7-menu,
+  :global(html:is([data-intro="play"], [data-intro="land"])) .v7-demo .v7-menu::after { animation:none; }
   .v7-cue { position:absolute; z-index:2; inset:0; pointer-events:none; color:#0b73d9; }
   .v7-cue-text { position:absolute; right:calc(100% + 100px); top:calc(185cqw - 47px); font-family:var(--font-hand,"Caveat",cursive); font-weight:600; font-size:27px; line-height:1; white-space:nowrap; animation:v7-cue-write 700ms cubic-bezier(.23,1,.32,1) var(--cue-at) both; }
   .v7-cue-arrow { position:absolute; overflow:visible; fill:none; stroke:currentColor; stroke-width:2.4px; stroke-linecap:round; stroke-linejoin:round; }
@@ -348,10 +348,10 @@ const prepared = messages.map(message => {
   .v7-demo[data-menu-seen="false"] .v7-menu::after { box-shadow:0 0 0 calc(2.5 * var(--vp)) #0589ff; animation:v7-menu-ring 6s cubic-bezier(.23,1,.32,1) calc(var(--cue-at) + 1.3s) infinite; }
   @keyframes v7-menu-breathe { 0%, 13.6%, 100% { transform:scale(1); } 5.6% { transform:scale(1.12); } }
   @keyframes v7-menu-ring { 0% { transform:scale(1); opacity:.7; } 24%, 100% { transform:scale(2); opacity:0; } }
-  /* The phone floats up from below in front of the mark once it has landed (Home.astro): quick out
-     of the deep, a little past its place and tilted, back under it, then still. */
-  :global(html:is([data-intro="play"], [data-intro="fly"])) .v7-device-wrap > :global(.v7-device),
-  :global(html:is([data-intro="play"], [data-intro="fly"])) .v7-caption { opacity:0; }
+  /* The phone floats up from below in front of the mark once its second leaf has opened (Home.astro):
+     quick out of the deep, a little past its place and tilted, back under it, then still. */
+  :global(html[data-intro="play"]) .v7-device-wrap > :global(.v7-device),
+  :global(html[data-intro="play"]) .v7-caption { opacity:0; }
   :global(html[data-intro="land"]) .v7-device-wrap > :global(.v7-device) { transform-origin:50% 100%; animation:v7-phone-rise 1150ms both; }
   :global(html[data-intro="land"]) .v7-caption { animation:v7-fade-in 500ms ease 650ms both; }
   @keyframes v7-phone-rise {
