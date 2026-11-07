@@ -42,8 +42,8 @@ const legacy = ["asks", "scenarios", "userbot"];
         </div>
         <div class="case-art" data-case-art>
           <picture class="case-photo">
-            <source type="image/avif" srcset={`/media/usecases/${row.id}-800.avif 800w, /media/usecases/${row.id}-1600.avif 1600w`} sizes="(max-width: 760px) calc(100vw - 44px), 52vw" />
-            <img src={`/media/usecases/${row.id}-800.webp`} srcset={`/media/usecases/${row.id}-800.webp 800w, /media/usecases/${row.id}-1600.webp 1600w`} sizes="(max-width: 760px) calc(100vw - 44px), 52vw" width="1600" height="1200" alt={row.alt} loading="lazy" decoding="async" />
+            <source type="image/avif" srcset={`/media/usecases/${row.id}-800.avif 800w, /media/usecases/${row.id}-1200.avif 1200w, /media/usecases/${row.id}-1600.avif 1600w`} sizes="(max-width: 760px) calc(100vw - 44px), 52vw" />
+            <img src={`/media/usecases/${row.id}-800.webp`} srcset={`/media/usecases/${row.id}-800.webp 800w, /media/usecases/${row.id}-1200.webp 1200w, /media/usecases/${row.id}-1600.webp 1600w`} sizes="(max-width: 760px) calc(100vw - 44px), 52vw" width="1600" height="1200" alt={row.alt} loading="lazy" decoding="async" />
           </picture>
           {pixels[row.id].map((p) => (
             <span class="case-pixel" aria-hidden="true" style={`left: ${p.x}%; top: ${p.y}%; width: ${p.size}px; height: ${p.size}px; --shade: ${p.shade}; --dx: ${p.dx}px; --dy: ${p.dy}px; --time: ${p.time}s; --delay: ${p.delay}s`} />

@@ -248,7 +248,12 @@
       for (const type of ["pointerleave", "pointercancel"]) canvas.addEventListener(type, () => { pointer = null; });
     }
   };
-  for (const canvas of document.querySelectorAll<HTMLCanvasElement>("canvas[data-willow]")) willow(canvas);
+  // The tree is far down the page: it is built and drawn only as it nears the screen, so the page's
+  // start never waits on it.
+  const near = new IntersectionObserver((entries) => {
+    for (const entry of entries) if (entry.isIntersecting) { near.unobserve(entry.target); willow(entry.target as HTMLCanvasElement); }
+  }, { rootMargin: "100% 0px" });
+  for (const canvas of document.querySelectorAll<HTMLCanvasElement>("canvas[data-willow]")) near.observe(canvas);
 </script>
 <style>
   .willow { width:100%; max-width:580px; aspect-ratio:1; min-width:0; justify-self:center; }

@@ -6,6 +6,7 @@ import Leaves from "./Leaves.astro";
 // import HeroApps from "./HeroApps.astro";
 import { demoCopy, demoMessages, demoMenuCopy } from "../data/demo";
 import { phrase, type Lang } from "../lib/copy";
+import { wall } from "../lib/wall";
 const { lang = "en" } = Astro.props as { lang?: Lang };
 const c = demoCopy[lang];
 const m = demoMenuCopy[lang];
@@ -42,7 +43,7 @@ const prepared = messages.map(message => {
   <Phone>
     {(["iva", "maria", "helga"] as const).map(peer => (
       <div class:list={["v7-screen", peer !== "iva" && "v7-person"]} data-screen={peer} aria-hidden={peer !== "iva" ? "true" : undefined} inert={peer !== "iva"}>
-        <img class="v7-wall" src="/media/tg-wall.webp" width="402" height="858" alt="" decoding="async" aria-hidden="true" />
+        <img class="v7-wall" src={wall.src} srcset={wall.srcset} sizes={wall.sizes} width="402" height="858" alt="" decoding={peer === "iva" ? undefined : "async"} fetchpriority={peer === "iva" ? "high" : undefined} aria-hidden="true" />
         <div class="v7-viewport" data-viewport={peer} role="log" aria-live="off" aria-label={c[peer]} tabindex="0">
           <div class="v7-feed">
             <div class="v7-date">{peer === "maria" ? c.yesterday : c.today}</div>
@@ -218,7 +219,7 @@ const prepared = messages.map(message => {
   .v7-text-block { margin:calc(2 * var(--vp)) 0; }
   /* A photo with a caption: the picture fills the top of the bubble, as in Telegram. */
   .v7-photo { display:block; width:calc(100% + 30 * var(--vp)); max-width:none; height:auto; aspect-ratio:3 / 2; object-fit:cover; margin:calc(-12 * var(--vp)) calc(-15 * var(--vp)) calc(8 * var(--vp)); border-radius:calc(18 * var(--vp)) calc(18 * var(--vp)) calc(4 * var(--vp)) calc(4 * var(--vp)); background:#ece5d8; }
-  .v7-title { font-family:"V7IvaUI","Apple Color Emoji",sans-serif; font-weight:600; font-size:calc(23 * var(--vp)); line-height:calc(29 * var(--vp)); letter-spacing:calc(-.4 * var(--vp)); margin:calc(1 * var(--vp)) 0 calc(5 * var(--vp)); }
+  .v7-title { font-family:"V7IvaUI","V7IvaUI Fallback","Apple Color Emoji",sans-serif; font-weight:600; font-size:calc(23 * var(--vp)); line-height:calc(29 * var(--vp)); letter-spacing:calc(-.4 * var(--vp)); margin:calc(1 * var(--vp)) 0 calc(5 * var(--vp)); }
   .v7-item { display:flex; gap:calc(8 * var(--vp)); margin:calc(5 * var(--vp)) 0; }
   .v7-emoji { width:calc(22 * var(--vp)); flex:none; text-align:center; }
   .v7-bubble,.v7-voice,.v7-venue { position:relative; align-self:flex-start; margin:calc(8 * var(--vp)) calc(12 * var(--vp)) 0; max-width:calc(300 * var(--vp)); padding:calc(8 * var(--vp)) calc(13 * var(--vp)); background:#fff; border-radius:calc(18 * var(--vp)) calc(18 * var(--vp)) calc(18 * var(--vp)) 0; box-shadow:0 calc(.6 * var(--vp)) calc(1 * var(--vp)) #17211d1a; }

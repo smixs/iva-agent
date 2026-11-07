@@ -26,7 +26,7 @@ const groups: [string, [string, string, string?][]][] = [
   <canvas class="footer-wave" data-footer-wave aria-hidden="true"></canvas>
   <div class="footer-inner">
     <a class="footer-brand" href={home} aria-label={ru ? "Ива, главная" : "Iva home"}>
-      <img src="/brand/logo-light.svg" alt="IVA" width="104" height="48" loading="lazy" decoding="async" />
+      <img src="/brand/logo-light.svg" alt="IVA" width="104" height="58" loading="lazy" decoding="async" />
     </a>
     <nav class="footer-links" aria-label={ru ? "Ссылки в подвале" : "Footer links"}>
       {groups.map(([title, links], i) => (
@@ -54,7 +54,7 @@ const groups: [string, [string, string, string?][]][] = [
   // up a burst. Runs only on screen; with reduced motion it stands still.
   const footer = document.querySelector<HTMLElement>("[data-footer]");
   const canvas = document.querySelector<HTMLCanvasElement>("[data-footer-wave]");
-  if (footer && canvas) {
+  const wave = (footer: HTMLElement, canvas: HTMLCanvasElement) => {
     const ctx = canvas.getContext("2d")!;
     const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
     const GREEN = ["#c9ea96", "#a4dc55", "#86c140"], BLUE = ["#d6e7f5", "#62a2dc", "#368ad2"], DEEP = ["#3f78ab", "#2b6291"];
@@ -269,6 +269,11 @@ const groups: [string, [string, string, string?][]][] = [
         wake = performance.now() + 1500;
       });
     }
+  };
+  // The footer is at the very end of the page: the wave is set up only as it nears the screen.
+  if (footer && canvas) {
+    const near = new IntersectionObserver(([entry]) => { if (entry.isIntersecting) { near.disconnect(); wave(footer, canvas); } }, { rootMargin: "100% 0px" });
+    near.observe(footer);
   }
 </script>
 <style>
