@@ -8,9 +8,6 @@ export default defineConfig({
   site: "https://iva-agent.com",
   output: "static",
   trailingSlash: "always",
-  // The styles ride in the page itself: no stylesheet request stands between the HTML and the
-  // first paint (about 14 KB compressed on the home page).
-  build: { inlineStylesheets: "always" },
   i18n: {
     defaultLocale: "en",
     locales: ["en", "ru"],
