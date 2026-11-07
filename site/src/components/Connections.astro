@@ -37,8 +37,7 @@ const rows = [0, 1, 2].map((r) => [...order.filter((_, i) => i % 3 === r), "more
   // Without script or with reduced motion the rows stand still, centred and faded at the edges
   // (CSS). Otherwise each row runs as a loop of its tiles at its own speed, the second one the
   // other way; near either edge a tile shrinks and fades. Only on screen, by the frame clock.
-  const box = document.querySelector<HTMLElement>("[data-connections]");
-  if (box && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
+  const run = (box: HTMLElement) => {
     const rows = [...box.querySelectorAll<HTMLElement>(".connection-row")].map((row, r) => ({
       row,
       tiles: [...row.children] as HTMLElement[],
@@ -85,5 +84,12 @@ const rows = [0, 1, 2].map((r) => [...order.filter((_, i) => i % 3 === r), "more
     new ResizeObserver(() => { measure(); place(0); }).observe(box);
     new IntersectionObserver(([entry]) => { seen = entry.isIntersecting; if (seen) start(); else stop(); }).observe(box);
     document.addEventListener("visibilitychange", () => (document.hidden ? stop() : start()));
+  };
+  // Far below the first screen: the rows start moving only as they near it, so the page's start
+  // never waits on measuring and cloning them.
+  const box = document.querySelector<HTMLElement>("[data-connections]");
+  if (box && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    const near = new IntersectionObserver(([entry]) => { if (entry.isIntersecting) { near.disconnect(); run(box); } }, { rootMargin: "100% 0px" });
+    near.observe(box);
   }
 </script>
