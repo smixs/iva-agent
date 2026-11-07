@@ -10,6 +10,7 @@
   Cache-Control: public, max-age=31536000, immutable
 /*.md
   Content-Type: text/markdown; charset=utf-8
+  X-Robots-Tag: noindex
 /install.txt
   Content-Type: text/plain; charset=utf-8
 /llms*.txt

@@ -17,8 +17,25 @@ export default defineConfig({
   integrations: [
     sitemap({
       filter: (page) => !page.includes("404"),
+      // hreflang pairs in the sitemap, the same as in each page's head: /x/ and /ru/x/ when both exist.
+      i18n: { defaultLocale: "en", locales: { en: "en", ru: "ru" } },
       serialize(item) {
         const p = new URL(item.url).pathname;
+        // The plugin shares one links array between the pages of a pair: copy, never push.
+        const en = item.links?.find((l) => l.lang === "en");
+        if (en && !item.links!.some((l) => l.lang === "x-default"))
+          item.links = [...item.links!, { lang: "x-default", url: en.url }];
+        if (p === "/" || p === "/ru/") {
+          // The home page is put together from the components, the copy and the data.
+          item.lastmod = new Date(
+            Math.max(
+              ...["src/components", "src/data", "src/layouts"].map((d) =>
+                lastModified(d).getTime(),
+              ),
+            ),
+          ).toISOString();
+          return item;
+        }
         let source = "src/components/Home.astro";
         if (p.includes("/docs/")) {
           const relative = p
@@ -39,8 +56,9 @@ export default defineConfig({
             }
             source = "../docs/README.md";
           }
-        } else if (p.includes("about") || p === "/privacy/")
-          source = "../docs/" + p.slice(1) + "index.html";
+        } else if (p.includes("about"))
+          source = p.startsWith("/ru/") ? "src/data/about-ru.html" : "src/data/about-en.html";
+        else if (p === "/privacy/") source = "src/data/privacy.html";
         item.lastmod = lastModified(source).toISOString();
         return item;
       },
