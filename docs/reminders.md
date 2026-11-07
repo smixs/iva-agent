@@ -29,6 +29,8 @@ Everything is read in your timezone — the one Iva is configured with, not the 
 
 Your reminder text is an instruction Iva gives her future self. At the due minute she wakes in a fresh session that knows nothing about the conversation you asked in, does what the text says — with her tools, so «find the news and send it» really goes and finds them — and the code sends the final text of that turn back to the chat and topic where you asked. One turn, one message.
 
+The turn runs on the helper and background model selected in `/menu` (`HELPER_MODEL`); empty means the chat model.
+
 That is why the text is written to stand on its own: «remind me about the standup» and «collect yesterday's tasks and list what is still open» both work, but «do that thing we discussed» will not — by then the discussion is gone.
 
 If the turn cannot run at all (the model provider is down, the agent breaks, the answer comes back empty), the code sends your text back to you exactly as you dictated it, and the row says what broke. So a reminder always arrives, with or without the model.

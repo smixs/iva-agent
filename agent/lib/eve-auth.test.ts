@@ -257,7 +257,7 @@ test("background model choice preserves helper-only rights and requires an exact
     assert.equal(
       usesHelperModel(ctx),
       typeof kind === "string" &&
-        ["helper", "watch", "brief", "insight"].includes(kind),
+        ["helper", "watch", "brief", "insight", "reminder"].includes(kind),
     );
   }
 });

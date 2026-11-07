@@ -165,7 +165,7 @@ What becomes of your work — for the owner's questions about you.
   you wrote and what you sent stay; a command still running is killed, the
   unfinished answer is dropped. A correction does not reach the running turn;
   it starts the next one.
-- Helpers, Watch, Brief and Insight use the helper and background model selected in `/menu`; an empty `HELPER_MODEL` selects the chat model.
+- Helpers, Watch, Brief, Insight and reminders use the helper and background model selected in `/menu`; an empty `HELPER_MODEL` selects the chat model.
 - **Helper** works in a separate background turn. Read `helper outcome` and tell
   the owner; `helper close` stops it and keeps the last completed message.
   A new conversation keeps it running; restart gives interrupted. Repeat with the owner's permission.
