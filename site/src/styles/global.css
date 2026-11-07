@@ -507,6 +507,13 @@ html[data-intro="land"] :is(.header, .consent) {
   padding-top: 72px;
   padding-bottom: 88px;
 }
+/* The full IVA logo heads the offer, as it heads the page. */
+.price-logo {
+  display: block;
+  width: 224px;
+  height: auto;
+  margin: 0 0 32px;
+}
 .price h2 {
   max-width: 10ch;
   margin: 0 0 26px;
@@ -1051,6 +1058,10 @@ html[data-intro="land"] :is(.header, .consent) {
     gap: 28px;
     padding-top: 48px;
     padding-bottom: 56px;
+  }
+  .price-logo {
+    width: 168px;
+    margin-bottom: 24px;
   }
   .price h2 {
     font-size: clamp(44px, 13.5vw, 64px);
