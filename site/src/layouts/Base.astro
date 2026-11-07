@@ -30,7 +30,10 @@ const home = isRu ? "/ru/" : "/";
 const canonical = new URL(Astro.url.pathname, Astro.site);
 const enPath = en || Astro.url.pathname.replace(/^\/ru\//, "/");
 const ruPath = ru || (enPath === "/privacy/" ? "/privacy/" : "/ru" + enPath);
-const og = `/media/og-${lang}.png`;
+const og = `/media/og-${lang}.jpg`;
+const ogAlt = isRu
+  ? "Ива в Telegram на экране смартфона. Личный AI ассистент, бесплатно и навсегда"
+  : "Iva in Telegram on a phone screen. Personal AI assistant, free forever";
 const nav = isRu
   ? ["Примеры задач", "Сервисы", "Цена", "Установка"]
   : ["Features", "Services", "Price", "Install"];
@@ -74,11 +77,15 @@ const links = ["features", "connections", "price", "install"];
     <meta property="og:description" content={description} />
     <meta property="og:url" content={canonical} />
     <meta property="og:image" content={new URL(og, Astro.site)} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content={ogAlt} />
     <meta property="og:locale" content={isRu ? "ru_RU" : "en_US"} />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content={title} />
     <meta name="twitter:description" content={description} />
     <meta name="twitter:image" content={new URL(og, Astro.site)} />
+    <meta name="twitter:image:alt" content={ogAlt} />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/site.webmanifest" />
