@@ -28,9 +28,9 @@ Desktop hero has copy left and large phone right. Mobile keeps the V6 phone fram
 The page below the hero begins directly with four concrete situations, with no generic introductory headline. Each mobile situation presents its heading, short explanation, then the people image; desktop alternates image and text. The page includes existing integration logos, Telegram settings, data security, installation and one fully collapsed FAQ group. Email and Telegram correspondence are named explicitly; reading Telegram chats requires connecting the user’s account.
 
 ## Evidence on Hand
-Approved film source: /Users/majento/dev/tries/2026-10-22-iva-demo-film/src/v6/Film6.tsx and src/v5/Film5.tsx.
+Approved film source: the 2026-10-22 demo film try (Film6.tsx and Film5.tsx), kept outside the repository.
 Existing preview source: site/src and site/public, revision a3725bba.
-Owner interview and proposal: /Users/majento/dev/my/assistant/.scratch/work/site-demo-proposal.md.
+Owner interview and proposal: .scratch/work/site-demo-proposal.md (local, not in git).
 Current task authorises V7 implementation on mini and a temporary try.cloudflare preview.
 
 ## Product Principles
