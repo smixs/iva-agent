@@ -1,22 +1,35 @@
+# iva-agent.com: the site and the docs are public. Search engines and AI assistants
+# are welcome to read, index and cite them. Short summary for language models: /llms.txt
+
 User-agent: *
 Allow: /
 
-User-agent: GPTBot
-Allow: /
-
-User-agent: OAI-SearchBot
-Allow: /
-
-User-agent: ClaudeBot
-Allow: /
-
-User-agent: PerplexityBot
-Allow: /
-
-User-agent: Google-Extended
-Allow: /
-
+# Search engines
+User-agent: Googlebot
+User-agent: Bingbot
 User-agent: YandexBot
+User-agent: Applebot
+User-agent: DuckDuckBot
+Allow: /
+
+# AI search, answers and user-requested fetches
+User-agent: OAI-SearchBot
+User-agent: ChatGPT-User
+User-agent: Claude-SearchBot
+User-agent: Claude-User
+User-agent: PerplexityBot
+User-agent: Perplexity-User
+User-agent: MistralAI-User
+Allow: /
+
+# AI model training
+User-agent: GPTBot
+User-agent: ClaudeBot
+User-agent: Google-Extended
+User-agent: Applebot-Extended
+User-agent: Meta-ExternalAgent
+User-agent: Amazonbot
+User-agent: CCBot
 Allow: /
 
 Sitemap: https://iva-agent.com/sitemap-index.xml

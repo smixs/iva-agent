@@ -14,6 +14,7 @@ const {
   noindex = false,
   ruAlternate = true,
   intro = false,
+  contentLang,
 } = Astro.props as {
   title: string;
   description: string;
@@ -24,13 +25,20 @@ const {
   noindex?: boolean;
   ruAlternate?: boolean;
   intro?: boolean;
+  // The language of the page's text when it differs from the site chrome around it.
+  contentLang?: Lang;
 };
 const isRu = lang === "ru";
 const home = isRu ? "/ru/" : "/";
 const canonical = new URL(Astro.url.pathname, Astro.site);
 const enPath = en || Astro.url.pathname.replace(/^\/ru\//, "/");
 const ruPath = ru || (enPath === "/privacy/" ? "/privacy/" : "/ru" + enPath);
-const og = `/media/og-${lang}.jpg`;
+const og = new URL(`/media/og-${lang}.jpg`, Astro.site);
+// The page in the other language, if there is one: hreflang pairs, og:locale:alternate.
+const paired = ruAlternate && !noindex;
+const locale = (l: Lang) => (l === "ru" ? "ru_RU" : "en_US");
+const textLang = contentLang || lang;
+// Describes the share picture (media/og-*.jpg): Iva's chat on a phone and the price line.
 const ogAlt = isRu
   ? "Ива в Telegram на экране смартфона. Личный AI ассистент, бесплатно и навсегда"
   : "Iva in Telegram on a phone screen. Personal AI assistant, free forever";
@@ -58,37 +66,41 @@ const links = ["features", "connections", "price", "install"];
       </script>
     )}
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{title}</title>
     <meta name="description" content={description} />
     {noindex && <meta name="robots" content="noindex" />}
-    <link rel="canonical" href={canonical} />
-    <link rel="alternate" hreflang="en" href={new URL(enPath, Astro.site)} />
-    {ruAlternate && (
-      <link rel="alternate" hreflang="ru" href={new URL(ruPath, Astro.site)} />
+    {!noindex && <link rel="canonical" href={canonical} />}
+    {paired && (
+      <>
+        <link rel="alternate" hreflang="en" href={new URL(enPath, Astro.site)} />
+        <link rel="alternate" hreflang="ru" href={new URL(ruPath, Astro.site)} />
+        <link rel="alternate" hreflang="x-default" href={new URL(enPath, Astro.site)} />
+      </>
     )}
-    <link
-      rel="alternate"
-      hreflang="x-default"
-      href={new URL(enPath, Astro.site)}
-    />
+    <meta name="theme-color" content="#fbfcf8" />
     <meta property="og:type" content="website" />
+    <meta property="og:site_name" content={isRu ? "Ива" : "Iva"} />
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
-    <meta property="og:url" content={canonical} />
-    <meta property="og:image" content={new URL(og, Astro.site)} />
+    {!noindex && <meta property="og:url" content={canonical} />}
+    <meta property="og:image" content={og} />
+    <meta property="og:image:type" content="image/jpeg" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta property="og:image:alt" content={ogAlt} />
-    <meta property="og:locale" content={isRu ? "ru_RU" : "en_US"} />
+    <meta property="og:locale" content={locale(textLang)} />
+    {paired && <meta property="og:locale:alternate" content={locale(isRu ? "en" : "ru")} />}
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content={title} />
     <meta name="twitter:description" content={description} />
-    <meta name="twitter:image" content={new URL(og, Astro.site)} />
+    <meta name="twitter:image" content={og} />
     <meta name="twitter:image:alt" content={ogAlt} />
+    <link rel="icon" href="/favicon.ico" sizes="32x32" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/site.webmanifest" />
+    <slot name="head" />
 
     {schema.map((item) => (
       <script
@@ -112,7 +124,7 @@ const links = ["features", "connections", "price", "install"];
           src="/brand/logo-light.svg"
           alt="IVA"
           width="104"
-          height="48"
+          height="58"
         />
         <img
           class="mobile-mark"
@@ -127,16 +139,6 @@ const links = ["features", "connections", "price", "install"];
           <a href={home + "#" + links[i]}>{n}</a>
         ))}
       </nav>
-      <button
-        class="mobile-toggle"
-        hidden
-        aria-expanded="false"
-        aria-controls="mobile-nav"
-      >
-        <span class="sr-only">{isRu ? "Меню" : "Menu"}</span>
-        <svg class="menu-open-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h16M4 16h16" /></svg>
-        <svg class="menu-close-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
-      </button>
       <div class="header-actions">
         <a
           class="language"
@@ -159,6 +161,17 @@ const links = ["features", "connections", "price", "install"];
           {isRu ? "Установить" : "Install"}
         </a>
       </div>
+      {/* The toggle sits right of the actions, so it follows them in the source and Tab reads the row in order. */}
+      <button
+        class="mobile-toggle"
+        hidden
+        aria-expanded="false"
+        aria-controls="mobile-nav"
+      >
+        <span class="sr-only">{isRu ? "Меню" : "Menu"}</span>
+        <svg class="menu-open-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h16M4 16h16" /></svg>
+        <svg class="menu-close-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
+      </button>
     </header>
     <nav
       id="mobile-nav"
@@ -186,11 +199,11 @@ const links = ["features", "connections", "price", "install"];
         document.querySelector<HTMLButtonElement>(".mobile-toggle")!;
       menu.hidden = true;
       toggle.hidden = false;
-      function close() {
+      function close(refocus = true) {
         menu.hidden = true;
         menu.classList.remove("is-open");
         toggle.setAttribute("aria-expanded", "false");
-        toggle.focus();
+        if (refocus) toggle.focus();
       }
       toggle.addEventListener("click", () => {
         const open = toggle.getAttribute("aria-expanded") === "true";
@@ -212,10 +225,17 @@ const links = ["features", "connections", "price", "install"];
       menu.querySelectorAll("a").forEach((link) =>
         link.addEventListener("click", (event) => {
           const url = new URL(link.href);
-          close();
-          if (url.pathname === location.pathname && url.hash) {
+          const target =
+            url.pathname === location.pathname && url.hash
+              ? document.querySelector<HTMLElement>(url.hash)
+              : null;
+          close(!target);
+          if (target) {
             event.preventDefault();
-            document.querySelector(url.hash)?.scrollIntoView();
+            target.scrollIntoView();
+            // Tab goes on from the section the link led to, not from the closed menu's toggle.
+            target.tabIndex = -1;
+            target.focus({ preventScroll: true });
             history.pushState(null, "", url.hash);
           }
         }),

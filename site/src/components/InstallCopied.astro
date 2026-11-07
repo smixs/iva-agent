@@ -93,14 +93,16 @@ const motes = [
   const status = document.querySelector<HTMLElement>("[data-copied-status]")!;
   const phrase = card.querySelector<HTMLElement>("[data-copied-phrase]")!;
   const time = card.querySelector<HTMLElement>("[data-copied-time]")!;
-  function show(ok: boolean, text: string) {
+  function show(ok: boolean, text: string, button: HTMLButtonElement) {
     card.dataset.state = ok ? "done" : "manual";
     phrase.textContent = ok ? "" : text;
     // A second copy while the card is up runs its countdown from the start.
     time.style.animation = "none";
     void time.offsetWidth;
     time.style.animation = "";
-    if (!card.matches(":popover-open")) card.showPopover();
+    // The pressed button becomes the card's invoker: Tab goes on from it into the card, and focus
+    // comes back to it when the card closes.
+    if (!card.matches(":popover-open")) card.showPopover({ source: button });
     status.textContent = [...card.querySelectorAll(`.copied-title [data-when="${card.dataset.state}"], .copied-body [data-when="${card.dataset.state}"]`)].map((el) => el.textContent).join(" ");
     if (!ok) {
       const range = document.createRange();
@@ -117,11 +119,11 @@ const motes = [
     const inDemo = Boolean(button.closest("[data-demo]"));
     try {
       await navigator.clipboard.writeText(text);
-      if (!inDemo) show(true, text);
+      if (!inDemo) show(true, text, button);
       button.dispatchEvent(new CustomEvent("iva:copy-result", { bubbles: true, detail: { ok: true, text } }));
       window.dispatchEvent(new CustomEvent("iva:analytics", { detail: { name: "copy_prompt" } }));
     } catch {
-      if (!inDemo) show(false, text);
+      if (!inDemo) show(false, text, button);
       button.dispatchEvent(new CustomEvent("iva:copy-result", { bubbles: true, detail: { ok: false, text } }));
     }
   });

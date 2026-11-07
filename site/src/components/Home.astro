@@ -8,6 +8,9 @@ import Willow from "./Willow.astro";
 import InstallCopied from "./InstallCopied.astro";
 import { homeCopy, rich, phrase, glue, type Lang } from "../lib/copy";
 import { sprite } from "../lib/services";
+import { wall } from "../lib/wall";
+import { website, organization, softwareApplication, faqPage } from "../lib/seo";
+import usecases from "../data/usecases.json";
 const { lang = "en" } = Astro.props as { lang: Lang };
 const ru = lang === "ru";
 const c = Object.fromEntries(
@@ -27,35 +30,14 @@ const headline = group(1, "H1");
 const faq = c[10].faq!;
 const docs = ru ? "/ru/docs/" : "/docs/";
 const schema = [
-  {
-    "@context": "https://schema.org",
-    "@type": "SoftwareApplication",
-    name: "Iva",
-    url: "https://iva-agent.com",
-    applicationCategory: "ProductivityApplication",
-    operatingSystem: "Linux, macOS",
-    description: t(0, "Description"),
-    offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
-    license: "https://opensource.org/license/mit",
-  },
-  {
-    "@context": "https://schema.org",
-    "@type": "Organization",
-    name: "Majento",
-    url: "https://majento.ai",
-    logo: "https://iva-agent.com/brand/mark-512.png",
-    sameAs: ["https://github.com/smixs/iva-agent"],
-  },
-  {
-    "@context": "https://schema.org",
-    "@type": "FAQPage",
-    inLanguage: lang,
-    mainEntity: faq.map((f) => ({
-      "@type": "Question",
-      name: f.question,
-      acceptedAnswer: { "@type": "Answer", text: f.answer.replace(/`/g, "") },
-    })),
-  },
+  website(lang),
+  organization(lang),
+  softwareApplication(
+    lang,
+    t(0, "Description"),
+    usecases[lang].rows.map((row) => row.title),
+  ),
+  faqPage(lang, faq),
 ];
 ---
 
@@ -68,6 +50,7 @@ const schema = [
   schema={schema}
   intro
 >
+  <link slot="head" rel="preload" as="image" href={wall.src} imagesrcset={wall.srcset} imagesizes={wall.sizes} fetchpriority="high" />
   <section class="hero section" aria-labelledby="hero-title">
     <div class="hero-copy">
       <h1 id="hero-title" class="hero-heading">
