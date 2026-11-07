@@ -515,6 +515,22 @@ function mountDemo(root: HTMLElement) {
     setText(announcement, copy.scenes[0]);
     sync();
   }, on);
+  // A control its own press hides or shuts away (a card's answers, disabled for good once one is
+  // chosen; the install question; the last "Next scene"; Iva's chat as another opens) hands the
+  // focus on, so Tab does not start again from the top of the page: the last scene to Replay, the
+  // rest to the chat now on screen. Runs after the handlers above have re-rendered.
+  root.addEventListener("click", event => {
+    const pressed = (event.target as Element).closest<HTMLButtonElement>("button");
+    const active = document.activeElement;
+    if (!pressed || active !== pressed && active !== document.body) return;
+    // Read off the attributes, not the layout: with checkVisibility() here Chrome dropped the
+    // focus from the menu's install button while the copy briefly disabled it.
+    const gone = !pressed.isConnected || !!pressed.closest("[hidden], [inert]")
+      || pressed.disabled && pressed.matches("[data-choice]");
+    if (!gone) return;
+    const chat = root.querySelector<HTMLElement>("[data-screen]:not([inert]) [data-viewport]");
+    (pressed === play ? replay : chat)?.focus({ preventScroll: true });
+  }, on);
   document.addEventListener("visibilitychange", sync, on);
   motion.addEventListener("change", () => {
     reduced = motion.matches;

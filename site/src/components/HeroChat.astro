@@ -368,7 +368,8 @@ const prepared = messages.map(message => {
   .v7-menu-install-button:focus-visible { outline:2px solid #17211d; outline-offset:-4px; }
   .v7-menu-install-button:disabled { cursor:wait; animation:none; }
   @keyframes v7-install-pulse { 0%,100% { transform:scale(1); } 50% { transform:scale(1.02); } }
-  .v7-caption { margin-top:10px; text-align:center; color:var(--ink,#17211d); font-family:inherit; font-size:12px; line-height:1.5; }
+  /* Above the blurred leaves (Leaves.astro, positioned at z-index 0), which reach under the phone on wide screens. */
+  .v7-caption { position:relative; z-index:1; margin-top:10px; text-align:center; color:var(--ink,#17211d); font-family:inherit; font-size:12px; line-height:1.5; }
   .v7-caption p { margin:0; }
   .v7-control-row { display:flex; align-items:center; justify-content:center; gap:14px; min-height:32px; }
   .v7-controls { display:flex; align-items:center; justify-content:center; gap:12px; }
