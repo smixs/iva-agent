@@ -649,6 +649,10 @@ html[data-intro="land"] :is(.header, .consent) {
 .skip:focus {
   top: 10px;
 }
+/* A section reached from the mobile menu takes focus only so Tab goes on from it; no ring. */
+section[tabindex="-1"]:focus {
+  outline: none;
+}
 /* Reviews: clippings of real Telegram messages on a chat-coloured wall, packed in columns. */
 .testimonials {
   padding-top: 40px;

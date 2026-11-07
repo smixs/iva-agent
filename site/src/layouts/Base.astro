@@ -119,16 +119,6 @@ const links = ["features", "connections", "price", "install"];
           <a href={home + "#" + links[i]}>{n}</a>
         ))}
       </nav>
-      <button
-        class="mobile-toggle"
-        hidden
-        aria-expanded="false"
-        aria-controls="mobile-nav"
-      >
-        <span class="sr-only">{isRu ? "Меню" : "Menu"}</span>
-        <svg class="menu-open-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h16M4 16h16" /></svg>
-        <svg class="menu-close-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
-      </button>
       <div class="header-actions">
         <a
           class="language"
@@ -151,6 +141,17 @@ const links = ["features", "connections", "price", "install"];
           {isRu ? "Установить" : "Install"}
         </a>
       </div>
+      {/* The toggle sits right of the actions, so it follows them in the source and Tab reads the row in order. */}
+      <button
+        class="mobile-toggle"
+        hidden
+        aria-expanded="false"
+        aria-controls="mobile-nav"
+      >
+        <span class="sr-only">{isRu ? "Меню" : "Menu"}</span>
+        <svg class="menu-open-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h16M4 16h16" /></svg>
+        <svg class="menu-close-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
+      </button>
     </header>
     <nav
       id="mobile-nav"
@@ -178,11 +179,11 @@ const links = ["features", "connections", "price", "install"];
         document.querySelector<HTMLButtonElement>(".mobile-toggle")!;
       menu.hidden = true;
       toggle.hidden = false;
-      function close() {
+      function close(refocus = true) {
         menu.hidden = true;
         menu.classList.remove("is-open");
         toggle.setAttribute("aria-expanded", "false");
-        toggle.focus();
+        if (refocus) toggle.focus();
       }
       toggle.addEventListener("click", () => {
         const open = toggle.getAttribute("aria-expanded") === "true";
@@ -204,10 +205,17 @@ const links = ["features", "connections", "price", "install"];
       menu.querySelectorAll("a").forEach((link) =>
         link.addEventListener("click", (event) => {
           const url = new URL(link.href);
-          close();
-          if (url.pathname === location.pathname && url.hash) {
+          const target =
+            url.pathname === location.pathname && url.hash
+              ? document.querySelector<HTMLElement>(url.hash)
+              : null;
+          close(!target);
+          if (target) {
             event.preventDefault();
-            document.querySelector(url.hash)?.scrollIntoView();
+            target.scrollIntoView();
+            // Tab goes on from the section the link led to, not from the closed menu's toggle.
+            target.tabIndex = -1;
+            target.focus({ preventScroll: true });
             history.pushState(null, "", url.hash);
           }
         }),
