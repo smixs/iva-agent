@@ -19,6 +19,36 @@
   unicode-range:
     U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
 }
+/* While Geologica loads, Arial stands in at Geologica's size and line metrics, so the swap to the
+   web font moves no text (no layout shift). Only for the glyphs Geologica itself covers. */
+@font-face {
+  font-family: "Geologica Fallback";
+  font-weight: 100 499;
+  src: local("Arial"), local("ArialMT");
+  size-adjust: 104.68%;
+  ascent-override: 93.14%;
+  descent-override: 26.27%;
+  line-gap-override: 0%;
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+0301, U+0304, U+0308, U+0329, U+0400-045F, U+0490-0491, U+04B0-04B1,
+    U+2000-206F, U+20AC, U+2116, U+2122, U+2191, U+2193, U+2212, U+2215,
+    U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Geologica Fallback";
+  font-weight: 500 900;
+  src: local("Arial Bold"), local("Arial-BoldMT");
+  size-adjust: 103.04%;
+  ascent-override: 94.62%;
+  descent-override: 26.69%;
+  line-gap-override: 0%;
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+0301, U+0304, U+0308, U+0329, U+0400-045F, U+0490-0491, U+04B0-04B1,
+    U+2000-206F, U+20AC, U+2116, U+2122, U+2191, U+2193, U+2212, U+2215,
+    U+FEFF, U+FFFD;
+}
 /* Caveat cut down to the glyphs of the menu cue ("нажми меня", "tap me"). */
 @font-face {
   font-family: "Iva Hand";
@@ -54,7 +84,7 @@
   --leaf-ink: #659f14;
   --blue: #368ad2;
   --link: #2468a8;
-  --font: "Geologica", "Avenir Next", sans-serif;
+  --font: "Geologica", "Geologica Fallback", "Avenir Next", sans-serif;
   --font-hand: "Iva Hand", "Caveat", "Segoe Print", cursive;
   --display: clamp(44px, 4.3vw, 62px);
   --heading: clamp(30px, 2.8vw, 40px);
