@@ -688,11 +688,10 @@ html[data-intro="land"] :is(.header, .consent) {
   box-shadow: 0 1px 1.5px rgb(30 50 30 / 0.14);
 }
 .review-name {
-  color: var(--hue);
+  color: var(--hue-ink);
   font-size: 15px;
   font-weight: 650;
   line-height: 1.35;
-  filter: brightness(0.86);
 }
 .review blockquote {
   margin: 3px 0 4px;
@@ -703,7 +702,7 @@ html[data-intro="land"] :is(.header, .consent) {
 }
 .review-source {
   display: block;
-  color: #8a9a8f;
+  color: #6a786e;
   font-size: 12.5px;
   text-align: right;
   text-decoration: none;
