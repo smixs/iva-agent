@@ -183,7 +183,7 @@ const schema =
         <ul>
           {entries.map((e: any) => (
             <li>
-              <a href={docUrl(e.id + ".md")}>{headingOf(e.id)}</a>
+              <a href={docUrl(e.id + ".md")} lang={textLang(headingOf(e.id)) === "ru" ? "ru" : undefined}>{headingOf(e.id)}</a>
             </li>
           ))}
         </ul>
