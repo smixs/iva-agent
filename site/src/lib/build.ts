@@ -65,6 +65,7 @@ export function copyLegacy(): AstroIntegration {
           "sitemap.xml",
           "robots.txt",
           "llms.txt",
+          "site.webmanifest",
         ]);
         for (const file of files("../docs")) {
           const relative = path.relative("../docs", file);

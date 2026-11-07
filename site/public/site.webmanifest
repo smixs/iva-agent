@@ -1,0 +1,25 @@
+{
+  "name": "Iva: personal AI assistant in Telegram",
+  "short_name": "Iva",
+  "description": "Free, open-source personal AI assistant in Telegram, on your own server or Mac.",
+  "lang": "en",
+  "start_url": "/",
+  "scope": "/",
+  "display": "browser",
+  "theme_color": "#fbfcf8",
+  "background_color": "#fbfcf8",
+  "icons": [
+    {
+      "src": "/favicon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/favicon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}
