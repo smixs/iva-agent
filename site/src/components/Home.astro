@@ -175,7 +175,7 @@ const schema = [
         splash.animate(frames, { duration: D, fill: "forwards" }).finished.then(land, done);
         // Overlapping action: as the mark sets off, its leaves swing against each other and settle.
         const swing = (el, deg) => el.animate([0, deg, -deg * 0.45, deg * 0.15, 0].map((d, i) => ({ offset: [0, 0.25, 0.55, 0.8, 1][i], transform: `rotate(${d}deg)`, easing: "cubic-bezier(.45,0,.55,1)" })), { duration: 800, delay: A });
-        for (const el of splash.querySelectorAll(".iva-leaf-g, .iva-leaf-full")) swing(el, 3);
+        swing(splash.querySelector(".iva-leaf-g"), 3);
         swing(splash.querySelector(".iva-leaf-b"), -7);
       };
       // The second leaf has opened (Leaves.astro) and held for a moment, and the fonts are in.
