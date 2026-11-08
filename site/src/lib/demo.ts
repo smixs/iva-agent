@@ -107,7 +107,9 @@ function mountDemo(root: HTMLElement) {
           else {
             const collapse = think.firstElementChild as HTMLElement;
             style(collapse, "opacity", String(swap.a * (.86 + .14 * Math.cos(2 * Math.PI * (f - message.think) / 54))));
-            style(think, "grid-template-rows", `${1 - swap.k}fr`);
+            // The row grows with the arrival spring; only the collapse may shrink it, or the
+            // rising bubble shows as a hard-edged strip for the first frames.
+            if (swap.k > 0) style(think, "grid-template-rows", `${1 - swap.k}fr`);
           }
         }
         if (f >= message.think && f < message.at) thinking = { start: message.think, end: message.at };
