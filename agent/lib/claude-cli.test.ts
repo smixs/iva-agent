@@ -77,7 +77,7 @@ import {
 // но и то, что уехало в CLI.
 const FAKE_CLI = `#!/usr/bin/env node
 import { spawn } from "node:child_process";
-import { closeSync, readFileSync, writeFileSync } from "node:fs";
+import { closeSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 
 const argv = process.argv.slice(2);
 const arg = (name) => {
@@ -103,7 +103,10 @@ function streamText(chunks) {
 
 function dump(extra) {
   if (dumpPath === undefined) return;
-  writeFileSync(dumpPath, JSON.stringify({ argv, settings, system: readFileSync(arg("--system-prompt-file"), "utf8"), frames, pid: process.pid, cwd: process.cwd(), ...extra }));
+  // Целиком или никак: тест читает дамп, пока подделка ещё жива, и пустой файл между
+  // открытием и записью ронял его разбор JSON.
+  writeFileSync(dumpPath + ".tmp", JSON.stringify({ argv, settings, system: readFileSync(arg("--system-prompt-file"), "utf8"), frames, pid: process.pid, cwd: process.cwd(), ...extra }));
+  renameSync(dumpPath + ".tmp", dumpPath);
 }
 
 async function scenario() {
