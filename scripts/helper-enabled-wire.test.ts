@@ -130,7 +130,7 @@ test("real installed framework registry removes only the three automatic task to
     assert.ok(paths.includes(`tools/${kept}.ts`));
   assert.ok(paths.includes("agent.ts"));
 });
-test("enabled tools keep retained schemas and descriptions except the approved helper/goal/schedule additions and current tasks/remind/memory_search definitions", async () => {
+test("enabled tools keep retained schemas and descriptions except the approved helper/goal/schedule additions and current tasks/remind/memory_search/write_card definitions", async () => {
   const previous = Object.values(base.wires)[0];
   const removed = new Set(["agent", "task_cancel", "task_update", "planner"]);
   const tasks = enabled.tools.find((t) => t.name === "tasks");
@@ -139,7 +139,9 @@ test("enabled tools keep retained schemas and descriptions except the approved h
   const revised = new Map(
     enabled.tools
       .filter((t) =>
-        ["bash", "remind", "memory_search", "tasks"].includes(t.name),
+        ["bash", "remind", "memory_search", "tasks", "write_card"].includes(
+          t.name,
+        ),
       )
       .map((t) => [t.name, t]),
   );
@@ -153,6 +155,11 @@ test("enabled tools keep retained schemas and descriptions except the approved h
       '"history"',
     ),
   );
+  assert.ok(
+    JSON.stringify(revised.get("write_card")?.inputSchema).includes(
+      "новой Card обязательны",
+    ),
+  );
   assert.deepEqual(
     enabled.tools.filter(
       (t) => !["helper", "goal", "schedule"].includes(t.name),
@@ -160,7 +167,7 @@ test("enabled tools keep retained schemas and descriptions except the approved h
     previous.tools
       .filter((t) => !removed.has(t.name))
       .map((t) =>
-        t.name === "memory_search"
+        t.name === "memory_search" || t.name === "write_card"
           ? revised.get(t.name)!
           : revised.has(t.name)
             ? { ...t, description: revised.get(t.name)!.description }
