@@ -8,9 +8,9 @@ vault-template/
 .venv-userbot/
 services/telegram-userbot/
 data/
-scripts/autograph/tests/golden/
 CHANGELOG.md
 wt/
 .gauntlet/
 /findings-review.md
 /workbench.md
+scripts/fixtures/claude-cache/

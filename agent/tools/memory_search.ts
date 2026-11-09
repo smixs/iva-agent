@@ -321,7 +321,7 @@ function isVectorIndex(value: unknown): value is Record<string, number[]> {
   );
 }
 
-// Читаем ночной adjacency-граф (autograph graph.py). ASSISTANT_GRAPH_PATH — override для тестов.
+// Читаем ночной adjacency-граф (scripts/memory/graph.ts). ASSISTANT_GRAPH_PATH — override для тестов.
 function loadGraph(): GraphNodes {
   const path =
     process.env.ASSISTANT_GRAPH_PATH ||

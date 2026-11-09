@@ -101,7 +101,7 @@ function printHelp(C: ReturnType<typeof createCliRuntime>["C"]): void {
 ${C.b}Iva CLI${C.x} — manage your personal agent
 
 ${C.b}Commands:${C.x}
-  ${C.c}iva update${C.x}         update: git pull + build + restart
+  ${C.c}iva update${C.x}         update: build the new release beside this one, check it starts, restart
   ${C.c}iva beta${C.x} / ${C.c}stable${C.x}   updates: every accepted change (beta) / releases only
   ${C.c}iva config${C.x}         configure: model, Telegram, Deepgram, TZ, vault
   ${C.c}iva login${C.x} [--browser]  sign in to an OpenAI subscription (ChatGPT) for MODEL_PROVIDER=codex

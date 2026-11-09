@@ -1335,7 +1335,7 @@ if [ "$SETUP_DONE" != true ]; then
   echo
 fi
 echo "  ${c_bold}$(t "Commands (${c_green}iva${c_reset}${c_bold} — from anywhere):" "Команды (${c_green}iva${c_reset}${c_bold} — из любого места):")${c_reset}"
-echo "    iva update        $(t "update (git pull + build + restart)" "обновить (git pull + сборка + рестарт)")"
+echo "    iva update        $(t "update (build the new release, check it starts, restart)" "обновить (сборка нового выпуска, проверка запуска, рестарт)")"
 echo "    iva config        $(t "configure (model/Telegram/Deepgram/TZ/vault)" "настройка (модель/Telegram/Deepgram/TZ/vault)")"
 echo "    iva doctor        $(t "diagnose and auto-fix the install" "диагностика и авто-починка установки")"
 echo "    iva status        $(t "services and timers status" "статус сервисов и таймеров")"
