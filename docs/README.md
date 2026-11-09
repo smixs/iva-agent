@@ -13,6 +13,10 @@ Iva is a self-hosted Telegram AI assistant with layered memory that turns your m
 - [cli.md](cli.md) — Telegram slash commands and the `iva` CLI
 - [menu.md](menu.md) — the `/menu` settings hub: screen map, what applies instantly vs on restart, key intake, character test, memory interview
 - [reminders.md](reminders.md) — how to ask Iva to remind you, one-time and repeating, the minute dispatcher, failed delivery, limits
+- [tasks.md](tasks.md) — tasks and due dates: adding, listing, changing a deadline, marking done
+- [goals.md](goals.md) — a result Iva follows for you until it arrives or its term runs out
+- [helpers.md](helpers.md) — long work continues in a helper while Iva keeps answering in the chat
+- [userbot.md](userbot.md) — the opt-in personal-account proxy: setup, what it can read and send, the anti-ban guardrail
 - [extending.md](extending.md) — skills, MCP connections, custom tools
 - [plugins.md](plugins.md) — plugins: what one is, how to install it, how to write your own, and what you risk
 - [trace.md](trace.md) — the turn journal: what the core records per turn, how to stitch one turn, retention and the content toggle
@@ -22,6 +26,7 @@ Iva is a self-hosted Telegram AI assistant with layered memory that turns your m
 - [philosophy.md](philosophy.md) — skill over code, the thin harness, the wheel principle (Russian only)
 - [adr/](adr/) — the decisions that bind the code: what was chosen, why, and what was rejected (Russian only)
 - [tech-debt.md](tech-debt.md) — known gaps and deferred decisions, tracked in the open
+- [eve.md](eve.md) — building and publishing Iva's copy of eve
 - [brand.md](brand.md) — the IVA logo: colors, variants, clear space and what not to do
 
 Документация на русском: [ru/](ru/)

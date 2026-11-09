@@ -131,4 +131,5 @@ excluded even inside the file directory. MCP client Roots can narrow this bounda
   `send_file`, `forward_messages`) with FloodWait compliance, randomized pacing, and a
   circuit-breaker (3 FloodWaits in 24h → sending pauses).
 - Built on [chigwell/telegram-mcp](https://github.com/chigwell/telegram-mcp) `v3.2.0`
-  (116 tools), pinned in `services/telegram-userbot/requirements.txt`.
+  (116 tools), pinned in `services/telegram-userbot/requirements.in` and hash-locked in
+  `requirements.lock`.

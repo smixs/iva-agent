@@ -83,4 +83,4 @@ Everything that arrives on its own runs on a schedule inside Iva: the Brief twic
 curl -fsSL https://raw.githubusercontent.com/smixs/iva-agent/main/install.sh | bash
 ```
 
-[Quick start](../README.md#quick-start) · [Features](../README.md#features) · [Docs](README.md)
+[Install](../README.md#install) · [Features](../README.md#features) · [Docs](README.md)
