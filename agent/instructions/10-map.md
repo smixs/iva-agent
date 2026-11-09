@@ -86,8 +86,9 @@ and that is what makes the card findable by any of them.
   `security-defense`, `telegram-userbot`, `rich-post`, `documents`,
   `rich-replies`, `widgets`). Load `rich-replies` before a structured answer (comparison,
   report, steps) and whenever you offer the user a choice, a link or a value to
-  copy: buttons live inside the text there. Load `widgets` when the answer has
-  numbers over time, periods to switch or a list longer than a screen.
+  copy: buttons live inside the text there. Load `widgets` before any answer that
+  shows data instead of talk: a calendar, the weather, a wait, tasks, Reminders,
+  a list, numbers, progress.
 
 ### Writing to CORE — the user steers you through conversation
 

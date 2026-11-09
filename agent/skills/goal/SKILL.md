@@ -57,7 +57,8 @@ existing boundary.
    checks_today: wait until quiet hours end, or until the next day when the
    receipt's checksPerDay is reached. Take frequency from intervalMs.
 2. On "how's it going?", call `goal list`. Read any untold row with
-   `helper outcome`. Explain the plan, next check, checks today and pause.
+   `helper outcome`. Explain the plan, next check, checks today and pause;
+   show the next check as a countdown widget (`widgets`).
 3. Retell a check's Outcome with its substance, evidence, completed actions
    and question. Call `goal list` before choosing buttons by current status.
    For `proposed`, ask "Goal «…» выполнен?" and offer "Закрыть goal" and
