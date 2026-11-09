@@ -23,6 +23,10 @@ import {
 } from "../../agent/lib/outbox.ts";
 import { traceOutbox, type TraceScope } from "../../agent/lib/trace.ts";
 import { parseTelegramDelivery } from "../../agent/lib/telegram-delivery.ts";
+import {
+  TELEGRAM_WIDGETS,
+  WIDGET_API_BASE,
+} from "../../agent/lib/telegram-widget.ts";
 import { classifyDeliverStatus } from "./deliver-policy.ts";
 import { screenPayload } from "./telegram-buttons.ts";
 
@@ -107,14 +111,14 @@ async function post(
   fetchImpl: FetchImpl,
 ): Promise<PostAck> {
   try {
-    const res = await fetchImpl(
-      `https://api.telegram.org/bot${bot}/${method}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      },
-    );
+    // sendWidget (Bot API 10.4) есть пока только в beta Bot API.
+    const base =
+      method === "sendWidget" ? WIDGET_API_BASE : "https://api.telegram.org";
+    const res = await fetchImpl(`${base}/bot${bot}/${method}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
     if (res.ok) return { ok: true };
     const text = await res.text();
     // 400 = Telegram не распарсил HTML: единственный статус, где повтор без тегов помогает.
@@ -199,6 +203,24 @@ function messageTransport(
       });
       return ack.ok || ack.retryPlain ? ack : { ...ack, stop: true };
     },
+    // Виджет Watch, Brief, Insight. Отказ по самому виджету (400, нет метода) — шов шлёт
+    // подпись текстом; сеть, 429 и 5xx после повторов обрывают отчёт, как у HTML-пути.
+    ...(TELEGRAM_WIDGETS === "auto"
+      ? {
+          sendWidget: async (html: string, caption: string) => {
+            const ack = await sendPost("sendWidget", {
+              chat_id: chat,
+              html,
+              ...(caption ? { caption } : {}),
+              ...extra,
+            });
+            if (ack.ok) return ack;
+            return ack.retryable
+              ? { ...ack, stop: true }
+              : { ...ack, retryPlain: false };
+          },
+        }
+      : {}),
     // Повтор без разметки — последний шанс этого чанка. Не вышел и он: дальше по
     // отчёту идти не с чем, каким бы кодом Telegram ни ответил.
     sendPlain: async (text) => {

@@ -1,5 +1,6 @@
 import { restartFailure } from "../systemd-control.ts";
-// Экран «Богатые ответы» (/menu → 💬): тумблер TELEGRAM_RICH_REPLIES.
+// Экран «Богатые ответы» (/menu → 💬): тумблеры TELEGRAM_RICH_REPLIES и TELEGRAM_WIDGETS
+// (виджеты Bot API 10.4 в пузыре, agent/lib/telegram-widget.ts).
 // auto (дефолт) шлёт ответ с таблицей, чек-листом, свёрткой или формулой богатым сообщением
 // Telegram, never держит такие ответы обычным текстом. Константу агент вычисляет при импорте
 // (agent/lib/telegram-rich-replies.ts), поэтому новое значение ждёт перезапуска iva.service —
@@ -10,6 +11,7 @@ import { button, buttonRow, escapeRichText } from "./buttons.ts";
 const SID = "rich";
 const PARENT = "r";
 const VAR = "TELEGRAM_RICH_REPLIES";
+const WIDGETS = "TELEGRAM_WIDGETS";
 
 type Mode = "auto" | "never";
 type MenuState = { awaitText: unknown };
@@ -37,8 +39,9 @@ const backLine = (ctx: MenuContext) =>
 // как есть, чтобы причина отказа лежала в меню, а не искалась в журнале.
 function configured(
   env: Record<string, string | undefined>,
+  name: string = VAR,
 ): Mode | { raw: string } {
-  const raw = (env[VAR] ?? "").trim();
+  const raw = (env[name] ?? "").trim();
   if (raw === "" || raw === "auto") return "auto";
   if (raw === "never") return "never";
   return { raw };
@@ -46,11 +49,20 @@ function configured(
 
 // Экран «режим записан — применить перезапуском?»: обе строки одинаково правят .env, а
 // значение читает процесс агента, который стартует заново.
-async function restartOffer(st: MenuState, ctx: MenuContext, mode: Mode) {
+async function restartOffer(
+  st: MenuState,
+  ctx: MenuContext,
+  mode: Mode,
+  name: string = VAR,
+) {
   const label =
-    mode === "auto"
-      ? ctx.tr("rich messages", "богатые сообщения")
-      : ctx.tr("plain text", "обычный текст");
+    name === WIDGETS
+      ? mode === "auto"
+        ? ctx.tr("widgets on", "виджеты включены")
+        : ctx.tr("widgets off", "виджеты выключены")
+      : mode === "auto"
+        ? ctx.tr("rich messages", "богатые сообщения")
+        : ctx.tr("plain text", "обычный текст");
   const text = [
     `# ${ctx.tr("💬 Rich replies", "💬 Богатые ответы")}`,
     ctx.tr(
@@ -79,6 +91,9 @@ export default {
     const invalid = typeof current === "string" ? null : current.raw;
     const mode = typeof current === "string" ? current : null;
     const mark = (value: Mode) => (mode === value ? " ✓" : "");
+    const widgets = configured(env, WIDGETS);
+    const widgetsInvalid = typeof widgets === "string" ? null : widgets.raw;
+    const widgetsMark = (value: Mode) => (widgets === value ? " ✓" : "");
     const text = [
       `# ${ctx.tr("💬 Rich replies", "💬 Богатые ответы")}`,
       ctx.tr(
@@ -103,6 +118,28 @@ export default {
           `iva_menu:${SID}:set:never`,
         ),
       ]),
+      ctx.tr(
+        "Widgets: Iva draws a live card right in the message: a chart, tabs, a list you can sort. Telegram apps without widgets show its caption.",
+        "Виджеты: Ива рисует живую карточку прямо в сообщении: график, вкладки, список с сортировкой. Приложения Telegram без виджетов показывают её подпись.",
+      ),
+      ...(widgetsInvalid === null
+        ? []
+        : [
+            ctx.tr(
+              `⚠️ .env holds ${WIDGETS}=${escapeRichText(widgetsInvalid)} — Iva won't start on that value. Pick one of the two below.`,
+              `⚠️ В .env стоит ${WIDGETS}=${escapeRichText(widgetsInvalid)} — с таким значением Ива не стартует. Выбери один из двух.`,
+            ),
+          ]),
+      buttonRow([
+        button(
+          `${ctx.tr("Widgets on", "Виджеты вкл")}${widgetsMark("auto")}`,
+          `iva_menu:${SID}:w:auto`,
+        ),
+        button(
+          `${ctx.tr("Widgets off", "Виджеты выкл")}${widgetsMark("never")}`,
+          `iva_menu:${SID}:w:never`,
+        ),
+      ]),
       backLine(ctx),
     ].join("\n\n");
     return { text };
@@ -114,6 +151,12 @@ export default {
       if (value !== "auto" && value !== "never") return ctx.show(st, SID);
       await upsertEnv(ctx.deps.envPath, { [VAR]: value });
       return restartOffer(st, ctx, value);
+    }
+    if (verb === "w") {
+      const value = args[0];
+      if (value !== "auto" && value !== "never") return ctx.show(st, SID);
+      await upsertEnv(ctx.deps.envPath, { [WIDGETS]: value });
+      return restartOffer(st, ctx, value, WIDGETS);
     }
     if (verb === "rs") {
       if (args[0] === "now") {

@@ -44,7 +44,8 @@ export function resolveContextWindow(
 }
 
 /**
- * Пул моделей аккаунта. Рукопожатие CLI отдаёт route-ид (`resolvedModel`): `claude-fable-5-1`,
+ * Пул моделей аккаунта. Рукопожатие CLI отдаёт route-ид (`resolvedModel`): `claude-fable-5-1`
+ * (Fable 5.2 пикер CLI 2.1.321 ещё не отдаёт),
  * `claude-opus-5-5`, `claude-sonnet-5-5`, `claude-haiku-5-5` (у CLI постарше
  * `claude-haiku-4-5-20251001`) — и он же ложится в CLAUDE_MODEL. CLI же выбирает модель по
  * СВОЕМУ имени, и у миллионного окна оно с суффиксом `[1m]`: `claude -p --model
@@ -62,6 +63,16 @@ const CLAUDE_MODELS: Record<
     readonly adaptive: boolean;
   }
 > = {
+  // Живьём 10.11.2026 (CLI 2.1.321, подписка): пикер этой модели ещё не знает (`Fable` →
+  // `claude-fable-5-1`), но и `claude-fable-5-2`, и `claude-fable-5-2[1m]` отвечают «ок», окно
+  // 1000000. Запрос, подписанный версией CLI 2.1.280, Anthropic отклонил: 400
+  // `claude_code_version_too_old`, нужна 2.1.290 или новее.
+  "claude-fable-5-2": {
+    native: "claude-fable-5-2",
+    window: 1_000_000,
+    adaptive: true,
+  },
+  // Прошлая Fable остаётся по полному имени: у кого она в .env, работает как работала.
   "claude-fable-5-1": {
     native: "claude-fable-5-1",
     window: 1_000_000,
@@ -118,7 +129,7 @@ const CLAUDE_MODELS: Record<
 };
 /** Короткие имена из списка аккаунта и старых .env — те же модели. */
 const CLAUDE_ALIASES: Record<string, string> = {
-  fable: "claude-fable-5-1",
+  fable: "claude-fable-5-2",
   opus: "claude-opus-5-5",
   sonnet: "claude-sonnet-5-5",
   // `haiku` — на 5.5, как у пикера CLI 2.1.293: окно у неё не меньше, чем у 4.5, а живая

@@ -157,7 +157,7 @@ export const CATALOG: Record<string, ProviderCatalogEntry> = {
     baseVar: null,
     keyVar: null,
     modelVar: "CLAUDE_MODEL",
-    def: "claude-fable-5-1",
+    def: "claude-fable-5-2",
     // Картинку смотрит выбранная текстовая модель подписки — своей переменной нет.
     visionVar: null,
     visionDef: null,
@@ -165,7 +165,7 @@ export const CATALOG: Record<string, ProviderCatalogEntry> = {
     // а он может не состояться (нет бинаря, нет входа, чужой вывод). Те же четыре id,
     // что у экрана.
     models: [
-      "claude-fable-5-1",
+      "claude-fable-5-2",
       "claude-opus-5-5",
       "claude-sonnet-5-5",
       "claude-haiku-5-5",

@@ -145,7 +145,7 @@ test("every supported provider keeps its own default model", () => {
       "deepseek-v4-pro",
       "deepseek-v4-pro",
       "gpt-5.5",
-      "claude-fable-5-1",
+      "claude-fable-5-2",
       "openai/gpt-5.1",
     ],
   );
@@ -228,7 +228,7 @@ test("every supported provider keeps its own default vision model", () => {
       "gemma4:31b",
       "qwen3.7-plus",
       "gpt-5.5",
-      "claude-fable-5-1",
+      "claude-fable-5-2",
       "google/gemini-2.5-flash",
     ],
   );
@@ -621,9 +621,9 @@ test("runtime gives claude the subscription transport and the model's context wi
     name: "claude",
     base: "process://claude",
     key: null,
-    model: "claude-fable-5-1",
+    model: "claude-fable-5-2",
     // Подписка мультимодальна: картинку смотрит та же модель.
-    vision: "claude-fable-5-1",
+    vision: "claude-fable-5-2",
     window: 1_000_000,
   });
 

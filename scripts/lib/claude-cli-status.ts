@@ -36,11 +36,19 @@ interface ClaudeModelChoice {
  *  которую отдаёт пикер CLI постарше вместо текущей (CLI 2.1.278 на c1 23.09.2026 знал
  *  Opus 5, а не 5.5; Sonnet 5.5 29.09.2026 есть в пикере CLI 2.1.284, а 2.1.283 называет его
  *  незнакомой моделью; Haiku 5.5 08.10.2026 пикер CLI 2.1.293 отдаёт на псевдоним `haiku`, а
- *  2.1.287 на c1 — ещё Haiku 4.5): кнопка встаёт на то же место, пока новой модели в пикере нет. */
+ *  2.1.287 на c1 — ещё Haiku 4.5): кнопка встаёт на то же место, пока новой модели в пикере нет.
+ *  `replaces` — прошлая модель, под именем которой пикер пока отдаёт это место, а кнопка уже
+ *  новая (владелец, 10.11.2026: Fable 5.2 вместо 5.1 сразу; пикер CLI 2.1.321 знает только
+ *  5.1, подписка отвечает на 5.2). Прошлая модель остаётся известной: в .env она работает. */
 const CLAUDE_MODEL_CHOICES: readonly (ClaudeModelChoice & {
   readonly previous?: ClaudeModelChoice;
+  readonly replaces?: ClaudeModelChoice;
 })[] = [
-  { id: "claude-fable-5-1", label: "Fable 5.1" },
+  {
+    id: "claude-fable-5-2",
+    label: "Fable 5.2",
+    replaces: { id: "claude-fable-5-1", label: "Fable 5.1" },
+  },
   {
     id: "claude-opus-5-5",
     label: "Opus 5.5",
@@ -60,9 +68,11 @@ const CLAUDE_MODEL_CHOICES: readonly (ClaudeModelChoice & {
 
 /** Каждая модель, которую экран умеет назвать: текущие и их предшественницы. */
 const CLAUDE_KNOWN_MODELS: readonly ClaudeModelChoice[] =
-  CLAUDE_MODEL_CHOICES.flatMap((choice) =>
-    choice.previous ? [choice, choice.previous] : [choice],
-  );
+  CLAUDE_MODEL_CHOICES.flatMap((choice) => [
+    choice,
+    ...(choice.previous ? [choice.previous] : []),
+    ...(choice.replaces ? [choice.replaces] : []),
+  ]);
 
 /** Подпись известной модели; чужой id возвращается как есть, чтобы список не врал. */
 export function claudeModelLabel(id: string): string {
@@ -451,7 +461,8 @@ function canonicalResolved(value: unknown): string | null {
 }
 
 /** Модели таблицы, которые пикер реально отдал: на месте текущей — она сама, без неё —
- *  её предшественница. Пустое пересечение — вшитые четыре. */
+ *  её предшественница; место, которое пикер называет именем из `replaces`, занимает текущая.
+ *  Пустое пересечение — вшитые четыре. */
 function choicesFromPicker(models: readonly unknown[]): ClaudeModelOption[] {
   const found = new Set<string>();
   for (const value of models) {
@@ -460,6 +471,7 @@ function choicesFromPicker(models: readonly unknown[]): ClaudeModelOption[] {
   }
   const picked = CLAUDE_MODEL_CHOICES.flatMap((choice) => {
     if (found.has(choice.id)) return [choice.id];
+    if (choice.replaces && found.has(choice.replaces.id)) return [choice.id];
     return choice.previous && found.has(choice.previous.id)
       ? [choice.previous.id]
       : [];

@@ -22,6 +22,7 @@ import { CANONICAL_REASONING_EFFORTS } from "./reasoning-levels.ts";
 import {
   claudeBinary,
   claudeContextWindow,
+  claudeModelLabel,
   claudeReasoningLevels,
   claudeStatus,
   ClaudeCliError,
@@ -224,8 +225,8 @@ const CLAUDE_LEVELS = ["low", "medium", "high", "xhigh", "max"];
 
 const CLAUDE_FOUR = [
   {
-    id: "claude-fable-5-1",
-    label: "Fable 5.1",
+    id: "claude-fable-5-2",
+    label: "Fable 5.2",
     reasoningLevels: CLAUDE_LEVELS,
   },
   { id: "claude-opus-5-5", label: "Opus 5.5", reasoningLevels: CLAUDE_LEVELS },
@@ -262,6 +263,7 @@ const CLAUDE_BEFORE_SONNET_55 = [
 // в output_config.effort. Разъедься они — кнопка писала бы в .env то, что до модели не едет.
 test("reasoning levels mirror the runtime: adaptive models only, efforts it sends", () => {
   const ids = [
+    "claude-fable-5-2",
     "claude-fable-5-1",
     "claude-opus-5-5",
     "claude-opus-5",
@@ -288,6 +290,42 @@ test("reasoning levels mirror the runtime: adaptive models only, efforts it send
   assert.deepEqual(claudeReasoningLevels("claude-sonnet-5-5"), CLAUDE_LEVELS);
   assert.deepEqual(claudeReasoningLevels("claude-sonnet-5"), CLAUDE_LEVELS);
   assert.deepEqual(claudeReasoningLevels("claude-haiku-5-5"), CLAUDE_LEVELS);
+});
+
+// Владелец, 10.11.2026: кнопка Fable 5.2 стоит на месте 5.1 сразу. Пикер CLI 2.1.321 называет
+// это место `claude-fable-5-1`, подписка на 5.2 отвечает; 5.1 остаётся известной для .env.
+test("a picker that names Fable 5.1 shows the Fable 5.2 button, and 5.1 keeps its label", async (t) => {
+  const picker = (resolved: string[]) =>
+    JSON.stringify({
+      type: "control_response",
+      response: {
+        subtype: "success",
+        request_id: "iva-picker",
+        response: {
+          models: resolved.map((resolvedModel) => ({
+            value: resolvedModel,
+            resolvedModel,
+          })),
+        },
+      },
+    });
+  for (const resolved of [
+    ["claude-fable-5-1"],
+    ["claude-fable-5-2"],
+    ["claude-fable-5-1", "claude-fable-5-2"],
+  ]) {
+    const models = await listClaudeModels(
+      envWith(t, "handshake", { FAKE_CLAUDE_PICKER: picker(resolved) }),
+    );
+    assert.deepEqual(
+      models.map((option) => option.id),
+      ["claude-fable-5-2"],
+      resolved.join(),
+    );
+  }
+  assert.equal(claudeModelLabel("claude-fable-5-2"), "Fable 5.2");
+  assert.equal(claudeModelLabel("claude-fable-5-1"), "Fable 5.1");
+  assert.deepEqual(claudeReasoningLevels("claude-fable-5-1"), CLAUDE_LEVELS);
 });
 
 test("the model list is the four named models, aliases and Haiku 4.5 dropped", async (t) => {
@@ -376,8 +414,8 @@ test("an older picker with Opus 5 shows Fable, Opus 5, Sonnet and Haiku", async 
   );
   assert.deepEqual(models, [
     {
-      id: "claude-fable-5-1",
-      label: "Fable 5.1",
+      id: "claude-fable-5-2",
+      label: "Fable 5.2",
       reasoningLevels: CLAUDE_LEVELS,
     },
     { id: "claude-opus-5", label: "Opus 5", reasoningLevels: CLAUDE_LEVELS },
