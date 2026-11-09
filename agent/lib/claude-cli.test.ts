@@ -2307,7 +2307,8 @@ async function waitForExit(pid: number): Promise<void> {
 test("имя модели для CLI и окно контекста берутся из одной таблицы", () => {
   // Рукопожатие отдаёт route-ид; CLI принимает своё имя — у миллионного окна с суффиксом [1m].
   assert.equal(claudeNativeModel("claude-fable-5-1"), "claude-fable-5-1[1m]");
-  assert.equal(claudeNativeModel("fable"), "claude-fable-5-1[1m]");
+  assert.equal(claudeNativeModel("claude-fable-5-2"), "claude-fable-5-2[1m]");
+  assert.equal(claudeNativeModel("fable"), "claude-fable-5-2[1m]");
   assert.equal(claudeNativeModel("opus"), "claude-opus-5-5[1m]");
   assert.equal(claudeNativeModel("claude-opus-5-5"), "claude-opus-5-5[1m]");
   assert.equal(claudeNativeModel("sonnet"), "claude-sonnet-5-5[1m]");

@@ -114,7 +114,7 @@ export const MODEL_PROVIDERS = {
     // не единственно верное имя: fable, opus, sonnet, Haiku 5.5 — 1M контекста, Haiku 4.5 — 200k.
     modelVar: "CLAUDE_MODEL",
     defaultHelperModel: "claude-sonnet-5-5",
-    defaultModel: "claude-fable-5-1",
+    defaultModel: "claude-fable-5-2",
     compatibleReasoning: false,
     // Подписка отвергает рассуждение без подписи, а сборка промпта CLI его и так пропускает.
     replaysReasoning: false,
