@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.5.10] - 2026-11-10
+
 - 🧠 **Fable 5.2 на экране модели Claude**: первая кнопка в `/model` → Claude и в мастере установки теперь Fable 5.2, она же модель Claude по умолчанию, и `CLAUDE_MODEL=fable` означает её. Нужен Claude Code CLI 2.1.290 или новее; Fable 5.1 остаётся доступной строкой `CLAUDE_MODEL=claude-fable-5-1` в `.env`. Fable 5.2 takes the place of Fable 5.1 on the Claude model screen and as the default Claude model; it needs Claude Code CLI 2.1.290 or newer, and Fable 5.1 stays available through `.env`.
 - 📊 **Виджеты в ответах**: Ива рисует живую карточку прямо в сообщении вместо строк текста везде, где есть что показать: календарь на день, неделю и месяц, погода, обратный отсчёт, пока вы чего-то ждёте, списки задач и напоминаний, график с вкладками, прогресс, чек-лист. Подпись карточки — ответ словами: её видят приложения без виджетов, и она уходит текстом, если карточка не отправилась. Выключаются в /menu → 💬 Богатые ответы. Replies may carry a Telegram widget (Bot API 10.4 via the beta Bot API address); its caption is the text fallback, and `TELEGRAM_WIDGETS=never` turns widgets off.
 
