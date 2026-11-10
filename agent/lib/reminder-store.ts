@@ -35,6 +35,14 @@ export class ReminderStoreError extends Error {}
 export class ReminderNotFoundError extends ReminderStoreError {}
 
 export type ReminderStatus = "pending" | "fired";
+/**
+ * Фаза последнего срабатывания строки — один вывод для тика, `iva doctor` и инструментов
+ * (specs/ReminderLifecycle.tla). waiting — ещё не срабатывала; running — взята, ребёнок идёт;
+ * delivered — текст дошёл; failed — не дошёл, причина в `error`; abandoned — ребёнка нет и
+ * факта нет: текст мог уйти, а мог и нет.
+ */
+export type ReminderPhase =
+  "waiting" | "running" | "delivered" | "failed" | "abandoned";
 /** `at` — один точный срок; `cron` — повторяющееся расписание (cron-выражение пользователя). */
 export type ReminderSchedule =
   { kind: "at"; atMs: number } | { kind: "cron"; expr: string; tz: string };
@@ -590,7 +598,7 @@ export async function fireDue(
         (row) =>
           row.status === "pending" &&
           row.nextRunAtMs <= nowMs &&
-          !scheduleRunning(row, nowMs, file === commandFile()),
+          reminderPhase(row, nowMs, file === commandFile()) !== "running",
       )
       .sort(byDeadline)
       .slice(0, limit);
@@ -784,11 +792,18 @@ export const commandLog = (id: string): string =>
 export const COMMAND_TIMEOUT_MS = 120_000;
 export const commandTimeoutMs = (row: Reminder) =>
   (row.running_timeout_minutes ?? row.timeout_minutes ?? 2) * 60_000;
-export const scheduleRunning = (
+/**
+ * Срок жизни срабатывания без исхода: у команды — её срок, у хода — RUN_STALE_MS от последнего
+ * пульса записи чата (её ведёт ребёнок, пока ход шлёт события) либо от самого срабатывания.
+ */
+export function reminderPhase(
   row: Reminder,
   now = Date.now(),
   command = false,
-): boolean => {
+): ReminderPhase {
+  if (row.firedAt === null) return "waiting";
+  if (row.delivered !== null) return row.delivered ? "delivered" : "failed";
+  if (row.error !== null) return "abandoned";
   const pulse =
     !command &&
     row.sessionId &&
@@ -797,12 +812,8 @@ export const scheduleRunning = (
         status.sessionId === row.sessionId && status.status === "running",
     )?.status.updatedAt;
   const span = command ? commandTimeoutMs(row) + 10_000 : RUN_STALE_MS;
-  return (
-    row.firedAt !== null &&
-    row.delivered === null &&
-    now < (pulse || row.firedAt) + span
-  );
-};
+  return now < (pulse || row.firedAt) + span ? "running" : "abandoned";
+}
 
 export async function clearCommandAlert(id: string): Promise<void> {
   const file = join(dataDir(), "alert-state.json");

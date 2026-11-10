@@ -387,6 +387,9 @@ test("doctor показывает провалы напоминаний за с�
         error: "agent wake failed: boom",
         delivered: true,
       },
+      // Агент упал между взятием строки и фактом: причины в строке ещё нет.
+      { id: "r6", firedAt: now - 45 * 60_000, error: null, delivered: null },
+      { id: "r7", firedAt: now - 60_000, error: null, delivered: null },
     ],
   });
   assert.ok(
@@ -428,6 +431,19 @@ test("doctor показывает провалы напоминаний за с�
     /did not go out/u.test(marker[1]),
     false,
     "невидимый факт назван провалом доставки",
+  );
+  // Брошенное срабатывание видно и без причины в строке (ReminderLifecycle, BoundedOutcome):
+  // доктор запускают и при лежащем агенте. Идущее срабатывание провалом не названо.
+  const abandoned = fresh.find(([, message]) => message.includes(hash8("r6")));
+  assert.ok(abandoned, JSON.stringify(fresh));
+  assert.match(
+    abandoned[1],
+    /fired 45m ago and the delivery fact was not recorded/u,
+  );
+  assert.equal(
+    fresh.some(([, message]) => message.includes(hash8("r7"))),
+    false,
+    "идущее срабатывание названо провалом",
   );
   // А записанный факт с ошибкой позднего шага — не «не дошло».
   const later = fresh.find(([, message]) => message.includes(hash8("r5")));

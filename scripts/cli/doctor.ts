@@ -1072,6 +1072,7 @@ function checkRollupStatus(ctx: DoctorContext): void {
 type ReminderStoreModule = {
   reminderFile: typeof import("../../agent/lib/reminder-store.ts").reminderFile;
   parseReminderTable: typeof import("../../agent/lib/reminder-store.ts").parseReminderTable;
+  reminderPhase: typeof import("../../agent/lib/reminder-store.ts").reminderPhase;
 };
 
 type ReminderTickModule = {
@@ -1132,22 +1133,26 @@ function checkReminderFailures(
     const rows = existsSync(file)
       ? store.parseReminderTable(file, JSON.parse(readFileSync(file, "utf8")))
       : [];
-    const failed = rows.filter(
-      (row) =>
-        row.error !== null &&
-        row.firedAt !== null &&
-        ctx.now() - row.firedAt <= dayMs,
-    );
-    for (const row of failed.slice(0, 5)) {
-      // Три состояния строки, а не одно: установленный провал, невидимый факт
-      // (текст мог уйти, запись не состоялась) и провал позднего шага после
-      // отправки. «Не дошло» — только первое; в строке — хеш id и код ошибки.
+    // Фазу строки выводит стор, тем же кодом, что у тика и инструментов. Брошенная строка
+    // видна и до того, как тик записал ей причину: доктор запускают и при лежащем агенте.
+    const failed = rows
+      .map((row) => ({ row, phase: store.reminderPhase(row, ctx.now()) }))
+      .filter(
+        ({ row, phase }) =>
+          (row.error !== null || phase === "abandoned") &&
+          row.firedAt !== null &&
+          ctx.now() - row.firedAt <= dayMs,
+      );
+    for (const { row, phase } of failed.slice(0, 5)) {
+      // Три исхода, а не один: установленный провал, брошенное срабатывание (текст мог
+      // уйти, факта нет) и провал позднего шага после отправки. «Не дошло» — только
+      // первое; в строке — хеш id и код ошибки.
       const code =
         row.error === null ? "error text omitted" : errorCode(row.error);
       const verdict =
-        row.delivered === false
+        phase === "failed"
           ? `did not go out: ${code}`
-          : row.delivered === null
+          : phase === "abandoned"
             ? "the delivery fact was not recorded"
             : `went out, a later step failed: ${code}`;
       // Печать на каждый провал, счёт — один на весь список: сводка считает раздел,
