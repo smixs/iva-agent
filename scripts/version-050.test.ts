@@ -456,8 +456,9 @@ void test("StaysOnItsRelease, NothingWritten, RefusedIsTold: shipped v0.3.30/v0.
   }
 });
 
-// specs/UpdateFloor.tla: StaysOnItsRelease where the old half never reads the marker.
-void test("StaysOnItsRelease: shipped v0.3.29 CLI hands off without reading the marker and the new half of this tree refuses", async (t) => {
+// specs/UpdateFloor.tla: StaysOnItsRelease and OnlyTheVersionDirectory where the old half
+// never reads the marker: it unpacks, and the new half refuses as its first act.
+void test("StaysOnItsRelease, OnlyTheVersionDirectory: shipped v0.3.29 CLI hands off without reading the marker, the new half of this tree refuses and only the unpacked directory is new", async (t) => {
   const old = await shipped(t, "v0.3.29");
   const root = workspace(t);
   const fx = releases(root, "0.3.29", "0.5.12");
@@ -478,7 +479,15 @@ void test("StaysOnItsRelease: shipped v0.3.29 CLI hands off without reading the 
   git(fx.source, "commit", "-qm", "this tree");
   git(fx.source, "push", "-q", fx.remote, "main");
   const { home, store, before, dir } = installation(root, fx, "0.3.29");
+  const untouched = listing(home);
   const ran = await update(t, old, dir);
+  const unpacked = `versions/${versionName("0.5.12", git(fx.source, "rev-parse", "HEAD"))}`;
+  assert.deepEqual(
+    listing(home).filter(
+      (path) => path !== unpacked && !path.startsWith(`${unpacked}/`),
+    ),
+    untouched,
+  );
   assert.equal(ran.code, 1, ran.said);
   assert.ok(
     ran.said.includes("Your Iva (0.3.29) is too old to update itself."),
@@ -491,6 +500,149 @@ void test("StaysOnItsRelease: shipped v0.3.29 CLI hands off without reading the 
     readFileSync(join(home, "data/sentinel"), "utf8"),
     "user data\n",
   );
+});
+
+// specs/UpdateFloor.tla: StaysOnItsRelease, NothingWritten, RefusedIsTold for the updater
+// that never hands off. The candidate is this tree with its dependencies left out, so the
+// shipped updater runs a real `npm ci` and npm runs the tree's own `preinstall`.
+void test("StaysOnItsRelease, NothingWritten, RefusedIsTold: shipped v0.3.14 CLI builds a candidate of this tree, its npm ci refuses and the checkout stays", async (t) => {
+  const root = workspace(t);
+  const npm = join(dirname(process.execPath), "npm");
+  const env = {
+    ...process.env,
+    ...IDENTITY,
+    npm_config_cache: join(root, "npm-cache"),
+    npm_config_offline: "true",
+    npm_config_update_notifier: "false",
+  };
+  const old = join(root, "v0.3.14");
+  mkdirSync(old);
+  execFileSync("tar", ["-xf", "-", "-C", old], {
+    input: execFileSync(
+      "git",
+      ["archive", "v0.3.14", "scripts", "agent", "package.json"],
+      { cwd: ROOT, maxBuffer: 32 * 1024 * 1024 },
+    ),
+  });
+  symlinkSync(join(ROOT, "node_modules"), join(old, "node_modules"));
+
+  const source = join(root, "source");
+  mkdirSync(source);
+  git(source, "init", "-q", "-b", "main");
+  write(
+    source,
+    "package.json",
+    JSON.stringify({ name: "iva", version: "0.3.14", type: "module" }),
+  );
+  write(source, ".gitignore", ".env\ndata/\n.output/\nnode_modules/\n");
+  git(source, "add", "-A");
+  git(source, "commit", "-qm", "0.3.14");
+  const before = git(source, "rev-parse", "HEAD");
+  for (const path of ["scripts", "agent", "packages", "bin"])
+    cpSync(join(ROOT, path), join(source, path), { recursive: true });
+  const manifest = JSON.parse(
+    readFileSync(join(ROOT, "package.json"), "utf8"),
+  ) as Record<string, unknown>;
+  delete manifest.dependencies;
+  delete manifest.devDependencies;
+  write(source, "package.json", JSON.stringify(manifest));
+  write(
+    source,
+    "update-compat.json",
+    readFileSync(join(ROOT, "update-compat.json"), "utf8"),
+  );
+  execFileSync(npm, ["install", "--package-lock-only", "--ignore-scripts"], {
+    cwd: source,
+    env,
+    stdio: "ignore",
+  });
+  git(source, "add", "-A");
+  git(source, "commit", "-qm", "this tree");
+  const remote = join(root, "remote.git");
+  git(root, "clone", "-q", "--bare", source, remote);
+  const home = join(root, "home");
+  git(root, "clone", "-q", remote, home);
+  git(home, "reset", "-q", "--hard", before);
+  write(home, ".env", "MODEL_PROVIDER=ollama\nIVA_PORT=8723\n");
+  write(home, "data/sentinel", "user data\n");
+  write(home, ".output/server/index.mjs", "the build that serves\n");
+  write(home, "node_modules/installed", "the dependencies that serve\n");
+
+  const file = (path: string) => pathToFileURL(join(old, path)).href;
+  const { createCliRuntime: shippedRuntime } = (await import(
+    file("scripts/cli/runtime.ts")
+  )) as { createCliRuntime: (root: string) => Record<string, unknown> };
+  const { createUpdateCommand } = (await import(
+    file("scripts/cli/update.ts")
+  )) as {
+    createUpdateCommand: (
+      options: unknown,
+    ) => (args: string[]) => Promise<void>;
+  };
+  const called: string[] = [];
+  const note = (name: string) => () => void called.push(name);
+  const exitBefore = process.exitCode;
+  const mute = (["log", "error", "warn", "info"] as const).map((method) =>
+    t.mock.method(console, method, () => {}),
+  );
+  let code: typeof process.exitCode;
+  try {
+    await createUpdateCommand({
+      runtime: {
+        ...shippedRuntime(home),
+        NPM: npm,
+        childEnv: env,
+        readEnv: () => ({ MODEL_PROVIDER: "ollama", AGENT_LANGUAGE: "en" }),
+        hasSystemd: () => true,
+        systemd: { restart: note("restart"), activate: note("activate") },
+      },
+      systemdLifecycle: {
+        writeUnits: note("writeUnits"),
+        migrateEnv: note("migrateEnv"),
+      },
+      showTree: () => Promise.resolve(),
+      restartUserbotIfActive: note("restartUserbot"),
+    })([]);
+    code = process.exitCode;
+  } finally {
+    process.exitCode = exitBefore;
+    for (const mock of mute) mock.mock.restore();
+  }
+
+  assert.equal(code, 1);
+  assert.equal(git(home, "rev-parse", "HEAD"), before);
+  assert.deepEqual(called, []);
+  assert.equal(existsSync(join(home, ".iva-update/staging")), false);
+  assert.equal(git(home, "worktree", "list").split("\n").length, 1);
+  for (const [path, body] of [
+    ["data/sentinel", "user data\n"],
+    [".output/server/index.mjs", "the build that serves\n"],
+    ["node_modules/installed", "the dependencies that serve\n"],
+    [".env", "MODEL_PROVIDER=ollama\nIVA_PORT=8723\n"],
+  ])
+    assert.equal(readFileSync(join(home, path), "utf8"), body, path);
+  const logs = join(home, "data/logs");
+  const log = readdirSync(logs)
+    .map((name) => readFileSync(join(logs, name), "utf8"))
+    .join("\n");
+  assert.ok(
+    log.includes("Your Iva (0.3.14) is too old to update itself."),
+    log,
+  );
+  assert.ok(log.includes(check.REPAIR_COMMAND), log);
+
+  // Everywhere else the same `preinstall` passes: outside a candidate directory, and in
+  // the candidate of an installation at the floor.
+  const guard = [join(ROOT, "scripts/floor-guard.ts")];
+  execFileSync(process.execPath, guard, { cwd: home });
+  const staging = join(home, ".iva-update/staging");
+  mkdirSync(staging, { recursive: true });
+  cpSync(join(ROOT, "update-compat.json"), join(staging, "update-compat.json"));
+  assert.throws(() =>
+    execFileSync(process.execPath, guard, { cwd: staging, stdio: "ignore" }),
+  );
+  write(home, "package.json", JSON.stringify({ name: "iva", version: FLOOR }));
+  execFileSync(process.execPath, guard, { cwd: staging });
 });
 
 void test("installer and repair select the numeric release across a minor boundary", (t) => {
