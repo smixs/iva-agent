@@ -15,6 +15,8 @@ const LINE_CAP = 1 << 16;
 const BLOCK_SMALL = 4096;
 const FM_MAX_LINES = 10_000;
 const DESCRIPTION_CAP = 500;
+// Чистка не заходит во вложения и в то, что человек отложил: бэкап и архив остаются как есть.
+const UNTOUCHED_DIRS = ["attachments", "backup", "archive"];
 
 /** Порт collapse_repeated_description и cap_description v0.4.8. Длины — в символах (code
  * points), как len() в Python: половины только у строки длиннее 40, период только у
@@ -218,8 +220,11 @@ export function cleanupVault(
   let [cleaned, saved] = [0, 0];
   const failures: string[] = [];
   // Нечитаемый каталог останавливает чистку: молча пропустить часть vault нельзя.
-  const files = vaultMarkdownFiles(root, (_dir, error) => {
-    throw error;
+  const files = vaultMarkdownFiles(root, {
+    skip: UNTOUCHED_DIRS,
+    onUnreadable: (_dir, error) => {
+      throw error;
+    },
   });
   for (const file of files)
     try {

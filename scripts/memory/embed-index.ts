@@ -51,7 +51,7 @@ for (const d of SCOPE) {
   const abs = join(VAULT(), d);
   try {
     if (statSync(abs).isDirectory())
-      files.push(...vaultMarkdownFiles(abs, unreadable));
+      files.push(...vaultMarkdownFiles(abs, { onUnreadable: unreadable }));
   } catch {
     /* нет директории */
   }

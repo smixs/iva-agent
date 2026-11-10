@@ -94,9 +94,11 @@ function buildLinkIndex(
   };
   // Ключ везде — путь БЕЗ .md: иначе своя же карточка попадает в индекс дважды, её stem
   // становится неоднозначным, и ссылка файла на самого себя читается как битая.
-  // Нечитаемый каталог обход пропускает: проверка ссылок на нём не падает.
-  const paths = vaultMarkdownFiles(vaultDir).map((file) =>
-    relative(vaultDir, file).split(sep).join("/").slice(0, -3),
+  // Нечитаемый каталог обход пропускает: проверка ссылок на нём не падает. Карточки в
+  // archive и backup — цели ссылок, как и остальные; attachments в индекс не идёт: цель
+  // `attachments/…` принимается проверкой файла на диске.
+  const paths = vaultMarkdownFiles(vaultDir, { skip: ["attachments"] }).map(
+    (file) => relative(vaultDir, file).split(sep).join("/").slice(0, -3),
   );
   const seen = new Set(paths);
   for (const extra of extraPaths) {
