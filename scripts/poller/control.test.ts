@@ -9,6 +9,10 @@ import {
   TELEGRAM_BUTTON_TAP_DAILY_TEXT_FIELD,
 } from "#lib/telegram-parts.ts";
 import { tempDir } from "../fixtures/temp-dir.ts";
+import {
+  resetIntentPhase,
+  type ResetIntentPhase,
+} from "../lib/telegram-reset-intent.ts";
 
 type Event = string | [string, string, number | undefined, string | undefined];
 type CaptureMessage = { message_id?: number };
@@ -48,8 +52,7 @@ type ControlModule = {
           discardThroughUpdateId?: number;
         },
       ) => Promise<unknown>;
-      resetRetryPendingImpl?: (chatKey: string) => boolean;
-      resetIntentPendingImpl?: (chatKey: string) => boolean;
+      resetPhaseImpl?: (chatKey: string) => ResetIntentPhase;
       pluginTapImpl?: (tap: {
         digest12: string;
         chatId: number;
@@ -1827,8 +1830,12 @@ function resetDeps(
         resets.push([key, target, options]);
         return performReset();
       },
-      resetRetryPendingImpl: () => retryPending,
-      resetIntentPendingImpl: () => intentPending,
+      resetPhaseImpl: () =>
+        resetIntentPhase({
+          recorded: intentPending,
+          retryPending,
+          escalated: false,
+        }),
     },
   };
 }

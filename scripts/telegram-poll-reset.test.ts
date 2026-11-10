@@ -66,6 +66,10 @@ type PerformResetOptions = {
 };
 type ReconcileResetOptions = {
   requestResetImpl?: (intent: ResetIntent) => Promise<unknown>;
+  completeStateImpl?: (
+    chatKey: string,
+    options: Record<string, unknown>,
+  ) => Promise<void>;
   logImpl?: (line: string) => void;
   now?: () => number;
   retryAfterMs?: number;
@@ -95,6 +99,7 @@ type PollModule = {
   ) => Promise<void>;
   drainReadyQueueHeads: (options: DrainOptions) => Promise<number>;
   hasPrivateResetIntent: (chatKey: string) => boolean;
+  privateResetIntentPhase: (chatKey: string, now?: () => number) => string;
   loadPrivateResetIntents: (options?: {
     loadImpl?: () => Promise<DurableResetIntent[]>;
   }) => Promise<DurableResetIntent[]>;
@@ -153,6 +158,7 @@ const {
   loadQueue,
   performScopedReset,
   persistPrivateResetIntent,
+  privateResetIntentPhase,
   reconcileScopedResetIntents,
   routeMessageUpdate,
   retireSettledSessions,
@@ -285,6 +291,164 @@ test("private reset intent is durable before remote reset and clears after local
   );
 
   assert.deepEqual(events, ["intent", "remote", "cleanup", "clear-intent"]);
+});
+
+// Тесты соответствия specs/ResetIntent.tla: имя называет инвариант модели.
+const privateUpdate = (updateId: number, chatId: number, text: string) => ({
+  version: 1,
+  updateId,
+  enqueuedAt: 1,
+  update: {
+    update_id: updateId,
+    message: {
+      message_id: updateId,
+      date: 1,
+      chat: { id: chatId, type: "private" },
+      from: { id: 42, is_bot: false, first_name: "Owner" },
+      text,
+    },
+  },
+});
+
+test("ResetIntent Phase: /new moves the phase none -> blocked -> recorded -> waiting -> recorded -> none", async () => {
+  const key = "601:";
+  let now = 1_000;
+  const phase = () => privateResetIntentPhase(key, () => now);
+  await writeQueueAtomic({ version: 1, queues: {} });
+  assert.equal(phase(), "none");
+  await assert.rejects(
+    performScopedReset(
+      key,
+      { sessionId: "session-601" },
+      {
+        clearQueue: true,
+        discardThroughUpdateId: 600,
+        persistIntentImpl: async () => {
+          throw new Error("disk full");
+        },
+        now: () => now,
+      },
+    ),
+    /disk full/u,
+  );
+  assert.equal(phase(), "blocked");
+  assert.equal(hasPrivateResetIntent(key), false);
+  now += 30_000;
+  assert.equal(phase(), "none");
+  await assert.rejects(
+    performScopedReset(
+      key,
+      { sessionId: "session-601" },
+      {
+        clearQueue: true,
+        discardThroughUpdateId: 600,
+        requestResetImpl: async () => {
+          throw new Error("eve unavailable");
+        },
+        now: () => now,
+      },
+    ),
+    /eve unavailable/u,
+  );
+  assert.equal(phase(), "waiting");
+  assert.equal(hasPrivateResetIntent(key), true);
+  now += 30_000;
+  assert.equal(phase(), "recorded");
+  assert.equal(
+    await reconcileScopedResetIntents({
+      requestResetImpl: async () => ({ status: "reset" }),
+      logImpl: () => {},
+      now: () => now,
+    }),
+    1,
+  );
+  assert.equal(phase(), "none");
+  assert.deepEqual(await loadPrivateResetIntents(), []);
+});
+
+test("ResetIntent IntentUntilClean and ConfirmOnce: a failed queue cleanup keeps the intent, recovery sends no confirmation", async () => {
+  const key = "602:";
+  let now = 0;
+  const notices: string[] = [];
+  await writeQueueAtomic({
+    version: 1,
+    queues: { [key]: [privateUpdate(700, 602, "before /new")] },
+  });
+  await persistPrivateResetIntent(key, 701);
+  const options = {
+    requestResetImpl: async () => ({ status: "reset" }),
+    logImpl: () => {},
+    sendImpl: async (_chatKey: string, text: string) => {
+      notices.push(text);
+    },
+    now: () => now,
+  };
+
+  assert.equal(
+    await reconcileScopedResetIntents({
+      ...options,
+      completeStateImpl: async () => {
+        throw new Error("queue rewrite failed");
+      },
+    }),
+    0,
+  );
+  assert.deepEqual(
+    (await loadPrivateResetIntents()).map(({ chatKey }) => chatKey),
+    [key],
+    "the intent must survive until its queue is cleared",
+  );
+  assert.equal(
+    privateResetIntentPhase(key, () => now),
+    "waiting",
+  );
+  const delivered: number[] = [];
+  const drain = () =>
+    drainReadyQueueHeads({
+      deliverImpl: async (update) => {
+        delivered.push(update.update_id);
+        return true;
+      },
+      settleUntil: new Map(),
+      inFlight: new Map(),
+      pins: new Map(),
+    });
+  await drain();
+  assert.deepEqual(delivered, [], "a message before /new never drains");
+
+  now += 30_000;
+  assert.equal(await reconcileScopedResetIntents(options), 1);
+  assert.equal((await loadQueue()).queues[key], undefined);
+  assert.deepEqual(await loadPrivateResetIntents(), []);
+  await drain();
+  assert.deepEqual(delivered, []);
+  assert.deepEqual(notices, [], "recovery never repeats the confirmation");
+});
+
+test("ResetIntent ExactCut: recovery clears the queue through the recorded update_id and keeps later messages", async () => {
+  const key = "603:";
+  await writeQueueAtomic({
+    version: 1,
+    queues: {
+      [key]: [
+        privateUpdate(800, 603, "before /new"),
+        privateUpdate(802, 603, "after /new"),
+      ],
+    },
+  });
+  await persistPrivateResetIntent(key, 801);
+  assert.equal(
+    await reconcileScopedResetIntents({
+      requestResetImpl: async () => ({ status: "reset" }),
+      logImpl: () => {},
+    }),
+    1,
+  );
+  assert.deepEqual(
+    (await loadQueue()).queues[key]?.map(({ updateId }) => updateId),
+    [802],
+  );
+  await writeQueueAtomic({ version: 1, queues: {} });
 });
 
 test("startup reconciliation prevents a remotely reset private queue from draining after a crash", async () => {

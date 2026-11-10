@@ -513,3 +513,20 @@ Id строки используется один раз на трассу; уб
 Модель проверяет атомарные записи и порядок событий. Реальные миллисекунды,
 матрица `goalActor`, транспорт Telegram, права файлов, текст заданий и соответствие
 фактическому коду G1 проверяются при реализации и общей приёмке.
+
+## ResetIntent
+
+`ResetIntent.tla` models the reset intent of a private chat (`/new` and `/restart`) and was written after the code: `scripts/lib/telegram-reset-intent.ts` (the intent file with `discardThroughUpdateId`), `scripts/poller/queue.ts` (`performScopedReset`, `reconcileScopedResetIntents`, the Bridge memory read by `privateResetIntentPhase`) and `scripts/poller/control.ts` (`startReset`, `holdForPendingRetry`, `finishReset`). One private chat, updates `1..N` with `/new` among them, the chat queue and the intent file on disk, the Bridge memory (the record mirror that fences the queue, the retry backoff, the failure count, the delivered escalation), the agent session as a generation, the main loop that handles `/new` step by step, the reconciliation task and a Bridge restart between any two steps that empties the memory. The operator `Phase` is `resetIntentPhase`: `none`, `blocked`, `recorded`, `waiting`, `escalated`. Time is a step `Expire`; group chats, the edit of the pending message, `/restart`'s service restart, a second Bridge process and read errors at startup are outside the model.
+
+Checked invariants:
+
+1. `ExactCut`: after `/new` the chat queue is cleared exactly through the recorded `update_id`; a message before it never reaches the new session, a message after it is kept, goes to the new session and is not wiped by a late reset.
+2. `IntentUntilClean`: without the intent file no message before a reset `/new` is left in the queue.
+3. `ConfirmOnce`: the owner sees "conversation reset" at most once per `/new`; `EscalationOnce`: one escalation per process.
+4. `Finished` (liveness): every `/new` gets an answer, and the intent is removed after the session reset and the cleanup, or the owner is told to run `iva reset`.
+
+Witnesses must fail: `-clear-first` (the intent is removed before the queue is cleared, `IntentUntilClean`), `-clear-all` (the queue is cleared through its last item, not the recorded `update_id`, `ExactCut`), `-confirm-recovery` (the reconciliation also confirms, `ConfirmOnce`). Two accepted windows also fail and stay as witnesses: `-confirm-window` (a restart between "conversation reset" and the saved offset: Telegram hands `/new` out again and the owner sees a second confirmation, `ConfirmOnce`) and `-interleave` (a reconciliation pass whose agent call outlives a whole `/new` and the next message: its late reset wipes the new session, `ExactCut`; the base model assumes a reconciliation pass ends before the main loop handles the next update). Conformance tests named after the invariants: `scripts/telegram-poll-reset.test.ts` (`ResetIntent …`) and `scripts/lib/telegram-reset-intent.test.ts`.
+
+```sh
+specs/reset-intent-check.sh
+```

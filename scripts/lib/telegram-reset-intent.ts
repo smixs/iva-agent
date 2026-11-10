@@ -20,6 +20,44 @@ export interface TelegramResetIntent {
   discardThroughUpdateId?: number;
 }
 
+// Фаза Интента сброса личного чата — оператор Phase модели specs/ResetIntent.tla.
+// none — намерения нет; blocked — записать намерение не удалось, /new ждёт отсрочку в
+// Telegram; recorded — намерение записано, очередь чата закрыта до очистки; waiting —
+// записано, шаг сброса отказал и ждёт повтора; escalated — то же, владелец получил
+// «запусти iva reset».
+export const RESET_INTENT_PHASES = [
+  "none",
+  "blocked",
+  "recorded",
+  "waiting",
+  "escalated",
+] as const;
+export type ResetIntentPhase = (typeof RESET_INTENT_PHASES)[number];
+
+// Запись — файл намерения (его зеркало в памяти Bridge); память — отсрочка повтора и
+// отметка о доставленной эскалации. Память не переживает перезапуск, запись переживает.
+export function resetIntentPhase({
+  recorded,
+  retryPending,
+  escalated,
+}: {
+  recorded: boolean;
+  retryPending: boolean;
+  escalated: boolean;
+}): ResetIntentPhase {
+  if (!recorded) return retryPending ? "blocked" : "none";
+  if (!retryPending) return "recorded";
+  return escalated ? "escalated" : "waiting";
+}
+
+// Очередь чата закрыта для доставки, пока намерение записано (ExactCut модели).
+export const resetIntentFences = (phase: ResetIntentPhase) =>
+  phase === "recorded" || phase === "waiting" || phase === "escalated";
+
+// Отсрочка повтора идёт: /new не начинает новый сброс.
+export const resetIntentRetryPending = (phase: ResetIntentPhase) =>
+  phase === "blocked" || phase === "waiting" || phase === "escalated";
+
 interface TelegramResetIntentOptions {
   now?: () => number;
   nonce?: () => string;

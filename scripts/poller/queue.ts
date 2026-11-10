@@ -18,6 +18,9 @@ import {
   clearTelegramResetIntent,
   loadTelegramResetIntents,
   persistTelegramResetIntent,
+  resetIntentFences,
+  resetIntentPhase,
+  type ResetIntentPhase,
 } from "../lib/telegram-reset-intent.ts";
 import {
   requestTelegramReset,
@@ -106,12 +109,26 @@ const queueInFlight = new Map<string, QueuePhase>();
 // Ids of a delivered batch until its removal is durable: every redelivery carries exactly them.
 const queueBatchPins = new Map<string, readonly number[]>();
 const queueDrainRotation: { afterKey: string | null } = { afterKey: null };
-// Remove this backoff when vercel/eve#2876 is fixed in the installed eve.
-const resetIntentRetryAt = new Map<string, number>();
-const resetIntentFailureCount = new Map<string, number>();
-const resetIntentEscalationDelivered = new Set<string>();
-// Remove this delivery fence with the vercel/eve#2876 workaround.
-const pendingResetIntentKeys = new Set<string>();
+// Память Bridge об Интенте сброса чата — вход resetIntentPhase вместе с файлом намерения.
+// recorded — зеркало файла: ограда доставки очереди чата. retryAt, failures, escalated —
+// отсрочка повтора, счёт отказов и доставленная эскалация. Перезапуск их теряет, сверка при
+// старте восстанавливает recorded с диска. Remove the backoff and the delivery fence when
+// vercel/eve#2876 is fixed in the installed eve.
+type ResetIntentMemory = {
+  recorded: boolean;
+  retryAt: number;
+  failures: number;
+  escalated: boolean;
+};
+const NO_RESET_INTENT_MEMORY: ResetIntentMemory = {
+  recorded: false,
+  retryAt: 0,
+  failures: 0,
+  escalated: false,
+};
+const resetIntentMemory = new Map<string, ResetIntentMemory>();
+// Порядок записи и сверки на диске, не фаза: скан, начатый до записи или снятия намерения,
+// не возвращает ему старое зеркало.
 const resetIntentKeyRevision = new Map<string, number>();
 const activeResetIntentScans = new Set<{ revision: number }>();
 const resetIntentMutationTails = new Map<string, Promise<void>>();
@@ -178,31 +195,57 @@ function pruneResetIntentRevisions() {
   }
 }
 
-function resetRetryPending(chatKey: string, now: number): boolean {
-  return (resetIntentRetryAt.get(chatKey) ?? 0) > now;
+function resetMemoryOf(chatKey: string): ResetIntentMemory {
+  return resetIntentMemory.get(chatKey) ?? NO_RESET_INTENT_MEMORY;
 }
 
-export function isPrivateResetRetryPending(
+function rememberResetIntent(
+  chatKey: string,
+  patch: Partial<ResetIntentMemory>,
+): ResetIntentMemory {
+  const next = { ...resetMemoryOf(chatKey), ...patch };
+  if (
+    next.recorded ||
+    next.retryAt !== 0 ||
+    next.failures !== 0 ||
+    next.escalated
+  ) {
+    resetIntentMemory.set(chatKey, next);
+  } else {
+    resetIntentMemory.delete(chatKey);
+  }
+  return next;
+}
+
+function resetRetryPending(chatKey: string, now: number): boolean {
+  return resetMemoryOf(chatKey).retryAt > now;
+}
+
+// Фаза Интента сброса чата по записи и памяти Bridge (specs/ResetIntent.tla, Phase).
+export function privateResetIntentPhase(
   chatKey: string,
   now: () => number = Date.now,
-): boolean {
-  return resetRetryPending(chatKey, now());
+): ResetIntentPhase {
+  const memory = resetMemoryOf(chatKey);
+  return resetIntentPhase({
+    recorded: memory.recorded,
+    retryPending: memory.retryAt > now(),
+    escalated: memory.escalated,
+  });
 }
 
 function deferResetRetry(chatKey: string, now: number, retryAfterMs: number) {
-  resetIntentRetryAt.set(chatKey, now + retryAfterMs);
+  rememberResetIntent(chatKey, { retryAt: now + retryAfterMs });
 }
 
 function recordResetFailure(chatKey: string): number {
-  const failures = (resetIntentFailureCount.get(chatKey) ?? 0) + 1;
-  resetIntentFailureCount.set(chatKey, failures);
-  return failures;
+  return rememberResetIntent(chatKey, {
+    failures: resetMemoryOf(chatKey).failures + 1,
+  }).failures;
 }
 
 function clearResetRetryState(chatKey: string) {
-  resetIntentRetryAt.delete(chatKey);
-  resetIntentFailureCount.delete(chatKey);
-  resetIntentEscalationDelivered.delete(chatKey);
+  rememberResetIntent(chatKey, { retryAt: 0, failures: 0, escalated: false });
 }
 
 function statusGeneration(status: RunStatus | null | undefined): number {
@@ -354,7 +397,7 @@ export async function persistPrivateResetIntent(
       discardThroughUpdateId,
     });
     recordResetIntentMutation(chatKey);
-    pendingResetIntentKeys.add(chatKey);
+    rememberResetIntent(chatKey, { recorded: true });
     return intent;
   });
 }
@@ -374,14 +417,15 @@ export async function loadPrivateResetIntents({
     );
     const loadedKeys = new Set(unchangedIntents.map(({ chatKey }) => chatKey));
     for (const { chatKey } of unchangedIntents) {
-      pendingResetIntentKeys.add(chatKey);
+      rememberResetIntent(chatKey, { recorded: true });
     }
-    for (const chatKey of pendingResetIntentKeys) {
+    for (const [chatKey, memory] of resetIntentMemory) {
       if (
+        memory.recorded &&
         !loadedKeys.has(chatKey) &&
         (resetIntentKeyRevision.get(chatKey) ?? 0) <= scan.revision
       ) {
-        pendingResetIntentKeys.delete(chatKey);
+        rememberResetIntent(chatKey, { recorded: false });
       }
     }
     return unchangedIntents;
@@ -402,13 +446,12 @@ export async function clearPrivateResetIntent(
   await serializeResetIntentMutation(chatKey, async () => {
     await clearImpl(RESET_INTENT_DIR, chatKey);
     recordResetIntentMutation(chatKey);
-    pendingResetIntentKeys.delete(chatKey);
-    clearResetRetryState(chatKey);
+    rememberResetIntent(chatKey, NO_RESET_INTENT_MEMORY);
   });
 }
 
 export const hasPrivateResetIntent = (chatKey: string) =>
-  pendingResetIntentKeys.has(chatKey);
+  resetIntentFences(privateResetIntentPhase(chatKey));
 
 const requestResetFromIntent: ResetRequestImpl = ({ target }) =>
   requestTelegramReset({
@@ -599,7 +642,7 @@ export async function reconcileScopedResetIntents({
       }
       if (
         failures >= escalationAttempts &&
-        !resetIntentEscalationDelivered.has(intent.chatKey)
+        !resetMemoryOf(intent.chatKey).escalated
       ) {
         try {
           await sendImpl(
@@ -609,7 +652,7 @@ export async function reconcileScopedResetIntents({
               "⚠️ Сброс диалога всё ещё заблокирован. Запусти iva reset на сервере, затем повтори /new.",
             ),
           );
-          resetIntentEscalationDelivered.add(intent.chatKey);
+          rememberResetIntent(intent.chatKey, { escalated: true });
         } catch (noticeError) {
           try {
             logImpl(
