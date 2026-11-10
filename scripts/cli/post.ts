@@ -16,12 +16,13 @@ import {
   openAsBlob,
   openSync,
   readSync,
-  realpathSync,
   statSync,
 } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { basename, extname, resolve, sep } from "node:path";
-import { resolveDataDir } from "../lib/data-dir.ts";
+// physical — тот же, что у канонического резолвера каталога данных: корни сравниваются с
+// ним в одной системе координат.
+import { physical, resolveDataDir } from "../../packages/data-dir/index.ts";
 import { readEnvFresh } from "../lib/env-file.ts";
 import type { createCliRuntime } from "./runtime.ts";
 
@@ -167,16 +168,6 @@ function resolveChat(chat: string | undefined, env: NodeJS.ProcessEnv): string {
       `Refusing to send: chat ${chat} is not in the allowlist (TELEGRAM_ALLOWED_USER_IDS + TELEGRAM_DIGEST_CHAT_ID)`,
     );
   return requested;
-}
-
-// Реальный путь без падения на несуществующем: ровно так же поступает канонический
-// резолвер каталога данных, и корни должны сравниваться с ним в одной системе координат.
-function physical(path: string): string {
-  try {
-    return realpathSync(path);
-  } catch {
-    return path;
-  }
 }
 
 /**
