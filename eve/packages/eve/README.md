@@ -150,7 +150,7 @@ eve is built to be durable. The runtime is Nitro + Workflows. Read the [deployme
 
 ## Read Next
 
-These files ship inside the installed package at `node_modules/eve/docs/`:
+The documentation lives at https://eve.dev/docs:
 
 - [Full docs index](https://eve.dev/docs) — recommended entry point
 - [Getting Started](https://eve.dev/docs/getting-started) — install, scaffold, and run locally
