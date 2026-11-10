@@ -900,6 +900,23 @@ for (const [from, branch] of [
   });
 }
 
+// The flag of earlier beta builds (from v0.4.9) at no branch: v0.5.11 turns it into Update
+// branch beta in an update of its own. The pinned first update is not that one; the second
+// one, from the step with the owner's branch back, is (repair.sh, update_current).
+test("Repaired, BranchKept: a shipped v0.4.17 with the flag iva.beta and no branch comes back from the step release on Update branch beta", async (t) => {
+  const world = belowFloorWorld(t, "0.4.17");
+  await versionsInstallation(world, "0.4.17", "");
+  git(join(world.home, "repo"), "config", "--local", "iva.beta", "true");
+
+  const ran = world.repair();
+
+  assert.equal(ran.status, 0, `${ran.stdout}\n${ran.stderr}`);
+  assert.match(ran.stdout, new RegExp(`updating to ${STEP} first`, "u"));
+  assert.equal(world.store().currentName(), world.name(NEWEST, world.newest));
+  assert.equal(world.branch(join(world.home, "repo")), "beta");
+  world.stepGone();
+});
+
 test("Repaired, BranchKept: repair killed after the first update leaves Iva on the step release, and the next run puts the branch back and finishes", async (t) => {
   const world = belowFloorWorld(t, "0.4.17");
   await versionsInstallation(world, "0.4.17", "main");
