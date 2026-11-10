@@ -295,19 +295,7 @@
       "import": "./dist/src/public/channels/telegram/index.js",
       "default": "./dist/src/public/channels/telegram/index.js"
     },
-    "./package.json": "./package.json",
-    "./setup/scaffold": {
-      "eve-source": "./src/setup/scaffold/index.ts",
-      "types": "./dist/src/setup/scaffold/index.d.ts",
-      "import": "./dist/src/setup/scaffold/index.js",
-      "default": "./dist/src/setup/scaffold/index.js"
-    },
-    "./setup": {
-      "eve-source": "./src/setup/index.ts",
-      "types": "./dist/src/setup/index.d.ts",
-      "import": "./dist/src/setup/index.js",
-      "default": "./dist/src/setup/index.js"
-    }
+    "./package.json": "./package.json"
   },
   "publishConfig": {
     "access": "public"
