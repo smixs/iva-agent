@@ -1098,10 +1098,14 @@ test("SupportedIsServed: the queue of strings and the shared run-status.json a c
   );
   const { head, chat } = JSON.parse(read) as {
     head: { legacyText?: string } | null;
-    chat: { sessionId?: string } | null;
+    chat: { status?: string; sessionId?: string } | null;
   };
   assert.equal(head?.legacyText, "keep this request");
-  assert.equal(chat?.sessionId, "s-1");
+  // Строку общего файла несёт запись чата, а поле сессии свободного чата схема записи
+  // не держит (specs/ChatRecord.tla, TurnFieldsOnlyWhenBusy): запись v0.3.0 со status idle
+  // приходит как есть без сессии, и это названная потеря перевода, а не молчаливая.
+  assert.equal(chat?.status, "idle");
+  assert.equal(chat?.sessionId, undefined);
 });
 
 test("repair leaves an installation below the floor on its rollback branch to its own updater", async (t) => {
