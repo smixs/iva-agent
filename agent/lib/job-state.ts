@@ -33,7 +33,7 @@ export type JobReservation =
       readonly ownerStartedAt: number;
     };
 
-/** Бронь записи имени; чужая форма полей — брони нет, как и раньше. */
+/** Бронь записи имени; поля другого типа — брони нет, как и раньше. */
 export function jobReservation(entry: unknown): JobReservation {
   const owned = ownedSchema.safeParse(entry);
   if (owned.success)
