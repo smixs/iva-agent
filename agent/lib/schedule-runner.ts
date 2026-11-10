@@ -602,8 +602,9 @@ function logOutcome(o: ResolvedOptions, outcome: SpawnOutcome): void {
     log(`schedule-runner: ${name} spawn error: ${errorMessage(outcome.error)}`);
 }
 
-// Факт — история запуска (одна таблица, п.1 T20): пишется и после провала, и после
-// успеха. Будим агента только когда факт на диске — иначе ходу нечего показать.
+// Факт — история запуска (одна таблица, п.1 T20): провал пишется всегда, успех — по политике
+// задания (factOnSuccess): always — всегда, after-failure — только закрывая прошлый провал.
+// Будим агента только когда факт на диске — иначе ходу нечего показать.
 interface Finish {
   readonly finishedAt: number;
   readonly outcome: SpawnOutcome;
@@ -794,7 +795,8 @@ async function finishRun(
   if (o.factsPath)
     await recordJobFact(o, o.factsPath, run, { finishedAt, outcome, childOk });
 
-  // Запуск успешен, только если ребёнок вышел нулём И факт лёг в таблицу.
+  // Запуск успешен, только если ребёнок вышел нулём И запись факта не отказала: успех,
+  // пропущенный политикой after-failure, — тоже успех, его след остаётся в статусе.
   const ok = childOk && run.factFailure === null;
   if (hasStatus(o)) {
     const finish = { finishedAt, code: outcome.code, ok };
@@ -803,8 +805,8 @@ async function finishRun(
     ));
   }
 
-  // Факт обязателен: без строки нет ни пробуждения, ни следа в таблице. Отказ записи
-  // обязан отклонить промис, иначе расписание считает шаг успешным (T30 №5).
+  // Отказ записи обязан отклонить промис, иначе расписание считает шаг успешным (T30 №5):
+  // без строки нет ни пробуждения, ни следа в таблице для провала и для политики always.
   if (run.factFailure !== null) throw run.factFailure;
 
   // Ошибка spawn (ENOENT и любая другая) едет наружу: потребитель обязан сказать

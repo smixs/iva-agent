@@ -22,4 +22,6 @@ check JobRun-ignore-death DeadFreed
 check JobRun-selfreuse-nocheck DeadFreed
 check JobRun-pidreuse DeadFreed
 check JobRun-grace OneLive
+check JobRun-always none
+check JobRun-sparse-nostatus FactKept
 check JobRun-orphan OneLive
