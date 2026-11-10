@@ -509,9 +509,9 @@ void test("a copy of .env that was never finished cannot replace a whole one", a
 });
 
 // ── Выпуск новой установки (ADR-0017) ──────────────────────────────────────
-// Новейший выпуск vX.Y.Z на ветке, если он не старше 0.4.9 (первый с бета-обновлениями),
-// иначе вершина; IVA_BETA=1 — вершина и iva.beta=true. Ветка остаётся той же.
-void test("новая установка: выпуск от 0.4.9 на той же ветке, старше — вершина, меток нет — вершина, IVA_BETA=1 — вершина и iva.beta", (t) => {
+// Новейший выпуск vX.Y.Z на ветке, без меток — вершина; IVA_BETA=1 — вершина и
+// iva.beta=true. Ветка остаётся той же.
+void test("новая установка: новейший выпуск на той же ветке, меток нет — вершина, IVA_BETA=1 — вершина и iva.beta", (t) => {
   const dir = workspace(t);
   const git = (...args: string[]) =>
     execFileSync("git", ["-C", dir, ...args], { encoding: "utf8" }).trim();
@@ -544,12 +544,12 @@ void test("новая установка: выпуск от 0.4.9 на той ж
   assert.equal(run().status, 0);
   assert.equal(git("rev-parse", "HEAD"), bare, "no release: the tip");
   git("tag", "v0.4.8");
-  const oldTip = commit("after 0.4.8");
+  commit("after 0.4.8");
   assert.equal(run().status, 0);
   assert.equal(
     git("rev-parse", "HEAD"),
-    oldTip,
-    "0.4.8 is older than 0.4.9: the tip",
+    bare,
+    "a release of any age is the release: no version is special",
   );
   git("tag", "v0.4.9", commit("0.4.9"));
   const release = git("rev-parse", "HEAD");
