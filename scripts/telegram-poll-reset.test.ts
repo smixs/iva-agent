@@ -58,10 +58,6 @@ type DurableResetIntent = {
 type CompleteResetOptions = {
   clearQueue?: boolean;
   clearQueueImpl?: () => Promise<unknown>;
-  deleteMessageImpl?: (
-    chatKey: string,
-    messageId: string | number,
-  ) => Promise<unknown>;
 };
 type PerformResetOptions = {
   clearQueue?: boolean;

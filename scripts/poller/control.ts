@@ -683,30 +683,6 @@ async function handleControl(
   deps: ControlDeps = {},
 ): Promise<ControlResult> {
   const io = controlIo(deps);
-  const callback = update.callback_query;
-  const legacyTarget =
-    callback?.data === "iva_cancel" ? ownerPrivateMessage(callback) : null;
-  if (callback && legacyTarget) {
-    const key = chatKey(update);
-    const status = key === null ? null : getChatStatus(key);
-    await io.ackImpl(callback.id).catch(() => {});
-    if (
-      status?.status === "running" &&
-      status.statusMessageId === legacyTarget.messageId &&
-      typeof status?.turnId === "string" &&
-      status.turnId.length > 0
-    ) {
-      await requestTurnStop(update, {
-        cancelImpl: io.cancelImpl,
-        getStatusImpl: () => status,
-      });
-    } else {
-      await io
-        .deleteImpl(legacyTarget.chatId, legacyTarget.messageId)
-        .catch(() => false);
-    }
-    return true;
-  }
   if (update.stopped_message_generation) {
     await handleTelegramDraftStop(update.stopped_message_generation, {
       allowedImpl: () => ALLOWED,
