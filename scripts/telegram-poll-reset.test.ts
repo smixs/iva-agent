@@ -65,6 +65,7 @@ type PerformResetOptions = {
   retryAfterMs?: number;
 };
 type ReconcileResetOptions = {
+  loadIntentsImpl?: () => Promise<DurableResetIntent[]>;
   requestResetImpl?: (intent: ResetIntent) => Promise<unknown>;
   completeStateImpl?: (
     chatKey: string,
@@ -447,6 +448,147 @@ test("ResetIntent ExactCut: recovery clears the queue through the recorded updat
   assert.deepEqual(
     (await loadQueue()).queues[key]?.map(({ updateId }) => updateId),
     [802],
+  );
+  await writeQueueAtomic({ version: 1, queues: {} });
+});
+
+test("ResetIntent ExactCut: a reconciliation that scanned before /new does not reset the session the delivery filled", async () => {
+  const key = "735:";
+  await writeQueueAtomic({
+    version: 1,
+    queues: {
+      [key]: [
+        privateUpdate(730, 735, "before /new"),
+        privateUpdate(732, 735, "after /new"),
+      ],
+    },
+  });
+  await persistPrivateResetIntent(key, 731);
+  // Удалённая сторона: агент разрешает сессию чата по адресу и сбрасывает её.
+  const session: number[] = [730];
+  const resets: string[] = [];
+  const reset = (name: string) => {
+    resets.push(name);
+    session.length = 0;
+    return Promise.resolve({ status: "reset" });
+  };
+
+  // Барьер в сверке: скан намерений на диске задерживается до /new и доставки 732.
+  let releaseScan = () => {};
+  let scanStarted = () => {};
+  const started = new Promise<void>((resolve) => (scanStarted = resolve));
+  const gate = new Promise<void>((resolve) => (releaseScan = resolve));
+  let scans = 0;
+  const reconciliation = reconcileScopedResetIntents({
+    loadIntentsImpl: async () => {
+      const intents = await loadPrivateResetIntents();
+      scans += 1;
+      if (scans === 1) {
+        scanStarted();
+        await gate;
+      }
+      return intents;
+    },
+    requestResetImpl: async () => reset("late-reconcile"),
+    logImpl: () => {},
+    sendImpl: async () => {},
+  });
+  await started;
+
+  await performScopedReset(
+    key,
+    { address: { chatId: "735" } },
+    {
+      clearQueue: true,
+      discardThroughUpdateId: 731,
+      requestResetImpl: async () => reset("new"),
+      logImpl: () => {},
+    },
+  );
+  assert.deepEqual(
+    [...session],
+    [],
+    "/new resets the session before the queue drains",
+  );
+  await drainReadyQueueHeads({
+    deliverImpl: async (update) => {
+      session.push(update.update_id);
+      return true;
+    },
+    settleUntil: new Map(),
+    inFlight: new Map(),
+    pins: new Map(),
+  });
+  assert.deepEqual(
+    session,
+    [732],
+    "the message after /new reached the new session",
+  );
+
+  releaseScan();
+  assert.equal(
+    await reconciliation,
+    0,
+    "an intent that /new removed is not reconciled",
+  );
+  assert.deepEqual(
+    session,
+    [732],
+    "the late reconciliation must not reset the session /new already filled",
+  );
+  assert.deepEqual(resets, ["new"], "one remote reset — the main path of /new");
+  await writeQueueAtomic({ version: 1, queues: {} });
+});
+
+test("ResetIntent ExactCut: delivery of a chat waits while its reset holds the chat queue", async () => {
+  const key = "736:";
+  await writeQueueAtomic({
+    version: 1,
+    queues: { [key]: [privateUpdate(740, 736, "queued while the reset runs")] },
+  });
+  let enteredReset = () => {};
+  let releaseReset = () => {};
+  const entered = new Promise<void>((resolve) => (enteredReset = resolve));
+  const gate = new Promise<void>((resolve) => (releaseReset = resolve));
+  // Сброс отставки сессии: очередь чата не чистится и намерения нет — доставку держит
+  // только очередь сброса чата.
+  const reset = performScopedReset(
+    key,
+    { sessionId: "session-736" },
+    {
+      requestResetImpl: async () => {
+        enteredReset();
+        await gate;
+        return { status: "reset" };
+      },
+      logImpl: () => {},
+    },
+  );
+  await entered;
+  const delivered: number[] = [];
+  const drain = () =>
+    drainReadyQueueHeads({
+      deliverImpl: async (update) => {
+        delivered.push(update.update_id);
+        return true;
+      },
+      settleUntil: new Map(),
+      inFlight: new Map(),
+      pins: new Map(),
+    });
+  await drain();
+  assert.deepEqual(
+    delivered,
+    [],
+    "the chat waits while its reset holds the chat queue",
+  );
+  releaseReset();
+  await reset;
+  await drain();
+  assert.deepEqual(
+    delivered,
+    [740],
+    "the head drains after the reset finishes",
   );
   await writeQueueAtomic({ version: 1, queues: {} });
 });

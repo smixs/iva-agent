@@ -20,12 +20,13 @@
 \* один шаг); /restart (тот же путь, плюс перезапуск сервиса); двойной процесс Bridge (его
 \* исключает замок процесса, specs/... нет, scripts/poller/process-lock.ts).
 \*
-\* Сверка грузит намерения только между апдейтами: слот запускается в начале прохода главного
-\* цикла, её загрузка заканчивается раньше, чем getUpdates вернёт апдейт, а следующий проход
-\* начинается после разбора всей пачки. Допущение базы (RecInterleave = FALSE): проход сверки
-\* по чату кончается раньше, чем главный цикл разберёт следующий апдейт, — вызов агента сверки
-\* короче ответа getUpdates. Без него (свидетель -interleave) запоздалый сброс сверки стирает
-\* сессию, в которой уже есть сообщение после /new; нужен простой getUpdates дольше отсрочки.
+\* Сверка и главный путь сброса одного чата идут по одной очереди чата (chatResetTails в
+\* scripts/poller/queue.ts): сверка берёт её, перечитывает намерение с диска и исполняет
+\* удалённый сброс только для того же discardThroughUpdateId; /new и доставка из очереди
+\* чата ждут, пока сверка держит очередь. RecInterleave — часть основной конфигурации:
+\* проход сверки идёт, пока главный цикл разбирает следующий апдейт. Мутант -interleave
+\* (RecReread = FALSE) — сверка берёт очередь, но не перечитывает намерение: запоздалый
+\* сброс стирает сессию, в которую /new уже доставил следующее сообщение.
 \*
 \* Действие модели -> файл:функция
 \*   Admit        scripts/poller/main.ts processTelegramUpdate -> inbox -> routing.ts
@@ -41,9 +42,13 @@
 \*   ClearIntent  queue.ts clearPrivateResetIntent (+ clearResetRetryState)
 \*   Confirm      control.ts finishReset: «Диалог сброшен»
 \*   Save         main.ts processTelegramUpdate: saveOffset(update_id + 1)
-\*   RecLoad      queue.ts loadPrivateResetIntents внутри reconcileScopedResetIntents
-\*   RecRemote / RecComplete / RecClear — шаги reconcileScopedResetIntents; отказ: счёт,
-\*                отсрочка, эскалация владельцу на EscalateAt-м отказе один раз за процесс
+\*   RecLoad      queue.ts loadPrivateResetIntents внутри reconcileScopedResetIntents:
+\*                скан каталога намерений и зеркало ограды
+\*   RecTake      reconcileScopedResetIntents: очередь сброса чата взята, намерение
+\*                перечитано с диска (RecReread); намерения нет или cut другой — сброса нет
+\*   RecRemote / RecComplete / RecClear — шаги reconcileScopedResetIntents под очередью
+\*                чата; отказ: счёт, отсрочка, эскалация владельцу на EscalateAt-м отказе
+\*                один раз за процесс
 \*   Expire       прошёл срок отсрочки (resetIntentRetryAt)
 \*   Restart      Bridge умер; при старте сверка до первого getUpdates (main.ts main)
 EXTENDS Naturals, FiniteSets
@@ -58,7 +63,8 @@ CONSTANTS
   ClearAll,       \* мутант: очередь чистится по последний в очереди, а не по записанный update_id
   ConfirmOnRecovery, \* мутант: сверка тоже подтверждает сброс
   ConfirmWindow,  \* свидетель: перезапуск между «Диалог сброшен» и записью offset
-  RecInterleave   \* свидетель: проход сверки идёт, пока главный цикл разбирает следующий апдейт
+  RecInterleave,  \* проход сверки идёт, пока главный цикл разбирает следующий апдейт
+  RecReread       \* мутант: сверка исполняет сброс, не перечитав намерение с диска
 
 Ids == 1..N
 Plain == Ids \ News
@@ -102,6 +108,11 @@ Phase ==
 Fence == Phase \in {"recorded", "waiting", "escalated"}
 RetryPending == Phase \in {"blocked", "waiting", "escalated"}
 
+\* Очередь сброса чата: главный путь держит её от записи намерения до его снятия, сверка —
+\* от перечитывания намерения до его снятия.
+MainHolds == main \in {"persist", "remote", "complete", "clear"}
+RecHolds == rec \in {"remote", "complete", "clear"}
+
 Max(S) == CHOOSE x \in S : \A y \in S : y <= x
 
 Init ==
@@ -134,7 +145,7 @@ FailMemory ==
 
 Admit ==
   /\ main = "loop" /\ off <= N /\ off \in Plain
-  /\ RecInterleave \/ rec = "idle"
+  /\ ~RecHolds                        \* прямая доставка ждёт очередь сброса чата
   /\ \/ (Fence \/ queue # {}) /\ queue' = queue \cup {off} /\ UNCHANGED turns
      \/ ~Fence /\ queue = {} /\ turns' = turns \cup {<<off, gen>>} /\ UNCHANGED queue
      \/ ~Fence /\ queue = {} /\ queue' = queue \cup {off} /\ UNCHANGED turns  \* чат занят ходом
@@ -144,6 +155,7 @@ Admit ==
 
 Drain ==
   /\ main = "loop" /\ ~Fence /\ queue # {}
+  /\ ~RecHolds
   /\ \E x \in queue :
        /\ \A y \in queue : x <= y
        /\ queue' = queue \ {x}
@@ -153,7 +165,7 @@ Drain ==
 
 NewStart ==
   /\ main = "loop" /\ off <= N /\ off \in News
-  /\ RecInterleave \/ rec = "idle"
+  /\ ~RecHolds                        \* /new берёт очередь сброса чата
   /\ Phase # "blocked"          \* blocked: апдейт остаётся в Telegram (answerPendingRetry бросает)
   /\ IF Phase \in {"waiting", "escalated"}
        THEN \* «повтор запланирован»: намерение на диске, апдейт подтверждается
@@ -235,14 +247,26 @@ Save ==
 \* ---------- сверка ----------
 
 RecLoad ==
-  /\ rec = "idle" /\ main \in {"loop", "boot"}
+  /\ rec = "idle"
+  /\ RecInterleave \/ main \in {"loop", "boot"}
   /\ mirror' = (intent # NoIntent)
   /\ booted' = TRUE
   /\ IF intent # NoIntent /\ ~backoff
-       THEN rec' = "remote" /\ recU' = intent
+       THEN rec' = "loaded" /\ recU' = intent
        ELSE UNCHANGED <<rec, recU>>
   /\ UNCHANGED <<off, queue, intent, gen, turns, fails, backoff, escalated, main, cur,
                  confirms, answered, gaveUp, resetGen, wiped, escalations, failsUsed, restarts>>
+
+\* Очередь сброса чата взята, намерение перечитано с диска: удалённый сброс идёт только
+\* для намерения, которое всё ещё лежит на диске в том же виде. Мутант RecReread = FALSE
+\* берёт записанный при скане cut и сбрасывает сессию, которую /new уже заменил.
+RecTake ==
+  /\ rec = "loaded" /\ ~MainHolds
+  /\ IF ~RecReread \/ intent = recU
+       THEN rec' = "remote" /\ UNCHANGED recU
+       ELSE rec' = "idle" /\ recU' = 0
+  /\ UNCHANGED <<off, queue, intent, gen, turns, diskless, main, cur, booted, confirms,
+                 answered, gaveUp, resetGen, wiped, escalations, failsUsed, restarts>>
 
 RecFails ==
   /\ CanFail /\ FailMemory
@@ -314,13 +338,14 @@ Done ==
 
 Next ==
   \/ Admit \/ Drain \/ NewStart \/ Persist \/ Remote \/ Complete \/ ClearIntent
-  \/ Confirm \/ Save \/ RecLoad \/ RecRemote \/ RecComplete \/ RecClear
+  \/ Confirm \/ Save \/ RecLoad \/ RecTake \/ RecRemote \/ RecComplete \/ RecClear
   \/ Expire \/ Restart \/ BootDone \/ Done
 
 Fairness ==
   /\ WF_vars(Admit) /\ WF_vars(Drain) /\ WF_vars(NewStart) /\ WF_vars(Persist)
   /\ WF_vars(Remote) /\ WF_vars(Complete) /\ WF_vars(ClearIntent) /\ WF_vars(Confirm)
-  /\ WF_vars(Save) /\ WF_vars(RecLoad) /\ WF_vars(RecRemote) /\ WF_vars(RecComplete)
+  /\ WF_vars(Save) /\ WF_vars(RecLoad) /\ WF_vars(RecTake) /\ WF_vars(RecRemote)
+  /\ WF_vars(RecComplete)
   /\ WF_vars(RecClear) /\ WF_vars(Expire) /\ WF_vars(BootDone)
 
 Spec == Init /\ [][Next]_vars /\ Fairness
@@ -330,7 +355,7 @@ Spec == Init /\ [][Next]_vars /\ Fairness
 TypeOK ==
   /\ off \in 1..(N + 1) /\ queue \subseteq Plain /\ intent \in {NoIntent} \cup News
   /\ main \in {"boot", "loop", "persist", "remote", "complete", "clear", "confirm", "save"}
-  /\ rec \in {"idle", "remote", "complete", "clear"}
+  /\ rec \in {"idle", "loaded", "remote", "complete", "clear"}
 
 \* (1) После /new очередь чата очищена ровно по записанный update_id: сообщение до /new не
 \* попадает в новую сессию, сообщение после /new не теряется, не идёт в старую сессию и не
