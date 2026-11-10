@@ -65,36 +65,6 @@
       "import": "./dist/src/client/index.js",
       "default": "./dist/src/client/index.js"
     },
-    "./react": {
-      "types": "./dist/src/react/index.d.ts",
-      "import": "./dist/src/react/index.js",
-      "default": "./dist/src/react/index.js"
-    },
-    "./vue": {
-      "types": "./dist/src/vue/index.d.ts",
-      "import": "./dist/src/vue/index.js",
-      "default": "./dist/src/vue/index.js"
-    },
-    "./svelte": {
-      "types": "./dist/src/svelte/index.d.ts",
-      "import": "./dist/src/svelte/index.js",
-      "default": "./dist/src/svelte/index.js"
-    },
-    "./next": {
-      "types": "./dist/src/public/next/index.d.ts",
-      "import": "./dist/src/public/next/index.js",
-      "default": "./dist/src/public/next/index.js"
-    },
-    "./nuxt": {
-      "types": "./dist/src/public/nuxt/index.d.ts",
-      "import": "./dist/src/public/nuxt/index.js",
-      "default": "./dist/src/public/nuxt/index.js"
-    },
-    "./sveltekit": {
-      "types": "./dist/src/public/sveltekit/index.d.ts",
-      "import": "./dist/src/public/sveltekit/index.js",
-      "default": "./dist/src/public/sveltekit/index.js"
-    },
     "./tools/approval": {
       "types": "./dist/src/public/tools/approval/index.d.ts",
       "import": "./dist/src/public/tools/approval/index.js",
