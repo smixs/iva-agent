@@ -200,7 +200,11 @@ export async function updaterCompat(
   own: string = updaterVersion(),
 ): Promise<UpdaterCompat> {
   const minUpdater = await readMinUpdater(git, commit);
-  if (!minUpdater) return { status: "ok" };
+  return minUpdater ? floorCompat(own, minUpdater) : { status: "ok" };
+}
+
+/** Is the release `own` at the floor a tree names? One comparison for both halves. */
+export function floorCompat(own: string, minUpdater: string): UpdaterCompat {
   const comparison = compareInstalled(own, minUpdater);
   if (comparison === null)
     throw new Error(

@@ -10,7 +10,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { CATALOG, catalogProvider } from "./lib/model-catalog.ts";
 import { notificationChat } from "./lib/notification-chat.ts";
 import { redactNotice } from "./lib/notice.ts";
@@ -34,6 +34,13 @@ import {
 } from "./lib/version-layout.ts";
 import { throughLink } from "./lib/link-target.ts";
 import {
+  floorCompat,
+  installedVersion,
+  parseMinUpdater,
+  UPDATE_COMPAT_FILE,
+  updaterTooOldMessage,
+} from "./lib/update-check.ts";
+import {
   quarantinePath,
   rewriteRunStatusesForUpdate,
   sessionStateTargets,
@@ -42,6 +49,7 @@ import {
   adoptUpdateLock,
   layoutFor,
   LEGACY_STATE_DIRS,
+  parseVersionName,
   readJson,
   STATE_DIRS,
 } from "./lib/version-store.ts";
@@ -1030,6 +1038,39 @@ export async function startCandidateServices(
 }
 
 /**
+ * Why this tree is not installed over what serves now, or null. From 0.3.30 the old half
+ * reads `minUpdater` itself before its first write; 0.3.15 to 0.3.29 hand off without
+ * reading it, so the first code of the new tree asks the same question of the release on
+ * disk (specs/UpdateFloor.tla, StaysOnItsRelease). A checkout that was never converted
+ * is named by its own package.json.
+ */
+export function belowFloor(
+  home: string,
+  tree: string = join(import.meta.dirname, ".."),
+): string | null {
+  const layout = layoutFor(home);
+  const serving = existsSync(layout.current)
+    ? parseVersionName(basename(realpathSync(layout.current)))?.version
+    : installedVersion(home);
+  if (!serving) return null;
+  const floor = parseMinUpdater(
+    readFileSync(join(tree, UPDATE_COMPAT_FILE), "utf8"),
+  );
+  return floorCompat(serving, floor).status === "too-old"
+    ? updaterTooOldMessage(serving, layout.values.AGENT_LANGUAGE)
+    : null;
+}
+
+/** An outcome reported before the lock is adopted: nothing was touched. */
+function refuse(message: string): number {
+  const outcome: UpdateOutcome = { status: "failed", message };
+  const report = process.env.IVA_UPDATE_OUTCOME;
+  if (report) writeFileSync(report, JSON.stringify(outcome));
+  else console.log(JSON.stringify(outcome));
+  return 1;
+}
+
+/**
  * The second half of an update, run by the version being installed: install,
  * build, probe, flip, migrate, restart and retire the old checkout all belong to
  * the new code, so a fix to any of them ships in the release carrying it.
@@ -1054,16 +1095,12 @@ export async function main(argv: readonly string[]): Promise<number> {
   // a health cycle - and finally names the value. `iva update` on the release after this one
   // refuses before even that (scripts/cli/version-update-command.ts).
   const configured = layout.values.MODEL_PROVIDER ?? "ollama";
-  if (!catalogProvider(configured)) {
-    const outcome: UpdateOutcome = {
-      status: "failed",
-      message: `Invalid MODEL_PROVIDER ${JSON.stringify(configured)}; expected one of: ${Object.keys(CATALOG).join(", ")} — run: iva config`,
-    };
-    const report = process.env.IVA_UPDATE_OUTCOME;
-    if (report) writeFileSync(report, JSON.stringify(outcome));
-    else console.log(JSON.stringify(outcome));
-    return 1;
-  }
+  if (!catalogProvider(configured))
+    return refuse(
+      `Invalid MODEL_PROVIDER ${JSON.stringify(configured)}; expected one of: ${Object.keys(CATALOG).join(", ")} — run: iva config`,
+    );
+  const tooOld = belowFloor(home);
+  if (tooOld) return refuse(tooOld);
 
   const lock = adoptUpdateLock(layout.data);
   const log: Say = (message) => console.log(`  ${message}`);

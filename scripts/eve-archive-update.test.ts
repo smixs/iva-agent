@@ -84,7 +84,7 @@ for (const layout of ["current", "lost-current", "legacy"] as const) {
         "package.json",
         JSON.stringify({
           name: "iva",
-          version: layout === "legacy" ? "0.4.8" : "0.4.16",
+          version: layout === "legacy" ? "0.5.0" : "0.5.9",
           type: "module",
         }),
       );
@@ -95,11 +95,11 @@ for (const layout of ["current", "lost-current", "legacy"] as const) {
       git(source, "add", "-A");
       git(source, "commit", "--quiet", "-m", "old installation");
       const oldSha = git(source, "rev-parse", "HEAD");
-      const oldName = `0.4.16-${oldSha.slice(0, 12)}`;
+      const oldName = `0.5.9-${oldSha.slice(0, 12)}`;
       archive.writeManifest(source);
       git(source, "add", "-A");
       git(source, "commit", "--quiet", "-m", "new archive dependency");
-      git(source, "tag", "v0.4.17");
+      git(source, "tag", "v0.5.12");
       git(root, "clone", "--quiet", "--bare", source, remote);
       mkdirSync(home, { recursive: true });
       write(home, ".env", "MODEL_PROVIDER=ollama\nAGENT_LANGUAGE=en\n");
@@ -119,7 +119,7 @@ for (const layout of ["current", "lost-current", "legacy"] as const) {
         write(
           oldRoot,
           "package.json",
-          '{"name":"iva","version":"0.4.16","type":"module"}',
+          '{"name":"iva","version":"0.5.9","type":"module"}',
         );
         write(oldRoot, "bin/iva.mjs", CLI);
         store.linkState(oldRoot);
@@ -177,7 +177,7 @@ for (const layout of ["current", "lost-current", "legacy"] as const) {
       );
       assert.match(
         npmLogs,
-        /cwd .*\/versions\/0\.4\.17-[a-f0-9]{12}/u,
+        /cwd .*\/versions\/0\.5\.12-[a-f0-9]{12}/u,
         result.output,
       );
       const calls = existsSync(log) ? readFileSync(log, "utf8") : "";
@@ -226,7 +226,7 @@ for (const layout of ["current", "lost-current", "legacy"] as const) {
             version: string;
           }
         ).version,
-        layout === "legacy" ? "0.4.17" : "0.4.16",
+        layout === "legacy" ? "0.5.12" : "0.5.9",
         "repair.sh resets legacy source files to the candidate before npm ci",
       );
       if (layout === "legacy")
@@ -275,22 +275,8 @@ function assertHistoricalTree(directory: string, version: string) {
     readFileSync(join(directory, "package.json"), "utf8"),
   ) as {
     version: string;
-    scripts: Record<string, string>;
   };
   assert.equal(manifest.version, version, "historical manifest version");
-  assert.match(
-    manifest.scripts.postinstall,
-    /patch-package/u,
-    "historical postinstall",
-  );
-  assert.ok(
-    existsSync(join(directory, "patches")),
-    "historical patches directory",
-  );
-  assert.ok(
-    readdirSync(join(directory, "patches")).length > 0,
-    "historical patches",
-  );
 }
 
 const minimum = (
@@ -298,7 +284,7 @@ const minimum = (
     minUpdater: string;
   }
 ).minUpdater;
-for (const version of [minimum, "0.4.16"]) {
+for (const version of [minimum]) {
   for (const fault of ["ok", "404", "integrity"] satisfies ArchiveFault[]) {
     test(`historical v${version} CLI hands off to downloaded update-finish (${fault})`, async (t) => {
       const root = realpathSync(
@@ -326,7 +312,7 @@ for (const version of [minimum, "0.4.16"]) {
       archive.writeManifest(source);
       git(source, "add", "-A");
       git(source, "commit", "--quiet", "-m", "candidate tree");
-      git(source, "tag", "v0.4.17");
+      git(source, "tag", "v0.5.12");
       git(root, "clone", "--quiet", "--no-local", "--mirror", source, remote);
       mkdirSync(home);
       git(root, "clone", "--quiet", "--mirror", remote, join(home, "repo"));
@@ -408,7 +394,7 @@ for (const version of [minimum, "0.4.16"]) {
         )
         .join("\n");
       assert.match(logs, /verbose argv "ci" "--no-audit" "--no-fund"/u);
-      assert.match(logs, /cwd .*\/versions\/0\.4\.17-[a-f0-9]{12}/u);
+      assert.match(logs, /cwd .*\/versions\/0\.5\.12-[a-f0-9]{12}/u);
       assert.ok(
         archive.requests.every((url) =>
           ["/eve.tgz", "/asset.tgz"].includes(url),
@@ -434,7 +420,7 @@ test("historical tests explain missing release tags in a clone", (t) => {
   assert.equal(git(clone, "tag", "--list"), "");
   const env = { ...process.env };
   delete env.NODE_TEST_CONTEXT;
-  for (const version of [minimum, "0.4.16"]) {
+  for (const version of [minimum]) {
     const result = spawnSync(
       process.execPath,
       [

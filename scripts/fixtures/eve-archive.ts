@@ -68,7 +68,7 @@ export async function eveArchive(t: TestContext, root: string) {
     setFault(value: ArchiveFault) {
       fault = value;
     },
-    writeManifest(directory: string, version = "0.4.17") {
+    writeManifest(directory: string, version = "0.5.12") {
       const dependencies = { eve: url };
       const pkg = {
         name: "iva",
