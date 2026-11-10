@@ -23,9 +23,6 @@
     "build:types": "tsc -p tsconfig.build.json --emitDeclarationOnly",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
-  "devDependencies": {
-    "vitest": "catalog:"
-  },
   "engines": {
     "node": ">=24"
   }
