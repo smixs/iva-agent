@@ -198,9 +198,13 @@ Iva carries eve 0.51.1 sources from vercel/eve in `eve/`, with our changes under
 ## What's New
 
 <details>
-<summary><b>v0.5.11 · 10.11.2026 — expand the latest releases</b></summary>
+<summary><b>v0.5.12 · 10.11.2026 — expand the latest releases</b></summary>
 
 ### 10.11.2026
+
+#### v0.5.12
+
+- 🧩 **Widget code stays hidden in live drafts**: Iva no longer shows raw widget code in the reply draft while it is being typed.
 
 #### v0.5.11
 

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## [0.5.12] - 2026-11-10
+
+- 🧩 **Код виджета скрыт в живом черновике**: Ива больше не показывает сырой код виджета в черновике ответа, пока он печатается. Iva no longer shows raw widget code in the reply draft while it is being typed.
+
 ## [0.5.11] - 2026-11-10
 
 - 📊 **Виджеты легче и точнее**: Ива начинает с родной карточки Telegram без стилей: заголовок, список, таблица и кнопки выглядят как обычные сообщения и весят меньше килобайта. Появились шаги работы помощника с отметками, кольца, графики-искры и чеки; карточка занимает пузырь до края, а журнал растёт вверх. The widgets skill starts from native unstyled cards and adds steppers, rings, sparklines, receipts, the resize anchor and the profile's full list of unsupported features and limits.
