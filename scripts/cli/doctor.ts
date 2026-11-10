@@ -313,7 +313,6 @@ type DoctorRun = {
   readonly ensureAssistantBearer: SystemdLifecycle["ensureAssistantBearer"];
   readonly writeUnits: SystemdLifecycle["writeUnits"];
   readonly activateUnits: SystemdLifecycle["activateUnits"];
-  readonly migrateEnv: SystemdLifecycle["migrateEnv"];
   readonly now: () => number;
   readonly sleep: (milliseconds: number) => Promise<void>;
   readonly exit: (code: number) => unknown;
@@ -484,8 +483,7 @@ function createDoctorRun(
     readEnv,
     dataDirAbs,
   } = runtime;
-  const { ensureAssistantBearer, writeUnits, activateUnits, migrateEnv } =
-    systemdLifecycle;
+  const { ensureAssistantBearer, writeUnits, activateUnits } = systemdLifecycle;
   // Одна выкладка данных на весь прогон: каталог не меняется под ногами, а
   // каждый лишний вызов — это ещё одно чтение .env ради того же ответа.
   const env = readEnv();
@@ -520,7 +518,6 @@ function createDoctorRun(
     ensureAssistantBearer,
     writeUnits,
     activateUnits,
-    migrateEnv,
     install: null,
     readOnly: dependencies.readOnly === true,
   };
@@ -624,7 +621,7 @@ async function checkClaudeCli(ctx: DoctorContext): Promise<void> {
   ctx.fail(status.hint);
 }
 
-/** Хвост раздела .env: двусмысленные строки, миграция порта, необязательные поиск и память. */
+/** Хвост раздела .env: двусмысленные строки, порт, необязательные поиск и память. */
 function checkEnvOptions(ctx: DoctorContext): void {
   // Значение вне безопасного подмножества сервис и команда могут прочитать
   // по-разному: юнит несёт `EnvironmentFile=`, а CLI читает тем же parseEnv, что и
@@ -640,9 +637,11 @@ function checkEnvOptions(ctx: DoctorContext): void {
       `.env lines the service and the CLI may read differently: ${ambiguous.join(", ")} — re-enter them: iva config`,
     );
   }
-  // old .env without IVA_PORT (or with :3000) — migrate right here
-  if (ctx.repair("add IVA_PORT to .env if missing", () => ctx.migrateEnv()))
-    ctx.fix();
+  // A .env written before 0.3.15 names no port. Nothing rewrites it: the owner adds the line.
+  if (!(ctx.env.IVA_PORT || "").trim())
+    ctx.fail(
+      `${ctx.envPath} has no IVA_PORT (a .env of Iva older than 0.3.15) — add the line IVA_PORT=<port>, or run: iva config`,
+    );
   // voice is optional: without the key voice notes are saved but not transcribed
   if (!(ctx.env.DEEPGRAM_API_KEY || "").trim())
     ctx.warn(

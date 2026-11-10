@@ -57,7 +57,6 @@ function lifecycle(): SystemdLifecycle {
     writeUnits: () => [],
     activateUnits: () => undefined,
     removeUnits: () => [],
-    migrateEnv: () => false,
     restartServices: () => undefined,
   };
 }
@@ -660,7 +659,6 @@ async function brokenInstall(t: TestContext) {
     ensureAssistantBearer: () => (calls.push("ensureAssistantBearer"), true),
     writeUnits: () => (calls.push("writeUnits"), []),
     activateUnits: () => void calls.push("activateUnits"),
-    migrateEnv: () => (calls.push("migrateEnv"), false),
   };
   return { data, runtime, spy, calls };
 }
@@ -682,7 +680,6 @@ await test("iva diagnose ничего не чинит, а iva doctor из тер
     );
     for (const what of [
       "check the internal bearer and .env permissions",
-      "add IVA_PORT to .env if missing",
       "run npm run build",
       "install and start the systemd units",
       "activate iva.service",
@@ -705,7 +702,6 @@ await test("iva diagnose ничего не чинит, а iva doctor из тер
   }
   for (const call of [
     "ensureAssistantBearer",
-    "migrateEnv",
     "run run build",
     "writeUnits",
     "activateUnits",

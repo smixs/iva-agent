@@ -13,7 +13,6 @@ import {
   generateAssistantBearer,
   isAssistantBearer,
 } from "../lib/assistant-auth.ts";
-import { writeEnvAtomicSync } from "../lib/env-file.ts";
 import {
   cleanupSystemdUnits,
   systemdExecArgument,
@@ -44,32 +43,6 @@ type RestartServicesOptions = {
   readonly afterUnitWrite?: () => void;
   readonly skipUnits?: readonly string[];
 };
-
-type PortMigration = {
-  readonly port: string;
-  /** ASSISTANT_HOST is the old :3000 default and moves to the new port. */
-  readonly moveHost: boolean;
-};
-
-/**
- * `.env` text with `IVA_PORT` appended after the last non-empty line. Every other line
- * stays as it is, except a stale :3000 `ASSISTANT_HOST`, which would keep clients on
- * the taken port.
- */
-function withIvaPort(raw: string, migration: PortMigration): string {
-  const appended = `${raw.replace(/\n*$/, "\n")}IVA_PORT=${migration.port}\n`;
-  return migration.moveHost
-    ? appended.replace(
-        /^(\s*ASSISTANT_HOST\s*=).*$/m,
-        `$1http://127.0.0.1:${migration.port}`,
-      )
-    : appended;
-}
-
-function portMigrationMessage(migration: PortMigration): string {
-  const moved = migration.moveHost ? ", ASSISTANT_HOST moved off :3000" : "";
-  return `.env migrated → IVA_PORT=${migration.port}${moved}`;
-}
 
 class CliSystemdLifecycle {
   private readonly runtime: CliRuntime;
@@ -371,42 +344,6 @@ class CliSystemdLifecycle {
     return cleanupSystemdUnits({ units, ...this.unitCleanupSteps() });
   }
 
-  // Migrate old installs to IVA_PORT. Idempotent: on the first `iva update`
-  // after switching to the new scheme it guarantees the variable and keeps the server
-  // (Environment=PORT=$IVA_PORT) from drifting away from clients (whose default is ASSISTANT_HOST).
-  migrateEnv(options: QuietOptions = {}): boolean {
-    const migration = this.portMigration();
-    if (!migration) return false;
-    writeEnvAtomicSync(
-      this.runtime.ENV_PATH,
-      withIvaPort(readFileSync(this.runtime.ENV_PATH, "utf8"), migration),
-    );
-    return this.announce(true, options, portMigrationMessage(migration));
-  }
-
-  // null: no .env, or already on the new scheme — leave it alone.
-  portMigration(): PortMigration | null {
-    if (!existsSync(this.runtime.ENV_PATH)) return null;
-    const env = this.runtime.readEnv();
-    return env.IVA_PORT ? null : this.portFor(env.ASSISTANT_HOST);
-  }
-
-  // old default :3000 → new default 8723; custom local host → its port; otherwise the default
-  portFor(host = ""): PortMigration {
-    const moveHost = host === this.runtime.OLD_DEFAULT_HOST;
-    return {
-      port: moveHost ? this.runtime.DEFAULT_PORT : this.localPort(host),
-      moveHost,
-    };
-  }
-
-  localPort(host: string): string {
-    return (
-      host.match(/^https?:\/\/(?:127\.0\.0\.1|localhost):(\d+)\/?$/i)?.[1] ??
-      this.runtime.DEFAULT_PORT
-    );
-  }
-
   // Any restart via `iva` first regenerates the unit → Environment=PORT always equals
   // the current IVA_PORT from .env. Without this, editing IVA_PORT + restart would leave the server
   // on the old port (the unit was already baked) while clients read the new one — the same desync.
@@ -423,7 +360,6 @@ class CliSystemdLifecycle {
       writeUnits: this.writeUnits.bind(this),
       activateUnits: this.activateUnits.bind(this),
       removeUnits: this.removeUnits.bind(this),
-      migrateEnv: this.migrateEnv.bind(this),
       restartServices: this.restartServices.bind(this),
     };
   }

@@ -342,6 +342,26 @@ void test("doctor warns on a non-zero last exit code even right after a fresh su
   assert.doesNotMatch(output, /таблица фактов не читается/);
 });
 
+// UpdateFloor.NoSilentLoss: a .env written before 0.3.15 names no port. Doctor says so with
+// the file's name and adds no line of its own; every line the owner wrote stays.
+void test("NoSilentLoss: doctor names a .env without IVA_PORT and does not add the line", async (t) => {
+  const { envPath, runCommand } = await fixture(t);
+  const before = await readFile(envPath, "utf8");
+  assert.doesNotMatch(before, /^IVA_PORT=/mu);
+
+  const result = runCommand("doctor");
+  const output = `${result.stdout}\n${result.stderr}`;
+
+  assert.equal(result.status, 1, output);
+  assert.ok(
+    output.includes(`${envPath} has no IVA_PORT`),
+    `the file is not named: ${output.replaceAll(SECRET, "<secret>")}`,
+  );
+  const after = await readFile(envPath, "utf8");
+  assert.doesNotMatch(after, /^IVA_PORT=/mu);
+  for (const line of before.split("\n")) assert.ok(after.includes(line));
+});
+
 // UpdateFloor.NoSilentLoss: unit files of a release below the floor (the eight
 // iva-memory-{daily,weekly,monthly,yearly} units and the iva-memory-doctor pair) are not
 // this CLI's. Every command that writes or reads units leaves them byte for byte and names

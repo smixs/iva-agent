@@ -67,6 +67,7 @@ function completeEnv(): Record<string, string> {
     TELEGRAM_ALLOWED_USER_IDS: "1",
     ASSISTANT_BEARER: "b".repeat(43),
     TAVILY_API_KEY: "tavily-key",
+    IVA_PORT: "8723",
   };
 }
 
@@ -78,7 +79,6 @@ function lifecycle(
     writeUnits: () => [],
     activateUnits: () => undefined,
     removeUnits: () => [],
-    migrateEnv: () => false,
     restartServices: () => undefined,
     ...overrides,
   };
@@ -895,7 +895,7 @@ test("missing env remains a failure while the systemd warning stays uncounted", 
   assert.deepEqual(exitCodes, [1]);
 });
 
-test("doctor keeps the initial env snapshot but reads the migrated listener port fresh", async (t) => {
+test("doctor keeps the initial env snapshot but reads the listener port fresh", async (t) => {
   const root = await sandbox(t);
   const unitDir = join(root, "units");
   const vault = join(root, "vault-initial");
@@ -909,7 +909,7 @@ test("doctor keeps the initial env snapshot but reads the migrated listener port
     ASSISTANT_DATA_DIR: "data-initial",
     ASSISTANT_VAULT_DIR: "vault-initial",
   };
-  const migratedEnv = { IVA_PORT: "9123" };
+  const freshEnv = { IVA_PORT: "9123" };
   const calls: string[] = [];
   const dataDirInputs: Array<Partial<Record<string, string>>> = [];
   const listenerArgs: Array<readonly string[]> = [];
@@ -938,7 +938,7 @@ test("doctor keeps the initial env snapshot but reads the migrated listener port
     readEnv: () => {
       readCount++;
       calls.push(readCount === 1 ? "read-initial" : "read-fresh");
-      return readCount === 1 ? initialEnv : migratedEnv;
+      return readCount === 1 ? initialEnv : freshEnv;
     },
     dataDirAbs: (env = initialEnv) => {
       dataDirInputs.push(env);
@@ -966,10 +966,6 @@ test("doctor keeps the initial env snapshot but reads the migrated listener port
       calls.push("ensure-bearer");
       return false;
     },
-    migrateEnv: () => {
-      calls.push("migrate-env");
-      return true;
-    },
     writeUnits: () => {
       calls.push("write-units");
       return [];
@@ -983,8 +979,7 @@ test("doctor keeps the initial env snapshot but reads the migrated listener port
   })();
 
   assert.equal(readCount, 2);
-  assert.ok(calls.indexOf("read-initial") < calls.indexOf("migrate-env"));
-  assert.ok(calls.indexOf("migrate-env") < calls.indexOf("read-fresh"));
+  assert.ok(calls.indexOf("read-initial") < calls.indexOf("read-fresh"));
   assert.ok(calls.indexOf("read-fresh") < calls.indexOf("inspect-listener"));
   assert.deepEqual(listenerArgs, [["-H", "-ltn", "sport", "=", ":9123"]]);
   assert.equal(dataDirInputs.length, 1);

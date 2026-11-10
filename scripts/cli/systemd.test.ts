@@ -352,50 +352,7 @@ test("an invalid bearer is replaced and a missing .env is left missing", () => {
   });
 });
 
-// ── migrateEnv ─────────────────────────────────────────────────────────────
-
-test("migrateEnv moves the old :3000 default to the new port and keeps secrets", () => {
-  withFixture(
-    `ASSISTANT_HOST=http://127.0.0.1:3000\nASSISTANT_BEARER=${BEARER}\n\n\n`,
-    (fx) => {
-      assert.equal(cli(fx).migrateEnv(), true);
-
-      assert.equal(
-        readFileSync(fx.envPath, "utf8"),
-        `ASSISTANT_HOST=http://127.0.0.1:8723\nASSISTANT_BEARER=${BEARER}\nIVA_PORT=8723\n`,
-      );
-      assert.deepEqual(fx.reports, [
-        ".env migrated → IVA_PORT=8723, ASSISTANT_HOST moved off :3000",
-      ]);
-    },
-  );
-});
-
-test("migrateEnv takes the port of a custom local host and leaves the host alone", () => {
-  withFixture("ASSISTANT_HOST=http://localhost:4100/", (fx) => {
-    assert.equal(cli(fx).migrateEnv({ quiet: true }), true);
-
-    assert.equal(
-      readFileSync(fx.envPath, "utf8"),
-      "ASSISTANT_HOST=http://localhost:4100/\nIVA_PORT=4100\n",
-    );
-    assert.deepEqual(fx.reports, []);
-  });
-});
-
-test("migrateEnv does nothing without .env or on the new scheme", () => {
-  withFixture(null, (fx) => {
-    assert.equal(cli(fx).migrateEnv(), false);
-    assert.equal(existsSync(fx.envPath), false);
-  });
-  withFixture("IVA_PORT=9000\nASSISTANT_HOST=http://127.0.0.1:3000\n", (fx) => {
-    assert.equal(cli(fx).migrateEnv(), false);
-    assert.equal(
-      readFileSync(fx.envPath, "utf8"),
-      "IVA_PORT=9000\nASSISTANT_HOST=http://127.0.0.1:3000\n",
-    );
-  });
-});
+// ── a .env without IVA_PORT ────────────────────────────────────────────────
 
 const envKey = fc.stringMatching(/^[A-Z][A-Z0-9_]{0,11}$/);
 const envValue = fc.oneof(
@@ -443,42 +400,23 @@ const envFile = fc
     },
   );
 
-test("property: migrateEnv keeps every key and line, adds one IVA_PORT, and is idempotent; an existing IVA_PORT is a no-op", () => {
+// UpdateFloor.NoSilentLoss: a .env written before 0.3.15 names no port. Writing units
+// never rewrites it: the bytes stay, and the unit carries the port the file names or the
+// default one.
+test("PROPERTY NoSilentLoss: writeUnits leaves a .env byte for byte, with or without IVA_PORT", () => {
   const seed = Number(process.env.FC_SEED ?? Date.now() % 2 ** 31);
-  console.log(`migrateEnv property seed=${seed} (rerun with FC_SEED=${seed})`);
+  console.log(`env property seed=${seed} (rerun with FC_SEED=${seed})`);
   fc.assert(
     fc.property(envFile, (raw) => {
       withFixture(raw, (fx) => {
-        const before = parseEnv(raw);
-        const systemd = cli(fx);
-        if (before.IVA_PORT) {
-          assert.equal(systemd.migrateEnv({ quiet: true }), false);
-          assert.equal(readFileSync(fx.envPath, "utf8"), raw);
-          return;
-        }
+        cli(fx).writeUnits({ ensureBearer: false });
 
-        assert.equal(systemd.migrateEnv({ quiet: true }), true);
-        const migrated = readFileSync(fx.envPath, "utf8");
-        const after = parseEnv(migrated);
-
-        const movedHost = before.ASSISTANT_HOST === "http://127.0.0.1:3000";
-        for (const [key, value] of Object.entries(before))
-          if (!(movedHost && key === "ASSISTANT_HOST"))
-            assert.equal(after[key], value, key);
-        assert.equal(migrated.match(/^IVA_PORT=/gm)?.length, 1);
-        assert.match(after.IVA_PORT ?? "", /^\d+$/);
-        const kept = migrated.split("\n");
-        for (const line of raw.split("\n").filter((l) => l.trim()))
-          if (!(movedHost && /^\s*ASSISTANT_HOST=/.test(line)))
-            assert.ok(kept.includes(line), `line lost: ${line}`);
-        if (movedHost)
-          assert.equal(
-            after.ASSISTANT_HOST,
-            `http://127.0.0.1:${after.IVA_PORT}`,
-          );
-
-        assert.equal(systemd.migrateEnv({ quiet: true }), false);
-        assert.equal(readFileSync(fx.envPath, "utf8"), migrated);
+        assert.equal(readFileSync(fx.envPath, "utf8"), raw);
+        const port = parseEnv(raw).IVA_PORT ?? "8723";
+        assert.ok(
+          unit(fx, "iva.service").includes(`Environment=PORT=${port}\n`),
+          `PORT=${port}`,
+        );
       });
     }),
     { seed, numRuns: 60 },
