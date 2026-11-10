@@ -89,12 +89,18 @@ if (
     status: "idle",
     sessionId: null,
     turnId: null,
+    draftId: null,
+    ingressId: null,
+    ingressAt: null,
   });
 } else if (mode === "direct-retry" || mode === "closed-session") {
   status.setChatStatus(privateKey, {
     status: "idle",
     sessionId: null,
     turnId: null,
+    draftId: null,
+    ingressId: null,
+    ingressAt: null,
   });
 } else if (
   mode === "core-distill-ownership-crash" ||
@@ -107,6 +113,9 @@ if (
     status: "idle",
     sessionId: null,
     turnId: null,
+    draftId: null,
+    ingressId: null,
+    ingressAt: null,
   });
 }
 if (mode === "group-noise" || mode === "routing") {
@@ -600,6 +609,9 @@ const fetchHarness = async (url: unknown, options: FetchOptions = {}) => {
           status: "idle",
           sessionId: null,
           turnId: null,
+          draftId: null,
+          ingressId: null,
+          ingressAt: null,
         });
       }
       if (getUpdatesCalls > texts.length + 1 && status.isRunning(privateKey)) {
@@ -607,6 +619,9 @@ const fetchHarness = async (url: unknown, options: FetchOptions = {}) => {
           status: "idle",
           sessionId: null,
           turnId: null,
+          draftId: null,
+          ingressId: null,
+          ingressAt: null,
         });
       }
       if (getUpdatesCalls >= 8) finish();
@@ -630,6 +645,9 @@ const fetchHarness = async (url: unknown, options: FetchOptions = {}) => {
           status: "idle",
           sessionId: null,
           turnId: null,
+          draftId: null,
+          ingressId: null,
+          ingressAt: null,
         });
       }
       if (getUpdatesCalls >= 5) finish();
@@ -662,6 +680,9 @@ const fetchHarness = async (url: unknown, options: FetchOptions = {}) => {
           status: "idle",
           sessionId: null,
           turnId: null,
+          draftId: null,
+          ingressId: null,
+          ingressAt: null,
         });
       }
       if (getUpdatesCalls >= 6) finish();

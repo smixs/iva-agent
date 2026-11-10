@@ -346,9 +346,9 @@ void test("core saves the interview but never delivers while the same threaded c
     },
   });
   const key = runStatus.chatKeyOf(88, 12);
-  runStatus.setChatStatus(key, { status: "running" });
+  runStatus.setChatStatus(key, { status: "running", sessionId: "busy" });
   t.after(() => {
-    runStatus.setChatStatus(key, { status: "idle" });
+    runStatus.setChatStatus(key, { status: "idle", sessionId: null });
   });
 
   await core.on("fin", [], state, context);

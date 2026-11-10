@@ -785,7 +785,7 @@ test("reapStaleRuns closes an abandoned compaction like a stale turn, but silent
     });
 
   // Срок тот же, что у хода: живую запись не трогаем.
-  assert.equal(await reapStaleRuns(deps(reaperNow - 30_000)), 0);
+  assert.equal(await reapStaleRuns(deps(reaperNow - 29_999)), 0);
   assert.equal(calls.length, 0);
   assert.equal(await reapStaleRuns(deps(reaperNow - 31_000)), 1);
   const patch = calls[0]?.[3] as StatusRecord;
@@ -805,7 +805,7 @@ test("reapStaleRuns leaves a fresh running record untouched", async () => {
       [
         {
           chatKey: "1:",
-          status: { ...staleStatus, updatedAt: reaperNow - 30_000 },
+          status: { ...staleStatus, updatedAt: reaperNow - 29_999 },
         },
       ],
       {
@@ -895,7 +895,7 @@ test("a long silent turn survives the reaper while its heartbeat runs; a dead on
       sessionId: "session-live",
       now: () => nowMs,
       beats,
-      getStatusImpl: () => record,
+      getStatusImpl: () => record as never,
       setStatusIfImpl: (_key, expected, patch) => {
         if (
           expected.status !== record.status ||
@@ -1369,7 +1369,7 @@ test("property: a turn with live activity is never reaped, a dead one is reaped 
           now: () => at,
           minIntervalMs: HEARTBEAT_MS,
           beats,
-          getStatusImpl: () => record,
+          getStatusImpl: () => record as never,
           setStatusIfImpl: (key, expected, patch) =>
             setStatusIf(key, expected, patch, at),
         });

@@ -328,8 +328,8 @@ for (const mode of ["queue", "steer"] as const)
     );
     setChatStatus("41:", {
       status: "idle",
-      sessionId: "busy",
-      turnId: "turn_0",
+      sessionId: null,
+      turnId: null,
     });
     await scan();
     await scan();

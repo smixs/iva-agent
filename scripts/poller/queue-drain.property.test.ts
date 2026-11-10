@@ -191,10 +191,14 @@ class Machine {
     };
   }
 
-  private status = () => ({
-    status: this.busy ? "running" : "idle",
-    generation: this.generation,
-  });
+  private status = () =>
+    this.busy
+      ? ({
+          status: "running",
+          sessionId: "s",
+          generation: this.generation,
+        } as const)
+      : ({ status: "idle", generation: this.generation } as const);
 
   async step(step: Step) {
     switch (step.t) {
