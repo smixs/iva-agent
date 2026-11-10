@@ -1,6 +1,15 @@
 # TLA+ models
 
-The repository keeps bounded models of the lock, the night writer, restart recovery, proactive notices, plugin proposals, idle compaction, the tap on a model's button and the drain of the Bridge queue in batches. Run them from a temporary directory because TLC writes state files beside the model.
+The repository keeps bounded models, one per section below: the directory lock (`FileLock`), the night writer
+(`NightWriter`), the update lock, the update run, the update job of the menu, the update branch and the update
+floor (`UpdateLock`, `UpdateRun`, `UpdateJob`, `UpdateBranch`, `UpdateFloor`), restart recovery (`RestartRecovery`),
+the half-hourly proactive run (`Proactive`), plugin proposals and plugin modes (`PluginProposal`, `PluginMode`),
+the nightly backup against an oversized vault file and the commit of the vault (`BrainOversize`, `VaultCommit`),
+the draft stop of a turn, the compaction between turns, the tap on a model's button and the drain of the Bridge
+queue in batches (`DraftStop`, `IdleCompaction`, `ButtonTap`, `QueueDrain`), the userbot login (`UserbotLogin`),
+the launchd unit (`LaunchdUnit`), the helper run, its outcome and the goal check (`Helpers`, `GoalCheck`), the chat
+record (`ChatRecord`), the reminder row and its turn (`ReminderLifecycle`, `TurnLifecycle`), the reset intent of a
+private chat (`ResetIntent`) and the run of a schedule (`JobRun`). Run them from a temporary directory because TLC writes state files beside the model. Every `*-check.sh` takes `tlc` from `PATH`, and `~/.local/bin/tlc` otherwise; `TLC=` names another path, `TLC_TIMEOUT` and `JAVA_TOOL_OPTIONS` set the time and the heap.
 
 ## FileLock
 
@@ -140,7 +149,7 @@ assumption as `FileLock`; a stalled live writer exceeding it can lose its lock.
 
 ## Proactive
 
-`Proactive.tla` models the half-hourly proactive run before its code exists (`scripts/proactive/tick.ts`): a no-wait lock that expires `staleMs` after it is taken, the state file `data/proactive.json` written whole from the run's memory, the Brief claim and turn, the Insight claim and turn (a run with an Insight ends after it, without Watch), the Watch claim before the turn, delivery and the `wakes` write after it, a crash or a failed write at any step and the runner's deadline. One `Tick` is 8 minutes: a 40-minute `staleMs` gives `Stale = 5`, a run that lives at most `timeoutMs + killGraceMs` (31 min 30 s, at most 4 boundaries) gives `MaxRun = 4`; the run itself cancels a turn at `IVA_JOB_STOP_AT`, and after a Brief that ran past its deadline Watch does not go. A comment in the model maps every action to its future file and function.
+`Proactive.tla` models the half-hourly proactive run (`scripts/proactive/tick.ts`): a no-wait lock that expires `staleMs` after it is taken, the state file `data/proactive.json` written whole from the run's memory, the Brief claim and turn, the Insight claim and turn (a run with an Insight ends after it, without Watch), the Watch claim before the turn, delivery and the `wakes` write after it, a crash or a failed write at any step and the runner's deadline. One `Tick` is 8 minutes: a 40-minute `staleMs` gives `Stale = 5`, a run that lives at most `timeoutMs + killGraceMs` (31 min 30 s, at most 4 boundaries) gives `MaxRun = 4`; the run itself cancels a turn at `IVA_JOB_STOP_AT`, and after a Brief that ran past its deadline Watch does not go. A comment in the model maps every action to its future file and function.
 
 Checked invariants:
 
@@ -464,7 +473,7 @@ offline-события — ожидаемые красные свидетели 
 свойств чтения по находкам FN4–FN5 ночи остаётся отдельной работой этой модели.
 
 ```sh
-PATH=/opt/homebrew/opt/openjdk@25/bin:$PATH JAVA_TOOL_OPTIONS=-Xmx3g sh specs/helper-check.sh
+JAVA_TOOL_OPTIONS=-Xmx3g sh specs/helper-check.sh
 ```
 
 Load <20 перед каждым cfg, workers 1..4, heap по умолчанию 3 GiB; BFS
@@ -473,9 +482,9 @@ Trap удаляет metadir/states; LOG_DIR сохраняет журналы и
 Срок на конфигурацию — `TLC_TIMEOUT`, по умолчанию 1800 с: на стенде WSL2 (8 потоков, 7,8 ГБ, TLC 1.7.4, Java 21) самая долгая, `HelperRun-v72-run`, идёт 699 с, весь скрипт — 859 с (замер 10.11.2026).
 Ожидаемый invariant отказ требует exit12 и точное имя; temporal отказ — exit13
 и единственное свойство конфигурации. Инфраструктурная ошибка не убивает мутант.
-Всего 48 конфигураций: 24 HelperRun (10 зелёных, 12 разных мутантов,
-дополнительная temporal проверка «нет потолка», свидетель durable-хвоста)
-и 24 HelperOutcome, включая семь проверок освобождения мест. Все прогоны выполняются на Mac mini.
+Всего 54 конфигурации: 27 HelperRun (11 зелёных и 16 красных — мутанты, temporal проверка «нет
+потолка» и свидетель durable-хвоста) и 27 HelperOutcome (3 зелёных и 24 красных, включая семь
+проверок освобождения мест). Прогон идёт там, где запущен скрипт.
 
 | Конфигурация                                                                   | Ожидаемый результат       |
 | ------------------------------------------------------------------------------ | ------------------------- |
@@ -552,12 +561,12 @@ Insight, Reminder, Signal или Alert действует по скиллу `goa
 Охрана `Claim` с `ownerPending=0` сохраняется как требование к коду, С4.
 
 ```sh
-PATH=/opt/homebrew/opt/openjdk@25/bin:$PATH sh specs/goal-check.sh
+sh specs/goal-check.sh
 ```
 
 Скрипт последовательно выполняет полный BFS девяти штатных конфигураций,
 17 мутантов и одного свидетеля достижимости. Предел всего набора составляет
-600 секунд, каждого запуска 150 секунд; `WORKERS` принимает 1–4, умолчание 4.
+595 секунд, каждого запуска 150 секунд; `WORKERS` принимает 1–4, умолчание 4.
 Каждый JVM получает отдельный `java.io.tmpdir`. Рабочее дерево TLC и `states`
 живут в `.scratch/goal-tla` и удаляются при выходе. `LOG_DIR=/absolute/path`
 сохраняет журналы и `results.tsv`. `TLC`, `TIMEOUT`, `TLC_TIMEOUT` и
@@ -711,6 +720,7 @@ wall-clock values. The model assumes that eve handles the events of one session
 in order, so a session-level release never overlaps a turn of that session.
 `IdleCompaction`, `RestartRecovery`, `DraftStop`, `DeferredRestart` and
 `TurnLifecycle` keep their own scenarios over the same record.
+
 ## ReminderLifecycle
 
 `ReminderLifecycle.tla` models one row of `data/reminders.json` through its firings: a Reminder (`Kind = "at"`) or a Routine (`Kind = "cron"`). The processes that share the row: the minute tick inside the agent (`agent/lib/reminder-tick.ts`, in order: `fireDue`, `sweepFired`, `closeAbandoned`, then the owed Alerts), the fire child (`scripts/reminders/fire.ts`), the Alert children (the same script called with `abandoned`, two slots per firing, so that a child which outlived the agent can meet a new one) and the tick's in-memory continuations, which die with the agent. The agent may crash and restart at any step; a child may die at any step and may also outlive the agent. The liveness window of a firing (`reminderPhase` says `running` until it passes) is one `Expire` step that may happen while the child is still alive. `firing` stands for `firedAt`, the identity every `recordDelivery` compares before it writes. Sending is two steps: Telegram accepts the message, then the sender gets the answer; a lost answer or a transient refusal makes the transport (`scripts/lib/telegram-send.ts`) wait and send the same message again, and the turn never runs again.
