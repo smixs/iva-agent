@@ -240,7 +240,8 @@ void test("подпись проходит тот же гейт секретов
 
 void test("жёсткая ссылка на файл снаружи - отказ", async (t) => {
   const calls = stubFetch(t);
-  const outside = mkdtempSync(join(REPO, ".send-file-hardlink-"));
+  // Снаружи Vault, но на его разделе: между разделами жёсткую ссылку не создать (EXDEV).
+  const outside = mkdtempSync(join(tmpdir(), "iva-send-file-outside-"));
   t.after(() => rmSync(outside, { recursive: true, force: true }));
   writeFileSync(join(outside, "secret.env"), "TOKEN=1");
   const link = join(vault, "attachments", "hard.txt");
