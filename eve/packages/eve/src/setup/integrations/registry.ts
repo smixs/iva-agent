@@ -1,6 +1,5 @@
 import { DISCORD_SETUP } from "./discord/setup.js";
 import { FILE_MEMORY_SETUP } from "./file-memory/setup.js";
-import { GITHUB_SETUP } from "./github/setup.js";
 import { LINEAR_SETUP } from "./linear/setup.js";
 import { LINQ_SETUP } from "./linq/setup.js";
 import { PHOTON_SETUP } from "./photon/setup.js";
@@ -15,7 +14,6 @@ export const SETUP_INTEGRATIONS: readonly SetupIntegration[] = [
   FILE_MEMORY_SETUP,
   SLACK_SETUP,
   DISCORD_SETUP,
-  GITHUB_SETUP,
   LINEAR_SETUP,
   LINQ_SETUP,
   PHOTON_SETUP,
