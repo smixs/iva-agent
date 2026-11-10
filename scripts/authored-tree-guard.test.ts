@@ -146,6 +146,7 @@ test("the authored tree has only its explicit shared-package edges", () => {
     [
       "agent/agent.ts -> ../packages/context-window/index.ts",
       "agent/hooks/trace.ts -> ../../packages/guards/index.ts",
+      "agent/hooks/trace.ts -> ../../packages/secret-redaction/index.ts",
       "agent/instructions/20-core.ts -> @iva/vault-dir",
       "agent/instructions/25-persona.ts -> @iva/vault-dir",
       "agent/instructions/now.ts -> @iva/timezone",

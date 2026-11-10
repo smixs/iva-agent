@@ -39,6 +39,8 @@ const {
 } = await import("./trace.ts");
 const { getChatStatus, hasTelegramPendingInputRequests, setChatStatus } =
   await import("./run-status.ts");
+const { REDACTED } = await import("../../packages/secret-redaction/index.ts");
+const { SECRET_ARGUMENTS } = await import("../connections/telegram-userbot.ts");
 const traceHookModule = await import("../hooks/trace.ts");
 const hook = traceHookModule.default;
 const {
@@ -318,6 +320,58 @@ void test("Error id, попытки и обрыв посреди ответа л
   assert.equal(data?.attempts, 3);
   assert.equal(data?.answerStarted, true);
   assert.equal(failed?.content, undefined);
+});
+
+// specs/UserbotLogin.tla, NoSecretLeaves: вызов qr_login_password пишется до ответа
+// прокси, и пароль двухфакторной защиты лежит в его аргументах.
+void test("секретный аргумент пишется меткой при включённом содержимом NoSecretLeaves", () => {
+  const password = "two-factor-password-not-for-disk";
+  feed({
+    type: "actions.requested",
+    data: {
+      sequence: 5,
+      stepIndex: 1,
+      turnId: "turn_3",
+      actions: [
+        {
+          kind: "tool-call",
+          callId: "call_pw",
+          toolName: "telegram-userbot__qr_login_password",
+          input: { password },
+        },
+        {
+          kind: "tool-call",
+          callId: "call_q",
+          toolName: "memory_search",
+          input: { query: "отпуск" },
+        },
+      ],
+    },
+  });
+  const text = readFileSync(traceFilePath(traceDay(), DATA), "utf8");
+  assert.ok(!text.includes(password), "the password reached the journal");
+  const data = journal().at(-1)?.data as Record<string, unknown>;
+  assert.deepEqual(data.args, [{ password: REDACTED }, { query: "отпуск" }]);
+  assert.deepEqual(
+    (data.actions as Record<string, unknown>[]).map((a) => a.toolName),
+    ["telegram-userbot__qr_login_password", "memory_search"],
+  );
+});
+
+void test("каждый параметр qr_login_password назван секретом NoSecretLeaves", () => {
+  const source = readFileSync(
+    new URL("../../services/telegram-userbot/onboarding.py", import.meta.url),
+    "utf8",
+  );
+  const signature = /async def qr_login_password\((.*)\)\s*->/u.exec(
+    source,
+  )?.[1];
+  assert.ok(signature, "onboarding.py no longer defines qr_login_password");
+  const names = [...signature.matchAll(/(?:^|,)\s*(\w+)\s*:/gu)].map(
+    (m) => m[1],
+  );
+  assert.deepEqual(names, ["password"]);
+  for (const name of names) assert.ok(SECRET_ARGUMENTS.includes(name), name);
 });
 
 void test("captureContent=false оставляет от события имена, класс сбоя и размеры", (t) => {

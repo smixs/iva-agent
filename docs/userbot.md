@@ -44,6 +44,11 @@ for you, in chat:
 > 2FA password included, and it passes through the model like any other message. After
 > connecting, delete those lines from the daily file — and if you sent a 2FA password, change
 > it. There is no separate secure channel for this yet.
+>
+> Iva itself writes the password nowhere else: the call that passes it to the proxy goes to
+> Trace with `<redacted>` in its place, and the proxy repeats it neither in a reply nor in
+> the service journal. eve's session history (`.eve/.workflow-data`) keeps that call beside
+> your message, as it keeps the whole conversation.
 
 ## Manual commands (optional — the agent runs these for you)
 
