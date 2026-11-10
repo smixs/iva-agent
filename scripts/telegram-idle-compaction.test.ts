@@ -3,7 +3,7 @@
 // решает, на session.waiting занимает чат (running + compacting) и зовёт штатный роут eve
 // POST /eve/v1/session/:id/compact с общим токеном. Конец пересказа (снова session.waiting)
 // освобождает чат. Двойник стоит только на внешних границах: Bot API, роут и сессия eve;
-// статус чата — настоящий файл, маршрутизация моста настоящая.
+// запись чата — настоящий файл, маршрутизация моста настоящая.
 import "./lib/ts-esm-hooks.ts";
 import assert from "node:assert/strict";
 import fc from "fast-check";
