@@ -2,7 +2,10 @@ import { lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, join, relative, sep } from "node:path";
 import { parseFrontmatterOrSkip } from "./frontmatter.ts";
 import { resolveTimeZone } from "../../packages/timezone/index.ts";
-import { vaultMarkdownFiles } from "../../packages/vault-walk/index.ts";
+import {
+  vaultMarkdownFiles,
+  type VaultWalkOptions,
+} from "../../packages/vault-walk/index.ts";
 
 // Ссылки [[…]], которые ведут в никуда. Модель пишет их с опечаткой в слаге, с выдуманной
 // транслитерацией или на карточку, которой никогда не создавали, — и это не косметика:
@@ -85,6 +88,7 @@ const LINK_SKIP = ["attachments", "backup"];
 function buildLinkIndex(
   vaultDir: string,
   extraPaths: readonly string[],
+  onUnreadable: VaultWalkOptions["onUnreadable"],
 ): LinkIndex {
   const index: LinkIndex = {
     exact: new Set(),
@@ -97,13 +101,15 @@ function buildLinkIndex(
   };
   // Ключ везде — путь БЕЗ .md: иначе своя же карточка попадает в индекс дважды, её stem
   // становится неоднозначным, и ссылка файла на самого себя читается как битая.
-  // Нечитаемый каталог обход пропускает: проверка ссылок на нём не падает. Карточки в
+  // Нечитаемый каталог проверка ссылок на записи пропускает и не падает; ночной граф
+  // передаёт `onUnreadable` и прерывается. Карточки в
   // archive — цели ссылок, как и остальные. attachments в индекс не идёт: цель
   // `attachments/…` принимается проверкой файла на диске. backup не идёт тоже: копия
   // карточки сделала бы короткую ссылку `[[topic]]` неоднозначной, то есть битой.
-  const paths = vaultMarkdownFiles(vaultDir, { skip: LINK_SKIP }).map((file) =>
-    relative(vaultDir, file).split(sep).join("/").slice(0, -3),
-  );
+  const paths = vaultMarkdownFiles(vaultDir, {
+    skip: LINK_SKIP,
+    onUnreadable,
+  }).map((file) => relative(vaultDir, file).split(sep).join("/").slice(0, -3));
   const seen = new Set(paths);
   for (const extra of extraPaths) {
     const relNoExt = extra.endsWith(".md") ? extra.slice(0, -3) : extra;
@@ -350,16 +356,25 @@ export interface LinkVerdict {
 /**
  * Индекс ссылок vault на один проход: его правилом write_card и write_file отказывают на
  * записи, им же ночной граф строит рёбра. `extraPaths` — карточки, которых на диске ещё
- * нет (записываемый файл при ADD): ссылка на них разрешена.
+ * нет (записываемый файл при ADD): ссылка на них разрешена. `onUnreadable` узнаёт о
+ * нечитаемом каталоге: без него каталог просто пропущен.
  */
 export function vaultLinks(
   vaultDir: string,
-  options: { extraPaths?: readonly string[]; today?: number } = {},
+  options: {
+    extraPaths?: readonly string[];
+    today?: number;
+    onUnreadable?: VaultWalkOptions["onUnreadable"];
+  } = {},
 ): {
   readonly cards: readonly string[];
   judge(raw: string, source: string): LinkVerdict;
 } {
-  const index = buildLinkIndex(vaultDir, options.extraPaths ?? []);
+  const index = buildLinkIndex(
+    vaultDir,
+    options.extraPaths ?? [],
+    options.onUnreadable,
+  );
   const today = options.today ?? todayUtc();
   return {
     cards: [...index.exact],
