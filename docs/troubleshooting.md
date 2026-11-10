@@ -189,7 +189,7 @@ iva restart
 
 ### Agent dead after editing MODEL_PROVIDER
 
-Cause: exactly five names are accepted — `ollama`, `opencode`, `codex`, `openrouter`, `custom`. Anything else, a typo or a different case included, is refused at startup instead of quietly running Ollama under the wrong name, so the service stops and says which names it takes:
+Cause: exactly six names are accepted — `ollama`, `opencode`, `codex`, `claude`, `openrouter`, `custom`. Anything else, a typo or a different case included, is refused at startup instead of quietly running Ollama under the wrong name, so the service stops and says which names it takes:
 
 ```bash
 journalctl --user -u iva.service -n 20 --no-pager
