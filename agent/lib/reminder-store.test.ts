@@ -4,6 +4,7 @@
 // поэтому ASSISTANT_DATA_DIR меняется до импорта модуля и ещё раз перед каждым тестом
 // (образец trace.property.test.ts:23-26).
 import assert from "node:assert/strict";
+import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { quarantineDamagedRecord } from "./damaged-record.ts";
@@ -15,11 +16,13 @@ import {
   readdirSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test, { beforeEach } from "node:test";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import type { Reminder, ReminderInput } from "./reminder-store.ts";
 
 const root = mkdtempSync(join(tmpdir(), "iva-reminders-"));
@@ -398,6 +401,82 @@ test("schemaVersion новее кода — явная ошибка", async () =
   assert.deepEqual(files(), ["reminders.json"]);
 });
 
+test("файл версии 1 переводится: срок и текст живут, режимы и аренда отброшены", async () => {
+  const now = Date.now();
+  await seed(
+    [
+      {
+        id: "old-one-shot",
+        text: "старое разовое",
+        mode: "agent",
+        schedule: { kind: "at", atMs: now + 60_000 },
+        nextRunAtMs: now + 60_000,
+        lastRunAtMs: null,
+        lastStatus: null,
+        lastError: null,
+        deliver: { chatId: "42" },
+        leaseUntilMs: null,
+        deliveredKey: null,
+      },
+      {
+        id: "old-cron",
+        text: "старое повторяющееся",
+        mode: "verbatim",
+        schedule: { kind: "cron", expr: "0 8 * * *", tz: "UTC" },
+        nextRunAtMs: now + 120_000,
+        lastRunAtMs: now - 60_000,
+        lastStatus: "failed",
+        lastError: "400 chat not found",
+        deliver: { chatId: "42" },
+        leaseUntilMs: null,
+        deliveredKey: "k",
+      },
+      {
+        id: "old-fired",
+        text: "уже пыталось сработать",
+        mode: "verbatim",
+        schedule: { kind: "at", atMs: now - 60_000 },
+        nextRunAtMs: now - 60_000,
+        lastRunAtMs: now - 60_000,
+        lastStatus: "failed",
+        lastError: "boom",
+        deliver: { chatId: "42" },
+        leaseUntilMs: null,
+        deliveredKey: null,
+      },
+    ],
+    1,
+  );
+
+  const rows = await list();
+  assert.deepEqual(
+    rows.map((r) => r.id),
+    ["old-fired", "old-one-shot", "old-cron"],
+  );
+  const fired = rows.find((r) => r.id === "old-fired");
+  assert.ok(fired);
+  assert.equal(
+    fired.status,
+    "fired",
+    "разовое уже сработало — второй раз нельзя",
+  );
+  assert.equal(fired.delivered, false);
+  assert.equal(fired.error, "boom");
+  const cron = rows.find((r) => r.id === "old-cron");
+  assert.ok(cron);
+  assert.equal(cron.status, "pending", "повторяющееся ждёт свой срок");
+  assert.equal(cron.delivered, false);
+  assert.equal(cron.error, "400 chat not found");
+  assert.equal(cron.createdAt > 0, true);
+  // После первой мутации файл уже версии 2.
+  await recordDelivery("old-cron", {
+    firedAt: cron.firedAt,
+    delivered: false,
+    error: "wake",
+  });
+  assert.equal(table().schemaVersion, REMINDER_SCHEMA_VERSION);
+});
+
 test("add отвергает мусор и не трогает файл", async () => {
   const now = 13_000_000;
   await seed([row({ id: "base", nextRunAtMs: now })]);
@@ -508,9 +587,71 @@ test("жизненный цикл, права файла и remove", async () =>
   assert.equal(statSync(reminderFile()).mode & 0o777, 0o600);
 });
 
-// UpdateFloor.NoSilentLoss: таблицу схемы 1 писала Iva старше 0.4.1. Ни чтение, ни запись её
-// не разбирают: отказ называет файл, байты остаются, в карантин ничего не уходит.
-test("NoSilentLoss: таблица схемы 1 — отказ с именем файла, файл не тронут", async () => {
+/** reminder-store.ts коммита `ref`, как он был: из `git archive`, рядом общий node_modules. */
+async function shippedStore(ref: string) {
+  const repo = fileURLToPath(new URL("../../", import.meta.url));
+  const tree = mkdtempSync(join(root, "shipped-"));
+  const paths = ["agent", "scripts", "packages", "package.json"].filter(
+    (path) =>
+      spawnSync("git", ["cat-file", "-e", `${ref}:${path}`], { cwd: repo })
+        .status === 0,
+  );
+  execFileSync("tar", ["-xf", "-", "-C", tree], {
+    input: execFileSync("git", ["archive", ref, ...paths], {
+      cwd: repo,
+      maxBuffer: 64 * 1024 * 1024,
+    }),
+  });
+  symlinkSync(join(repo, "node_modules"), join(tree, "node_modules"));
+  return (await import(
+    pathToFileURL(join(tree, "agent/lib/reminder-store.ts")).href
+  )) as {
+    REMINDER_SCHEMA_VERSION: number;
+    add: (input: Record<string, unknown>) => Promise<unknown>;
+    list: (file?: string) => Promise<Reminder[]>;
+  };
+}
+
+// specs/UpdateFloor.tla: SupportedIsServed. Таблицу схемы 1 писала Iva до 0.4.1; 0.5.11
+// читает её и переводит только первой записью. Установка, прошедшая ступеньку без записи,
+// приходит к этому коду со схемой 1 - и напоминание из неё срабатывает.
+test("SupportedIsServed: a schema 1 table its shipped writer left, read but not written by v0.5.11, is listed and fires", async () => {
+  const writer = await shippedStore("194584b2");
+  assert.equal(writer.REMINDER_SCHEMA_VERSION, 1);
+  const now = Date.now();
+  await writer.add({
+    id: "inherited",
+    text: "keep future reminder",
+    mode: "verbatim",
+    schedule: { kind: "at", atMs: now + 60_000 },
+    deliver: { chatId: "42" },
+  });
+  const written = readFileSync(reminderFile(), "utf8");
+  assert.equal(JSON.parse(written).schemaVersion, 1);
+  const step = await shippedStore("v0.5.11");
+  const stepRows = await step.list(reminderFile());
+  assert.equal(readFileSync(reminderFile(), "utf8"), written);
+
+  const rows = await list();
+  // createdAt перевода - время чтения; остальное как у 0.5.11.
+  const bare = (all: Reminder[]) => all.map(({ createdAt: _, ...r }) => r);
+  assert.deepEqual(bare(rows), bare(stepRows));
+  assert.deepEqual(
+    rows.map((r) => [r.id, r.text, r.status, r.nextRunAtMs]),
+    [["inherited", "keep future reminder", "pending", now + 60_000]],
+  );
+  assert.equal(readFileSync(reminderFile(), "utf8"), written);
+
+  const due = await fireDue(now + 60_000, 10);
+  assert.deepEqual(
+    due.map((r) => r.id),
+    ["inherited"],
+  );
+  assert.equal(table().schemaVersion, REMINDER_SCHEMA_VERSION);
+  assert.deepEqual(files(), ["reminders.json"]);
+});
+
+test("миграция v1: не срабатывавшее мигрирует без факта, не провалом", async () => {
   const now = Date.now();
   await seed(
     [
@@ -527,27 +668,18 @@ test("NoSilentLoss: таблица схемы 1 — отказ с именем �
     ],
     1,
   );
-  const before = readFileSync(reminderFile(), "utf8");
-  const refusal = (error: unknown): boolean => {
-    assert.ok(error instanceof Error);
-    assert.ok(
-      error.message.startsWith(
-        `${reminderFile()}: schemaVersion 1 was written by Iva older than 0.4.1`,
-      ),
-      error.message,
-    );
-    return true;
-  };
 
-  await assert.rejects(list(), refusal);
-  await assert.rejects(remove("never-ran"), refusal);
-  await assert.rejects(fireDue(now + 600_000, 10), refusal);
-
-  assert.equal(readFileSync(reminderFile(), "utf8"), before);
-  assert.deepEqual(
-    files().filter((name) => name.includes(".damaged-")),
-    [],
+  const rows = await list();
+  const found = rows.find((r) => r.id === "never-ran");
+  assert.ok(found);
+  assert.equal(found.status, "pending");
+  assert.equal(found.firedAt, null);
+  assert.equal(
+    found.delivered,
+    null,
+    "несрабатывавшее — нет факта доставки, а не провал",
   );
+  assert.equal(found.error, null);
 });
 
 test("POISON reminders quarantine invalid and duplicate rows once before the next write", async (t) => {
