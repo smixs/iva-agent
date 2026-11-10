@@ -279,8 +279,8 @@ export function listIndex(
   return idx >= 0 && idx < length ? idx : defNum - 1;
 }
 
-// Выбор свободного порта: спрашиваем желаемый, проверяем тем же чекером, что и
-// `check-port` (scripts/lib/ports.ts); занят — предлагаем ближайший свободный. Закрывает
+// Выбор свободного порта: спрашиваем желаемый, проверяем чекером scripts/lib/ports.ts;
+// занят — предлагаем ближайший свободный. Закрывает
 // корень бага на этапе настройки: сервер не стартует на занятом порту.
 function pickPort(d: Core, def: string): Promise<string> {
   return untilAnswered(() => portRound(d, def));

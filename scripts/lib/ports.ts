@@ -1,5 +1,4 @@
-// SOLID-ядро проверки портов Iva. Переиспользуется CLI (scripts/check-port.ts) и
-// scripts/setup/dialog.ts.
+// SOLID-ядро проверки портов Iva. Им пользуется настройка (scripts/setup/).
 //
 //   • Probe (SRP/ISP)   — один способ детекта «занят ли порт»: bind / /proc / docker.
 //   • PortChecker (DIP) — агрегирует инъецированные Probe, не зная их реализации.
@@ -9,11 +8,8 @@
 import net from "node:net";
 import { readFileSync, existsSync } from "node:fs";
 import { execFileSync, spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
 
 export const DEFAULT_PORT = 8723;
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 export interface ProbeResult {
   occupied: boolean;
@@ -191,14 +187,4 @@ export function defaultChecker(): PortChecker {
     process.platform === "darwin" ? lsofProbe : procProbe,
     dockerProbe,
   ]);
-}
-
-// Читает IVA_PORT из .env (приоритет), затем process.env, иначе дефолт.
-export function readIvaPort(): number {
-  const env = join(ROOT, ".env");
-  if (existsSync(env)) {
-    const m = readFileSync(env, "utf8").match(/^\s*IVA_PORT\s*=\s*(\d+)/m);
-    if (m) return Number(m[1]);
-  }
-  return Number(process.env.IVA_PORT) || DEFAULT_PORT;
 }
