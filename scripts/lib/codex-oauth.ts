@@ -3,38 +3,43 @@
 // для мастеров /model и setup. Остаётся в scripts/, потому что `iva login` обязан работать на
 // инсталле без авторского дерева — см. docs/tech-debt.md.
 //
-// Вторая половина шва — agent/lib/codex-auth.ts: рефреш токена и заголовки запроса, то есть
+// Вторая половина — agent/lib/codex-auth.ts: рефреш токена и заголовки запроса, то есть
 // всё, что нужно самому агенту в рантайме. Импортировать её отсюда на этапе загрузки нельзя
-// (её тут может не быть — мастер setup грузится и на инсталле без agent/), поэтому
-// протокольные константы, путь к файлу токена, его чтение, атомарная запись и разбор
-// id_token повторены здесь самодостаточно; расхождение ловит
-// scripts/lib/codex-auth-seam.test.ts. Каталог моделей нужен только на полном инсталле, и его
-// половину заголовков подтягивает ленивый импорт внутри самого вызова.
+// (её тут может не быть — мастер setup грузится и на инсталле без agent/). Общее у половин —
+// файл токена и протокольные константы — лежит в packages/codex-auth и грузится без
+// авторского дерева. Каталог моделей нужен только на полном инсталле, и его половину
+// заголовков подтягивает ленивый импорт внутри самого вызова.
 // Чистый ESM, только node-builtins (crypto/fs/http/child_process).
 //
 // Протокол (reverse-engineered из openai/codex, публичный client_id):
 //   auth-домен  https://auth.openai.com     device-code + browser-PKCE
 //   API-домен   https://chatgpt.com/backend-api/codex   /models
 import { createHash, randomBytes } from "node:crypto";
-import {
-  chmodSync,
-  mkdirSync,
-  readFileSync,
-  renameSync,
-  writeFileSync,
-} from "node:fs";
 import { createServer } from "node:http";
 import type { Server } from "node:http";
 import { spawn } from "node:child_process";
-import { dirname, join } from "node:path";
-import type { CodexAuth } from "#lib/codex-auth.ts";
+import {
+  accountFromIdToken,
+  authFilePath,
+  CLIENT_ID,
+  type CodexAuth,
+  ISSUER,
+  ORIGINATOR,
+  readAuth,
+  toAuth,
+  TOKEN_URL,
+  type TokenResponse,
+  writeAuth,
+} from "../../packages/codex-auth/index.ts";
 import {
   CANONICAL_REASONING_EFFORTS,
   FALLBACK_REASONING_EFFORTS,
 } from "../../packages/reasoning-levels/index.ts";
 import { resolveDataDir } from "./data-dir.ts";
 
-export type { CodexAuth };
+// Мастер setup спрашивает «вход уже есть?» и печатает план подписки — на инсталле, где
+// авторского дерева может не быть. Битый файл читается как «входа нет».
+export { authFilePath, type CodexAuth, readAuth };
 
 export interface LoginOptions {
   dataDir?: string;
@@ -55,21 +60,9 @@ export interface CodexModelCatalogOptions {
 }
 
 type JsonRecord = Record<string, unknown>;
-type TokenResponse = {
-  id_token?: string;
-  access_token: string;
-  refresh_token?: string;
-};
 type LoginPort = { server: Server; port: number };
 
-// Протокольные константы OAuth, повторённые из agent/lib/codex-auth.ts (см. шапку). Экспорт —
-// ради шва: scripts/lib/codex-auth-seam.test.ts сверяет обе копии, иначе ротация client_id на
-// одной стороне оставила бы сьют зелёным и сломала вход или почасовой рефреш.
-export const ISSUER = "https://auth.openai.com";
-export const CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"; // публичный client_id Codex CLI
-export const TOKEN_URL = `${ISSUER}/oauth/token`;
 const SCOPE = "openid profile email offline_access";
-export const ORIGINATOR = "codex_cli_rs";
 const DEVICE_PORT = 1455; // codex-совместимый redirect-порт (fallback 1457)
 const FALLBACK_PORT = 1457;
 
@@ -79,89 +72,6 @@ const MODELS_FETCH_TIMEOUT_MS = 10_000;
 const AUTH_TIMEOUT_MS = 30_000;
 // Язык подсказок входа (en по умолчанию — как у codex CLI). Мастер/CLI прокидывают lang.
 const tr = (lang: string, en: string, ru: string) => (lang === "ru" ? ru : en);
-
-// ── файл токена (копия из agent/lib/codex-auth.ts: агент читает и перезаписывает тот же файл) ──
-export function authFilePath(dataDir = defaultDir()): string {
-  return join(dataDir, "codex-auth.json");
-}
-
-// Мастер setup спрашивает «вход уже есть?» и печатает план подписки, а запускают его в том
-// числе install.sh и `iva config` — на инсталле, где авторского дерева может не быть. Битый
-// файл читается как «входа нет»: перелогиниться мастер и так предложит.
-export function readAuth(dataDir = defaultDir()): CodexAuth | null {
-  try {
-    return JSON.parse(readFileSync(authFilePath(dataDir), "utf8")) as CodexAuth;
-  } catch {
-    return null;
-  }
-}
-
-// Атомарная запись 0600 (temp + rename) — секрет не должен мелькнуть с широкими правами,
-// а конкурентный read не должен поймать полу-записанный файл.
-function writeAuth(auth: CodexAuth, dataDir: string): void {
-  const file = authFilePath(dataDir);
-  mkdirSync(dirname(file), { recursive: true });
-  const tmp = `${file}.${process.pid}.tmp`;
-  writeFileSync(tmp, JSON.stringify(auth, null, 2), { mode: 0o600 });
-  chmodSync(tmp, 0o600);
-  renameSync(tmp, file);
-}
-
-// parseJwt и toAuth ниже экспортируются ради шва — их точные копии живут в
-// agent/lib/codex-auth.ts, а scripts/lib/codex-auth-seam.test.ts гоняет обе на общих
-// фикстурах: разъехавшийся разбор клеймов или сборка объекта хранилища ломают либо вход,
-// либо почасовой рефреш, и молча.
-export function parseJwt(jwt: string): JsonRecord {
-  const payload = String(jwt).split(".")[1];
-  if (!payload) throw new Error("malformed JWT");
-  return JSON.parse(
-    Buffer.from(payload, "base64url").toString("utf8"),
-  ) as JsonRecord;
-}
-
-// Из id_token достаём account_id и план подписки (клейм https://api.openai.com/auth).
-export function accountFromIdToken(idToken: string): {
-  accountId: string | null;
-  planType: string | null;
-} {
-  let auth: JsonRecord = {};
-  try {
-    auth = (parseJwt(idToken)["https://api.openai.com/auth"] ||
-      {}) as JsonRecord;
-  } catch {
-    /* нет клейма — вернём пустое */
-  }
-  const accountId = auth.chatgpt_account_id;
-  const planType = auth.chatgpt_plan_type;
-  return {
-    accountId: typeof accountId === "string" && accountId ? accountId : null,
-    planType: typeof planType === "string" && planType ? planType : null,
-  };
-}
-
-// Собирает объект хранилища из ответа токен-эндпоинта.
-export function toAuth(
-  tokens: TokenResponse,
-  prev: Partial<CodexAuth> = {},
-): CodexAuth {
-  const idToken = tokens.id_token || prev.id_token;
-  // id_token есть, но аккаунта в нём нет (не JWT, нет клейма, пустой клейм) — прежние
-  // accountId и planType остаются: без заголовка ChatGPT-Account-ID бэкенд подписки
-  // отвечает отказом, а рефреш сам себя не чинит (слепое QA v3). Новый id_token,
-  // НАЗВАВШИЙ аккаунт, по-прежнему побеждает: так переезжают на другой.
-  const named = idToken
-    ? accountFromIdToken(idToken)
-    : { accountId: null, planType: null };
-  return {
-    id_token: idToken,
-    // Пустой ответ не смеет стереть уже записанный токен: файл входа обновляется только
-    // на непустое значение (PBT-DS1-P F2).
-    access_token: tokens.access_token || prev.access_token || "",
-    refresh_token: tokens.refresh_token || prev.refresh_token,
-    accountId: named.accountId ?? prev.accountId ?? null,
-    planType: named.planType ?? prev.planType ?? null,
-  };
-}
 
 function pkce() {
   const verifier = b64url(randomBytes(64));

@@ -1,8 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 /* eslint-disable @typescript-eslint/no-floating-promises, @typescript-eslint/require-await */
+import { accountFromIdToken } from "../../packages/codex-auth/index.ts";
 import {
-  accountFromIdToken,
   listCodexModelCatalog,
   parseCodexModelCatalog,
 } from "./codex-oauth.ts";

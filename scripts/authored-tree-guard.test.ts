@@ -154,6 +154,7 @@ test("the authored tree has only its explicit shared-package edges", () => {
       "agent/lib/claude-cli.ts -> ../../packages/claude-command/index.ts",
       "agent/lib/claude-cli.ts -> ../../packages/context-window/index.ts",
       "agent/lib/claude-cli.ts -> ../../packages/reasoning-levels/index.ts",
+      "agent/lib/codex-auth.ts -> ../../packages/codex-auth/index.ts",
       "agent/lib/data-dir.ts -> ../../packages/data-dir/index.ts",
       "agent/lib/job-facts.ts -> ../../packages/secret-redaction/index.ts",
       "agent/lib/model-auth-alert.ts -> ../../packages/alert-state/index.ts",
@@ -190,7 +191,7 @@ test("the authored tree has only its explicit shared-package edges", () => {
       "agent/tools/write_card.ts -> @iva/vault-dir",
       "agent/tools/write_file.ts -> @iva/vault-dir",
     ],
-    "agent/ may leave its tree only for packages/, the home both trees share (by package name or by relative path): data-dir, vault-dir, timezone, context-window, opencode-protocol, notification-chat, reasoning-levels, guards and vault-walk, plus the one rule that cuts secrets for both `iva diagnose` and the schedule log tail the agent reads (a second copy of that rule is how a token inside `bot<token>` stayed in data/jobs.json), and the one rule that finds the claude CLI for both the runtime and `iva doctor` (two copies let the doctor pass a command the runtime could not start)",
+    "agent/ may leave its tree only for packages/, the home both trees share (by package name or by relative path): data-dir, vault-dir, timezone, context-window, opencode-protocol, notification-chat, reasoning-levels, guards, vault-walk and codex-auth (the token file both the login and the runtime write), plus the one rule that cuts secrets for both `iva diagnose` and the schedule log tail the agent reads (a second copy of that rule is how a token inside `bot<token>` stayed in data/jobs.json), and the one rule that finds the claude CLI for both the runtime and `iva doctor` (two copies let the doctor pass a command the runtime could not start)",
   );
 });
 

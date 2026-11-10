@@ -2,54 +2,42 @@
 // The Codex subscription is signed in by scripts/lib/codex-oauth.ts (`iva login` and the setup
 // wizard, which both have to run on an install whose agent/ is missing) and used by
 // agent/lib/codex-auth.ts (the agent refreshing the token before every model call). Neither
-// half may import the other at load time, so the OAuth constants, the token file path, its
-// read, its atomic 0600 write and the id_token claim reader exist on both sides. This test is
-// what ties the copies: it signs in through the login half, reads the result back through the
-// runtime half, and holds the protocol constants of one side against the traffic of the other.
-//
-// The duplicated bodies — `parseJwt()` and `toAuth()` — are pinned the way the dual-language
-// parser pairs are (`scripts/golden-parsers.test.ts`): one fixture table, both copies driven
-// through it, so drift on either side turns red instead of splitting the halves in silence.
+// half may import the other at load time; what they share — the OAuth constants, the token
+// file path, its read, its atomic 0600 write and the id_token claim reader — is one module,
+// packages/codex-auth. This test holds the two halves together on the wire: it signs in
+// through the login half, reads the result back through the runtime half, checks the traffic
+// against the shared constants, and watches the file system while each half writes the secret.
 // What the runtime half does with the file afterwards (the refresh window, the refresh itself,
 // its in-flight dedup and the re-read fallback) is `agent/lib/codex-auth.test.ts`.
-import test from "node:test";
+import test, { mock } from "node:test";
 import assert from "node:assert/strict";
-import {
+import fs, {
   chmodSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
-  accountFromIdToken as authoredAccountFromIdToken,
   authFilePath as authoredAuthFilePath,
-  CLIENT_ID as AUTHORED_CLIENT_ID,
   type CodexAuth,
   codexAuthHeaders,
-  ISSUER as AUTHORED_ISSUER,
-  ORIGINATOR as AUTHORED_ORIGINATOR,
-  parseJwt as authoredParseJwt,
   readAuth as authoredReadAuth,
-  toAuth as authoredToAuth,
-  TOKEN_URL as AUTHORED_TOKEN_URL,
   writeAuth,
 } from "#lib/codex-auth.ts";
 import {
-  accountFromIdToken,
-  authFilePath,
   CLIENT_ID,
   ISSUER,
-  ORIGINATOR,
   parseJwt,
-  readAuth,
-  runDeviceCodeLogin,
   toAuth,
   TOKEN_URL,
-} from "./codex-oauth.ts";
+} from "../../packages/codex-auth/index.ts";
+import { authFilePath, readAuth, runDeviceCodeLogin } from "./codex-oauth.ts";
 
 // `unknown`, not `object`: a payload that is a bare JSON string or number is exactly the
 // shape both copies of parseJwt() have to survive identically.
@@ -138,6 +126,7 @@ test("a login writes the token file the runtime half reads back", async (t) => {
   assert.equal(stored?.accountId, "acc_seam");
   assert.equal(stored?.planType, "pro");
   assert.equal(stored?.refresh_token, "refresh-1");
+  assert.deepEqual(stored, toAuth(loginTokens()));
 
   // A fresh token needs no refresh, so the headers come straight off the stored file.
   const headers = await codexAuthHeaders(dataDir);
@@ -145,12 +134,20 @@ test("a login writes the token file the runtime half reads back", async (t) => {
   assert.equal(headers["ChatGPT-Account-ID"], "acc_seam");
 });
 
-test("both halves write the token file at the same path, mode and shape", async (t) => {
+test("both halves name, read and rewrite the same token file", async (t) => {
   const dataDir = scratchDir(t);
-  await signIn(dataDir);
   const path = join(dataDir, "codex-auth.json");
+  assert.equal(authFilePath(dataDir), path);
+  assert.equal(authoredAuthFilePath(dataDir), path);
+
+  // No file yet: the wizard asks "already signed in?" before any login ever happened.
+  assert.equal(readAuth(dataDir), null);
+  assert.equal(authoredReadAuth(dataDir), null);
+
+  await signIn(dataDir);
   const afterLogin = readFileSync(path, "utf8");
   assert.equal(statSync(path).mode & 0o777, 0o600);
+  assert.deepEqual(readAuth(dataDir), authoredReadAuth(dataDir));
 
   // The runtime half rewrites the very same file on every refresh: widen it and prove the
   // rewrite restores both the bytes and the permissions the login half established.
@@ -160,40 +157,135 @@ test("both halves write the token file at the same path, mode and shape", async 
   writeAuth(parsed, dataDir);
   assert.equal(readFileSync(path, "utf8"), afterLogin);
   assert.equal(statSync(path).mode & 0o777, 0o600);
-});
-
-test("both halves read the token file back the same way", async (t) => {
-  const dataDir = scratchDir(t);
-  assert.equal(authFilePath(dataDir), authoredAuthFilePath(dataDir));
-
-  // No file yet: the wizard asks "already signed in?" before any login ever happened.
-  assert.equal(readAuth(dataDir), null);
-  assert.deepEqual(readAuth(dataDir), authoredReadAuth(dataDir));
-
-  await signIn(dataDir);
-  assert.deepEqual(readAuth(dataDir), authoredReadAuth(dataDir));
 
   // A half-written token file reads as "not signed in" on both sides — the wizard then
   // offers a login instead of announcing a configured install.
-  writeFileSync(authFilePath(dataDir), '{"access_token": "trunc', "utf8");
+  writeFileSync(path, '{"access_token": "trunc', "utf8");
   assert.equal(readAuth(dataDir), null);
-  assert.deepEqual(readAuth(dataDir), authoredReadAuth(dataDir));
+  assert.equal(authoredReadAuth(dataDir), null);
 });
 
-test("both halves speak the same OAuth protocol", async (t) => {
-  // The constants are copied, not shared, so rotating one side alone must turn this red.
-  assert.deepEqual(
-    { ISSUER, CLIENT_ID, TOKEN_URL, ORIGINATOR },
-    {
-      ISSUER: AUTHORED_ISSUER,
-      CLIENT_ID: AUTHORED_CLIENT_ID,
-      TOKEN_URL: AUTHORED_TOKEN_URL,
-      ORIGINATOR: AUTHORED_ORIGINATOR,
-    },
-  );
+// ── the secret on the wire ────────────────────────────────────────────────────
+// What the file system sees while a half stores the token. The secret is written to a
+// sibling temp file that is 0600 from the moment it exists — whatever the umask — and
+// complete before it is renamed over the token file; the token file itself is never opened
+// for writing, so a concurrent reader meets the old login or the new one and nothing between.
 
-  // …and the login half really signs in with them, so the copies above are not decoration:
-  // the same issuer, token endpoint and client_id the runtime half refreshes against.
+type Rename = {
+  from: string;
+  to: string;
+  mode: number;
+  staged: unknown;
+  before: string | null;
+};
+
+/** Runs `write` with umask 0 and records every write and rename under `dataDir`. */
+async function watchTokenWrites(
+  dataDir: string,
+  write: () => Promise<unknown>,
+): Promise<{ written: string[]; renames: Rename[] }> {
+  const written: string[] = [];
+  const renames: Rename[] = [];
+  const realWrite = fs.writeFileSync;
+  const realRename = fs.renameSync;
+  const readOrNull = (path: string): string | null => {
+    try {
+      return readFileSync(path, "utf8");
+    } catch {
+      return null;
+    }
+  };
+  mock.method(fs, "writeFileSync", ((path, ...rest) => {
+    if (typeof path === "string" && path.startsWith(dataDir))
+      written.push(path);
+    return realWrite(path, ...rest);
+  }) as typeof fs.writeFileSync);
+  mock.method(fs, "renameSync", ((from, to) => {
+    renames.push({
+      from: String(from),
+      to: String(to),
+      mode: statSync(from).mode & 0o777,
+      staged: JSON.parse(readFileSync(from, "utf8")),
+      before: readOrNull(String(to)),
+    });
+    return realRename(from, to);
+  }) as typeof fs.renameSync);
+  syncBuiltinESMExports();
+  const umask = process.umask(0);
+  try {
+    await write();
+  } finally {
+    process.umask(umask);
+    mock.restoreAll();
+    syncBuiltinESMExports();
+  }
+  return { written, renames };
+}
+
+function assertAtomicSecretWrite(
+  dataDir: string,
+  seen: { written: string[]; renames: Rename[] },
+  before: string | null,
+): void {
+  const path = join(dataDir, "codex-auth.json");
+  assert.equal(seen.renames.length, 1, "one rename per stored login");
+  const [rename] = seen.renames;
+  assert.equal(rename.to, path);
+  assert.equal(
+    dirname(rename.from),
+    dataDir,
+    "temp file sits beside the token",
+  );
+  assert.deepEqual(
+    seen.written,
+    [rename.from],
+    "the secret is written to the temp file only, never to the token file",
+  );
+  assert.equal(rename.mode, 0o600, "temp file is 0600 under umask 0");
+  assert.equal(
+    rename.before,
+    before,
+    "the token file is whole until the rename",
+  );
+  assert.deepEqual(rename.staged, authoredReadAuth(dataDir));
+  assert.equal(statSync(path).mode & 0o777, 0o600);
+  assert.deepEqual(readdirSync(dataDir), ["codex-auth.json"]);
+}
+
+test("the login half stores the secret atomically and 0600", async (t) => {
+  const dataDir = scratchDir(t);
+  const seen = await watchTokenWrites(dataDir, () => signIn(dataDir));
+  assertAtomicSecretWrite(dataDir, seen, null);
+});
+
+test("the runtime half refreshes the secret atomically and 0600", async (t) => {
+  const dataDir = scratchDir(t);
+  await signIn(dataDir);
+  // An expired access_token makes the next request refresh and rewrite the file.
+  const expired: CodexAuth = {
+    ...toAuth(loginTokens()),
+    access_token: jwt({ exp: 1 }),
+  };
+  writeAuth(expired, dataDir);
+  const path = join(dataDir, "codex-auth.json");
+  chmodSync(path, 0o644);
+  const before = readFileSync(path, "utf8");
+  const refreshed = jwt({ exp: 9_999_999_999, label: "refreshed" });
+  const realFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = realFetch;
+  });
+  globalThis.fetch = (input: RequestInfo | URL) => {
+    assert.equal(input, TOKEN_URL);
+    return Promise.resolve(Response.json({ access_token: refreshed }));
+  };
+
+  const seen = await watchTokenWrites(dataDir, () => codexAuthHeaders(dataDir));
+  assertAtomicSecretWrite(dataDir, seen, before);
+  assert.equal(authoredReadAuth(dataDir)?.access_token, refreshed);
+});
+
+test("the login half signs in with the constants the runtime half refreshes against", async (t) => {
   const requests = await signIn(scratchDir(t));
   const requestTo = (suffix: string): CapturedRequest => {
     const found = requests.find((request) => request.url.endsWith(suffix));
@@ -201,43 +293,25 @@ test("both halves speak the same OAuth protocol", async (t) => {
     return found;
   };
   const usercode = requestTo("/deviceauth/usercode");
-  assert.equal(
-    usercode.url,
-    `${AUTHORED_ISSUER}/api/accounts/deviceauth/usercode`,
-  );
+  assert.equal(usercode.url, `${ISSUER}/api/accounts/deviceauth/usercode`);
   assert.equal(
     (JSON.parse(usercode.body) as { client_id: string }).client_id,
-    AUTHORED_CLIENT_ID,
+    CLIENT_ID,
   );
   const exchange = requestTo("/oauth/token");
-  assert.equal(exchange.url, AUTHORED_TOKEN_URL);
-  assert.equal(
-    new URLSearchParams(exchange.body).get("client_id"),
-    AUTHORED_CLIENT_ID,
-  );
+  assert.equal(exchange.url, TOKEN_URL);
+  assert.equal(new URLSearchParams(exchange.body).get("client_id"), CLIENT_ID);
 });
 
-test("both halves read the same claims out of an id_token", () => {
-  for (const token of [idToken(), "garbage", ""]) {
-    assert.deepEqual(
-      accountFromIdToken(token),
-      authoredAccountFromIdToken(token),
-      token.slice(0, 16),
-    );
-  }
-});
-
-// ── golden pin: the copied bodies ─────────────────────────────────────────────
-// Fixtures shared by both copies, the way scripts/autograph/tests/golden/ is shared by the
-// TS and Python parsers: one input, one expectation, two implementations asserted against it.
-// The expectation here is "whatever the other copy says", which is the whole contract —
-// neither half is the original, and either one drifting alone breaks a login or an hourly
-// refresh nobody would notice until the token expired.
+// ── what a token response becomes on disk ─────────────────────────────────────
+// One function builds the stored login for both the first sign-in and the hourly refresh;
+// a silent change here breaks one of them, and nobody notices until the token expires.
 
 interface AuthCase {
   name: string;
   tokens: TokenResponse;
   prev?: Partial<CodexAuth>;
+  stored: CodexAuth;
 }
 
 const STORED: Partial<CodexAuth> = {
@@ -250,6 +324,25 @@ const STORED: Partial<CodexAuth> = {
 const claimToken = (auth: unknown): string =>
   jwt({ exp: 9_999_999_999, "https://api.openai.com/auth": auth });
 
+const ROTATED = claimToken({
+  chatgpt_account_id: "acc_next",
+  chatgpt_plan_type: "team",
+});
+const CLAIMLESS = jwt({ exp: 9_999_999_999 });
+const WRONG_TYPES = claimToken({
+  chatgpt_account_id: 42,
+  chatgpt_plan_type: "",
+});
+
+/** The stored login after a refresh that changed nothing but the access_token. */
+const kept = (accessToken: string, idTokenNow = idToken()): CodexAuth => ({
+  id_token: idTokenNow,
+  access_token: accessToken,
+  refresh_token: "refresh-old",
+  accountId: "acc_seam",
+  planType: "pro",
+});
+
 const AUTH_FIXTURES: AuthCase[] = [
   {
     name: "fresh login: everything comes off the wire",
@@ -258,165 +351,101 @@ const AUTH_FIXTURES: AuthCase[] = [
       access_token: "at-1",
       refresh_token: "rt-1",
     },
+    stored: { ...kept("at-1"), refresh_token: "rt-1" },
   },
   {
     // The hourly refresh: the endpoint answers with one field and the rest has to survive.
     name: "refresh: only access_token, the file carries the rest",
     tokens: { access_token: "at-2" },
     prev: STORED,
+    stored: kept("at-2"),
   },
   {
-    // The endpoint may answer without a token at all. The stored one has to survive on both
-    // sides: the login half writes the file of the very same shape the refresh writes back.
+    // The endpoint may answer without a token at all. The stored one has to survive: the
+    // login half writes the file of the very same shape the refresh writes back.
     name: "an answer without access_token keeps the stored one",
     tokens: { access_token: "" },
     prev: { ...STORED, access_token: "at-stored" },
+    stored: kept("at-stored"),
   },
   {
     name: "refresh: the response rotates id_token and refresh_token",
-    tokens: {
-      id_token: claimToken({
-        chatgpt_account_id: "acc_next",
-        chatgpt_plan_type: "team",
-      }),
+    tokens: { id_token: ROTATED, access_token: "at-3", refresh_token: "rt-3" },
+    prev: STORED,
+    stored: {
+      id_token: ROTATED,
       access_token: "at-3",
       refresh_token: "rt-3",
+      accountId: "acc_next",
+      planType: "team",
     },
-    prev: STORED,
   },
   {
     // A new id_token without the claim keeps the stored account: ChatGPT-Account-ID is how
     // the subscription backend knows the account, and one silent claim-less answer must not
     // strip it until the next login (blind QA v3). A token that names an account still wins.
     name: "refresh: a claimless id_token keeps the stored account",
-    tokens: { id_token: jwt({ exp: 9_999_999_999 }), access_token: "at-4" },
+    tokens: { id_token: CLAIMLESS, access_token: "at-4" },
     prev: STORED,
+    stored: kept("at-4", CLAIMLESS),
   },
   {
     name: "refresh: an unparsable id_token keeps the stored account",
     tokens: { id_token: "garbage", access_token: "at-5" },
     prev: STORED,
+    stored: kept("at-5", "garbage"),
   },
   {
-    // Non-string claims are the shape a provider change would arrive in; both copies must
-    // read them as "no account" rather than stringifying a number into a header, and the
-    // account already on disk stays.
+    // Non-string claims are the shape a provider change would arrive in: they read as "no
+    // account" rather than a number stringified into a header, and the account on disk stays.
     name: "claims of the wrong type keep the stored account",
-    tokens: {
-      id_token: claimToken({ chatgpt_account_id: 42, chatgpt_plan_type: "" }),
-      access_token: "at-6",
-    },
+    tokens: { id_token: WRONG_TYPES, access_token: "at-6" },
     prev: STORED,
+    stored: kept("at-6", WRONG_TYPES),
   },
   {
     name: "an empty id_token is no id_token: the stored account stays",
     tokens: { id_token: "", access_token: "at-7" },
     prev: STORED,
+    stored: kept("at-7"),
   },
   {
     name: "nothing stored and nothing but an access_token returned",
     tokens: { access_token: "at-8" },
+    stored: {
+      id_token: undefined,
+      access_token: "at-8",
+      refresh_token: undefined,
+      accountId: null,
+      planType: null,
+    },
   },
   {
     name: "an empty refresh_token does not overwrite the stored one",
     tokens: { access_token: "at-9", refresh_token: "" },
     prev: STORED,
+    stored: kept("at-9"),
   },
 ];
 
-const JWT_FIXTURES = [
-  idToken(),
-  jwt({ exp: 1, nested: { ok: [1, "два", null] } }),
-  jwt("строка"),
-  "",
-  "garbage",
-  ".",
-  "..",
-  "a..c",
-  "a.b.c",
-  `a.${b64url({ exp: 1 })}`,
-  `a.${b64url({ exp: 1 })}.c.d`,
-  "a.%%%.c",
-];
+for (const { name, tokens, prev, stored } of AUTH_FIXTURES)
+  test(`toAuth: ${name}`, () => {
+    assert.deepEqual(toAuth(tokens, prev), stored);
+  });
 
-type Outcome = { value: unknown } | { error: string };
-
-/** Both copies must agree on failure too: the throw is what callers catch. */
-const outcome = (run: () => unknown): Outcome => {
-  try {
-    return { value: run() };
-  } catch (error) {
-    return { error: (error as Error).message };
-  }
-};
-
-test("the copies are two functions, not one re-export", () => {
-  // Pinning a function against itself would pass forever; the seam only exists while the
-  // authored tree keeps its own body (it may not import scripts/ at load time).
-  assert.notEqual(toAuth, authoredToAuth);
-  assert.notEqual(parseJwt, authoredParseJwt);
-});
-
-test("both halves build the same stored auth out of a token response", () => {
-  for (const { name, tokens, prev } of AUTH_FIXTURES) {
-    assert.deepEqual(toAuth(tokens, prev), authoredToAuth(tokens, prev), name);
-  }
-});
-
-test("both halves parse the same payload out of a JWT", () => {
-  for (const token of JWT_FIXTURES) {
-    assert.deepEqual(
-      outcome(() => parseJwt(token)),
-      outcome(() => authoredParseJwt(token)),
-      JSON.stringify(token),
-    );
-  }
-});
-
-test("the login half stores exactly what its own toAuth() builds", async (t) => {
-  // Keeps the pin honest: the exported copies above are the ones the flow really runs, so
-  // a fixture-only agreement cannot pass while the shipped path does something else.
-  const dataDir = scratchDir(t);
-  await signIn(dataDir);
-  assert.deepEqual(authoredReadAuth(dataDir), toAuth(loginTokens()));
-});
-
-test("randomized token responses keep the copies identical (seed exposed)", () => {
-  const seed = Number(process.env.IVA_TEST_SEED ?? Date.now() % 100_000);
-  console.log(
-    `randomized codex-auth seam seed: ${seed} (IVA_TEST_SEED to replay)`,
-  );
-  let lcg = seed >>> 0;
-  const rand = (): number => {
-    lcg = (lcg * 1664525 + 1013904223) >>> 0;
-    return lcg / 2 ** 32;
-  };
-  const pick = <T>(values: readonly T[]): T =>
-    values[Math.floor(rand() * values.length)];
-
-  for (let i = 0; i < 200; i++) {
-    const account = pick([`acc_${i}`, "", 42, null, undefined, { id: i }]);
-    const plan = pick(["pro", "team", "", 7, null, undefined]);
-    const token = pick([
-      claimToken({ chatgpt_account_id: account, chatgpt_plan_type: plan }),
-      claimToken(pick([null, "claim", 5, []])),
-      jwt({ exp: Math.floor(rand() * 2 ** 31) }),
-      pick(["", "garbage", "a.b.c", `x.${b64url({ a: i })}.y`]),
-      undefined,
-    ]);
-    const tokens: TokenResponse = {
-      access_token: `at-${i}`,
-      ...(token === undefined ? {} : { id_token: token }),
-      ...(rand() < 0.5 ? { refresh_token: pick(["", `rt-${i}`]) } : {}),
-    };
-    const prev: Partial<CodexAuth> = pick([{}, STORED, { accountId: null }]);
-    const seen = JSON.stringify({ i, tokens, prev });
-    assert.deepEqual(toAuth(tokens, prev), authoredToAuth(tokens, prev), seen);
-    if (token !== undefined)
-      assert.deepEqual(
-        outcome(() => parseJwt(token)),
-        outcome(() => authoredParseJwt(token)),
-        seen,
-      );
-  }
+test("parseJwt reads the payload segment and throws on anything else", () => {
+  assert.deepEqual(parseJwt(idToken()), {
+    exp: 9_999_999_999,
+    "https://api.openai.com/auth": {
+      chatgpt_account_id: "acc_seam",
+      chatgpt_plan_type: "pro",
+    },
+  });
+  assert.equal(parseJwt(jwt("строка")), "строка");
+  assert.deepEqual(parseJwt(`a.${b64url({ exp: 1 })}`), { exp: 1 });
+  assert.deepEqual(parseJwt(`a.${b64url({ exp: 1 })}.c.d`), { exp: 1 });
+  for (const token of ["", "garbage", ".", "..", "a..c"])
+    assert.throws(() => parseJwt(token), /malformed JWT/u, token);
+  for (const token of ["a.b.c", "a.%%%.c"])
+    assert.throws(() => parseJwt(token), SyntaxError, token);
 });
