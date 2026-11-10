@@ -31,7 +31,7 @@ import type { CodexAuth } from "#lib/codex-auth.ts";
 import {
   CANONICAL_REASONING_EFFORTS,
   FALLBACK_REASONING_EFFORTS,
-} from "./reasoning-levels.ts";
+} from "../../packages/reasoning-levels/index.ts";
 import { resolveDataDir } from "./data-dir.ts";
 
 export type { CodexAuth };

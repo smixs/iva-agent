@@ -32,7 +32,7 @@ import {
   resolveModelProvider,
   type ModelProviderName,
 } from "./lib/model-provider.ts";
-import { CANONICAL_REASONING_EFFORTS as EFFORTS } from "./lib/reasoning-levels.ts";
+import { CANONICAL_REASONING_EFFORTS as EFFORTS } from "../packages/reasoning-levels/index.ts";
 import { toolNameWireMiddleware } from "./lib/tool-wire-name.ts";
 import { repeatGuardMiddleware } from "./lib/repeat-guard.ts";
 import { generateViaStream } from "./lib/generate-via-stream.ts";

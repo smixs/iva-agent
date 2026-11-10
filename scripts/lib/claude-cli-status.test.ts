@@ -18,7 +18,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test, { type TestContext } from "node:test";
 import { claudeConflicts, claudeEffort, claudeModel } from "#lib/claude-cli.ts";
-import { CANONICAL_REASONING_EFFORTS } from "./reasoning-levels.ts";
+import { CANONICAL_REASONING_EFFORTS } from "../../packages/reasoning-levels/index.ts";
 import {
   claudeBinary,
   claudeContextWindow,
