@@ -24,13 +24,13 @@ import {
   utimesSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import fc from "fast-check";
 
 // Хук резолвинга идёт первым: модули тянут соседей NodeNext-спецификаторами.
 import "./lib/ts-esm-hooks.ts";
+import { tempDir } from "./fixtures/temp-dir.ts";
 
 const { RETIRE_MARKER, retireCheckout, retireIdentity } =
   await import("../scripts/update-finish.ts");
@@ -62,7 +62,7 @@ const TRACKED = [
 const ARTIFACTS = ["node_modules", ".output"];
 
 function makeHome(): string {
-  const home = mkdtempSync(join(tmpdir(), "pbt-r4-home-"));
+  const home = tempDir("pbt-r4-home-");
   const git = (...args: string[]): string =>
     execFileSync("git", ["-C", home, ...args], { encoding: "utf8" });
   git("init", "-q", "-b", "main");
@@ -197,7 +197,7 @@ await test("НАХОДКА R4-1: чужая метка ничего не сно�
 });
 
 await test("НАХОДКА R4-1: упавший на первом удалении вывод не оставляет метку", () => {
-  const home = mkdtempSync(join(tmpdir(), "pbt-r4-locked-"));
+  const home = tempDir("pbt-r4-locked-");
   const git = (...args: string[]): string =>
     execFileSync("git", ["-C", home, ...args], { encoding: "utf8" });
   git("init", "-q", "-b", "main");
@@ -277,8 +277,8 @@ await test("правка в коде Ивы вывод не переживает
 // и публикацией нового шима: повтор создаёт шим заново, но каталог-заявка с копией
 // прежнего шима остаётся в `~/.local/bin` навсегда - ни один путь её не убирает.
 await test("НАХОДКА R4-4: обрыв при обновлении шима не оставляет мусор рядом", () => {
-  const home = mkdtempSync(join(tmpdir(), "pbt-r4-shim-home-"));
-  const bin = mkdtempSync(join(tmpdir(), "pbt-r4-shim-bin-"));
+  const home = tempDir("pbt-r4-shim-home-");
+  const bin = tempDir("pbt-r4-shim-bin-");
   const shim = join(bin, "iva");
   const desired = shimScript(home, process.execPath, join(home, "data"));
   // Заявка обрыва: имя несёт pid процесса, которого больше нет.
@@ -301,8 +301,8 @@ await test("НАХОДКА R4-4: обрыв при обновлении шима
 // Имя `2avFo0` даёт parseInt → 2, и раньше заявка сносяme вместе с единственной копией
 // шима; теперь старый формат судится только по возрасту.
 await test("НАХОДКА R4-4: имя старого формата с ведущей цифрой не читается как pid", () => {
-  const home = mkdtempSync(join(tmpdir(), "pbt-r4-shim-home-"));
-  const bin = mkdtempSync(join(tmpdir(), "pbt-r4-shim-bin-"));
+  const home = tempDir("pbt-r4-shim-home-");
+  const bin = tempDir("pbt-r4-shim-bin-");
   const shim = join(bin, "iva");
   const desired = shimScript(home, process.execPath, join(home, "data"));
   writeFileSync(shim, desired, { mode: 0o755 });
@@ -321,8 +321,8 @@ await test("НАХОДКА R4-4: имя старого формата с вед�
 // БЛОКЕР Б2 QA: заявку живого чужого процесса уборка не имеет права пропускать вечно.
 // pid переиспользован не нашим процессом — заявка брошена.
 await test("НАХОДКА R4-4: заявка с чужим живым pid убирается", () => {
-  const home = mkdtempSync(join(tmpdir(), "pbt-r4-shim-home-"));
-  const bin = mkdtempSync(join(tmpdir(), "pbt-r4-shim-bin-"));
+  const home = tempDir("pbt-r4-shim-home-");
+  const bin = tempDir("pbt-r4-shim-bin-");
   const shim = join(bin, "iva");
   const desired = shimScript(home, process.execPath, join(home, "data"));
   writeFileSync(shim, desired, { mode: 0o755 });
@@ -346,8 +346,8 @@ await test("НАХОДКА R4-4: заявка с чужим живым pid уб�
 // БЛОКЕР Б2 QA: убирая заявку, нельзя потерять шим. Если шим на месте нет, а в заявке
 // лежит его копия — копия единственная, её возвращают до уборки каталога.
 await test("НАХОДКА R4-4: заявка с единственной копией шима сначала возвращает шим", () => {
-  const home = mkdtempSync(join(tmpdir(), "pbt-r4-shim-home-"));
-  const bin = mkdtempSync(join(tmpdir(), "pbt-r4-shim-bin-"));
+  const home = tempDir("pbt-r4-shim-home-");
+  const bin = tempDir("pbt-r4-shim-bin-");
   const shim = join(bin, "iva");
   const desired = shimScript(home, process.execPath, join(home, "data"));
   const claim = join(bin, claimName(deadPid()));
@@ -366,8 +366,8 @@ await test("НАХОДКА R4-4: заявка с единственной коп
 // миллисекунды, поэтому заявка старше часа с нашим (повторно использованным) pid
 // брошена, и её recovery-копия не должна потеряться вместе с каталогом.
 await test("НАХОДКА R4-4: заявка с нашим pid старше часа убирается", () => {
-  const home = mkdtempSync(join(tmpdir(), "pbt-r4-shim-home-"));
-  const bin = mkdtempSync(join(tmpdir(), "pbt-r4-shim-bin-"));
+  const home = tempDir("pbt-r4-shim-home-");
+  const bin = tempDir("pbt-r4-shim-bin-");
   const shim = join(bin, "iva");
   const desired = shimScript(home, process.execPath, join(home, "data"));
   const claim = join(bin, claimName(process.pid));
@@ -387,8 +387,8 @@ await test("НАХОДКА R4-4: заявка с нашим pid старше ч�
 // Жёсткий обрыв (kill -9) мог оставить заявку старого формата - без pid в имени.
 // Её судят по возрасту: брошенная больше часа назад убирается при следующем старте.
 await test("НАХОДКА R4-4: брошенная заявка старого формата старше часа убирается", () => {
-  const home = mkdtempSync(join(tmpdir(), "pbt-r4-shim-home-"));
-  const bin = mkdtempSync(join(tmpdir(), "pbt-r4-shim-bin-"));
+  const home = tempDir("pbt-r4-shim-home-");
+  const bin = tempDir("pbt-r4-shim-bin-");
   const shim = join(bin, "iva");
   const desired = shimScript(home, process.execPath, join(home, "data"));
   writeFileSync(shim, desired, { mode: 0o755 });
@@ -404,8 +404,8 @@ await test("НАХОДКА R4-4: брошенная заявка старого 
 // Зелёный control уборки: свежую заявку без pid она не трогает - её ещё может держать
 // параллельный ход на старом коде.
 await test("зелёное: свежую заявку старого формата уборка не трогает", () => {
-  const home = mkdtempSync(join(tmpdir(), "pbt-r4-shim-home-"));
-  const bin = mkdtempSync(join(tmpdir(), "pbt-r4-shim-bin-"));
+  const home = tempDir("pbt-r4-shim-home-");
+  const bin = tempDir("pbt-r4-shim-bin-");
   const shim = join(bin, "iva");
   const desired = shimScript(home, process.execPath, join(home, "data"));
   writeFileSync(shim, desired, { mode: 0o755 });
@@ -419,8 +419,8 @@ await test("зелёное: свежую заявку старого форма�
 // Зелёный control уборки: заявку живого процесса она не трогает (иначе снесла бы
 // работу параллельного обновления).
 await test("зелёное: заявку живого процесса уборка не трогает", () => {
-  const home = mkdtempSync(join(tmpdir(), "pbt-r4-shim-home-"));
-  const bin = mkdtempSync(join(tmpdir(), "pbt-r4-shim-bin-"));
+  const home = tempDir("pbt-r4-shim-home-");
+  const bin = tempDir("pbt-r4-shim-bin-");
   const shim = join(bin, "iva");
   const desired = shimScript(home, process.execPath, join(home, "data"));
   writeFileSync(shim, desired, { mode: 0o755 });
@@ -443,8 +443,8 @@ await test("зелёное: заявку живого процесса убор�
 
 // Зелёные controls шима: чужой шим не трогается, чужой файл на месте остаётся.
 await test("зелёное: чужой шим не перезаписывается", () => {
-  const home = mkdtempSync(join(tmpdir(), "pbt-r4-shim-home-"));
-  const bin = mkdtempSync(join(tmpdir(), "pbt-r4-shim-bin-"));
+  const home = tempDir("pbt-r4-shim-home-");
+  const bin = tempDir("pbt-r4-shim-bin-");
   const shim = join(bin, "iva");
   writeFileSync(shim, "#!/bin/sh\necho foreign\n", { mode: 0o755 });
   assert.equal(

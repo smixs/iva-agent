@@ -18,8 +18,9 @@ import type { SendFileAnswer } from "../agent/tools/send_file.ts";
 // Тесты тулов живут в scripts/: файл рядом с тулами eve счёл бы ещё одним тулом и сборка
 // упала бы. Хук резолвинга идёт первым — тулы тянут соседей NodeNext-спецификаторами.
 import "./lib/ts-esm-hooks.ts";
+import { tempDir } from "./fixtures/temp-dir.ts";
 
-const vault = mkdtempSync(join(tmpdir(), "iva-send-file-vault-"));
+const vault = tempDir("iva-send-file-vault-");
 mkdirSync(join(vault, "attachments", "2026-09-24"), { recursive: true });
 writeFileSync(join(vault, "attachments", "2026-09-24", "report.pdf"), "%PDF-1");
 process.env.ASSISTANT_VAULT_DIR = vault;
@@ -114,7 +115,7 @@ void test("абсолютный путь в Vault доходит до файла
 
 void test("файл из временного каталога ОС разрешён", async (t) => {
   stubFetch(t);
-  const dir = mkdtempSync(join(tmpdir(), "iva-send-file-tmp-"));
+  const dir = tempDir("iva-send-file-tmp-");
   writeFileSync(join(dir, "out.csv"), "a,b");
   const answer = await run(
     { path: join(dir, "out.csv") },

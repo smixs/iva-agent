@@ -17,10 +17,9 @@ import { join } from "node:path";
 import test, { type TestContext } from "node:test";
 import { writeFileAtomic } from "#lib/fs-atomic.ts";
 import { createVersionStore } from "../lib/version-store.ts";
+import { tempDir } from "../fixtures/temp-dir.ts";
 
-const dataDir = realpathSync(
-  mkdtempSync(join(tmpdir(), "iva-update-reconcile-")),
-);
+const dataDir = realpathSync(tempDir("iva-update-reconcile-"));
 process.env.ASSISTANT_DATA_DIR = dataDir;
 writeFileSync(
   join(dataDir, "settings.json"),

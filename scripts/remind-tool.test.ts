@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import {
   existsSync,
-  mkdtempSync,
   readdirSync,
   readFileSync,
   rmSync,
@@ -9,7 +8,6 @@ import {
   utimesSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test, { type TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -26,10 +24,11 @@ import type {
 // Тесты тулов живут в scripts/: файл рядом с тулами eve счёл бы ещё одним тулом и сборка
 // упала бы. Хук резолвинга идёт первым — тулы тянут соседей NodeNext-спецификаторами.
 import "./lib/ts-esm-hooks.ts";
+import { tempDir } from "./fixtures/temp-dir.ts";
 
 const NOW = Date.UTC(2026, 8, 12, 5, 0, 0); // 10:00 в Asia/Tashkent
 
-const dataDir = mkdtempSync(join(tmpdir(), "iva-remind-tool-"));
+const dataDir = tempDir("iva-remind-tool-");
 process.env.ASSISTANT_DATA_DIR = dataDir;
 process.env.ASSISTANT_TIMEZONE = "Asia/Tashkent";
 process.env.TELEGRAM_DIGEST_CHAT_ID = "555";

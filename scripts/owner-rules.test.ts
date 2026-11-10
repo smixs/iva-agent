@@ -4,12 +4,10 @@ import assert from "node:assert/strict";
 import {
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { beforeEach } from "node:test";
 import type { ToolContext } from "eve/tools";
@@ -18,13 +16,14 @@ import type { ToolContext } from "eve/tools";
 // eve счёл бы ещё одним тулом и сборка упала бы. Хук резолвинга идёт первым — тулы
 // тянут соседей NodeNext-спецификаторами.
 import "./lib/ts-esm-hooks.ts";
+import { tempDir } from "./fixtures/temp-dir.ts";
 
-const dataDir = mkdtempSync(join(tmpdir(), "iva-owner-rules-"));
+const dataDir = tempDir("iva-owner-rules-");
 process.env.ASSISTANT_DATA_DIR = dataDir;
 
 // Гвард карточек T15 отказывает перезаписи существующего файла, если вольт
 // не резолвится: слоту нужна перезапись, поэтому вольт в стенде настоящий.
-const vaultDir = mkdtempSync(join(tmpdir(), "iva-owner-rules-vault-"));
+const vaultDir = tempDir("iva-owner-rules-vault-");
 mkdirSync(join(vaultDir, "cards"), { recursive: true });
 process.env.ASSISTANT_VAULT_DIR = vaultDir;
 

@@ -1,16 +1,10 @@
 /* eslint-disable @typescript-eslint/no-floating-promises, @typescript-eslint/require-await -- Node's test runner owns registrations and reset test doubles intentionally preserve asynchronous production boundaries. */
 import assert from "node:assert/strict";
-import {
-  mkdtempSync,
-  readFileSync,
-  readdirSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import fc from "fast-check";
+import { tempDir } from "./fixtures/temp-dir.ts";
 
 type ChatStatus = {
   status: string;
@@ -139,7 +133,7 @@ type PollModule = {
   ) => Promise<void>;
 };
 
-const dataDir = mkdtempSync(join(tmpdir(), "iva-scoped-reset-"));
+const dataDir = tempDir("iva-scoped-reset-");
 process.env.ASSISTANT_DATA_DIR = dataDir;
 process.env.TELEGRAM_BOT_TOKEN = "test-token";
 process.env.TELEGRAM_WEBHOOK_SECRET_TOKEN = "test-secret";

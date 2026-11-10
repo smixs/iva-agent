@@ -1,13 +1,6 @@
 /* eslint-disable @typescript-eslint/no-floating-promises, @typescript-eslint/require-await -- Node owns test registration; async doubles preserve the I/O boundary. */
 import assert from "node:assert/strict";
-import {
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
+import { readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import fc from "fast-check";
@@ -15,6 +8,7 @@ import {
   TELEGRAM_BUTTON_TAP_FIELD,
   TELEGRAM_BUTTON_TAP_DAILY_TEXT_FIELD,
 } from "#lib/telegram-parts.ts";
+import { tempDir } from "../fixtures/temp-dir.ts";
 
 type Event = string | [string, string, number | undefined, string | undefined];
 type CaptureMessage = { message_id?: number };
@@ -119,7 +113,7 @@ type WizardsModule = {
 
 // Мост читает run-status с диска и берёт allowlist из окружения на импорте, поэтому
 // и то и другое ставим ДО загрузки модуля, в свежей data-директории.
-const dataDir = mkdtempSync(join(tmpdir(), "iva-control-"));
+const dataDir = tempDir("iva-control-");
 process.env.ASSISTANT_DATA_DIR = dataDir;
 // Экраны моста в тестах проверяются в rich-стиле (по умолчанию у пользователя classic).
 writeFileSync(
@@ -1876,7 +1870,7 @@ async function withFakeSystemctl<T>(
   exitCode: number,
   run: (argsLog: string) => Promise<T>,
 ): Promise<T> {
-  const dir = mkdtempSync(join(tmpdir(), "iva-systemctl-"));
+  const dir = tempDir("iva-systemctl-");
   const argsLog = join(dir, "args.log");
   writeFileSync(
     join(dir, "systemctl"),
