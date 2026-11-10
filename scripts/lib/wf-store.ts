@@ -54,25 +54,55 @@ export function quarantinePath(
   link: string,
   stamp = new Date().toISOString().replace(/[:.]/g, "-"),
 ): string | null {
-  const path = throughLink(link);
-  const stat = pathStat(path);
-  if (!stat) return null;
-  const base = `${path}.trash-${stamp}`;
-  let dest = base;
-  for (let collision = 1; pathStat(dest); collision++)
-    dest = `${base}-${collision}`;
+  const plan = quarantineDestination(link, stamp);
+  if (!plan) return null;
+  moveQuarantine(plan, link);
+  return plan.trash;
+}
 
+/**
+ * Куда уйдёт состояние, если его сейчас унести: путь и адрес карантина, без движения.
+ * Нужен журналу хода обновления (specs/UpdateRun.tla): путь записывается на диск до того,
+ * как состояние унесут, иначе обрыв оставит его без имени.
+ */
+export function quarantineDestination(
+  link: string,
+  stamp = new Date().toISOString().replace(/[:.]/g, "-"),
+): { path: string; trash: string; link: string } | null {
+  const path = throughLink(link);
+  if (!pathStat(path)) return null;
+  const base = `${path}.trash-${stamp}`;
+  let trash = base;
+  for (let collision = 1; pathStat(trash); collision++)
+    trash = `${base}-${collision}`;
+  return { path, trash, link };
+}
+
+/** Унести состояние по записанному адресу: один rename и живая ссылка на месте унесённого. */
+export function moveQuarantine(
+  plan: {
+    readonly path: string;
+    readonly trash: string;
+    readonly link?: string;
+  },
+  link = plan.link ?? plan.path,
+): void {
+  const { path, trash } = plan;
+  // Карантин по этому адресу уже есть - состояние унесено, и повтор после обрыва
+  // (журнал хода обновления) не заводит второй карантин поверх первого.
+  if (pathStat(trash)) return;
+  const stat = pathStat(path);
+  if (!stat) return; // Уже унесено: второй проход по тому же журналу ничего не двигает.
   // Права едут вместе с inode после rename. Закрываем источник заранее: при сбое chmod
   // исходник остаётся на месте, а вызывающий reset честно отмечает incomplete.
   if (stat.isDirectory()) chmodSync(path, 0o700);
   else if (stat.isFile()) chmodSync(path, 0o600);
-  renameSync(path, dest);
+  renameSync(path, trash);
   // Ссылка не должна повиснуть: mkdir через висящий симлинк — ENOENT, и сервис,
   // который сам создаёт свой стор при старте, после reset уже не поднимется.
   if (path !== link && stat.isDirectory())
     mkdirSync(path, { recursive: true, mode: 0o700 });
   pruneTrash(path);
-  return dest;
 }
 
 /** Session state that an update retires before the new version starts. */
