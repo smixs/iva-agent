@@ -352,7 +352,7 @@ void test("мост пишет постановку в очередь и чис�
     update_id: 910,
     message: { message_id: 11, chat: { id: 77 }, text: "слова-постановки-910" },
   };
-  trace.traceBridgeQueued(queued, 2);
+  trace.traceBridgeQueued(queued, 2, "chat busy: turn");
   const batch = {
     update_id: 913,
     message: {
@@ -382,6 +382,7 @@ void test("мост пишет постановку в очередь и чис�
     kind: "message",
     count: 2,
     parts: 1,
+    reason: "chat busy: turn",
   });
   const delivered = last(
     events,

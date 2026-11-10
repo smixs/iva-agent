@@ -899,12 +899,17 @@ export function traceBridgeDelivery(
   });
 }
 
-/** Шов Bridge: сообщение встало в очередь чата; count — сколько теперь ждёт. */
+/** Шов Bridge: сообщение встало в очередь чата; count — сколько теперь ждёт, reason — почему. */
 export function traceBridgeQueued(
   update: TelegramUpdateLike,
   count: number,
+  reason?: string,
 ): void {
-  emitBridge(update, "queued", { count, parts: updatePartCount(update) });
+  emitBridge(update, "queued", {
+    count,
+    parts: updatePartCount(update),
+    ...(reason === undefined ? {} : { reason }),
+  });
 }
 
 export type HelperTraceEvent =
