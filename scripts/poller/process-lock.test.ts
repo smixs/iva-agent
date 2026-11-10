@@ -20,9 +20,6 @@ import {
   parseTelegramGuardHolderMarker,
   parseTelegramProcessOwner,
   readProcessStartIdentity,
-  TELEGRAM_PROCESS_GUARD_BASE,
-  TELEGRAM_PROCESS_LOCK_FILE,
-  TELEGRAM_PROCESS_OWNER_FILE,
   TELEGRAM_PROCESS_RESOURCE,
   telegramProcessOwnerIsLive,
 } from "./process-lock.ts";
@@ -205,14 +202,6 @@ void test("process owner parser requires PID and OS start identity", () => {
 void test("the production holder resource is uid-global and contains no bot, path, or secret", () => {
   const uid = typeof process.getuid === "function" ? process.getuid() : 0;
   assert.equal(TELEGRAM_PROCESS_RESOURCE, `telegram:${uid}`);
-  assert.equal(
-    TELEGRAM_PROCESS_LOCK_FILE,
-    join(TELEGRAM_PROCESS_GUARD_BASE, "telegram-poll.lock"),
-  );
-  assert.equal(
-    TELEGRAM_PROCESS_OWNER_FILE,
-    join(TELEGRAM_PROCESS_GUARD_BASE, "telegram-poll-owner.json"),
-  );
   const holder = {
     schema: "iva-telegram-poll-holder/v2",
     resource: TELEGRAM_PROCESS_RESOURCE,

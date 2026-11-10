@@ -30,14 +30,6 @@ export const TELEGRAM_PROCESS_GUARD_BASE = join(
   "/tmp",
   `iva-telegram-poll-${processUid}`,
 );
-export const TELEGRAM_PROCESS_LOCK_FILE = join(
-  TELEGRAM_PROCESS_GUARD_BASE,
-  "telegram-poll.lock",
-);
-export const TELEGRAM_PROCESS_OWNER_FILE = join(
-  TELEGRAM_PROCESS_GUARD_BASE,
-  "telegram-poll-owner.json",
-);
 
 export type TelegramProcessOwner = {
   schema: typeof OWNER_SCHEMA;
