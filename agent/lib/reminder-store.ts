@@ -771,18 +771,21 @@ export async function sweepFired(
 
 /**
  * Брошенные срабатывания получают причину одним переходом под локом, как взятие строки:
- * второй раз строку не закроют, поэтому Alert о ней уходит не больше одного раза. Текст
- * строки заново не отправляется: таблица не знает, успел ли его отправить умерший ребёнок.
+ * второй раз строку не закроют. Срабатывание, чей ребёнок ещё идёт в этом процессе агента
+ * (`running`), срок жизни не закрывает: ход без присмотра чата пульса не шлёт. Текст строки
+ * заново не отправляется: таблица не знает, успел ли его отправить умерший ребёнок.
  */
 export async function closeAbandoned(
   nowMs: number,
   file = reminderFile(),
+  running: (row: Reminder) => boolean = () => false,
 ): Promise<Reminder[]> {
   return mutate(file, async () => {
     const rows = await loadTable(file);
     const abandoned = rows.filter(
       (row) =>
         isOpen(row) &&
+        !running(row) &&
         reminderPhase(row, nowMs, file === commandFile()) === "abandoned",
     );
     if (abandoned.length === 0) return [];
@@ -791,6 +794,25 @@ export async function closeAbandoned(
     return abandoned.map((row) => structuredClone(row));
   });
 }
+
+/** Тик закрыл срабатывание причиной, опоздавшего факта нет: владельцу должен Alert. */
+export const owesAlert = (row: Reminder): boolean =>
+  row.firedAt !== null &&
+  row.delivered === null &&
+  row.error === REMINDER_ABANDONED;
+
+/**
+ * Запись дросселя Alert (packages/alert-state), которая хранит факт «Alert о брошенном
+ * срабатывании отправлен». У напоминания существо — само срабатывание; у команды ключ общий с
+ * её прочими Alert, и недельный дроссель команд остаётся прежним.
+ */
+export const abandonedAlertKey = (
+  row: Reminder,
+  command: boolean,
+): { readonly key: string; readonly essence: string } =>
+  command
+    ? { key: `schedule-${row.id}`, essence: "abandoned" }
+    : { key: `reminder-${row.id}`, essence: `abandoned ${row.firedAt}` };
 
 /** Commands use the same table engine in a file older releases never open. */
 export const commandFile = (): string =>

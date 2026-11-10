@@ -11,13 +11,15 @@ import { stepLimitNotice } from "#lib/model-response.ts";
 // запишет delivered=false с причиной по коду выхода.
 //
 // Вызов `fire.ts <id> abandoned` хода не ведёт: тик закрыл срабатывание, оставшееся без исхода
-// (агент упал между взятием строки и фактом), и ребёнок шлёт владельцу один Alert с причиной.
-// Текст напоминания заново не отправляется: успел ли его отправить умерший ребёнок, таблица
-// не знает (specs/ReminderLifecycle.tla, NoDuplicate).
+// (агент упал между взятием строки и фактом), и ребёнок шлёт владельцу Alert с причиной. Строка
+// перечитывается перед отправкой: опоздавший факт доставки Alert снимает. Факт «Alert
+// отправлен» пишет дроссель Alert (alertOnce): тик зовёт ребёнка, пока факта нет. Текст
+// напоминания заново не отправляется: успел ли его отправить умерший ребёнок, таблица не знает
+// (specs/ReminderLifecycle.tla, OneAttemptPerCapture, NoFalseAlert, AbandonedAlerted).
 //
 // Живёт в scripts/, а не в agent/: выталкивание наружу идёт через Telegram и клиента eve
 // (scripts/authored-tree-guard.test.ts: agent/ не импортирует scripts/).
-// Коды выхода: 0 — срабатывание отработало; 1 — Alert о брошенной строке не ушёл;
+// Коды выхода: 0 — срабатывание отработало, Alert ушёл или уже не нужен; 1 — Alert не ушёл;
 // 2 — вызов без id, с чужим режимом или неизвестный id.
 import { isEntrypoint } from "../lib/version-layout.ts";
 import { notificationChat } from "../../packages/notification-chat/index.ts";
@@ -33,12 +35,16 @@ import {
   takeOverTelegramChat,
 } from "#lib/telegram-turn-start.ts";
 import {
+  abandonedAlertKey,
   list,
+  owesAlert,
   recordDelivery,
   recordTurnSession,
   type Reminder,
   type ReminderChat,
 } from "#lib/reminder-store.ts";
+import { dataDir } from "#lib/data-dir.ts";
+import { alertOnce } from "../lib/notice-policy.ts";
 import { resolveTimeZone } from "../../packages/timezone/index.ts";
 import { formatZoned } from "#lib/zoned-time.ts";
 import { noticeTranslator } from "../lib/notice-policy.ts";
@@ -419,9 +425,17 @@ async function fireRow(row: Reminder, deps: Wiring): Promise<void> {
 
 /**
  * Alert о брошенном срабатывании: напоминание названо отрывком и сроком, причина и действие —
- * словами. В таблицу ребёнок не пишет: причину в строку уже записал тик.
+ * словами. В таблицу ребёнок не пишет: причину в строку уже записал тик. Строка читается после
+ * всех приготовлений, прямо перед отправкой.
  */
-async function alertAbandoned(row: Reminder, deps: Wiring): Promise<number> {
+async function alertAbandoned(id: string, deps: Wiring): Promise<number> {
+  const tr = await deps.translator(deps.env);
+  const row = await loadRow(id, deps);
+  if (typeof row === "number") return row;
+  if (!owesAlert(row)) {
+    deps.log(`reminders: ${row.id} has an outcome now, no alert`);
+    return 0;
+  }
   const routed = route(row, deps);
   if (!("target" in routed)) {
     deps.log(
@@ -429,7 +443,6 @@ async function alertAbandoned(row: Reminder, deps: Wiring): Promise<number> {
     );
     return 1;
   }
-  const tr = await deps.translator(deps.env);
   const flat = row.text.replace(/\s+/gu, " ").trim();
   const excerpt =
     flat.length > ALERT_EXCERPT ? `${flat.slice(0, ALERT_EXCERPT)}…` : flat;
@@ -438,25 +451,31 @@ async function alertAbandoned(row: Reminder, deps: Wiring): Promise<number> {
     resolveTimeZone(deps.env.ASSISTANT_TIMEZONE),
   );
   const { target } = routed;
-  const result = await deps.send(
-    target.token,
-    target.chat,
-    tr(
-      `The reminder "${excerpt}" due ${due} may not have reached you: its firing was cut short, most likely by an Iva restart. If it is not above in this chat, it did not arrive.`,
-      `Напоминание «${excerpt}» на ${due} могло не дойти: срабатывание оборвалось, вероятно, при перезапуске Ивы. Если его нет выше в этом чате, оно не пришло.`,
-    ),
-    {
-      retryTransient: true,
-      threadId: target.threadId ?? undefined,
-      trace: { source: "reminder" },
-    },
-  );
+  const { key, essence } = abandonedAlertKey(row, false);
+  let refusal = "";
+  const outcome = await alertOnce(dataDir(), key, essence, async () => {
+    const result = await deps.send(
+      target.token,
+      target.chat,
+      tr(
+        `The reminder "${excerpt}" due ${due} may not have reached you: its firing was cut short, most likely by an Iva restart. If it is not above in this chat, it did not arrive.`,
+        `Напоминание «${excerpt}» на ${due} могло не дойти: срабатывание оборвалось, вероятно, при перезапуске Ивы. Если его нет выше в этом чате, оно не пришло.`,
+      ),
+      {
+        retryTransient: true,
+        threadId: target.threadId ?? undefined,
+        trace: { source: "reminder" },
+      },
+    );
+    refusal = result.error;
+    return result.ok;
+  });
   deps.log(
-    result.ok
-      ? `reminders: ${row.id} abandoned, alert sent`
-      : `reminders: ${row.id} abandoned, alert not sent: ${result.error}`,
+    outcome === "failed"
+      ? `reminders: ${row.id} abandoned, alert not sent: ${refusal}`
+      : `reminders: ${row.id} abandoned, alert ${outcome}`,
   );
-  return result.ok ? 0 : 1;
+  return outcome === "failed" ? 1 : 0;
 }
 
 /** Строка срабатывания или код выхода: чужой id и нечитаемая таблица заканчивают ребёнка. */
@@ -488,9 +507,9 @@ export async function runReminderFire(
     return 2;
   }
   const deps: Wiring = { ...DEFAULTS, ...dependencies };
+  if (mode === "abandoned") return alertAbandoned(id, deps);
   const row = await loadRow(id, deps);
   if (typeof row === "number") return row;
-  if (mode === "abandoned") return alertAbandoned(row, deps);
   await fireRow(row, deps);
   return 0;
 }

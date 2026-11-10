@@ -6,6 +6,8 @@ import {
   list,
   recordDelivery,
   ReminderNotFoundError,
+  abandonedAlertKey,
+  owesAlert,
   COMMAND_TIMEOUT_MS,
   commandTimeoutMs,
   clearCommandAlert,
@@ -96,8 +98,10 @@ export async function runCommandFire(
       ).ok;
     });
   if (options.abandoned) {
+    // Опоздавший факт снимает Alert; факт «Alert отправлен» пишет дроссель (тик зовёт, пока нет).
+    if (!owesAlert(row)) return 0;
     const sent = await alert(
-      "abandoned",
+      abandonedAlertKey(row, true).essence,
       "осталась без исхода: запуск оборвался, вероятно, при перезапуске Ивы",
     );
     return sent === "failed" ? 1 : 0;

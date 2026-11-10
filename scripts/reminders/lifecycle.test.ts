@@ -1,8 +1,8 @@
 // Соответствие кода модели specs/ReminderLifecycle.tla: каждый тест называет инвариант модели и
 // проигрывает на настоящих сторе, тике и ребёнке порядок шагов, которым его ломает мутант
-// модели. «Падение агента» здесь — тик с dispatchOnly и ребёнком, который не возвращается:
-// продолжение тика, дописывающее исход, пропадает вместе с процессом агента; «перезапуск» —
-// следующий тик.
+// модели. «Жизнь агента» — своя память тика (TickMemory): в ней тик держит идущих детей.
+// «Падение агента» — тик с dispatchOnly и ребёнком, который не возвращается, после чего его
+// память выбрасывается вместе с продолжением; «перезапуск» — следующий тик со свежей памятью.
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
@@ -31,7 +31,8 @@ const {
 } = await import("#lib/reminder-store.ts");
 const { runReminderTick } = await import("#lib/reminder-tick.ts");
 const { describeReminder } = await import("#lib/reminder-tool.ts");
-const { RUN_STALE_MS } = await import("#lib/run-status.ts");
+const { RUN_STALE_MS, setChatStatus } = await import("#lib/run-status.ts");
+const { sendTelegramHtml } = await import("../lib/telegram-send.ts");
 const { runReminderFire } = await import("./fire.ts");
 const { runCommandFire } = await import("./command.ts");
 
@@ -65,6 +66,17 @@ function jobs(
 
 const quiet = () => {};
 
+/** Память тика одного процесса агента: новая — перезапуск. */
+const life = () => ({ firing: new Set<string>(), alerting: new Set<string>() });
+
+/** Ребёнок, которого тик запускает по-настоящему: и срабатывание, и Alert. */
+const realChild =
+  (deps: ReturnType<typeof fireDeps>) =>
+  async ([, id, mode]: string[]): Promise<RunScheduledJobResult> => ({
+    ...done,
+    code: await runReminderFire(id, deps, mode),
+  });
+
 /** Двойник отправки: всё, что ушло в чат. */
 function chat() {
   const texts: string[] = [];
@@ -95,13 +107,14 @@ const fireDeps = (send: ReturnType<typeof chat>["send"]) => ({
 const once = (now: number, id = "lost") =>
   add({ id, text: TEXT, schedule: { kind: "at", atMs: now - MINUTE } });
 
-/** Тик взял строку, и агент упал до записи исхода. */
+/** Тик взял строку, и агент упал до записи исхода: его память пропала вместе с ним. */
 async function takenThenCrash(now: number): Promise<void> {
   const first = await runReminderTick({
     nowMs: now,
     dispatchOnly: true,
     runJob: jobs(never).runJob,
     log: quiet,
+    memory: life(),
   });
   assert.equal(first.claimed, 1);
 }
@@ -141,7 +154,7 @@ void test("ReminderLifecycle BoundedOutcome: строка, взятая пере
   ]);
 });
 
-void test("ReminderLifecycle NoDuplicate: текст ушёл, ребёнок умер до записи факта — после перезапуска текст второй раз не уходит, уходит Alert", async () => {
+void test("ReminderLifecycle OneAttemptPerCapture: текст ушёл, ребёнок умер до записи факта — после перезапуска текст второй раз не уходит, уходит Alert", async () => {
   const now = Date.now();
   await once(now);
   const { texts, send } = chat();
@@ -158,6 +171,7 @@ void test("ReminderLifecycle NoDuplicate: текст ушёл, ребёнок у
       return done;
     }).runJob,
     log: quiet,
+    memory: life(),
   });
   await new Promise((resolve) => setTimeout(resolve, 50));
   assert.deepEqual(texts, [TEXT]);
@@ -186,23 +200,252 @@ void test("ReminderLifecycle NoDuplicate: текст ушёл, ребёнок у
   );
 });
 
-void test("ReminderLifecycle AlertOnce: закрытую строку следующий тик не закрывает и Alert не повторяет", async () => {
+void test("ReminderLifecycle AlertOnce: закрытую строку следующий тик не закрывает, а после записанного факта Alert не повторяет", async () => {
   const now = Date.now();
   await once(now);
   await takenThenCrash(now);
   const later = now + RUN_STALE_MS + MINUTE;
   assert.equal((await closeAbandoned(later)).length, 1);
   assert.deepEqual(await closeAbandoned(later + MINUTE), []);
-  const next = jobs();
+  const { texts, send } = chat();
+  const first = jobs(realChild(fireDeps(send)));
   await runReminderTick({
     nowMs: later + MINUTE,
+    runJob: first.runJob,
+    log: quiet,
+  });
+  assert.deepEqual(first.calls, [
+    ["scripts/reminders/fire.ts", "lost", "abandoned"],
+  ]);
+  assert.equal(texts.length, 1);
+  // Факт «Alert отправлен» в дросселе: ни тик, ни перезапуск больше не зовут ребёнка с Alert.
+  for (const memory of [undefined, life()]) {
+    const next = jobs();
+    await runReminderTick({
+      nowMs: later + 2 * MINUTE,
+      runJob: next.runJob,
+      log: quiet,
+      memory,
+    });
+    assert.deepEqual(next.calls, []);
+  }
+  // Ребёнок, позванный повторно, тоже молчит: факт уже есть.
+  assert.equal(await runReminderFire("lost", fireDeps(send), "abandoned"), 0);
+  assert.equal(texts.length, 1);
+});
+
+void test("ReminderLifecycle AbandonedAlerted: агент упал между записью причины и ребёнком с Alert — после перезапуска Alert уходит, и один", async () => {
+  const now = Date.now();
+  await once(now);
+  await takenThenCrash(now);
+  // Причина записана, ребёнок с Alert не запущен: агент упал сразу после closeAbandoned.
+  assert.equal((await closeAbandoned(now + RUN_STALE_MS + MINUTE)).length, 1);
+
+  const { texts, send } = chat();
+  const refused = jobs(
+    realChild({
+      ...fireDeps(send),
+      send: () =>
+        Promise.resolve({
+          ok: false,
+          fellBack: false,
+          error: "502: Bad Gateway",
+        }),
+    }),
+  );
+  const at = now + RUN_STALE_MS + 2 * MINUTE;
+  await runReminderTick({
+    nowMs: at,
+    runJob: refused.runJob,
+    log: quiet,
+    memory: life(),
+  });
+  assert.deepEqual(refused.calls, [
+    ["scripts/reminders/fire.ts", "lost", "abandoned"],
+  ]);
+
+  // Telegram отказал: факта нет, следующий проход зовёт ребёнка снова.
+  const retried = jobs(realChild(fireDeps(send)));
+  await runReminderTick({
+    nowMs: at + MINUTE,
+    runJob: retried.runJob,
+    log: quiet,
+  });
+  assert.deepEqual(retried.calls, [
+    ["scripts/reminders/fire.ts", "lost", "abandoned"],
+  ]);
+  assert.equal(texts.length, 1);
+  assert.match(texts[0], /могло не дойти/u);
+
+  const after = jobs();
+  await runReminderTick({
+    nowMs: at + 2 * MINUTE,
+    runJob: after.runJob,
+    log: quiet,
+  });
+  assert.deepEqual(after.calls, []);
+});
+
+void test("ReminderLifecycle NoFalseAlert: чат занят ходом владельца, ребёнок напоминания жив без пульса — срок жизни его не закрывает, Alert не уходит", async () => {
+  const now = Date.now();
+  await once(now);
+  setChatStatus("555:", { status: "running", sessionId: "owner-turn" });
+  let release: (turn: {
+    status: "completed";
+    message: string;
+  }) => void = () => {};
+  const held = new Promise<{ status: "completed"; message: string }>(
+    (resolve) => (release = resolve),
+  );
+  let claimed: boolean | undefined;
+  let turns = 0;
+  const { texts, send } = chat();
+  const deps = {
+    ...fireDeps(send),
+    runTurn: async (
+      _prompt: string,
+      _client: unknown,
+      { watch }: { watch: { claim: (id: string) => Promise<boolean> } },
+    ) => {
+      turns += 1;
+      claimed = await watch.claim("reminder-turn");
+      return held;
+    },
+  } as unknown as ReturnType<typeof fireDeps>;
+  const memory = life();
+  const first = await runReminderTick({
+    nowMs: now,
+    dispatchOnly: true,
+    runJob: jobs(realChild(deps)).runJob,
+    log: quiet,
+    memory,
+  });
+  assert.equal(first.claimed, 1);
+  while (claimed === undefined)
+    await new Promise((resolve) => setTimeout(resolve, 2));
+  assert.equal(claimed, false, "чат занят: пульса у хода нет");
+
+  const late = jobs();
+  await runReminderTick({
+    nowMs: now + RUN_STALE_MS + MINUTE,
+    runJob: late.runJob,
+    log: quiet,
+    memory,
+  });
+  assert.deepEqual(late.calls, [], "живое срабатывание закрыто сроком");
+  assert.equal((await list())[0]?.error, null);
+
+  release({ status: "completed", message: TEXT });
+  while ((await list())[0]?.delivered === null)
+    await new Promise((resolve) => setTimeout(resolve, 2));
+  assert.deepEqual(texts, [TEXT]);
+  assert.equal(turns, 1);
+  const [row] = await list();
+  assert.deepEqual([row?.delivered, row?.error], [true, null]);
+  const after = jobs();
+  await runReminderTick({
+    nowMs: now + RUN_STALE_MS + 2 * MINUTE,
+    runJob: after.runJob,
+    log: quiet,
+    memory,
+  });
+  assert.deepEqual(after.calls, []);
+});
+
+void test("ReminderLifecycle NoFalseAlert: опоздавший факт доставки, записанный до ребёнка с Alert, снимает Alert", async () => {
+  const now = Date.now();
+  await once(now);
+  await takenThenCrash(now);
+  const [taken] = await list();
+  assert.equal((await closeAbandoned(now + RUN_STALE_MS + MINUTE)).length, 1);
+  // Ребёнок, переживший агента, успел записать факт.
+  await recordDelivery("lost", {
+    firedAt: taken?.firedAt ?? null,
+    delivered: true,
+    error: null,
+  });
+  const { texts, send } = chat();
+  assert.equal(await runReminderFire("lost", fireDeps(send), "abandoned"), 0);
+  assert.deepEqual(texts, []);
+  const next = jobs();
+  await runReminderTick({
+    nowMs: now + RUN_STALE_MS + 2 * MINUTE,
     runJob: next.runJob,
     log: quiet,
   });
   assert.deepEqual(next.calls, []);
 });
 
-void test("ReminderLifecycle ExactlyOnceOrReason: строку без исхода уборка не трогает — после суток простоя она сначала получает причину и Alert", async () => {
+/** Telegram принимает каждое сообщение, а ответ на первое теряется. */
+function lostFirstAnswer() {
+  let accepted = 0;
+  const send: typeof sendTelegramHtml = (bot, target, text, options) =>
+    sendTelegramHtml(bot, target, text, {
+      ...options,
+      sleep: () => Promise.resolve(),
+      fetchImpl: () => {
+        accepted += 1;
+        if (accepted === 1)
+          return Promise.reject(
+            new TypeError("response lost after acceptance"),
+          );
+        return Promise.resolve(new Response("{}", { status: 200 }));
+      },
+    });
+  return { send, accepted: () => accepted };
+}
+
+void test("ReminderLifecycle OneAttemptPerCapture: ответ Telegram потерян после принятия — транспорт шлёт тот же текст ещё раз, второго хода нет", async () => {
+  const now = Date.now();
+  await once(now);
+  await fireDue(now, 5);
+  const wire = lostFirstAnswer();
+  let turns = 0;
+  const deps = {
+    ...fireDeps(chat().send),
+    send: wire.send,
+    runTurn: () => {
+      turns += 1;
+      return Promise.resolve({
+        status: "completed" as const,
+        message: TEXT,
+        feedback: () => Promise.resolve(undefined),
+      });
+    },
+  };
+  assert.equal(await runReminderFire("lost", deps), 0);
+  assert.equal(turns, 1, "повтор транспорта запустил второй ход");
+  assert.equal(
+    wire.accepted(),
+    2,
+    "не меньше одного раза: повтор после потерянного ответа",
+  );
+  assert.equal((await list())[0]?.delivered, true);
+
+  // Alert идёт тем же путём; факт записан один раз, тик его больше не зовёт.
+  await once(now, "alert");
+  await takenThenCrash(now);
+  await closeAbandoned(now + RUN_STALE_MS + MINUTE);
+  const alertWire = lostFirstAnswer();
+  assert.equal(
+    await runReminderFire(
+      "alert",
+      { ...fireDeps(chat().send), send: alertWire.send },
+      "abandoned",
+    ),
+    0,
+  );
+  assert.equal(alertWire.accepted(), 2);
+  const next = jobs();
+  await runReminderTick({
+    nowMs: now + RUN_STALE_MS + 2 * MINUTE,
+    runJob: next.runJob,
+    log: quiet,
+  });
+  assert.deepEqual(next.calls, []);
+});
+
+void test("ReminderLifecycle DeliveredOrReason: строку без исхода уборка не трогает — после суток простоя она сначала получает причину и Alert", async () => {
   const now = Date.now();
   await once(now);
   await takenThenCrash(now);
@@ -304,6 +547,7 @@ void test("ReminderLifecycle: расписание-команда без исх�
     dispatchOnly: true,
     runJob: jobs(never).runJob,
     log: quiet,
+    memory: life(),
   });
   const past = now + 2 * MINUTE + 10_000;
   const restarted = jobs();
@@ -333,6 +577,16 @@ void test("ReminderLifecycle: расписание-команда без исх�
   }
   assert.equal(texts.length, 1);
   assert.match(texts[0], /^Задача «touch should-not-run» осталась без исхода/u);
+  // Факт Alert записан дросселем команд: ни следующий проход, ни перезапуск Alert не повторяют.
+  const next = jobs();
+  await runReminderTick({
+    command: true,
+    nowMs: past + MINUTE,
+    runJob: next.runJob,
+    log: quiet,
+    memory: life(),
+  });
+  assert.deepEqual(next.calls, []);
 });
 
 void test("reminderPhase: одна фаза последнего срабатывания для тика, доктора и инструментов", () => {
