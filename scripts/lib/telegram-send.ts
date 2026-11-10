@@ -23,10 +23,7 @@ import {
 } from "../../agent/lib/outbox.ts";
 import { traceOutbox, type TraceScope } from "../../agent/lib/trace.ts";
 import { parseTelegramDelivery } from "../../agent/lib/telegram-delivery.ts";
-import {
-  TELEGRAM_WIDGETS,
-  WIDGET_API_BASE,
-} from "../../agent/lib/telegram-widget.ts";
+import { TELEGRAM_WIDGETS } from "../../agent/lib/telegram-widget.ts";
 import { classifyDeliverStatus } from "./deliver-policy.ts";
 import { screenPayload } from "./telegram-buttons.ts";
 
@@ -111,14 +108,14 @@ async function post(
   fetchImpl: FetchImpl,
 ): Promise<PostAck> {
   try {
-    // sendWidget (Bot API 10.4) есть пока только в beta Bot API.
-    const base =
-      method === "sendWidget" ? WIDGET_API_BASE : "https://api.telegram.org";
-    const res = await fetchImpl(`${base}/bot${bot}/${method}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
+    const res = await fetchImpl(
+      `https://api.telegram.org/bot${bot}/${method}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      },
+    );
     if (res.ok) return { ok: true };
     const text = await res.text();
     // 400 = Telegram не распарсил HTML: единственный статус, где повтор без тегов помогает.

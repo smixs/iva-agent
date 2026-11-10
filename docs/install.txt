@@ -12,23 +12,23 @@ Keep the full SKILL.md and references together, then read SKILL.md and follow it
 Otherwise, fetch and read SKILL.md directly and follow its steps. Read each reference when its step calls for it.
 Resolve references/... against the file list below.
 
-Files from release v0.5.10:
+Files from release v0.5.11:
 
 - skills/install-iva/SKILL.md
-  https://raw.githubusercontent.com/smixs/iva-agent/v0.5.10/skills/install-iva/SKILL.md
+  https://raw.githubusercontent.com/smixs/iva-agent/v0.5.11/skills/install-iva/SKILL.md
 - skills/install-iva/references/preflight.md
-  https://raw.githubusercontent.com/smixs/iva-agent/v0.5.10/skills/install-iva/references/preflight.md
+  https://raw.githubusercontent.com/smixs/iva-agent/v0.5.11/skills/install-iva/references/preflight.md
 - skills/install-iva/references/target.md
-  https://raw.githubusercontent.com/smixs/iva-agent/v0.5.10/skills/install-iva/references/target.md
+  https://raw.githubusercontent.com/smixs/iva-agent/v0.5.11/skills/install-iva/references/target.md
 - skills/install-iva/references/access.md
-  https://raw.githubusercontent.com/smixs/iva-agent/v0.5.10/skills/install-iva/references/access.md
+  https://raw.githubusercontent.com/smixs/iva-agent/v0.5.11/skills/install-iva/references/access.md
 - skills/install-iva/references/server-security.md
-  https://raw.githubusercontent.com/smixs/iva-agent/v0.5.10/skills/install-iva/references/server-security.md
+  https://raw.githubusercontent.com/smixs/iva-agent/v0.5.11/skills/install-iva/references/server-security.md
 - skills/install-iva/references/iva-state.md
-  https://raw.githubusercontent.com/smixs/iva-agent/v0.5.10/skills/install-iva/references/iva-state.md
+  https://raw.githubusercontent.com/smixs/iva-agent/v0.5.11/skills/install-iva/references/iva-state.md
 - skills/install-iva/references/keys.md
-  https://raw.githubusercontent.com/smixs/iva-agent/v0.5.10/skills/install-iva/references/keys.md
+  https://raw.githubusercontent.com/smixs/iva-agent/v0.5.11/skills/install-iva/references/keys.md
 - skills/install-iva/references/finish.md
-  https://raw.githubusercontent.com/smixs/iva-agent/v0.5.10/skills/install-iva/references/finish.md
+  https://raw.githubusercontent.com/smixs/iva-agent/v0.5.11/skills/install-iva/references/finish.md
 - skills/install-iva/references/secrets.md
-  https://raw.githubusercontent.com/smixs/iva-agent/v0.5.10/skills/install-iva/references/secrets.md
+  https://raw.githubusercontent.com/smixs/iva-agent/v0.5.11/skills/install-iva/references/secrets.md
