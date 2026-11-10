@@ -39,11 +39,9 @@ import {
 import { SAFE_PLUGIN_PART } from "#lib/plugin-store.ts";
 import { createSystemdControl } from "./systemd-control.ts";
 import {
-  installedPluginUnits,
   mcpProxyUnitBody,
   mcpUnitName,
   pluginServiceUnitBody,
-  pluginUnitNames,
   pluginUnitPlan,
   reconcilePluginUnits,
   runningPluginUnits,
@@ -427,10 +425,6 @@ test("reconcile writes what belongs, starts it, and takes away what does not", (
       "unrelated.service",
     ].sort(),
   );
-  assert.deepEqual(
-    installedPluginUnits({ scope, unitDir, systemd: control }),
-    [],
-  );
 });
 
 test("a unit that will not come up is reported and its neighbour still starts", () => {
@@ -662,11 +656,6 @@ test("the units of one plugin resolve to owned running representations", () => {
     name: "trace",
     services: { web: { port: 8726 }, gone: { port: 8727 } },
   };
-  assert.deepEqual(pluginUnitNames(entry, scope), [
-    scoped("iva-plugin-trace-web.service"),
-    scoped("iva-plugin-trace-gone.service"),
-  ]);
-  assert.deepEqual(pluginUnitNames({ name: "bare" }, scope), []);
   assert.deepEqual(
     runningPluginUnits({
       scope,

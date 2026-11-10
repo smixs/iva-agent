@@ -26,7 +26,7 @@ import { hasInboundAttackSignal, sanitizeInbound } from "#lib/security-gate.ts";
 import { readSettingsState } from "#lib/settings.ts";
 import { injectionWarning } from "#lib/telegram-gate-notice.ts";
 import { JOB_STOP_AT_ENV } from "#lib/schedule-runner.ts";
-import { resolveTimeZone } from "#lib/timezone.ts";
+import { resolveTimeZone } from "../../packages/timezone/index.ts";
 import {
   noticeTranslator,
   recordAlert,
@@ -42,7 +42,7 @@ import {
   type ReminderTurn,
   type ReminderTurnKind,
 } from "../lib/reminder-turn.ts";
-import { ownerChat } from "../lib/notification-chat.ts";
+import { ownerChat } from "../../packages/notification-chat/index.ts";
 import { insightFailureLines, listTurnFailures } from "../lib/turn-failures.ts";
 import { listTurnRepeats } from "../lib/turn-repeats.ts";
 import { readEntries, summarize, type UsageRecord } from "../lib/usage.ts";

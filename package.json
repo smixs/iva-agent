@@ -6,13 +6,10 @@
     "iva": "bin/iva.mjs"
   },
   "imports": {
-    "#*": "./agent/*",
-    "#evals/*": "./evals/*"
+    "#*": "./agent/*"
   },
   "scripts": {
-    "iva": "node bin/iva.mjs",
     "setup": "node scripts/setup.mjs",
-    "check-port": "node scripts/check-port.ts",
     "build": "node --env-file-if-exists=.env scripts/build.ts",
     "build:core": "eve build",
     "dev": "eve dev",
@@ -22,7 +19,6 @@
     "live-turn": "node scripts/live-turn.ts",
     "poll": "node --env-file=.env scripts/telegram-poll.mjs",
     "memory": "node --env-file=.env scripts/memory/night.ts",
-    "cleanup": "node scripts/vault-cleanup.ts",
     "brain": "node --env-file=.env scripts/memory/brain.ts",
     "typecheck": "tsgo",
     "lint": "eslint --flag unstable_native_nodejs_ts_config .",

@@ -13,7 +13,7 @@ import {
   statSync,
   symlinkSync,
 } from "node:fs";
-import { dirname, isAbsolute, join } from "node:path";
+import { dirname, join } from "node:path";
 import { createRequire } from "node:module";
 import type { AtomicWriteOptions } from "../../agent/lib/fs-atomic.ts";
 import {
@@ -88,16 +88,6 @@ function atomicWriter(): AtomicWriter {
   // The CLI must still load on a broken install whose authored tree is absent.
   // Mutation requires the canonical writer and fails closed if that tree is gone.
   return require("../../agent/lib/fs-atomic.ts") as AtomicWriter;
-}
-
-/** A state directory as the .env spells it: an absolute one as given, the rest inside `root`. */
-export function stateDir(
-  root: string,
-  configured: string | undefined,
-  fallback: string,
-): string {
-  const raw = configured?.trim() || fallback;
-  return isAbsolute(raw) ? raw : join(root, raw);
 }
 
 /** Where an installation keeps things; state and the mirror outlive every version. */

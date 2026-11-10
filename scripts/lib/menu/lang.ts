@@ -4,7 +4,7 @@
 // (cron-скрипты, init-vault) были согласованы на своём следующем запуске без правок.
 import { writeSettings } from "#lib/settings.ts";
 import { upsertEnv } from "../env-file.ts";
-import { button, buttonRow } from "./buttons.ts";
+import { button, buttonRow } from "../telegram-buttons.ts";
 
 type Lang = "en" | "ru";
 type MenuState = { page: number };

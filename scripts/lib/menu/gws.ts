@@ -20,7 +20,7 @@ import {
   childEnv,
   AUTH_SERVICES,
 } from "./gws-auth.ts";
-import { button } from "./buttons.ts";
+import { button, menuBackLine } from "../telegram-buttons.ts";
 
 const SID = "gws";
 const PARENT = "r";
@@ -58,11 +58,6 @@ const isPrivate = (st: MenuState) => Number(st.chatId) > 0;
 const sleep = (ms: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, ms));
 
-const backLine = (ctx: MenuContext) =>
-  `${button(ctx.tr("‹ Menu", "‹ Меню"), `iva_menu:${PARENT}:o`)} — ${ctx.tr(
-    "back to the settings.",
-    "вернуться в настройки.",
-  )}`;
 const cancelLine = (ctx: MenuContext) =>
   `${button(ctx.tr("Cancel", "Отмена"), `iva_menu:${SID}:o`, "danger")} — ${ctx.tr(
     "leave the login without changes.",
@@ -151,7 +146,7 @@ function instructions(ctx: MenuContext) {
       "paste the JSON or attach the file in a private chat.",
       "вставить JSON или приложить файл в личном чате.",
     )}`,
-    backLine(ctx),
+    menuBackLine(ctx, PARENT),
   ].join("\n\n");
   return { text };
 }
@@ -178,7 +173,7 @@ export default {
             "CLI `gws` не найден на сервере.",
           ),
           checkLine(ctx),
-          backLine(ctx),
+          menuBackLine(ctx, PARENT),
         ].join("\n\n"),
       };
     }
@@ -195,7 +190,7 @@ export default {
         ),
         connectLine(ctx),
         checkLine(ctx),
-        backLine(ctx),
+        menuBackLine(ctx, PARENT),
       ].join("\n\n");
       return { text };
     }
@@ -217,7 +212,7 @@ export default {
         "войти заново и выдать текущий набор прав.",
       )}`,
       checkLine(ctx),
-      backLine(ctx),
+      menuBackLine(ctx, PARENT),
     ].join("\n\n");
     return { text };
   },
@@ -234,7 +229,7 @@ export default {
           `${ctx.tr(
             "The client secret is sensitive — open a private chat and send it there.",
             "client_secret — секрет. Открой личный чат и пришли его там.",
-          )}\n\n${backLine(ctx)}`,
+          )}\n\n${menuBackLine(ctx, PARENT)}`,
         );
       }
       st.awaitText = { kind: "gwsjson", secret: true, data: {}, file: true };
@@ -266,7 +261,7 @@ export default {
               "Не удалось запустить gws-авторизацию — проверь client_secret и попробуй снова.",
             ),
             connectLine(ctx),
-            backLine(ctx),
+            menuBackLine(ctx, PARENT),
           ].join("\n\n"),
         );
       }
@@ -349,7 +344,7 @@ export default {
           `${ctx.tr(
             `Couldn't save the file: ${message}`,
             `Не удалось сохранить файл: ${message}`,
-          )}\n\n${backLine(ctx)}`,
+          )}\n\n${menuBackLine(ctx, PARENT)}`,
         );
       }
       invalidate();
@@ -361,7 +356,7 @@ export default {
             "Сохранил. Теперь нажми «Подключить» для входа.",
           ),
           connectLine(ctx),
-          backLine(ctx),
+          menuBackLine(ctx, PARENT),
         ].join("\n\n"),
       );
     },
@@ -387,7 +382,7 @@ export default {
               "Сессия входа истекла. Нажми «Подключить», чтобы начать заново.",
             ),
             connectLine(ctx),
-            backLine(ctx),
+            menuBackLine(ctx, PARENT),
           ].join("\n\n"),
         );
       }
@@ -418,7 +413,7 @@ export default {
               "Не удалось передать код gws (окно входа, вероятно, истекло по таймауту). Нажми «Подключить» и попробуй снова.",
             ),
             connectLine(ctx),
-            backLine(ctx),
+            menuBackLine(ctx, PARENT),
           ].join("\n\n"),
         );
       }
@@ -432,7 +427,7 @@ export default {
           `${T(
             `✅ Google account connected. Scopes: ${SCOPES}.`,
             `✅ Google-аккаунт подключён. Права: ${SCOPES}.`,
-          )}\n\n${backLine(ctx)}`,
+          )}\n\n${menuBackLine(ctx, PARENT)}`,
         );
       }
       return ctx.flows.screen(
@@ -443,7 +438,7 @@ export default {
             "⚠️ Не удалось подтвердить подключение. Нажми «Подключить» и попробуй снова.",
           ),
           connectLine(ctx),
-          backLine(ctx),
+          menuBackLine(ctx, PARENT),
         ].join("\n\n"),
       );
     },

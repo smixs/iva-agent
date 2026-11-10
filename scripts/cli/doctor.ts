@@ -102,7 +102,7 @@ export function authoredTreeMissing(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   // Своя ошибка называет `#lib/`-алиас или путь в `agent/`; чужой пакет (`packages/…`)
   // сюда не попадает и доктор о нём предупреждает.
-  return /#lib\/|#evals\/|agent[\\/]/u.test(message);
+  return /#lib\/|agent[\\/]/u.test(message);
 }
 
 /**

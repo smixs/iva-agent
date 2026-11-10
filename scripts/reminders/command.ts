@@ -12,7 +12,7 @@ import {
 } from "#lib/reminder-store.ts";
 import { dataDir } from "#lib/data-dir.ts";
 import { alertOnce, alertResolved } from "../lib/notice-policy.ts";
-import { ownerChat } from "../lib/notification-chat.ts";
+import { ownerChat } from "../../packages/notification-chat/index.ts";
 import { sendTelegramHtml } from "../lib/telegram-send.ts";
 import { redactNotice } from "../lib/notice.ts";
 import { isEntrypoint } from "../lib/version-layout.ts";

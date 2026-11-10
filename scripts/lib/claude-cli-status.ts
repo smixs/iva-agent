@@ -13,7 +13,7 @@ import {
   resolveClaude,
   servicePath,
 } from "../../packages/claude-command/index.ts";
-import { CANONICAL_REASONING_EFFORTS } from "./reasoning-levels.ts";
+import { CANONICAL_REASONING_EFFORTS } from "../../packages/reasoning-levels/index.ts";
 
 export type ClaudeEnv = Readonly<Record<string, string | undefined>>;
 

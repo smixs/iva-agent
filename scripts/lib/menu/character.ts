@@ -15,7 +15,7 @@ import {
   personaMarkdown,
 } from "../quiz.ts";
 import { resolveVaultDir } from "../../../packages/vault-dir/index.ts";
-import { button, buttonRow } from "./buttons.ts";
+import { button, buttonRow, menuBackLine } from "../telegram-buttons.ts";
 
 const SID = "chr";
 const PARENT = "r";
@@ -34,13 +34,6 @@ type MenuContext = {
     screen: (state: MenuState, text: string) => Promise<void>;
   };
 };
-
-function backLine(ctx: MenuContext): string {
-  return `${button(ctx.tr("‹ Menu", "‹ Меню"), `iva_menu:${PARENT}:o`)} — ${ctx.tr(
-    "back to the settings.",
-    "вернуться в настройки.",
-  )}`;
-}
 
 function errorMessage(error: unknown): string {
   return (error as { readonly message: string }).message;
@@ -65,7 +58,7 @@ function renderQuestion(st: MenuState, ctx: MenuContext) {
       button(a[2], `iva_menu:${SID}:q:${i}:2`),
       button(a[3], `iva_menu:${SID}:q:${i}:3`),
     ]),
-    backLine(ctx),
+    menuBackLine(ctx, PARENT),
   ].join("\n\n");
   return ctx.flows.screen(st, text);
 }
@@ -84,7 +77,7 @@ function renderPortrait(st: MenuState, ctx: MenuContext) {
       "answer the 10 questions again.",
       "ответить на 10 вопросов заново.",
     )}`,
-    backLine(ctx),
+    menuBackLine(ctx, PARENT),
   ].join("\n\n");
   return ctx.flows.screen(st, text);
 }
@@ -104,7 +97,7 @@ export default {
         "answer the 10 questions.",
         "ответить на 10 вопросов.",
       )}`,
-      backLine(ctx),
+      menuBackLine(ctx, PARENT),
     ].join("\n\n");
     return { text };
   },
@@ -147,7 +140,7 @@ export default {
           `${ctx.tr(
             `Couldn't write the character file: ${message}`,
             `Не удалось записать файл характера: ${message}`,
-          )}\n\n${backLine(ctx)}`,
+          )}\n\n${menuBackLine(ctx, PARENT)}`,
         );
       }
       return ctx.flows.screen(
@@ -155,7 +148,7 @@ export default {
         `${ctx.tr(
           "Character saved. It applies from your next message.",
           "Характер сохранён. Применится со следующего сообщения.",
-        )}\n\n${backLine(ctx)}`,
+        )}\n\n${menuBackLine(ctx, PARENT)}`,
       );
     }
     return ctx.show(st, SID);

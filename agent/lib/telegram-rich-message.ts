@@ -20,6 +20,7 @@ import {
   type TelegramRawMedia,
   type TelegramRawMessage,
 } from "./telegram-parts.ts";
+import { isRecord } from "../../packages/guards/index.ts";
 
 export interface RichMessageReading {
   /** Markdown в исходном порядке; пусто, когда текста нет. Листья экранированы. */
@@ -75,10 +76,6 @@ function textTask(node: unknown, mode: Mode): Task {
   return { kind: "text", node, mode };
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 // Ловушка в геттере или Proxy — это потерянное поле, а не повод бросить. Счётчик
 // общий на модуль, но обход синхронный и не вложенный: один проход читает только свою
 // разницу и по ней честно поднимает `truncated`.
@@ -106,7 +103,7 @@ function each(value: unknown, make: Make): Task[] {
   return [{ kind: "each", list: value as object, make, at: 0 }];
 }
 
-function asText(value: unknown): string {
+export function asText(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 

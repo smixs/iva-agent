@@ -11,7 +11,7 @@ import { restartFailure } from "../systemd-control.ts";
 
 import { readEnvValues, upsertEnv } from "../env-file.ts";
 import { SEARCH_CATALOG, checkSearchKey } from "../search-catalog.ts";
-import { button, buttonRow } from "./buttons.ts";
+import { button, buttonRow, menuBackLine } from "../telegram-buttons.ts";
 
 const SID = "srch";
 const PARENT = "r";
@@ -36,13 +36,6 @@ type MenuContext = {
     end: (state: MenuState, text: string) => Promise<void>;
   };
 };
-
-function backLine(ctx: MenuContext): string {
-  return `${button(ctx.tr("‹ Menu", "‹ Меню"), `iva_menu:${PARENT}:o`)} — ${ctx.tr(
-    "back to the settings.",
-    "вернуться в настройки.",
-  )}`;
-}
 
 function cancelLine(ctx: MenuContext): string {
   return `${button(ctx.tr("Cancel", "Отмена"), `iva_menu:${SID}:o`, "danger")} — ${ctx.tr(
@@ -78,7 +71,7 @@ async function promptKey(st: MenuState, ctx: MenuContext, provider: Provider) {
       `${ctx.tr(
         "API keys are secrets — open a private chat with me and set the search key there.",
         "Ключи — это секрет. Открой личный чат со мной и введи ключ поиска там.",
-      )}\n\n${backLine(ctx)}`,
+      )}\n\n${menuBackLine(ctx, PARENT)}`,
     );
   }
   st.awaitText = {
@@ -119,7 +112,7 @@ async function restartOffer(
       ),
       button(ctx.tr("Later", "Позже"), `iva_menu:${SID}:rs:later`),
     ]),
-    backLine(ctx),
+    menuBackLine(ctx, PARENT),
   ].join("\n\n");
   return ctx.flows.screen(st, text);
 }
@@ -153,7 +146,7 @@ export default {
         "enter a new key for the current provider.",
         "ввести новый ключ текущего провайдера.",
       )}`,
-      backLine(ctx),
+      menuBackLine(ctx, PARENT),
     ].join("\n\n");
     return { text };
   },

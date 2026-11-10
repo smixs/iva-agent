@@ -6,7 +6,7 @@ import { z } from "zod";
 import { setTimeout as pause } from "node:timers/promises";
 import { resolveVaultDir } from "@iva/vault-dir";
 import { resolveDataDir } from "#lib/data-dir.ts";
-import { resolveTimeZone } from "#lib/timezone.ts";
+import { resolveTimeZone } from "../../packages/timezone/index.ts";
 import { readSettings } from "#lib/settings.ts";
 import {
   commitVaultSweep,
@@ -26,7 +26,7 @@ import { underMemoryLock } from "../lib/memory-lock.ts";
 import { resolveStopAt } from "../lib/rollup-turn.ts";
 import * as attempts from "../lib/rollup-attempts.ts";
 import * as notice from "../lib/notice-policy.ts";
-import { notificationChat } from "../lib/notification-chat.ts";
+import { notificationChat } from "../../packages/notification-chat/index.ts";
 import { sendTelegramHtml } from "../lib/telegram-send.ts";
 import * as input from "./night-input.ts";
 import type { DayEntry } from "./night-input.ts";

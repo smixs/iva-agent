@@ -15,7 +15,7 @@ import {
   type TelegramUpdateBatchItem,
 } from "../lib/telegram-queue.ts";
 import { alertOnce, alertResolved } from "../lib/notice-policy.ts";
-import { notificationChat } from "../lib/notification-chat.ts";
+import { notificationChat } from "../../packages/notification-chat/index.ts";
 import { tr } from "#lib/i18n.ts";
 import {
   ACCEPTANCE_ROUTE,

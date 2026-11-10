@@ -1,9 +1,8 @@
-// Stable reasoning vocabulary understood by the runtime protocol.
+// Stable reasoning vocabulary understood by the runtime protocol: agent/provider.ts checks
+// THINKING_EFFORT against it, the /think buttons and `iva config` offer it. One list for
+// both trees, loadable on installs whose agent/ is missing.
 // Telegram shows a model's live subset, with a conservative fallback when the
 // catalog is unavailable. `ultra` is intentionally unsupported.
-// The canonical list is repeated in agent/lib/reasoning-levels.ts, where the runtime
-// validates THINKING_EFFORT: this copy is loaded by `iva config` on installs whose agent/
-// may be missing, so it cannot reach for the authored tree. Pinned in the test next door.
 export const CANONICAL_REASONING_EFFORTS = Object.freeze([
   "minimal",
   "low",

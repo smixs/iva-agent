@@ -21,6 +21,7 @@ import { chatKeyOf, hasTelegramPendingInputRequests } from "./run-status.ts";
 import { traceInboundOutcome } from "./trace.ts";
 import { TELEGRAM_QUEUE_RECEIPT_FIELD } from "./telegram-parts.ts";
 import { readSettings } from "./settings.ts";
+import { isRecord } from "../../packages/guards/index.ts";
 
 export const TELEGRAM_ACCEPTANCE_ROUTE = "/eve/v1/telegram/accepted";
 export const TELEGRAM_ACCEPTANCE_KIND_HEADER = "x-iva-telegram-acceptance";
@@ -44,9 +45,6 @@ type RequestMetadata = {
   reroute: TelegramReroute | null;
   updateId: number | null;
 };
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
 
 const receiptContext = new AsyncLocalStorage<ReceiptContext>();
 const RECEIPT_PATTERN = /^[a-f0-9]{32}$/u;

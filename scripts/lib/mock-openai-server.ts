@@ -6,12 +6,9 @@
 // под upstream с нуля.
 import { createServer, type IncomingMessage } from "node:http";
 import { text as consumeText } from "node:stream/consumers";
+import { isRecord } from "../../packages/guards/index.ts";
 
 const MODEL = "iva-replica";
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 function stringifyContentPart(value: unknown): string {
   if (value == null) return "";

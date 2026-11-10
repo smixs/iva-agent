@@ -6,7 +6,12 @@ import { restartFailure } from "../systemd-control.ts";
 // (agent/lib/telegram-rich-replies.ts), поэтому новое значение ждёт перезапуска iva.service —
 // предлагаем его сразу, как на экране поиска.
 import { readEnvValues, upsertEnv } from "../env-file.ts";
-import { button, buttonRow, escapeRichText } from "./buttons.ts";
+import {
+  button,
+  buttonRow,
+  escapeRichText,
+  menuBackLine,
+} from "../telegram-buttons.ts";
 
 const SID = "rich";
 const PARENT = "r";
@@ -27,12 +32,6 @@ type MenuContext = {
     end: (state: MenuState, text: string) => Promise<void>;
   };
 };
-
-const backLine = (ctx: MenuContext) =>
-  `${button(ctx.tr("‹ Menu", "‹ Меню"), `iva_menu:${PARENT}:o`)} — ${ctx.tr(
-    "back to the settings.",
-    "вернуться в настройки.",
-  )}`;
 
 // Значение .env так, как его поймёт агент: пусто и auto — авто, never — обычный текст. Любое
 // другое значение агент не примет вовсе (richRepliesMode бросает при импорте): показываем его
@@ -76,7 +75,7 @@ async function restartOffer(
       ),
       button(ctx.tr("Later", "Позже"), `iva_menu:${SID}:rs:later`),
     ]),
-    backLine(ctx),
+    menuBackLine(ctx, PARENT),
   ].join("\n\n");
   return ctx.flows.screen(st, text);
 }
@@ -140,7 +139,7 @@ export default {
           `iva_menu:${SID}:w:never`,
         ),
       ]),
-      backLine(ctx),
+      menuBackLine(ctx, PARENT),
     ].join("\n\n");
     return { text };
   },

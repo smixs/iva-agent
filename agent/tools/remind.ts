@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { defineTool } from "eve/tools";
 import { z } from "zod";
-import { notificationChat } from "../lib/notification-chat.ts";
+import { notificationChat } from "../../packages/notification-chat/index.ts";
 import { ownerTimeZone } from "../lib/reminder-time.ts";
 import {
   add,

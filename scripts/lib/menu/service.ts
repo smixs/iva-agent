@@ -9,7 +9,7 @@ import { logHint } from "../systemd-control.ts";
 import { join } from "node:path";
 import { readEnvValues } from "../env-file.ts";
 import { updateRunning } from "../version-store.ts";
-import { button } from "./buttons.ts";
+import { button } from "../telegram-buttons.ts";
 import { menuStyle } from "../telegram-buttons.ts";
 import { writeSettings } from "#lib/settings.ts";
 import { betaOf, setBeta } from "../update-channel.ts";

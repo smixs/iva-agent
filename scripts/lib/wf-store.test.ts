@@ -18,7 +18,6 @@ import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  quarantineDir,
   quarantinePath,
   queuedInputTargets,
   recoverInterruptedSessionState,
@@ -43,12 +42,12 @@ function withFsHook(install: () => void, run: () => void): void {
   }
 }
 
-void test("quarantineDir переименовывает стор в *.trash-<штамп> с содержимым", () => {
+void test("quarantinePath переименовывает стор в *.trash-<штамп> с содержимым", () => {
   const root = tempDir("wf-store-");
   const dir = join(root, ".workflow-data");
   mkdirSync(dir);
   writeFileSync(join(dir, "run.json"), "{}");
-  const dest = quarantineDir(dir, "2026-01-01T00-00-00-000Z");
+  const dest = quarantinePath(dir, "2026-01-01T00-00-00-000Z");
   assert.equal(dest, `${dir}.trash-2026-01-01T00-00-00-000Z`);
   assert.ok(dest);
   assert.ok(!existsSync(dir), "исходная директория должна исчезнуть");
@@ -110,7 +109,7 @@ void test("старые directory-карантины ротируются, св�
   const dir = join(root, "store");
   for (const stamp of ["2026-01-01", "2026-01-02", "2026-01-03"]) {
     mkdirSync(dir);
-    quarantineDir(dir, stamp);
+    quarantinePath(dir, stamp);
   }
   assert.deepEqual(readdirSync(root).sort(), [
     "store.trash-2026-01-02",

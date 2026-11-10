@@ -7,7 +7,7 @@ import {
   MODEL_PROVIDERS,
   resolveModelProvider,
 } from "#lib/model-provider.ts";
-import { ContextWindowConfigurationError } from "../../agent/lib/context-window.ts";
+import { ContextWindowConfigurationError } from "../../packages/context-window/index.ts";
 import {
   CATALOG,
   catalogModel,

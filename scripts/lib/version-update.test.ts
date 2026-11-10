@@ -276,10 +276,6 @@ test("a package outside the tree is still what the updater's walk refuses", () =
     aliasTarget("#lib/schedule-table.ts", repository),
     join(repository, "agent/lib/schedule-table.ts"),
   );
-  assert.equal(
-    aliasTarget("#evals/smoke.ts", repository),
-    join(repository, "evals/smoke.ts"),
-  );
   assert.equal(aliasTarget("eve/channels", repository), null);
   assert.equal(aliasTarget("just-bash", repository), null);
 });

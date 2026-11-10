@@ -1,37 +1,19 @@
-import {
-  lstatSync,
-  readdirSync,
-  readFileSync,
-  realpathSync,
-  statSync,
-} from "node:fs";
+import { lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, join, relative, sep } from "node:path";
 import { parseFrontmatterOrSkip } from "./frontmatter.ts";
-import { resolveTimeZone } from "./timezone.ts";
+import { resolveTimeZone } from "../../packages/timezone/index.ts";
+import { vaultMarkdownFiles } from "../../packages/vault-walk/index.ts";
 
 // Ссылки [[…]], которые ведут в никуда. Модель пишет их с опечаткой в слаге, с выдуманной
 // транслитерацией или на карточку, которой никогда не создавали, — и это не косметика:
 // битая ссылка сразу режет health score графа, а ночной graph.fix чинит только то, что
 // однозначно резолвится, остальное копится. Поэтому отказ на записи, детерминированный.
 //
-// Резолв обязан совпадать с ночным обходом один в один, иначе отказ будет ложным:
-// scripts/autograph/common.py (walk_vault, build_link_index, normalize_link_target,
-// resolve_link_target) и scripts/autograph/graph.py (build_graph, expected_future_link).
-
-const IGNORE_DIRS = new Set([
-  ".obsidian",
-  "attachments",
-  ".git",
-  ".graph",
-  ".claude",
-  ".trash",
-  "backup",
-  "archive",
-  "__pycache__",
-]);
+// Резолв один на запись и на ночной граф: scripts/memory/graph.ts строит рёбра этим же
+// индексом (vaultLinks), поэтому ссылка, принятая на записи, ночью не становится битой.
 
 // Вложения: заметка может законно кончаться на суффикс вложения (voice.ogg.md), поэтому
-// исключение работает только ПОСЛЕ неудачного резолва — так же, как в build_graph.
+// исключение работает только ПОСЛЕ неудачного резолва.
 const EMBED_EXTS = [
   ".jpg",
   ".jpeg",
@@ -49,42 +31,18 @@ const EMBED_EXTS = [
 ];
 const DAY_MS = 86_400_000;
 
+// Ключ → rel-путь карточки без .md. Ключ с двумя владельцами лежит в ambiguous*.
 interface LinkIndex {
   exact: Set<string>;
-  uniqueSuffix: Set<string>;
+  uniqueSuffix: Map<string, string>;
   ambiguousSuffix: Set<string>;
-  uniqueStem: Set<string>;
+  uniqueStem: Map<string, string>;
   ambiguousStem: Set<string>;
-  uniqueTitle: Set<string>;
+  uniqueTitle: Map<string, string>;
   ambiguousTitle: Set<string>;
 }
 
-/** Все .md под корнем vault'а, кроме IGNORE_DIRS, как rel-пути через «/». */
-function walkVault(vaultDir: string): string[] {
-  const results: string[] = [];
-  const visit = (dir: string): void => {
-    let entries;
-    try {
-      entries = readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return; // нечитаемый каталог — как будто его нет, проверка не падает на нём
-    }
-    for (const entry of entries) {
-      if (entry.isDirectory()) {
-        if (IGNORE_DIRS.has(entry.name)) continue;
-        visit(join(dir, entry.name));
-      } else if (entry.isFile() && entry.name.endsWith(".md")) {
-        results.push(
-          relative(vaultDir, join(dir, entry.name)).split(sep).join("/"),
-        );
-      }
-    }
-  };
-  visit(vaultDir);
-  return results;
-}
-
-/** Ключ ссылки по H1: NFC, один пробел, нижний регистр (python normalize_title). */
+/** Ключ ссылки по H1: NFC, один пробел, нижний регистр. */
 function normalizeTitle(text: string): string {
   return text
     .normalize("NFC")
@@ -106,35 +64,39 @@ function extractTitle(content: string, path: string): string | null {
 }
 
 function addKey(
-  unique: Set<string>,
+  unique: Map<string, string>,
   ambiguous: Set<string>,
   key: string,
+  id: string,
 ): void {
   if (ambiguous.has(key)) return;
   if (unique.has(key)) {
-    // Второй владелец того же ключа: python переносит его в ambiguous_*, и резолв
-    // такой цели даёт None — неоднозначная ссылка считается неразрешённой.
+    // Второй владелец того же ключа: неоднозначная ссылка считается неразрешённой.
     unique.delete(key);
     ambiguous.add(key);
     return;
   }
-  unique.add(key);
+  unique.set(key, id);
 }
 
-function buildLinkIndex(vaultDir: string, extraPaths: string[]): LinkIndex {
+function buildLinkIndex(
+  vaultDir: string,
+  extraPaths: readonly string[],
+): LinkIndex {
   const index: LinkIndex = {
     exact: new Set(),
-    uniqueSuffix: new Set(),
+    uniqueSuffix: new Map(),
     ambiguousSuffix: new Set(),
-    uniqueStem: new Set(),
+    uniqueStem: new Map(),
     ambiguousStem: new Set(),
-    uniqueTitle: new Set(),
+    uniqueTitle: new Map(),
     ambiguousTitle: new Set(),
   };
   // Ключ везде — путь БЕЗ .md: иначе своя же карточка попадает в индекс дважды, её stem
   // становится неоднозначным, и ссылка файла на самого себя читается как битая.
-  const paths = walkVault(vaultDir).map((rel) =>
-    rel.endsWith(".md") ? rel.slice(0, -3) : rel,
+  // Нечитаемый каталог обход пропускает: проверка ссылок на нём не падает.
+  const paths = vaultMarkdownFiles(vaultDir).map((file) =>
+    relative(vaultDir, file).split(sep).join("/").slice(0, -3),
   );
   const seen = new Set(paths);
   for (const extra of extraPaths) {
@@ -150,12 +112,13 @@ function buildLinkIndex(vaultDir: string, extraPaths: string[]): LinkIndex {
 
     const parts = relNoExt.split("/");
     const stem = parts[parts.length - 1];
-    addKey(index.uniqueStem, index.ambiguousStem, stem);
+    addKey(index.uniqueStem, index.ambiguousStem, stem, relNoExt);
     for (let i = 1; i < parts.length - 1; i += 1) {
       addKey(
         index.uniqueSuffix,
         index.ambiguousSuffix,
         parts.slice(i).join("/"),
+        relNoExt,
       );
     }
 
@@ -168,12 +131,12 @@ function buildLinkIndex(vaultDir: string, extraPaths: string[]): LinkIndex {
     const title = extractTitle(content, relNoExt);
     if (title === null) continue;
     const key = normalizeTitle(title);
-    if (key) addKey(index.uniqueTitle, index.ambiguousTitle, key);
+    if (key) addKey(index.uniqueTitle, index.ambiguousTitle, key, relNoExt);
   }
   return index;
 }
 
-/** python normalize_link_target. */
+/** Цель без `\`, якоря, `.md` и ведущего `vault/`. */
 function normalizeLinkTarget(target: string): string {
   let value = target.replace(/\\/g, "").trim();
   const hash = value.indexOf("#");
@@ -183,17 +146,18 @@ function normalizeLinkTarget(target: string): string {
   return value;
 }
 
-/** python resolve_link_target: точный путь → уникальный суффикс → уникальный stem → H1. */
-function isResolved(target: string, index: LinkIndex): boolean {
-  if (!target) return false;
-  if (index.exact.has(target)) return true;
-  if (index.uniqueSuffix.has(target)) return true;
-  if (index.ambiguousSuffix.has(target)) return false;
-  if (target.includes("/")) return false;
-  if (index.uniqueStem.has(target)) return true;
-  if (index.ambiguousStem.has(target)) return false;
-  const titleKey = normalizeTitle(target);
-  return index.uniqueTitle.has(titleKey);
+/** Карточка, на которую ведёт цель: точный путь → уникальный суффикс → уникальный stem → H1. */
+function resolveCard(target: string, index: LinkIndex): string | null {
+  if (!target) return null;
+  if (index.exact.has(target)) return target;
+  const bySuffix = index.uniqueSuffix.get(target);
+  if (bySuffix !== undefined) return bySuffix;
+  if (index.ambiguousSuffix.has(target)) return null;
+  if (target.includes("/")) return null;
+  const byStem = index.uniqueStem.get(target);
+  if (byStem !== undefined) return byStem;
+  if (index.ambiguousStem.has(target)) return null;
+  return index.uniqueTitle.get(normalizeTitle(target)) ?? null;
 }
 
 const pad = (value: number, width: number): string =>
@@ -216,7 +180,7 @@ function isoCalendar(time: number): { year: number; week: number } {
   return { year, week };
 }
 
-/** date.fromisocalendar: null там, где python бросает ValueError (недели 0/53 без 53-й). */
+/** День ISO-недели; null для недели, которой в году нет (0-я, 53-я в 52-недельном году). */
 function fromIsoCalendar(
   year: number,
   week: number,
@@ -296,9 +260,8 @@ function monthlyParent(source: string): FutureParent | null {
 }
 
 /**
- * python expected_future_link: отсутствующий родитель роллапа (daily → свой weekly,
- * weekly → monthly, monthly → yearly) битой ссылкой не считается, пока день создания
- * не прошёл. День создания включительно.
+ * Отсутствующий родитель роллапа (daily → свой weekly, weekly → monthly, monthly → yearly)
+ * битой ссылкой не считается, пока день создания не прошёл. День создания включительно.
  */
 function expectedFutureLink(
   source: string,
@@ -324,8 +287,7 @@ function todayUtc(): number {
 }
 
 /**
- * python _is_existing_attachment (graph.py): вложение валидно, только если ровно этот файл
- * лежит внутри vault обычным файлом. Расширение не важно: DOCX и любой будущий тип не
+ * Вложение валидно, только если ровно этот файл лежит внутри vault обычным файлом. Расширение не важно: DOCX и любой будущий тип не
  * должны становиться битыми из-за того, что их нет в списке медиа. Абсолютный путь, `..`
  * и симлинк на любом шаге пути — отказ, иначе ссылка вывела бы проверку за корень.
  */
@@ -352,8 +314,7 @@ function realPathOrNull(path: string): string | null {
   }
 }
 
-/** Сегменты пути как python Path.parts: пустые и «.» схлопнуты; абсолютный путь и «..»
- * — null. */
+/** Сегменты пути: пустые и «.» схлопнуты; абсолютный путь и «..» — null. */
 function safeParts(target: string): string[] | null {
   if (isAbsolute(target)) return null;
   const parts = target.split("/").filter((part) => part !== "" && part !== ".");
@@ -363,6 +324,52 @@ function safeParts(target: string): string[] | null {
 function isInside(root: string, path: string): boolean {
   const inside = relative(root, path);
   return !inside.startsWith("..") && !isAbsolute(inside);
+}
+
+/** Сырые цели [[ссылок]] текста: без подписи после `|` и якоря после `#`. */
+export function linkTargetsIn(text: string): string[] {
+  return [...text.matchAll(/\[\[([^\]|]+?)(?:\|[^\]]+)?\]\]/gu)]
+    .map((match) => match[1].split("#", 1)[0].trim())
+    .filter(Boolean);
+}
+
+/** Куда ведёт ссылка: `card` — rel-путь карточки без .md; null и не `broken` — принята без
+ * карточки (файл вложения, медиа по расширению, ещё не созданный родитель роллапа). */
+export interface LinkVerdict {
+  readonly target: string;
+  readonly card: string | null;
+  readonly broken: boolean;
+}
+
+/**
+ * Индекс ссылок vault на один проход: его правилом write_card и write_file отказывают на
+ * записи, им же ночной граф строит рёбра. `extraPaths` — карточки, которых на диске ещё
+ * нет (записываемый файл при ADD): ссылка на них разрешена.
+ */
+export function vaultLinks(
+  vaultDir: string,
+  options: { extraPaths?: readonly string[]; today?: number } = {},
+): {
+  readonly cards: readonly string[];
+  judge(raw: string, source: string): LinkVerdict;
+} {
+  const index = buildLinkIndex(vaultDir, options.extraPaths ?? []);
+  const today = options.today ?? todayUtc();
+  return {
+    cards: [...index.exact],
+    judge(raw, source) {
+      const target = normalizeLinkTarget(raw);
+      const card = resolveCard(target, index);
+      if (card !== null) return { target, card, broken: false };
+      // Порядок важен: сначала точный файл вложения, потом список медиа.
+      const accepted =
+        (target.startsWith("attachments/") &&
+          isExistingAttachment(vaultDir, target)) ||
+        EMBED_EXTS.some((ext) => raw.toLowerCase().endsWith(ext)) ||
+        expectedFutureLink(source, target, today);
+      return { target, card: null, broken: !accepted };
+    },
+  };
 }
 
 /**
@@ -375,38 +382,23 @@ export function unresolvedLinkTargets(
   options: { vaultDir: string; source: string; today?: number },
 ): string[] {
   if (rawTargets.length === 0) return [];
-  const index = buildLinkIndex(options.vaultDir, [options.source]);
-  const today = options.today ?? todayUtc();
-  const unresolved: string[] = [];
-  const seen = new Set<string>();
-
+  const links = vaultLinks(options.vaultDir, {
+    extraPaths: [options.source],
+    today: options.today,
+  });
+  const unresolved = new Set<string>();
   for (const raw of rawTargets) {
-    const target = normalizeLinkTarget(raw);
-    if (isResolved(target, index)) continue;
-    // Тот же порядок, что в build_graph: сначала точный файл вложения, потом список медиа.
-    if (
-      target.startsWith("attachments/") &&
-      isExistingAttachment(options.vaultDir, target)
-    )
-      continue;
-    const lower = raw.toLowerCase();
-    if (EMBED_EXTS.some((ext) => lower.endsWith(ext))) continue;
-    if (expectedFutureLink(options.source, target, today)) continue;
-    if (seen.has(target)) continue;
-    seen.add(target);
-    unresolved.push(target);
+    const verdict = links.judge(raw, options.source);
+    if (verdict.broken) unresolved.add(verdict.target);
   }
-  return unresolved;
+  return [...unresolved];
 }
 
 export function brokenLinksIn(
   text: string,
   options: { vaultDir: string; source: string },
 ): string | null {
-  const raw = [...text.matchAll(/\[\[([^\]|]+?)(?:\|[^\]]+)?\]\]/gu)].map(
-    (match) => match[1].split("#", 1)[0].trim(),
-  );
-  const targets = unresolvedLinkTargets(raw.filter(Boolean), options);
+  const targets = unresolvedLinkTargets(linkTargetsIn(text), options);
   return targets.length
     ? `Ссылки ведут в никуда: ${targets.map((target) => `[[${target}]]`).join(", ")}. Ничего не записано. ` +
         "Сначала создай карточку через write_card или напиши без [[ ]]; точный путь проверь через memory_search/read_file."

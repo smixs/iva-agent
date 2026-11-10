@@ -8,7 +8,7 @@ import {
   resolveContextWindow,
   providerContextWindow,
   claudeContextWindow,
-} from "./context-window.ts";
+} from "../../packages/context-window/index.ts";
 
 const VARIABLE = "OLLAMA_CONTEXT_WINDOW";
 const FALLBACK = 131_072;

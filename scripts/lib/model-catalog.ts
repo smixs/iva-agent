@@ -12,7 +12,7 @@ import {
 import {
   CANONICAL_REASONING_EFFORTS,
   FALLBACK_REASONING_EFFORTS,
-} from "./reasoning-levels.ts";
+} from "../../packages/reasoning-levels/index.ts";
 
 export interface ProviderCatalogEntry {
   label: string;

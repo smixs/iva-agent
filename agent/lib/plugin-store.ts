@@ -17,6 +17,7 @@ import { mkdir, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { saveJsonAtomic } from "./json-store.ts";
 import { pluginNameProblem } from "./plugin-reader.ts";
+import { isRecord } from "../../packages/guards/index.ts";
 
 /**
  * Loopback-порты, выданные плагину: по одному на MCP proxy и на сервис (ADR-0009).
@@ -129,10 +130,6 @@ export function pluginTokenFile(
 /** Файл состояния: `data/custom/plugins.json`. */
 export function pluginsStateFile(dataDir: string): string {
   return join(dataDir, "custom", "plugins.json");
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function string(value: unknown, fallback = ""): string {

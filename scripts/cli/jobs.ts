@@ -11,7 +11,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { resolveVaultDir } from "../../packages/vault-dir/index.ts";
 import { readEnvFresh } from "../lib/env-file.ts";
-import { resolveTimeZone } from "../lib/timezone.ts";
+import { resolveTimeZone } from "../../packages/timezone/index.ts";
 // `import type` стирается при компиляции: таблица фактов живёт в authored tree, а
 // `iva jobs` обязан грузиться и там, где agent/ нет (scripts/authored-tree-guard.test.ts),
 // поэтому значения берутся динамическим импортом внутри команды.

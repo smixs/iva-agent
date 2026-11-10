@@ -1,15 +1,13 @@
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
-import { basename, dirname, join, relative, sep } from "node:path";
+import { mkdirSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { parseFrontmatterOrSkip } from "#lib/frontmatter.ts";
 import { writeFileAtomicSync } from "#lib/fs-atomic.ts";
-import { markdownFiles } from "../lib/vault-cleanup.ts";
+import { linkTargetsIn, vaultLinks } from "#lib/vault-links.ts";
 
 // Граф ссылок vault для memory_search: узлы с входящими и исходящими [[ссылками]] и
-// список битых. Brain пересобирает его ночью.
-
-const LINK = /!?\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|[^\]]+)?\]\]/gu;
-const normalized = (value: string) =>
-  value.normalize("NFKC").trim().toLocaleLowerCase("ru-RU");
+// список битых. Brain пересобирает его ночью. Куда ведёт ссылка, решает тот же индекс,
+// которым write_card и write_file отказывают на записи (#lib/vault-links.ts): принятая
+// на записи ссылка ночью битой не становится.
 
 type GraphNode = { incoming: string[]; outgoing: string[] };
 export interface VaultGraph {
@@ -18,43 +16,28 @@ export interface VaultGraph {
   readonly broken: Array<{ source: string; target: string }>;
 }
 
-/** Тела файлов и цель ссылки по пути, имени файла или единственному H1. */
-function indexVault(root: string) {
-  const paths = new Map<string, string>();
-  const titles = new Map<string, string[]>();
-  const bodies = new Map<string, string>();
-  for (const file of markdownFiles(root)) {
-    const id = relative(root, file).split(sep).join("/").replace(/\.md$/u, "");
-    paths.set(normalized(id), id).set(normalized(basename(id)), id);
-    const text = existsSync(file) ? readFileSync(file, "utf8") : "";
-    const body = parseFrontmatterOrSkip(text, file)?.body ?? text;
-    bodies.set(id, body);
-    const title = normalized(/^ {0,3}#\s+(.+)$/mu.exec(body)?.[1] ?? "");
-    if (title) titles.set(title, [...(titles.get(title) ?? []), id]);
+/** Тело карточки без frontmatter; исчезла между обходом и чтением — пустое. */
+function bodyOf(root: string, card: string): string {
+  const file = join(root, `${card}.md`);
+  let text: string;
+  try {
+    text = readFileSync(file, "utf8");
+  } catch {
+    return "";
   }
-  const target = (raw: string) => {
-    const byTitle = titles.get(normalized(raw)) ?? [];
-    return (
-      paths.get(normalized(raw)) ??
-      (byTitle.length === 1 ? byTitle[0] : undefined)
-    );
-  };
-  return { bodies, target };
+  return parseFrontmatterOrSkip(text, file)?.body ?? text;
 }
 
-export function buildVaultGraph(root: string): VaultGraph {
-  const { bodies, target } = indexVault(root);
+export function buildVaultGraph(root: string, today?: number): VaultGraph {
+  const links = vaultLinks(root, { today });
   const nodes: Record<string, GraphNode> = {};
   const broken: VaultGraph["broken"] = [];
-  for (const [source, body] of bodies) {
+  for (const source of links.cards) {
     const outgoing = new Set<string>();
-    for (const match of body.matchAll(LINK)) {
-      const raw = match[1].trim().replace(/\.md$/u, "");
-      const found = target(raw);
-      const attachment =
-        raw.startsWith("attachments/") && existsSync(join(root, raw));
-      if (found) outgoing.add(found);
-      else if (!attachment) broken.push({ source, target: raw });
+    for (const raw of linkTargetsIn(bodyOf(root, source))) {
+      const verdict = links.judge(raw, source);
+      if (verdict.card !== null) outgoing.add(verdict.card);
+      else if (verdict.broken) broken.push({ source, target: verdict.target });
     }
     nodes[source] = { incoming: [], outgoing: [...outgoing] };
   }

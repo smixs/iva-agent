@@ -31,7 +31,7 @@ import { dataDir } from "./data-dir.ts";
 import { readSettings } from "./settings.ts";
 import { parentTurnId } from "./usage.ts";
 import { allowedTelegramUsers } from "./telegram-allowlist.ts";
-import { resolveTimeZone } from "./timezone.ts";
+import { resolveTimeZone } from "../../packages/timezone/index.ts";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;

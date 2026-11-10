@@ -497,14 +497,6 @@ function entryRefs(
     ),
   );
 }
-export function pluginUnitNames(
-  entry: PluginUnitOwner,
-  scope: PluginUnitScope,
-): string[] {
-  return entryRefs([entry], scope).map((ref) =>
-    scopedPluginUnitName(ref.identity),
-  );
-}
 function openUnit(file: string): OpenUnit | null {
   let fd: number;
   try {
@@ -764,11 +756,6 @@ export function resolvedPluginUnitName(
   const key = pluginUnitKey(identity);
   if (inventory.conflicts.has(key)) return undefined;
   return inventory.actual.get(key)?.unit ?? scopedPluginUnitName(identity);
-}
-export function installedPluginUnits(options: InspectOptions): string[] {
-  return [...inspectPluginUnits(options).actual.values()]
-    .map((unit) => unit.unit)
-    .sort();
 }
 export function runningPluginUnits(options: InspectOptions): string[] {
   const refs = options.units ?? entryRefs(options.entries ?? [], options.scope);

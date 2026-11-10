@@ -28,6 +28,7 @@ import {
 } from "./config.ts";
 import { edit, reply, tg } from "./transport.ts";
 import { parseUpdateCallbackData } from "./update-callback.ts";
+import { isRecord } from "../../packages/guards/index.ts";
 export { parseUpdateCallbackData } from "./update-callback.ts";
 
 type UpdateInfo = Awaited<ReturnType<typeof inspectUpstream>>;
@@ -400,10 +401,6 @@ type ReconcileOptions = {
   launchImpl: (jobId: string) => Promise<LaunchResult>;
 };
 type VersionStore = ReturnType<typeof createVersionStore>;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 async function readUpdateJob(path: string): Promise<UpdateJob | null> {
   try {

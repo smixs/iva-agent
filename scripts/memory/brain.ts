@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { resolveDataDir } from "../lib/data-dir.ts";
 import { alertOnce, noticeTranslator } from "../lib/notice-policy.ts";
-import { notificationChat } from "../lib/notification-chat.ts";
+import { notificationChat } from "../../packages/notification-chat/index.ts";
 import { vaultDirOrExit } from "../lib/vault-boundary.ts";
 
 const vault = vaultDirOrExit();

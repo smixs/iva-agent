@@ -3,7 +3,7 @@
 // so a reminder cannot be a small script importing project modules. The installed launcher
 // carries the absolute nvm node path, which makes a subcommand the only send that survives.
 import { readEnvFresh } from "../lib/env-file.ts";
-import { notificationChat } from "../lib/notification-chat.ts";
+import { notificationChat } from "../../packages/notification-chat/index.ts";
 import type { createCliRuntime } from "./runtime.ts";
 
 type CliRuntime = ReturnType<typeof createCliRuntime>;

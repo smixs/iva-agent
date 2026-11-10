@@ -2,11 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fc from "fast-check";
 
-import { validateTimeZone as validateAuthored } from "#lib/timezone.ts";
-import { validateTimeZone } from "./timezone.ts";
+import { validateTimeZone as validateAuthored } from "@iva/timezone";
+import { validateTimeZone } from "../../packages/timezone/index.ts";
 
 // Оба дерева соблюдают один контракт: authored tree проверяет зону на старте сервера,
-// scripts/ — когда Doctor пишет юниты без каталога agent/.
+// scripts/ — когда Doctor пишет юниты без каталога agent/. Пакет один; сверяются два пути
+// к нему — имя пакета (инструкции authored tree) и относительный путь (все остальные).
 const CASES: readonly [unknown, string | null][] = [
   [" Asia/Tashkent ", "Asia/Tashkent"],
   ["Mars/Olympus", null],

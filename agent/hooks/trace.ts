@@ -10,6 +10,7 @@ import {
   TRACE_TRUNCATION_MARKER,
 } from "../lib/trace.js";
 import { parentTurnId, subagentTurnId } from "../lib/usage.js";
+import { isRecord } from "../../packages/guards/index.ts";
 
 // Журнал хода, часть eve: ОДИН хук на подстановочное событие `*` пишет каждый шаг модели,
 // каждый вызов тула и каждый терминальный исход в data/trace/YYYY-MM-DD.jsonl (ADR-0010).
@@ -92,10 +93,6 @@ const MAX_TRACKED_REPLAY_TURNS = 128;
 // Eve derives every authored channel kind from its file name with this prefix.
 const authoredChannelKind = (name: string) => `channel:${name}`;
 const TELEGRAM_CHANNEL_KIND = authoredChannelKind("telegram");
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 function isScalar(value: unknown): boolean {
   return (

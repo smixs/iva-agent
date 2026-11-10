@@ -26,17 +26,18 @@ import {
   codexAuthHeaders,
   forceRefreshAccessToken,
 } from "./lib/codex-auth.ts";
-import { providerContextWindow } from "./lib/context-window.ts";
+import { providerContextWindow } from "../packages/context-window/index.ts";
 import {
   MODEL_PROVIDERS,
   resolveModelProvider,
   type ModelProviderName,
 } from "./lib/model-provider.ts";
-import { CANONICAL_REASONING_EFFORTS as EFFORTS } from "./lib/reasoning-levels.ts";
+import { CANONICAL_REASONING_EFFORTS as EFFORTS } from "../packages/reasoning-levels/index.ts";
 import { toolNameWireMiddleware } from "./lib/tool-wire-name.ts";
 import { repeatGuardMiddleware } from "./lib/repeat-guard.ts";
 import { generateViaStream } from "./lib/generate-via-stream.ts";
 import { compactionUsageMiddleware, type UsageLabel } from "./lib/usage-tap.ts";
+import { isRecord } from "../packages/guards/index.ts";
 
 type WrappableModel = Parameters<typeof wrapLanguageModel>[0]["model"];
 type ModelStreamPart =
@@ -45,10 +46,6 @@ type ModelStreamPart =
   >["stream"] extends ReadableStream<infer Part>
     ? Part
     : never;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 // Единый источник конфигурации провайдера модели. Имя, текстовую и vision-модель выбирает
 // resolveModelProvider — раз при старте и одинаково для рантайма и учёта расхода; неизвестное

@@ -17,7 +17,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import type { ToolContext } from "eve/tools";
-import { quarantineDir } from "./lib/wf-store.ts";
+import { quarantinePath } from "./lib/wf-store.ts";
 import { settled } from "./fixtures/tool-result.ts";
 import { tempDir } from "./fixtures/temp-dir.ts";
 
@@ -101,7 +101,7 @@ test("карантин закрывает права старого world-readab
   const dir = join(root, ".workflow-data");
   mkdirSync(dir);
   chmodSync(dir, 0o755); // стор из эпохи до UMask-фикса
-  const dest = quarantineDir(dir, "2026-01-01");
+  const dest = quarantinePath(dir, "2026-01-01");
   assert.ok(dest);
   assert.equal(
     statSync(dest).mode & 0o777,

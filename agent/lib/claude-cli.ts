@@ -77,7 +77,7 @@ import {
   type NativeBlock,
   type NativeMessage,
 } from "./claude-admission.ts";
-import { CANONICAL_REASONING_EFFORTS } from "./reasoning-levels.ts";
+import { CANONICAL_REASONING_EFFORTS } from "../../packages/reasoning-levels/index.ts";
 import { TOOL_NAME_MAX, wireToolName } from "./tool-wire-name.ts";
 import {
   claudeNotFound,
@@ -135,8 +135,11 @@ const CLAUDE_ENV: Record<string, string> = {
   DISABLE_COMPACT: "1",
   CLAUDE_CODE_TOTAL_TOKENS_REMINDER: "off",
 };
-export { claudeModel, claudeContextWindow } from "./context-window.ts";
-import { claudeModel } from "./context-window.ts";
+export {
+  claudeModel,
+  claudeContextWindow,
+} from "../../packages/context-window/index.ts";
+import { claudeModel } from "../../packages/context-window/index.ts";
 
 /** Имя модели в том виде, в каком его понимает `claude -p --model`. */
 export function claudeNativeModel(route: string): string {
@@ -146,7 +149,7 @@ export function claudeNativeModel(route: string): string {
 /** Имя инструмента: правило Anthropic, [A-Za-z0-9_-] и вместе с префиксом до 64 символов. */
 /**
  * Усилия, которые принимает `output_config.effort`. `minimal` в их числе нет: подписка
- * отвечает на него 400, а `disabled` Iva и не знает — словарь лежит в reasoning-levels.ts
+ * отвечает на него 400, а `disabled` Iva и не знает — словарь лежит в packages/reasoning-levels
  * и общий с остальными вендорами.
  */
 const CLAUDE_EFFORTS: readonly string[] = CANONICAL_REASONING_EFFORTS.filter(

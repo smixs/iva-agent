@@ -8,7 +8,7 @@
 // (NoticeSend): гейт стоит на вызове Bot API, а не тут (правило в outbox.ts). Реплика с
 // кнопкой «Повторить» канал везёт швом Outbox: кнопка живёт только в rich-сообщении.
 import { humanizeProviderError } from "./error-humanizer.ts";
-import { notificationChat } from "./notification-chat.ts";
+import { notificationChat } from "../../packages/notification-chat/index.ts";
 import { modelAuthFailure } from "./model-auth.ts";
 import {
   dispatchModelAuth,

@@ -1,5 +1,6 @@
 import type { RouteHandlerArgs } from "eve/channels";
 import { verifyTelegramRequest } from "eve/channels/telegram";
+import { isRecord } from "../../packages/guards/index.ts";
 
 export type TelegramSessionAddress = {
   chatId: string;
@@ -15,9 +16,6 @@ type ResetOperations = Pick<
   RouteHandlerArgs,
   "attachSession" | "resolveSession"
 >;
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
 
 const numericString = (value: unknown, signed: boolean): string | null => {
   if (typeof value === "number") {

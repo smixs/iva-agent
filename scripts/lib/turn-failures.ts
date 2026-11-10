@@ -13,6 +13,7 @@ import { closeSync, fstatSync, openSync, readSync, readdirSync } from "node:fs";
 import { StringDecoder } from "node:string_decoder";
 import { join } from "node:path";
 import { turnRef } from "./turn-ref.ts";
+import { isRecord } from "../../packages/guards/index.ts";
 export { turnRef } from "./turn-ref.ts";
 
 export type TurnFailure = {
@@ -42,8 +43,6 @@ const LINE_CHARS = 200;
 // предупреждение одной строкой и пустая строка (scripts/proactive/tick.ts, `insightPrompt`).
 const INSIGHT_PROMPT = /^(?:[^\n]*\n\n)?Insight:/u;
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
 const text = (value: unknown): string =>
   typeof value === "string" ? value : "";
 const scalar = (value: unknown): string =>

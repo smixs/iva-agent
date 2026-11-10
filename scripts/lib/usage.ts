@@ -9,7 +9,7 @@ import { join } from "node:path";
 import type { UsageRecord } from "#lib/usage.ts";
 import { resolveDataDir } from "./data-dir.ts";
 import { REMINDER_TURN_KINDS } from "./reminder-turn.ts";
-import { resolveTimeZone } from "./timezone.ts";
+import { resolveTimeZone } from "../../packages/timezone/index.ts";
 
 export type { UsageRecord };
 
