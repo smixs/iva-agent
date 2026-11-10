@@ -9,7 +9,8 @@
 //
 // Срабатывание без исхода (агент упал между взятием и фактом) закрывает тик: closeAbandoned
 // пишет причину, когда срок жизни срабатывания истёк. До этого строку не берут заново и не
-// убирают. Жизненный цикл строки и его инварианты — specs/ReminderLifecycle.tla.
+// убирают, и после — тоже, пока владельцу должен Alert о нём (alertOwed): долг живёт только в
+// этой строке. Жизненный цикл строки и его инварианты — specs/ReminderLifecycle.tla.
 //
 // Файл, записанный более новой версией Ивы, читается как явная ошибка: читать его наугад
 // значит молча испортить данные следующей записью. Файл версии 1 (режимы verbatim/agent,
@@ -29,6 +30,7 @@ import {
 import { nextCronRunMs } from "./reminder-time.ts";
 import { listChatStatuses, RUN_STALE_MS } from "./run-status.ts";
 import { isRecord, isSafeInteger } from "../../packages/guards/index.ts";
+import { alertDue } from "../../packages/alert-state/index.ts";
 
 export const REMINDER_SCHEMA_VERSION = 2;
 /** Сколько держим сработавшую разовую строку: столько владелец видит факт в remind list. */
@@ -580,6 +582,8 @@ export async function remove(
  * Срабатывание: pending-строки со сроком не позже nowMs переходят в fired и получают
  * firedAt — один атомарный переход под локом, поэтому два тика не могут взять одну строку.
  * Строка, чьё прошлое срабатывание ещё без исхода, ждёт: её ребёнок идёт либо её закроет тик.
+ * Строка, которая должна Alert о брошенном срабатывании, тоже ждёт: новый срок затёр бы
+ * firedAt и причину, и Alert о прошлом сроке не ушёл бы никогда (AlertBeforeDrop).
  * Повторяющаяся строка тем же переходом пересчитывается на следующий срок и остаётся
  * pending: её факт срабатывания (firedAt) уже проставлен, а доставку допишет ребёнок.
  *
@@ -608,7 +612,10 @@ export async function fireDue(
     const due = rows
       .filter(
         (row) =>
-          row.status === "pending" && row.nextRunAtMs <= nowMs && !isOpen(row),
+          row.status === "pending" &&
+          row.nextRunAtMs <= nowMs &&
+          !isOpen(row) &&
+          !alertOwed(row, file),
       )
       .sort(byDeadline)
       .slice(0, limit);
@@ -745,7 +752,8 @@ function recordLog(
 
 /**
  * Уборка: сработавшие разовые строки живут сутки — столько владелец видит факт. Строку без
- * исхода уборка не трогает: сначала её закрывает closeAbandoned.
+ * исхода уборка не трогает: сначала её закрывает closeAbandoned. Строку, которая должна Alert,
+ * тоже: долг ушёл бы вместе с ней (AlertBeforeDrop).
  */
 export async function sweepFired(
   nowMs: number,
@@ -760,7 +768,8 @@ export async function sweepFired(
           row.status === "fired" &&
           row.firedAt !== null &&
           row.firedAt <= nowMs - keepMs &&
-          !isOpen(row)
+          !isOpen(row) &&
+          !alertOwed(row, file)
         ),
     );
     const swept = rows.length - kept.length;
@@ -813,6 +822,16 @@ export const abandonedAlertKey = (
   command
     ? { key: `schedule-${row.id}`, essence: "abandoned" }
     : { key: `reminder-${row.id}`, essence: `abandoned ${row.firedAt}` };
+
+/**
+ * Долг Alert не погашен: строка закрыта причиной, опоздавшего факта нет, и дроссель Alert не
+ * хранит факта отправки. Такую строку не берут заново и не убирают.
+ */
+export function alertOwed(row: Reminder, file: string): boolean {
+  if (!owesAlert(row)) return false;
+  const { key, essence } = abandonedAlertKey(row, file === commandFile());
+  return alertDue(dataDir(), key, essence);
+}
 
 /** Commands use the same table engine in a file older releases never open. */
 export const commandFile = (): string =>

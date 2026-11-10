@@ -376,6 +376,99 @@ void test("ReminderLifecycle NoFalseAlert: опоздавший факт дос�
   assert.deepEqual(next.calls, []);
 });
 
+void test("ReminderLifecycle AlertBeforeDrop: агент упал после причины, сутки простоя — уборка не убирает строку, пока Alert не ушёл", async () => {
+  const now = Date.now();
+  await once(now);
+  await takenThenCrash(now);
+  assert.equal((await closeAbandoned(now + RUN_STALE_MS + MINUTE)).length, 1);
+  // Агент упал до ребёнка с Alert и поднялся через сутки.
+  const dayLater = now + REMINDER_FIRED_KEEP_MS + MINUTE;
+  const { texts, send } = chat();
+  const refused = jobs(
+    realChild({
+      ...fireDeps(send),
+      send: () =>
+        Promise.resolve({ ok: false, fellBack: false, error: "502: Bad" }),
+    }),
+  );
+  const first = await runReminderTick({
+    nowMs: dayLater,
+    runJob: refused.runJob,
+    log: quiet,
+    memory: life(),
+  });
+  assert.equal(first.swept, 0, "уборка унесла долг Alert");
+  assert.deepEqual(refused.calls, [
+    ["scripts/reminders/fire.ts", "lost", "abandoned"],
+  ]);
+  // Telegram отказал: долг цел, строка цела, следующий тик зовёт Alert снова.
+  const retried = jobs(realChild(fireDeps(send)));
+  const second = await runReminderTick({
+    nowMs: dayLater + MINUTE,
+    runJob: retried.runJob,
+    log: quiet,
+  });
+  assert.equal(second.swept, 0);
+  assert.equal(texts.length, 1);
+  // Факт «Alert отправлен» записан: строку уже можно убрать.
+  const third = await runReminderTick({
+    nowMs: dayLater + 2 * MINUTE,
+    runJob: jobs().runJob,
+    log: quiet,
+  });
+  assert.equal(third.swept, 1);
+});
+
+void test("ReminderLifecycle AlertBeforeDrop: Routine не берётся на новый срок, пока Alert о брошенном прошлом не ушёл", async () => {
+  const now = Date.UTC(2026, 9, 19, 3);
+  await add({
+    id: "daily",
+    text: TEXT,
+    schedule: { kind: "cron", expr: "0 * * * *", tz: "UTC" },
+    nextRunAtMs: now,
+  });
+  await takenThenCrash(now);
+  // Причина записана, агент упал до ребёнка с Alert; поднялся, когда пришёл новый срок.
+  assert.equal((await closeAbandoned(now + RUN_STALE_MS + MINUTE)).length, 1);
+  const hour = now + 60 * MINUTE;
+  const { texts, send } = chat();
+  const refused = jobs(
+    realChild({
+      ...fireDeps(send),
+      send: () =>
+        Promise.resolve({ ok: false, fellBack: false, error: "502: Bad" }),
+    }),
+  );
+  const held = await runReminderTick({
+    nowMs: hour,
+    runJob: refused.runJob,
+    log: quiet,
+    memory: life(),
+  });
+  assert.equal(held.claimed, 0, "новый срок стёр долг Alert о прошлом");
+  assert.deepEqual(refused.calls, [
+    ["scripts/reminders/fire.ts", "daily", "abandoned"],
+  ]);
+  assert.equal((await list())[0]?.firedAt, now);
+
+  // Alert ушёл в следующем проходе; новый срок берётся проходом после.
+  const alerted = jobs(realChild(fireDeps(send)));
+  const sent = await runReminderTick({
+    nowMs: hour + MINUTE,
+    runJob: alerted.runJob,
+    log: quiet,
+  });
+  assert.equal(sent.claimed, 0);
+  assert.equal(texts.length, 1);
+  assert.match(texts[0], /могло не дойти/u);
+  const taken = await runReminderTick({
+    nowMs: hour + 2 * MINUTE,
+    runJob: jobs().runJob,
+    log: quiet,
+  });
+  assert.equal(taken.claimed, 1);
+});
+
 /** Telegram принимает каждое сообщение, а ответ на первое теряется. */
 function lostFirstAnswer() {
   let accepted = 0;
@@ -489,8 +582,9 @@ void test("ReminderLifecycle FactOfThisFiring: исход брошенного �
   await takenThenCrash(now);
   const hour = now + 60 * MINUTE;
 
-  // Срок следующего срабатывания пришёл, прошлое без исхода: строку не берут, а закрывают.
-  const closing = jobs();
+  // Срок следующего срабатывания пришёл, прошлое без исхода: строку не берут, а закрывают, и
+  // Alert о нём уходит до нового срока (AlertBeforeDrop).
+  const closing = jobs(realChild(fireDeps(chat().send)));
   const closingTick = await runReminderTick({
     nowMs: hour,
     runJob: closing.runJob,

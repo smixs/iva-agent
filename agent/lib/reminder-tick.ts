@@ -13,7 +13,8 @@
 // (TickMemory): такое срабатывание срок жизни не закрывает. Строку, которую взял упавший агент,
 // следующий тик закрывает причиной, когда срок жизни истёк. Alert о ней тик отдаёт ребёнку на
 // каждом проходе, пока дроссель Alert (packages/alert-state) не хранит факт отправки: падение
-// между причиной и ребёнком долг не стирает. Текст напоминания заново не уходит
+// между причиной и ребёнком долг не стирает. Пока долг не погашен, строку не берут на новый
+// срок и не убирают (alertOwed). Текст напоминания заново не уходит
 // (specs/ReminderLifecycle.tla).
 //
 // Пульс тика — mtime файла data/reminders.tick: он обновляется после удачного взятия, и по
@@ -26,16 +27,14 @@ import {
   commandFile,
   commandTimeoutMs,
   reminderFile,
-  abandonedAlertKey,
+  alertOwed,
   closeAbandoned,
   fireDue,
   list,
-  owesAlert,
   recordDelivery,
   sweepFired,
   type Reminder,
 } from "./reminder-store.ts";
-import { alertDue } from "../../packages/alert-state/index.ts";
 import { listChatStatuses, setChatStatusIf } from "./run-status.ts";
 import {
   runScheduledJob,
@@ -328,14 +327,11 @@ async function alertAbandoned(
 function owedAlerts(
   rows: readonly Reminder[],
   file: string,
-  command: boolean,
   alerting: ReadonlySet<string>,
 ): Reminder[] {
-  return rows.filter((row) => {
-    if (!owesAlert(row) || alerting.has(childKey(file, row))) return false;
-    const { key, essence } = abandonedAlertKey(row, command);
-    return alertDue(dataDir(), key, essence);
-  });
+  return rows.filter(
+    (row) => alertOwed(row, file) && !alerting.has(childKey(file, row)),
+  );
 }
 
 /**
@@ -378,7 +374,7 @@ export async function runReminderTick(
     abandoned = await closeAbandoned(nowMs, file, (row) =>
       memory.firing.has(childKey(file, row)),
     );
-    owed = owedAlerts(await list(file), file, command, memory.alerting);
+    owed = owedAlerts(await list(file), file, memory.alerting);
   } catch (error) {
     log(`reminders: closing abandoned rows failed: ${message(error)}`);
   }
