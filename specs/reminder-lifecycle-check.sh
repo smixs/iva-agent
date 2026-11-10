@@ -16,7 +16,11 @@ check ReminderLifecycle none
 check ReminderLifecycle-routine none
 check ReminderLifecycle-nopickup BoundedOutcome
 check ReminderLifecycle-nopickup-live EveryFiringConcludes
-check ReminderLifecycle-resend NoDuplicate
+check ReminderLifecycle-resend OneAttemptPerCapture
 check ReminderLifecycle-stale FactOfThisFiring
 check ReminderLifecycle-recapture OncePerDue
-check ReminderLifecycle-sweepopen ExactlyOnceOrReason
+check ReminderLifecycle-sweepopen DeliveredOrReason
+check ReminderLifecycle-closelive NoFalseAlert
+check ReminderLifecycle-alertblind NoFalseAlert
+check ReminderLifecycle-nofact AlertOnce
+check ReminderLifecycle-forget AbandonedAlerted

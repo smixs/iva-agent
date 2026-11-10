@@ -2,180 +2,286 @@
 EXTENDS Naturals
 
 \* One row of data/reminders.json through its firings: a Reminder (Kind = "at") or a
-\* Routine (Kind = "cron"). Four processes share the row: the minute tick inside the
-\* agent, the fire child, the Alert child and the tick's in-memory continuation.
+\* Routine (Kind = "cron"). The processes that share the row: the minute tick inside the
+\* agent, the fire child, the Alert children, and the tick's in-memory continuations.
 \*
-\* Tick -> agent/lib/reminder-tick.ts:runReminderTick, three table transactions in order:
+\* Tick -> agent/lib/reminder-tick.ts:runReminderTick, table transactions in order:
 \*   TickDue   -> reminder-store.ts:fireDue
 \*   TickSweep -> reminder-store.ts:sweepFired
-\*   TickClose -> reminder-store.ts:closeAbandoned
+\*   TickClose -> reminder-store.ts:closeAbandoned (skips a firing whose child this agent runs)
+\*   TickAlert -> reminder-tick.ts:owedAlerts (closed rows whose Alert fact is missing)
 \* Spawn, HandlerFill -> reminder-tick.ts:fireRow (the continuation dies with the agent)
-\* ChildSend, ChildRefused, ChildRecord -> scripts/reminders/fire.ts:fireRow
-\* SpawnAlert, AlertSend -> reminder-tick.ts:alertAbandoned, fire.ts:alertAbandoned
+\* ChildSend, ChildAnswer, ChildAnswerLost, ChildRefused, ChildRecord -> scripts/reminders/fire.ts:fireRow
+\*   ChildSend: Telegram accepted the message; ChildAnswer: the sender got the answer;
+\*   ChildAnswerLost: the answer was lost and the transport (scripts/lib/telegram-send.ts)
+\*   sends the same text again. The turn itself never runs again.
+\* AlertCheck, AlertAccept, AlertAnswer, AlertRecord -> fire.ts:alertAbandoned through
+\*   alertOnce (packages/alert-state): the row and the Alert fact are read, the Alert is sent,
+\*   the fact is recorded.
 \* Open, Expire -> reminder-store.ts:reminderPhase ("running" until the liveness window passes)
 \* firing stands for firedAt: the identity every recordDelivery compares before it writes.
 \*
 \* Excludes: move and run_now (ScheduleTool), the turn itself (TurnLifecycle, ReminderSilence),
-\* the per-tick claim limit, a damaged table, and a Telegram answer that lies about delivery.
-CONSTANTS Kind, Fault, MaxCrashes
+\* the per-tick claim limit, a damaged table, a Telegram answer that lies about delivery, and
+\* the milliseconds between the Alert child's check and its send.
+CONSTANTS Kind, Fault, MaxCrashes, MaxFaults
 ASSUME Kind \in {"at", "cron"}
-ASSUME Fault \in {"none", "nopickup", "resend", "stale", "recapture", "sweepopen"}
+ASSUME Fault \in {"none", "nopickup", "resend", "stale", "recapture", "sweepopen",
+                  "closelive", "alertblind", "forget", "nofact"}
 
 Firings == 1..2
 Dues == 1..2
+Slots == 1..2
 
 VARIABLES agent, tick, matured, dueAt, status, firing, delivered, error, expired,
-          child, handler, alert, crashes,
-          texts, alerts, reasons, captures, overdue
+          child, handler, sender, tracked, alertFact, crashes, faults,
+          texts, lostText, alerts, misses, reasons, captures, overdue, falseAlert
 row == <<status, dueAt, firing, delivered, error, expired>>
-ghost == <<texts, alerts, reasons, captures, overdue>>
-vars == <<agent, tick, matured, row, child, handler, alert, crashes, ghost>>
+ghost == <<texts, lostText, alerts, misses, reasons, captures, overdue, falseAlert>>
+vars == <<agent, tick, matured, row, child, handler, sender, tracked, alertFact, crashes,
+          faults, ghost>>
 
-Init == /\ agent = "up" /\ tick = "idle" /\ matured = 0 /\ crashes = 0
+Init == /\ agent = "up" /\ tick = "idle" /\ matured = 0 /\ crashes = 0 /\ faults = 0
         /\ status = "pending" /\ dueAt = 1 /\ firing = 0
-        /\ delivered = "null" /\ error = FALSE /\ expired = FALSE
+        /\ delivered = "null" /\ error = "none" /\ expired = FALSE
         /\ child = [f \in Firings |-> "none"] /\ handler = [f \in Firings |-> FALSE]
-        /\ alert = [f \in Firings |-> "none"]
-        /\ texts = [f \in Firings |-> 0] /\ alerts = [f \in Firings |-> 0]
+        /\ sender = [f \in Firings |-> [k \in Slots |-> "none"]]
+        /\ tracked = [f \in Firings |-> 0] /\ alertFact = [f \in Firings |-> FALSE]
+        /\ texts = [f \in Firings |-> 0] /\ lostText = [f \in Firings |-> 0]
+        /\ alerts = [f \in Firings |-> 0] /\ misses = [f \in Firings |-> 0]
         /\ reasons = [f \in Firings |-> FALSE] /\ captures = [d \in Dues |-> 0]
-        /\ overdue = FALSE
+        /\ overdue = FALSE /\ falseAlert = FALSE
 
 \* A firing with neither a fact nor a reason: nobody has said how it ended.
-Open == status # "swept" /\ firing > 0 /\ delivered = "null" /\ ~error
+Open == status # "swept" /\ firing > 0 /\ delivered = "null" /\ error = "none"
+\* The row still shows firing f closed by the tick, no late fact, and no Alert fact yet.
+Owes(f) == /\ firing = f /\ status # "swept" /\ delivered = "null" /\ error = "abandoned"
+           /\ ~alertFact[f]
+Alive(s) == s \in {"check", "send", "accepted", "sent"}
+Fault1 == faults < MaxFaults /\ faults' = faults + 1
 
 \* ---- clock ----
 Mature == /\ matured < (IF Kind = "cron" THEN 2 ELSE 1) /\ matured' = matured + 1
-          /\ UNCHANGED <<agent, tick, row, child, handler, alert, crashes, ghost>>
+          /\ UNCHANGED <<agent, tick, row, child, handler, sender, tracked, alertFact,
+                         crashes, faults, ghost>>
 \* The liveness window passes. The clock does not know whether the child is alive.
 Expire == /\ Open /\ ~expired /\ expired' = TRUE
           /\ UNCHANGED <<agent, tick, matured, status, dueAt, firing, delivered, error,
-                         child, handler, alert, crashes, ghost>>
+                         child, handler, sender, tracked, alertFact, crashes, faults, ghost>>
 
 \* ---- the minute tick ----
 TickStart == /\ agent = "up" /\ tick = "idle" /\ tick' = "due"
-             /\ UNCHANGED <<agent, matured, row, child, handler, alert, crashes, ghost>>
+             /\ UNCHANGED <<agent, matured, row, child, handler, sender, tracked, alertFact,
+                            crashes, faults, ghost>>
 \* One atomic transition takes the row; an open firing is never taken over.
 TickDue ==
   /\ agent = "up" /\ tick = "due" /\ tick' = "sweep"
   /\ IF status = "pending" /\ dueAt <= matured /\ ~Open /\ firing < 2
      THEN /\ firing' = firing + 1
-          /\ delivered' = "null" /\ error' = FALSE /\ expired' = FALSE
+          /\ delivered' = "null" /\ error' = "none" /\ expired' = FALSE
           /\ handler' = [handler EXCEPT ![firing + 1] = TRUE]
           /\ captures' = [captures EXCEPT ![dueAt] = @ + 1]
           /\ status' = IF Kind = "at" /\ Fault # "recapture" THEN "fired" ELSE "pending"
           /\ dueAt' = IF Kind = "cron" /\ Fault # "recapture" THEN dueAt + 1 ELSE dueAt
      ELSE UNCHANGED <<row, handler, captures>>
-  /\ UNCHANGED <<agent, matured, child, alert, crashes, texts, alerts, reasons, overdue>>
+  /\ UNCHANGED <<agent, matured, child, sender, tracked, alertFact, crashes, faults,
+                 texts, lostText, alerts, misses, reasons, overdue, falseAlert>>
 \* A day later the fired row leaves the table, but only once its firing has an outcome.
 TickSweep ==
   /\ agent = "up" /\ tick = "sweep" /\ tick' = "close"
   /\ \/ /\ status = "fired" /\ (~Open \/ Fault = "sweepopen") /\ status' = "swept"
      \/ status' = status
   /\ UNCHANGED <<agent, matured, dueAt, firing, delivered, error, expired,
-                 child, handler, alert, crashes, ghost>>
-\* The open firing whose window has passed gets its reason in one transition; the Alert
-\* is owed from that moment and is never owed twice.
+                 child, handler, sender, tracked, alertFact, crashes, faults, ghost>>
+\* The open firing whose window has passed and whose child this agent does not run gets its
+\* reason in one transition. A child this agent still runs keeps its firing open.
+Closable == Open /\ expired /\ (~handler[firing] \/ Fault = "closelive")
 TickClose ==
-  /\ agent = "up" /\ tick = "close" /\ tick' = "idle"
-  /\ IF Open /\ expired
+  /\ agent = "up" /\ tick = "close"
+  /\ IF Closable
      THEN IF Fault = "nopickup"
-          THEN /\ overdue' = TRUE /\ UNCHANGED <<error, reasons, alert>>
-          ELSE /\ error' = TRUE
+          THEN /\ overdue' = TRUE /\ tick' = "alert" /\ UNCHANGED <<error, reasons>>
+          ELSE /\ error' = "abandoned" /\ tick' = "alertnew"
                /\ reasons' = [reasons EXCEPT ![firing] = TRUE]
-               /\ alert' = [alert EXCEPT ![firing] = "due"]
                /\ UNCHANGED overdue
-     ELSE UNCHANGED <<error, reasons, alert, overdue>>
-  /\ UNCHANGED <<agent, matured, status, dueAt, firing, delivered, expired,
-                 child, handler, crashes, texts, alerts, captures>>
-Tick == TickStart \/ TickDue \/ TickSweep \/ TickClose
+     ELSE /\ tick' = "alert" /\ UNCHANGED <<error, reasons, overdue>>
+  /\ UNCHANGED <<agent, matured, status, dueAt, firing, delivered, expired, child, handler,
+                 sender, tracked, alertFact, crashes, faults, texts, lostText, alerts,
+                 misses, captures, falseAlert>>
+\* Every pass hands an owed Alert to a child, unless an Alert child this agent runs already
+\* has it. The debt lives in the row and the Alert fact, so a crash does not erase it.
+\* Fault "forget": the Alert goes out only in the pass that closed the row (the code before).
+FreeSlot(f) == {k \in Slots : ~Alive(sender[f][k])}
+TickAlert ==
+  /\ agent = "up" /\ tick \in {"alert", "alertnew"} /\ tick' = "idle"
+  /\ IF /\ firing > 0 /\ Owes(firing) /\ tracked[firing] = 0 /\ FreeSlot(firing) # {}
+        /\ (Fault # "forget" \/ tick = "alertnew")
+     THEN LET k == CHOOSE s \in FreeSlot(firing) : TRUE
+          IN /\ sender' = [sender EXCEPT ![firing][k] = "check"]
+             /\ tracked' = [tracked EXCEPT ![firing] = k]
+     ELSE UNCHANGED <<sender, tracked>>
+  /\ UNCHANGED <<agent, matured, row, child, handler, alertFact, crashes, faults, ghost>>
+Tick == TickStart \/ TickDue \/ TickSweep \/ TickClose \/ TickAlert
 
 \* ---- the fire child ----
 Spawn(f) == /\ agent = "up" /\ handler[f] /\ child[f] = "none"
             /\ child' = [child EXCEPT ![f] = "turn"]
-            /\ UNCHANGED <<agent, tick, matured, row, handler, alert, crashes, ghost>>
-\* The reply of the turn or the row text as is: one message reaches the chat.
-ChildSend(f) == /\ child[f] = "turn" /\ child' = [child EXCEPT ![f] = "sent"]
+            /\ UNCHANGED <<agent, tick, matured, row, handler, sender, tracked, alertFact,
+                           crashes, faults, ghost>>
+\* Telegram accepts the reply of the turn or the row text as is.
+ChildSend(f) == /\ child[f] \in {"turn", "resend"} /\ child' = [child EXCEPT ![f] = "accepted"]
                 /\ texts' = [texts EXCEPT ![f] = @ + 1]
-                /\ UNCHANGED <<agent, tick, matured, row, handler, alert, crashes,
-                               alerts, reasons, captures, overdue>>
-\* No route, the owner's stop or a Telegram refusal: nothing reaches the chat.
-ChildRefused(f) == /\ child[f] = "turn" /\ child' = [child EXCEPT ![f] = "refused"]
-                   /\ UNCHANGED <<agent, tick, matured, row, handler, alert, crashes, ghost>>
+                /\ UNCHANGED <<agent, tick, matured, row, handler, sender, tracked, alertFact,
+                               crashes, faults, lostText, alerts, misses, reasons, captures,
+                               overdue, falseAlert>>
+ChildAnswer(f) == /\ child[f] = "accepted" /\ child' = [child EXCEPT ![f] = "sent"]
+                  /\ UNCHANGED <<agent, tick, matured, row, handler, sender, tracked,
+                                 alertFact, crashes, faults, ghost>>
+\* The answer is lost after Telegram accepted: the transport sends the same text again.
+ChildAnswerLost(f) ==
+  /\ child[f] = "accepted" /\ Fault1 /\ child' = [child EXCEPT ![f] = "resend"]
+  /\ lostText' = [lostText EXCEPT ![f] = @ + 1]
+  /\ UNCHANGED <<agent, tick, matured, row, handler, sender, tracked, alertFact, crashes,
+                 texts, alerts, misses, reasons, captures, overdue, falseAlert>>
+\* No route, the owner's stop or a Telegram refusal: nothing more reaches the chat.
+ChildRefused(f) == /\ child[f] \in {"turn", "resend"} /\ child' = [child EXCEPT ![f] = "refused"]
+                   /\ UNCHANGED <<agent, tick, matured, row, handler, sender, tracked,
+                                  alertFact, crashes, faults, ghost>>
 \* The fact goes to the row only for the firing it belongs to.
 Mine(f) == status # "swept" /\ (firing = f \/ Fault = "stale")
 ChildRecord(f) ==
   /\ child[f] \in {"sent", "refused"} /\ child' = [child EXCEPT ![f] = "done"]
   /\ IF Mine(f)
      THEN /\ delivered' = IF child[f] = "sent" THEN "true" ELSE "false"
-          /\ error' = (error \/ child[f] = "refused")
+          /\ error' = IF child[f] = "refused" THEN "other" ELSE error
           /\ reasons' = IF child[f] = "refused"
                         THEN [reasons EXCEPT ![firing] = TRUE] ELSE reasons
      ELSE UNCHANGED <<delivered, error, reasons>>
-  /\ UNCHANGED <<agent, tick, matured, status, dueAt, firing, expired, handler, alert,
-                 crashes, texts, alerts, captures, overdue>>
+  /\ UNCHANGED <<agent, tick, matured, status, dueAt, firing, expired, handler, sender,
+                 tracked, alertFact, crashes, faults, texts, lostText, alerts, misses,
+                 captures, overdue, falseAlert>>
 \* The fact write failed (the table lock was busy): the child leaves without it.
 ChildSilent(f) == /\ child[f] \in {"sent", "refused"} /\ child' = [child EXCEPT ![f] = "done"]
-                  /\ UNCHANGED <<agent, tick, matured, row, handler, alert, crashes, ghost>>
+                  /\ UNCHANGED <<agent, tick, matured, row, handler, sender, tracked,
+                                 alertFact, crashes, faults, ghost>>
 \* SIGKILL, or the service manager stops the child together with the agent.
-ChildDie(f) == /\ child[f] \in {"turn", "sent", "refused"}
+ChildDie(f) == /\ child[f] \in {"turn", "accepted", "resend", "sent", "refused"}
                /\ child' = [child EXCEPT ![f] = "dead"]
-               /\ UNCHANGED <<agent, tick, matured, row, handler, alert, crashes, ghost>>
+               /\ UNCHANGED <<agent, tick, matured, row, handler, sender, tracked,
+                              alertFact, crashes, faults, ghost>>
 \* The tick's continuation: a child that ended without a fact gets its reason.
 HandlerFill(f) ==
   /\ agent = "up" /\ handler[f] /\ child[f] \in {"done", "dead"}
   /\ handler' = [handler EXCEPT ![f] = FALSE]
   /\ IF Mine(f) /\ delivered = "null"
-     THEN /\ error' = TRUE /\ reasons' = [reasons EXCEPT ![firing] = TRUE]
+     THEN /\ error' = "other" /\ reasons' = [reasons EXCEPT ![firing] = TRUE]
           /\ delivered' = IF child[f] = "dead" THEN "false" ELSE "null"
      ELSE UNCHANGED <<delivered, error, reasons>>
-  /\ UNCHANGED <<agent, tick, matured, status, dueAt, firing, expired, child, alert,
-                 crashes, texts, alerts, captures, overdue>>
+  /\ UNCHANGED <<agent, tick, matured, status, dueAt, firing, expired, child, sender,
+                 tracked, alertFact, crashes, faults, texts, lostText, alerts, misses,
+                 captures, overdue, falseAlert>>
 
-\* ---- the Alert child ----
-SpawnAlert(f) == /\ agent = "up" /\ alert[f] = "due" /\ alert' = [alert EXCEPT ![f] = "child"]
-                 /\ UNCHANGED <<agent, tick, matured, row, child, handler, crashes, ghost>>
-\* The Alert names the reminder and the reason. It is not the row text sent again:
-\* the table cannot tell whether the dead child had already sent it.
-AlertSend(f) ==
-  /\ alert[f] = "child" /\ alert' = [alert EXCEPT ![f] = "done"]
+\* ---- the Alert children ----
+\* A sender that ends is forgotten by the continuation that watched it, if any.
+End(f, k, s) == /\ sender' = [sender EXCEPT ![f][k] = s]
+                /\ tracked' = IF tracked[f] = k THEN [tracked EXCEPT ![f] = 0] ELSE tracked
+\* The child reads the row and the Alert fact. Fault "alertblind" skips the row.
+\* falseAlert: the check let through an Alert about a firing whose fact the row holds or whose
+\* fire child this agent still runs.
+Passes(f) == IF Fault = "alertblind" THEN ~alertFact[f] ELSE Owes(f)
+AlertCheck(f, k) ==
+  /\ sender[f][k] = "check"
+  /\ IF Passes(f)
+     THEN /\ sender' = [sender EXCEPT ![f][k] = "send"] /\ UNCHANGED tracked
+          /\ falseAlert' = (falseAlert \/ handler[f] \/ (firing = f /\ delivered = "true"))
+     ELSE End(f, k, "done") /\ UNCHANGED falseAlert
+  /\ UNCHANGED <<agent, tick, matured, row, child, handler, alertFact, crashes, faults,
+                 texts, lostText, alerts, misses, reasons, captures, overdue>>
+\* Telegram accepts the Alert. It names the reminder and the reason; it is not the row
+\* text sent again: the table cannot tell whether the fire child had already sent it.
+AlertAccept(f, k) ==
+  /\ sender[f][k] = "send" /\ sender' = [sender EXCEPT ![f][k] = "accepted"]
   /\ IF Fault = "resend"
      THEN texts' = [texts EXCEPT ![f] = @ + 1] /\ UNCHANGED alerts
      ELSE alerts' = [alerts EXCEPT ![f] = @ + 1] /\ UNCHANGED texts
-  /\ UNCHANGED <<agent, tick, matured, row, child, handler, crashes, reasons, captures, overdue>>
-AlertLost(f) == /\ alert[f] = "child" /\ alert' = [alert EXCEPT ![f] = "done"]
-                /\ UNCHANGED <<agent, tick, matured, row, child, handler, crashes, ghost>>
+  /\ UNCHANGED <<agent, tick, matured, row, child, handler, tracked, alertFact, crashes,
+                 faults, lostText, misses, reasons, captures, overdue, falseAlert>>
+AlertAnswer(f, k) == /\ sender[f][k] = "accepted" /\ sender' = [sender EXCEPT ![f][k] = "sent"]
+                     /\ UNCHANGED <<agent, tick, matured, row, child, handler, tracked,
+                                    alertFact, crashes, faults, ghost>>
+AlertAnswerLost(f, k) ==
+  /\ sender[f][k] = "accepted" /\ Fault1 /\ sender' = [sender EXCEPT ![f][k] = "send"]
+  /\ misses' = [misses EXCEPT ![f] = @ + 1]
+  /\ UNCHANGED <<agent, tick, matured, row, child, handler, tracked, alertFact, crashes,
+                 texts, lostText, alerts, reasons, captures, overdue, falseAlert>>
+\* Telegram refused: no fact, the next pass hands the Alert to a new child.
+AlertRefused(f, k) == /\ sender[f][k] = "send" /\ Fault1 /\ End(f, k, "done")
+                      /\ UNCHANGED <<agent, tick, matured, row, child, handler, alertFact,
+                                     crashes, ghost>>
+\* The fact "Alert sent" is recorded after the send. Fault "nofact": it is never recorded.
+AlertRecord(f, k) ==
+  /\ sender[f][k] = "sent" /\ End(f, k, "done")
+  /\ alertFact' = IF Fault = "nofact" THEN alertFact ELSE [alertFact EXCEPT ![f] = TRUE]
+  /\ UNCHANGED <<agent, tick, matured, row, child, handler, crashes, faults, ghost>>
+\* A sender that dies after Telegram accepted leaves an Alert without its fact.
+AlertDie(f, k) ==
+  /\ Alive(sender[f][k]) /\ Fault1 /\ End(f, k, "dead")
+  /\ misses' = IF sender[f][k] \in {"accepted", "sent"}
+               THEN [misses EXCEPT ![f] = @ + 1] ELSE misses
+  /\ UNCHANGED <<agent, tick, matured, row, child, handler, alertFact, crashes,
+                 texts, lostText, alerts, reasons, captures, overdue, falseAlert>>
 
 \* ---- the agent ----
-\* Everything the tick kept in memory goes: continuations and Alerts not yet handed over.
+\* Everything the tick kept in memory goes: continuations and the senders it watched. The
+\* children are processes of their own and may outlive the agent. A sender the agent forgets
+\* before it recorded its fact may meet a second sender after the restart.
 Crash == /\ agent = "up" /\ crashes < MaxCrashes
          /\ agent' = "down" /\ tick' = "idle" /\ crashes' = crashes + 1
-         /\ handler' = [f \in Firings |-> FALSE]
-         /\ alert' = [f \in Firings |-> IF alert[f] = "due" THEN "none" ELSE alert[f]]
-         /\ UNCHANGED <<matured, row, child, ghost>>
+         /\ handler' = [f \in Firings |-> FALSE] /\ tracked' = [f \in Firings |-> 0]
+         /\ misses' = [f \in Firings |->
+                         IF \E k \in Slots : Alive(sender[f][k]) THEN misses[f] + 1
+                         ELSE misses[f]]
+         /\ UNCHANGED <<matured, row, child, sender, alertFact, faults, texts, lostText,
+                        alerts, reasons, captures, overdue, falseAlert>>
 Restart == /\ agent = "down" /\ agent' = "up"
-           /\ UNCHANGED <<tick, matured, row, child, handler, alert, crashes, ghost>>
+           /\ UNCHANGED <<tick, matured, row, child, handler, sender, tracked, alertFact,
+                          crashes, faults, ghost>>
 
+ChildStep(f) == Spawn(f) \/ ChildSend(f) \/ ChildAnswer(f) \/ ChildRecord(f) \/ HandlerFill(f)
+SenderStep(f, k) == AlertCheck(f, k) \/ AlertAccept(f, k) \/ AlertAnswer(f, k) \/ AlertRecord(f, k)
 Next == \/ Mature \/ Expire \/ Tick \/ Crash \/ Restart
         \/ \E f \in Firings :
-             \/ Spawn(f) \/ ChildSend(f) \/ ChildRefused(f) \/ ChildRecord(f)
-             \/ ChildSilent(f) \/ ChildDie(f) \/ HandlerFill(f)
-             \/ SpawnAlert(f) \/ AlertSend(f) \/ AlertLost(f)
+             \/ ChildStep(f) \/ ChildAnswerLost(f) \/ ChildRefused(f) \/ ChildSilent(f)
+             \/ ChildDie(f)
+             \/ \E k \in Slots : SenderStep(f, k) \/ AlertAnswerLost(f, k)
+                                 \/ AlertRefused(f, k) \/ AlertDie(f, k)
 Spec == Init /\ [][Next]_vars
-\* After the last crash the agent comes back, the tick keeps ticking and the clock moves.
-FairSpec == Spec /\ WF_vars(Restart) /\ WF_vars(Tick) /\ WF_vars(Expire)
+\* After the last crash the agent comes back, the tick keeps ticking, the clock moves, and
+\* the children finish: the turn has its silence watchdog, Telegram answers in the end.
+FairSpec == /\ Spec /\ WF_vars(Restart) /\ WF_vars(Tick) /\ WF_vars(Expire)
+            /\ \A f \in Firings : /\ WF_vars(ChildStep(f))
+                                  /\ \A k \in Slots : WF_vars(SenderStep(f, k))
 
-\* 5. No duplicate in the chat: the text of one firing goes out at most once.
-NoDuplicate == \A f \in Firings : texts[f] <= 1
+\* 5. One capture, one delivery attempt: the text of a firing reaches the chat once, and again
+\*    only when Telegram accepted it and the answer was lost (at least once at the transport).
+OneAttemptPerCapture == \A f \in Firings : texts[f] <= 1 + lostText[f]
 \* 3. The fact in the row is the fact of the firing the row shows.
-FactOfThisFiring == status # "swept" /\ firing > 0 /\ delivered = "true" => texts[firing] = 1
+FactOfThisFiring == status # "swept" /\ firing > 0 /\ delivered = "true" => texts[firing] >= 1
 \* 4. One due, one firing.
 OncePerDue == \A d \in Dues : captures[d] <= 1
-\* 2. No tick walks past an open firing whose window has passed.
+\* 2. No tick walks past an open firing whose window has passed and whose child is gone.
 BoundedOutcome == ~overdue
-AlertOnce == \A f \in Firings : alerts[f] <= 1
-\* 1. A firing that is over went out exactly once or carries its reason.
+\* One abandoned firing, one Alert; a repeat only when a sender lost track of an Alert it had
+\* sent: the answer was lost, the sender died after Telegram accepted, or the agent forgot it.
+AlertOnce == \A f \in Firings : alerts[f] <= 1 + misses[f]
+\* No Alert about a firing whose fact the row holds or whose child this agent still runs.
+NoFalseAlert == ~falseAlert
+\* 1. A firing that is over went out or carries its reason.
 Settled(f) == f <= firing /\ ~(f = firing /\ Open)
-ExactlyOnceOrReason == \A f \in Firings : Settled(f) => texts[f] = 1 \/ reasons[f]
+DeliveredOrReason == \A f \in Firings : Settled(f) => texts[f] >= 1 \/ reasons[f]
 \* 2. Every taken row gets its outcome, across crashes and restarts too.
 EveryFiringConcludes == Open ~> ~Open
+\* The Alert about an abandoned firing goes out after any crash, unless the row leaves first:
+\* swept a day later, a late fact, or the next firing of a Routine.
+AbandonedAlerted == \A f \in Firings : Owes(f) ~> ~Owes(f)
 ====
