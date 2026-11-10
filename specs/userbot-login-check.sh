@@ -24,4 +24,7 @@ check UserbotLogin-no-marker NoSilentIdle
 check UserbotLogin-no-session-check AuthorizedHasSession
 check UserbotLogin-raw-error NoSecretLeaves
 check UserbotLogin-no-wait WaitRespected
+check UserbotLogin-trace-args NoSecretLeaves
+check UserbotLogin-read-keeps-marker ReadEndsLogin
+check UserbotLogin-success-unread SuccessIsTheRead
 check UserbotLogin-retry-witness NoLoginAfterWrongPassword

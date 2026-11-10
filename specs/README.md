@@ -232,15 +232,17 @@ specs/queue-drain-check.sh
 
 ## UserbotLogin
 
-`UserbotLogin.tla` models the QR login of the userbot proxy (`services/telegram-userbot/onboarding.py`): one account, one process, one Telegram auth key. The proxy holds the phase in memory (`idle`, `starting`, `waiting`, `password_needed`, `authorized`, `expired`, `error`, `interrupted`) and one marker file on disk, `telegram-userbot.login`, beside the session file. Telegram holds its own side of the login for the auth key. The owner scans the QR, may be asked for the cloud password and may mistype it, the QR expires, Telegram names a flood wait, the session file disappears, the owner signs the session out from another device, and the unit restarts the proxy at any step. The phase that is told is `Login.phase()`: Telegram's answer first, the phase in memory otherwise.
+`UserbotLogin.tla` models the QR login of the userbot proxy (`services/telegram-userbot/onboarding.py`): one account, one process, one Telegram auth key. The proxy holds the phase in memory (`idle`, `starting`, `waiting`, `password_needed`, `authorized`, `expired`, `error`, `interrupted`) and one marker file on disk, `telegram-userbot.login`, beside the session file. Telegram holds its own side of the login for the auth key. The owner scans the QR, may be asked for the cloud password and may mistype it, the QR expires, Telegram names a flood wait, the session file disappears, the owner signs the session out from another device, and the unit restarts the proxy at any step. The phase that is told is `Login.phase()`: Telegram's answer first, the phase in memory otherwise. Every call of `qr_login_password` reaches Trace (`agent/hooks/trace.ts`) before the proxy answers it.
 
-`userbot-login-check.sh` checks `UserbotLogin.cfg` (672 distinct states), five mutants and one witness:
+`userbot-login-check.sh` checks `UserbotLogin.cfg` (866 distinct states), eight mutants and one witness:
 
 - `WrongPasswordKeepsAsking`: a refused password, wrong or too early, leaves the phase `password_needed`. `UserbotLogin-wrong-password-ends.cfg` is the code before the model: the refusal ends the login in `error`, and the owner starts from the QR.
 - `NoSilentIdle`: a login cut by a restart reads `interrupted`, unless Telegram already let the account in or the session file is gone; it never reads as a login that was not begun. `UserbotLogin-no-marker.cfg` keeps the phase in memory only.
 - `AuthorizedHasSession`: `authorized` is told only while the session file is on disk. `UserbotLogin-no-session-check.cfg` trusts Telegram's answer alone.
-- `NoSecretLeaves`: the password, the login token and the bot token stay out of the journal, the disk and the tool replies. `UserbotLogin-raw-error.cfg` tells a failure in the words of the exception.
+- `NoSecretLeaves`: the password, the login token and the bot token stay out of the journal, the disk, Trace and the tool replies — everything Iva and the proxy write. `UserbotLogin-raw-error.cfg` tells a failure in the words of the exception. `UserbotLogin-trace-args.cfg` writes the call to Trace with the password in its arguments; the code writes `<redacted>` in place of every argument the connection names secret (`SECRET_ARGUMENTS` in `agent/connections/telegram-userbot.ts`). The owner's own message with the password is outside the invariant: it is the owner's text, kept in the day's `daily/` file and in the session history of eve (`.eve/.workflow-data`), and that history keeps the call as the model made it beside that message.
 - `WaitRespected`: no password goes to Telegram before the wait it named has passed. `UserbotLogin-no-wait.cfg` forgets the wait. The proxy knows the wait in memory only: the first password after a restart reaches Telegram, which names the wait again.
+- `ReadEndsLogin`: a read that saw the account let in ended the login, so no marker stays on disk and no old `interrupted` comes back after a sign-out elsewhere. `UserbotLogin-read-keeps-marker.cfg` tells `authorized` and leaves the phase and the marker of a process that died between Telegram's yes and its own.
+- `SuccessIsTheRead`: the right password is answered "connected" only when the read says `authorized`. `UserbotLogin-success-unread.cfg` answers in fixed words while the session file is gone.
 - `UserbotLogin-retry-witness.cfg` must fail on `NoLoginAfterWrongPassword`: a login that got a wrong password still ends `authorized` without a second QR.
 
 | Model action                                                                         | Code                                                                  |
@@ -250,12 +252,14 @@ specs/queue-drain-check.sh
 | `LoginFails`, `PasswordCheckFails`                                                   | `Login._fail`: fixed words and the class of the exception             |
 | `PasswordHeldBack`, `WrongPassword`, `TelegramNamesWait`, `RightPassword`            | `Login.password`                                                      |
 | `Restart`                                                                            | `Login.__init__`: the marker decides between `interrupted` and `idle` |
+| `ReadSeesLogin`                                                                      | `Login._read`: the read that sees the account let in ends the login   |
+| `Traced`                                                                             | `agent/hooks/trace.ts`: `<redacted>` in place of a secret argument    |
 | `Reported`                                                                           | `Login.phase`, sent by `/healthz` as `login`                          |
 | `OwnerScans`, `TooManyChecks`, `WaitPasses`, `SessionFileLost`, `SignedOutElsewhere` | Telegram, the clock, the disk and the owner                           |
 
-`services/telegram-userbot/test_onboarding.py` replays the counterexamples against the code with Telegram replaced and walks random sequences of the model's actions, checking the five invariants after every step; each test names its invariant. `scripts/lib/userbot-health.test.ts` holds the list of phases in TypeScript to the list `onboarding.py` sends.
+`services/telegram-userbot/test_onboarding.py` replays the counterexamples against the code with Telegram replaced and walks random sequences of the model's actions, checking the invariants after every step; each test names its invariant. `agent/lib/trace-hook.test.ts` feeds the call to the real Trace hook and holds the secret arguments to the parameters of `qr_login_password` in `onboarding.py`. `scripts/lib/userbot-health.test.ts` holds the list of phases in TypeScript to the list `onboarding.py` sends.
 
-Outside the model: a QR scanned after the restart that cut its login, a marker file that cannot be written (the login is refused before it begins), the flood wait of up to sixty seconds that Telethon sleeps through by itself, a second account.
+Outside the model: the session history of eve and the owner's message (above), a QR scanned after the restart that cut its login, a marker file that cannot be written (the login is refused before it begins), the flood wait of up to sixty seconds that Telethon sleeps through by itself, a second account.
 
 ## LaunchdUnit
 
