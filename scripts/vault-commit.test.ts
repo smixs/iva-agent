@@ -1083,34 +1083,6 @@ test("окружение git: свой язык сообщений, буквал
   assert.equal("SECRET_TOKEN" in env, false);
 });
 
-// Чтение истории тем же раннером: null только когда ls-tree говорит «пути нет»; битая ревизия,
-// пропавший объект коммита, пропавший блоб — исключение, не пустой текст.
-test("vaultShow отдаёт текст пути, null на отсутствующем пути и бросает на битой ревизии и пропавших объектах", async (t) => {
-  const vault = makeVault(t);
-  const { vaultHead, vaultShow } = (await import(
-    join(REPO, "agent", "lib", "vault-commit.ts")
-  )) as typeof import("../agent/lib/vault-commit.ts");
-  writeFileSync(join(vault, "CORE.md"), "# CORE\n");
-  sh(["add", "CORE.md"], vault);
-  sh(["commit", "-q", "-m", "core"], vault);
-  const head = sh(["rev-parse", "HEAD"], vault).trim();
-
-  assert.equal(await vaultHead(vault), head);
-  assert.equal(await vaultShow(vault, head, "CORE.md"), "# CORE\n");
-  assert.equal(await vaultShow(vault, head, "missing.md"), null);
-  await assert.rejects(
-    vaultShow(vault, "deadbeef", "CORE.md"),
-    /ls-tree deadbeef/u,
-  );
-
-  const drop = (sha: string) =>
-    rmSync(join(vault, ".git", "objects", sha.slice(0, 2), sha.slice(2)));
-  drop(sh(["rev-parse", `${head}:CORE.md`], vault).trim());
-  await assert.rejects(vaultShow(vault, head, "CORE.md"), /git show/u);
-  drop(head);
-  await assert.rejects(vaultShow(vault, head, "CORE.md"), /ls-tree/u);
-});
-
 // Настоящий fake git получает те же аргументы и окружение, зависает без дочернего sleep.
 // Проба только ускоряет таймер раннера; исходный срок 12/24 с сохраняется в трассе.
 for (const hangs of [1, 2])

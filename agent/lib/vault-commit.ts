@@ -555,35 +555,6 @@ export async function commitVaultWrite(
   return outcome;
 }
 
-/** HEAD vault тем же раннером (таймаут, окружение, разбор отказа). Отказ — исключение. */
-export async function vaultHead(root: string): Promise<string> {
-  const run = await git(["rev-parse", "HEAD"], root);
-  if (run.code !== 0) throw new Error(`${root}: ${reasonOf(run)}`);
-  return run.out.trim();
-}
-
-/** Текст пути в коммите vault; null — пути в этом коммите нет. Предназначено для обычного
- * blob: тип записи не проверяется, каталог, gitlink и symlink функция не различает (ls-tree их
- * перечислит, show отдаст что есть). «Нет пути» решает не текст
- * stderr (при пропавшем объекте коммита `git show` печатает ту же фразу), а `ls-tree`: код 0 и
- * пустой вывод — пути нет; код 0 и строка — путь есть, дальше `show`, и любой его отказ (битый
- * блоб, таймаут, переполнение буфера раннера) — исключение; код ≠ 0 (битая ревизия, пропавший
- * объект коммита) — исключение. В пустоту память не откатывается. */
-export async function vaultShow(
-  root: string,
-  sha: string,
-  path: string,
-): Promise<string | null> {
-  const entry = await git(["ls-tree", sha, "--", path], root);
-  if (entry.code !== 0)
-    throw new Error(`git ls-tree ${sha} -- ${path}: ${reasonOf(entry)}`);
-  if (entry.out.trim() === "") return null;
-  const run = await git(["show", `${sha}:${path}`], root);
-  if (run.code !== 0)
-    throw new Error(`git show ${sha}:${path}: ${reasonOf(run)}`);
-  return run.out;
-}
-
 /** Ночной подметальщик: закоммитить всё незакоммиченное в vault - днём это делают писатели, а
  * он подбирает то, что осталось. Механизм тот же, что у правки: свой репозиторий, своё
  * окружение, пути литералами. */
