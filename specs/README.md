@@ -123,6 +123,27 @@ Witnesses must fail: `PluginProposal-norename.cfg` (the tap copies the proposal 
 specs/plugin-proposal-check.sh
 ```
 
+## BrainOversize
+
+`BrainOversize.tla` models the nightly backup of the vault against a file over 90 MB (decision of the owner, 10.11.2026). GitHub refuses a blob from 100 MB, and one such blob stops the whole push. Sizes are two values, `small` and `big`; the starting history already holds one big blob written before the guard. The owner, the agent or an attachment writes files at any moment; Brain commits what changed and then tells the owner. The comment in the model maps every action to its function.
+
+The threshold sits in `commitPaths` (`agent/lib/vault-commit.ts`), which every commit of the vault goes through: the writers of the day, the sweep of the night before it starts, and Brain. A path over `VAULT_BLOB_LIMIT_BYTES` goes neither to `git add` nor to the commit and comes back as `oversize`; Brain names the set in one Alert (`scripts/memory/brain.ts`, `alertOversize`).
+
+Checked invariants:
+
+1. `BigNeverCommitted`: no version over the threshold reaches the history.
+2. `SkippedIsTold`: after the night, the last Alert names the skipped set, or its send failed and the next night repeats it. `OneAlertPerSet`: the same set is not told twice in a row (the week of the throttle in `packages/alert-state` is outside the model).
+3. `OthersGo`: a commit takes every changed file under the threshold.
+4. `HistoryKept`: what the backup already holds stays; a tracked file that grew keeps its last committed version.
+
+Mutants must fail: `BrainOversize-no-threshold.cfg` (`BigNeverCommitted`), `BrainOversize-silent.cfg` (a skip without an Alert, `SkippedIsTold`), `BrainOversize-abort.cfg` (a skip stops the whole commit, `OthersGo`), `BrainOversize-every-night.cfg` (`OneAlertPerSet`), `BrainOversize-unstage.cfg` (a skip takes a tracked file out of the index, `HistoryKept`). The tests named `BrainOversize` in `scripts/memory/brain.test.ts` and `scripts/vault-commit.test.ts` run the real Brain and the real seam on a git repository with sparse 91 MB files.
+
+Outside the model: a commit that git refuses (no Alert that night, the next one repeats), a blob over the limit already in the history before the guard (the push keeps failing, and the Alert about the backup says so), Git LFS, and the 100 MB limit of other hosts.
+
+```sh
+specs/brain-oversize-check.sh
+```
+
 ## PluginMode
 
 `PluginMode.tla` models the two switches of one plugin entry in `data/custom/plugins.json`, `enabled` and `trusted` (ADR-0009), and the units that follow them. It was written after the code and checks the code. The four pairs are four named modes, read in the code by `pluginMode` (`agent/lib/plugin-store.ts`): `full`, `no-processes`, `paused` (switched off, the trust is remembered) and `off`. The plugin of the model has processes: a `stdio` server in `mcp.json` or a service in `sh.iva/services/`.

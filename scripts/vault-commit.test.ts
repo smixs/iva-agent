@@ -845,6 +845,44 @@ test("ignore новых путей не отменяет соседний бэк
   assert.equal(readFileSync(privateFile, "utf8"), "private\n");
 });
 
+test("BrainOversize: a file over 90 MB stays out of every commit and the index; its deletion still goes", async (t) => {
+  const vault = makeVault(t);
+  const big = join(vault, "cards/notes/film.mp4");
+  const small = join(vault, "cards/notes/note.md");
+  execFileSync("truncate", ["-s", "91M", big]);
+  writeFileSync(small, "note\n");
+  const { value: outcome, logged } = await journal(() =>
+    tool.seam.commitVaultWrite("write", [big, small], vault),
+  );
+  assert.deepEqual(outcome, {
+    ok: true,
+    committed: true,
+    oversize: ["cards/notes/film.mp4"],
+  });
+  assert.deepEqual(touched(vault), ["cards/notes/note.md"]);
+  assert.match(logged, /больше 90 МБ.*film\.mp4/u);
+  assert.equal(statusAll(vault), "?? cards/notes/film.mp4");
+  assert.deepEqual(await tool.seam.commitVaultWrite("write", [big], vault), {
+    ok: true,
+    committed: false,
+    oversize: ["cards/notes/film.mp4"],
+  });
+  // Ровно порог — ещё файл, а не огромный.
+  execFileSync("truncate", ["-s", String(90 * 1024 * 1024), small]);
+  rmSync(big);
+  assert.deepEqual(await tool.seam.commitVaultWrite("edge", [small], vault), {
+    ok: true,
+    committed: true,
+  });
+  // Удаление файла — не файл больше порога: оно коммитится.
+  rmSync(small);
+  assert.deepEqual(await tool.seam.commitVaultWrite("gone", [small], vault), {
+    ok: true,
+    committed: true,
+  });
+  assert.equal(statusAll(vault), "");
+});
+
 test("отслеживаемый литеральный путь под ignored каталогом продолжает историю (#257)", async (t) => {
   const vault = makeVault(t);
   const path = "cards/notes/отчёт-*.md";

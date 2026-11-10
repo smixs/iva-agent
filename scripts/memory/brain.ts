@@ -2,7 +2,11 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { resolveDataDir } from "../../packages/data-dir/index.ts";
-import { alertOnce, noticeTranslator } from "../lib/notice-policy.ts";
+import {
+  alertOnce,
+  alertResolved,
+  noticeTranslator,
+} from "../lib/notice-policy.ts";
 import { notificationChat } from "../../packages/notification-chat/index.ts";
 import { vaultDirOrExit } from "../lib/vault-boundary.ts";
 
@@ -14,6 +18,7 @@ const dataDir = resolveDataDir(process.cwd());
 async function authoredTree() {
   return {
     ...(await import("#lib/core-cap.ts")),
+    ...(await import("#lib/telegram-format.ts")),
     ...(await import("#lib/vault-commit.ts")),
     ...(await import("../lib/telegram-send.ts")),
     ...(await import("./graph.ts")),
@@ -36,9 +41,28 @@ async function send(text: string): Promise<boolean> {
 
 async function commitOwnerChanges(): Promise<boolean> {
   const result = await tree.commitVaultSweep("brain: owner changes", vault);
-  if (!result.ok)
+  if (!result.ok) {
     console.error(`brain: backup commit failed: ${result.reason ?? "unknown"}`);
-  return result.ok;
+    return false;
+  }
+  await alertOversize(result.oversize ?? []);
+  return true;
+}
+
+/** Файлы больше порога остались вне бэкапа: один Alert на набор, суть - имена (неделя
+ * тишины на тот же набор); набор ушёл - запись забыта, рецидив заговорит сразу. */
+async function alertOversize(paths: readonly string[]): Promise<void> {
+  if (paths.length === 0) return alertResolved(dataDir, "vault-oversize");
+  const names = [...paths].sort();
+  const list = names.map((name) => `• ${tree.escHtml(name)}`).join("\n");
+  await alertOnce(dataDir, "vault-oversize", names.join("\n"), () =>
+    send(
+      T(
+        `These vault files are larger than 90 MB, so they stay out of the backup (GitHub refuses them and the whole push would stop). They are still on the disk; the rest is backed up. Move them out of the vault or add them to its .gitignore:\n${list}`,
+        `Эти файлы vault больше 90 МБ и остаются вне бэкапа (GitHub их не принимает, и не ушёл бы весь push). На диске они на месте, остальное бэкапится. Вынеси их из vault или добавь в его .gitignore:\n${list}`,
+      ),
+    ),
+  );
 }
 
 // Граф - производные данные: .gitignore vault из шаблона исключает .graph/, в git он не идёт.

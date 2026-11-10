@@ -52,6 +52,12 @@ const gitRecovery = new Map<string, { raises: number; timeout: number }>();
 const IVA_IDENTITY = ["-c", "user.name=Iva", "-c", "user.email=iva@localhost"];
 const REASON_CAP = 200;
 const LOG_PREFIX = "[vault-commit]";
+/**
+ * GitHub отклоняет блоб от 100 МБ, и тогда не уходит весь push бэкапа. Файл больше порога в
+ * коммит не идёт ни у одного писателя: остаётся на диске, а Brain называет его владельцу
+ * (`specs/BrainOversize.tla`).
+ */
+export const VAULT_BLOB_LIMIT_BYTES = 90 * 1024 * 1024;
 /** Бит записи индекса: файл добавлен без содержимого (`git add -N`). */
 const INTENT_TO_ADD = 0x2000_0000;
 /** Пустой блоб: с ним в индексе лежит и `add -N`, и честно застейдженный пустой файл. */
@@ -97,6 +103,8 @@ export type VaultCommit =
       readonly reason?: string;
       /** Пути вне бэкапа по правилам ignore владельца, относительно vault. */
       readonly skipped?: readonly string[];
+      /** Пути больше VAULT_BLOB_LIMIT_BYTES: в коммит не пошли, лежат на диске. */
+      readonly oversize?: readonly string[];
     }
   | { readonly ok: false; readonly reason: string };
 
@@ -433,7 +441,32 @@ function serialized<T>(task: () => Promise<T>): Promise<T> {
   return queued;
 }
 
+/** Больше порога ли файл. Пропавший путь - это удаление, и оно коммитится как раньше. */
+function oversized(file: string): boolean {
+  try {
+    // lstat: у ссылки в блоб идёт она сама, а не файл, на который она указывает.
+    return lstatSync(file).size > VAULT_BLOB_LIMIT_BYTES;
+  } catch {
+    return false;
+  }
+}
+
+/** Пути больше порога остаются вне коммита и вне индекса; остальные коммитятся как всегда. */
 async function commitPaths(
+  vault: string,
+  message: string,
+  paths: readonly string[],
+): Promise<VaultCommit> {
+  const oversize = paths.filter((path) => oversized(join(vault, path)));
+  if (oversize.length === 0) return commitFitting(vault, message, paths);
+  const fitting = paths.filter((path) => !oversize.includes(path));
+  const outcome = fitting.length
+    ? await commitFitting(vault, message, fitting)
+    : ({ ok: true, committed: false } as const);
+  return outcome.ok ? { ...outcome, oversize } : outcome;
+}
+
+async function commitFitting(
   vault: string,
   message: string,
   paths: readonly string[],
@@ -551,6 +584,10 @@ export async function commitVaultWrite(
   if (outcome.ok && outcome.skipped?.length)
     console.error(
       `${LOG_PREFIX} ${message}: вне git-бэкапа по ignore: ${JSON.stringify(outcome.skipped)}`,
+    );
+  if (outcome.ok && outcome.oversize?.length)
+    console.error(
+      `${LOG_PREFIX} ${message}: вне git-бэкапа, больше 90 МБ: ${JSON.stringify(outcome.oversize)}`,
     );
   return outcome;
 }
