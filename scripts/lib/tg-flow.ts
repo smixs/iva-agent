@@ -27,6 +27,42 @@ type TelegramFlowTransport = (
 
 type TelegramKeyboard = Array<Array<Record<string, unknown>>>;
 
+/**
+ * Шаги мастера /model и /think (scripts/poller/wizards.ts), каждый — экран со своими
+ * кнопками. Слот другого флоу (/menu) шага не имеет: `null`.
+ */
+export const WIZARD_STEPS = [
+  "intro",
+  "loading",
+  "effort",
+  "provider",
+  "awaiting_base",
+  "awaiting_model",
+  "awaiting_key",
+  "cli_status",
+  "models",
+  "model_error",
+  "login",
+  "saved",
+] as const;
+export type WizardStep = (typeof WIZARD_STEPS)[number];
+
+export function isWizardStep(value: unknown): value is WizardStep {
+  return (WIZARD_STEPS as readonly unknown[]).includes(value);
+}
+
+/**
+ * Следующий текст в чате, который ждёт флоу, а не eve: `kind` называет поле, `secret` —
+ * сообщение удаляется из чата до разбора.
+ */
+export type AwaitText = {
+  kind: string;
+  secret: boolean;
+  data?: Record<string, unknown>;
+  /** Ждёт файл, а не текст (JSON ключа Google Workspace). */
+  file?: boolean;
+};
+
 export type TelegramFlowState = {
   flow: string;
   chatId: TelegramFlowId;
@@ -38,8 +74,8 @@ export type TelegramFlowState = {
   model: unknown;
   efforts: unknown;
   effort: unknown;
-  step: unknown;
-  awaitText: unknown;
+  step: WizardStep | null;
+  awaitText: AwaitText | null;
   screen: unknown;
   page: number;
   data: Record<string, unknown>;

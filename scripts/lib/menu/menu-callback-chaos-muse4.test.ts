@@ -7,29 +7,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fc from "fast-check";
+import type { TelegramFlowState } from "../tg-flow.ts";
 import { createMenu } from "./index.ts";
 
 const SEED = 20260401;
 
 type Call = { method: string; params: Record<string, unknown> };
-type State = {
-  flow: string;
-  chatId: string | number;
-  userId: string | number;
-  createdAt: number;
-  msgId: number | null;
-  provider: unknown;
-  modelOptions: unknown;
-  model: unknown;
-  efforts: unknown;
-  effort: unknown;
-  step: unknown;
-  awaitText: unknown;
-  screen: unknown;
-  page: number;
-  data: Record<string, unknown>;
-  [key: string]: unknown;
-};
+type State = TelegramFlowState;
 
 const STUB_SCREENS = {
   // texts.k — экран владеет тем же kind, что ждёт живое меню: только такое ожидание
