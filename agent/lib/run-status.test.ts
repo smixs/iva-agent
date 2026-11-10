@@ -43,6 +43,35 @@ test("NoSilentLoss: the shared run-status.json is neither read nor touched", () 
   assert.equal(readFileSync(shared, "utf8"), bytes);
 });
 
+// specs/UpdateFloor.tla: NoSilentLoss. Releases before 0.4.0 wrote continuationToken into a
+// chat record. The record is read whole; the field is neither used nor stripped.
+test("NoSilentLoss: a chat record that carries continuationToken is read whole and the field stays", () => {
+  const key = "token-chat:";
+  mkdirSync(join(dataDir, "run-status.d"), { recursive: true });
+  writeFileSync(
+    join(
+      dataDir,
+      "run-status.d",
+      `${Buffer.from(key).toString("base64url")}.json`,
+    ),
+    JSON.stringify({
+      status: "running",
+      sessionId: "s",
+      turnId: "t",
+      generation: 3,
+      updatedAt: 5,
+      continuationToken: "old",
+    }),
+  );
+
+  assert.equal(status.getChatStatus(key)?.sessionId, "s");
+  assert.equal(status.getChatStatus(key)?.continuationToken, "old");
+  status.setChatStatus(key, { turnId: "t2" });
+  assert.equal(status.getChatStatus(key)?.turnId, "t2");
+  assert.equal(status.getChatStatus(key)?.sessionId, "s");
+  assert.equal(status.getChatStatus(key)?.continuationToken, "old");
+});
+
 test("distinct chats survive bounded concurrent writers", async () => {
   const workers = 8;
   const keysPerWorker = 100;

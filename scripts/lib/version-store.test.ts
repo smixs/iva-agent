@@ -436,6 +436,26 @@ test("a corrupt active marker blocks healing without changing its bytes", (t) =>
   assert.equal(existsSync(store.layout.current), false);
 });
 
+// UpdateFloor.NoSilentLoss: releases before 0.3.24 wrote the marker as iva-active/v1. It is
+// not converted: every reader refuses it by the file's name and the bytes stay.
+test("NoSilentLoss: an active.json of schema iva-active/v1 is refused by name and its bytes stay", (t) => {
+  const root = home(t);
+  const store = createVersionStore(root);
+  install(store, "0.3.14-aaaaaaaaaaaa");
+  store.activate("0.3.14-aaaaaaaaaaaa");
+  const marker = join(store.layout.data, "active.json");
+  const v1 = `${JSON.stringify({ schema: "iva-active/v1", version: "0.3.14-aaaaaaaaaaaa" })}\n`;
+  writeFileSync(marker, v1);
+
+  for (const read of [
+    () => store.settled(),
+    () => store.heal(),
+    () => store.activate("0.3.14-aaaaaaaaaaaa"),
+  ])
+    assert.throws(read, /active\.json.*corrupt|corrupt.*active\.json/u);
+  assert.equal(readFileSync(marker, "utf8"), v1);
+});
+
 test("a valid current link cannot hide a corrupt active marker from healing", (t) => {
   const store = createVersionStore(home(t));
   install(store, "0.3.14-aaaaaaaaaaaa");
