@@ -2,14 +2,18 @@
 
 Iva carries eve sources in `eve/`, imported from [vercel/eve](https://github.com/vercel/eve)
 at commit `eb5949a622801b35a2a6f78bb58d9eef27273cac` (eve 0.51.1).
-The copy contains the eve package, its catalog dependency, package documentation and
-build inputs. Iva's changes are ordinary commits in this directory, held by tests
-on the boundary with Iva. Taking a newer upstream commit is a separate decision
-(ADR-0023).
+The copy contains the eve package, its catalog dependency and build inputs. It
+carries no upstream tests and no package documentation, and it drops the entry
+points Iva never loads: the React, Vue, Svelte, Next, Nuxt and SvelteKit adapters,
+the self-modification extension, and the Slack, Teams, Discord, Linear, Twilio,
+Chat SDK, Photon and Linq channels (ADR-0027). The eve documentation lives at
+https://eve.dev/docs. Iva's changes are ordinary commits in this directory, held
+by tests on the boundary with Iva. Taking a newer upstream commit is a separate
+decision (ADR-0023).
 
-Edit the source in `eve/packages/eve/src/`, run the affected upstream tests and Iva
-boundary tests, and commit the source. Maintainers use Node 24 or newer and pnpm
-11.25.0. Choose a fresh `0.51.1-iva.N` in `scripts/build-eve.sh` and
+Edit the source in `eve/packages/eve/src/`, run the Iva boundary tests that name
+the changed behaviour, and commit the source. Maintainers use Node 24 or newer and
+pnpm 11.25.0. Choose a fresh `0.51.1-iva.N` in `scripts/build-eve.sh` and
 `scripts/eve-release.sh` for each new archive. Users install the ready package;
 they only build the Iva agent.
 
@@ -52,6 +56,30 @@ BUILD metadata and dependency lock. Hashes include only the executable flag,
 so file access permissions and umask do not change them. The build-only
 `.vendor-stamp.json` is excluded from the packed hash; its script fingerprint
 uses relative paths, so archive bytes are identical across build directories.
+
+## Checking an eve change
+
+The copy has no test suite of its own. A change to eve is checked from Iva's side:
+
+- A behaviour change is held by an Iva boundary test that names the changed eve
+  behaviour (`scripts/eve-*.test.ts`, ADR-0023), then by the gate of its task
+  level.
+- A change meant to leave Iva's behaviour alone (a removal, a build edit) is
+  compared with the previous archive. Every file that stays in the archive is
+  byte-identical to the previous one, apart from `package.json`, `BUILD.json`,
+  `README.md`, `bin/eve.js` and `dist/src/compiled/.vendor-stamp.json`. After
+  `npm run build`, the eve modules in `.output/server` (the `//#region` markers)
+  are the same set with the same content; only the version string differs.
+- `npm run build`, `node node_modules/eve/bin/eve.js --help` and
+  `node node_modules/eve/bin/eve.js start --help` exit 0.
+- `scripts/eve-copy.test.ts` pins what the copy no longer carries.
+
+eve is built as one rolldown program. Removing a source file can reorder imports
+and rename local variables or colliding top-level names in files that stay, so a
+removal that changes a remaining file is rolled back even when the code reads the
+same. The evals, the ACP server, the terminal UI, the GitHub channel, the unused
+CLI commands and the vendored dependencies of the removed channels stay in the
+copy for this reason.
 
 The sources retain the [Apache-2.0 license](../eve/LICENSE) and
 [NOTICE](../eve/NOTICE), including the Iva modifications. Both files are also
