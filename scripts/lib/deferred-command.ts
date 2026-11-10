@@ -102,13 +102,13 @@ export async function deferCommand(dir: string, argv: readonly string[]) {
   });
 }
 export async function activityBusy(dir: string) {
-  const { listChatStatuses } = await import("#lib/run-status.ts");
+  const { chatHeld, chatState, listChatStatuses } =
+    await import("#lib/run-status.ts");
   const { readHelpers } = await import("#lib/helper-store.ts");
   const helpers = (await readHelpers(join(dir, "helpers.json"))).rows;
   return (
-    listChatStatuses().some(
-      ({ status }) => status.status === "running" || status.compacting === true,
-    ) || helpers.some((row) => row.run !== null)
+    listChatStatuses().some(({ status }) => chatHeld(chatState(status))) ||
+    helpers.some((row) => row.run !== null)
   );
 }
 export async function executeDeferred(dir: string, root: string, id: string) {

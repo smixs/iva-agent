@@ -25,14 +25,19 @@ import {
   type TelegramResetTarget,
 } from "../lib/telegram-reset.ts";
 import {
+  chatState,
   getChatStatus,
   listChatStatuses,
   chatKeyOf,
   parseTelegramSessionRetirement,
   QUEUED_STATUS_CLEARED,
   RUN_STALE_MS,
+  TURN_FIELDS_CLEARED,
   setChatStatus,
   setChatStatusIf,
+  type ChatRecord,
+  type ChatRecordExpected,
+  type ChatRecordPatch,
 } from "#lib/run-status.ts";
 import { tr } from "#lib/i18n.ts";
 import { appendTrace, type TraceInput } from "#lib/trace.ts";
@@ -44,14 +49,7 @@ type ErrorLike = {
   resetPhase?: string;
   resetFailures?: number;
 };
-type RunStatus = Record<string, unknown> & {
-  status?: unknown;
-  generation?: unknown;
-  updatedAt?: unknown;
-  sessionId?: unknown;
-  ingressId?: unknown;
-  ingressAt?: unknown;
-};
+type RunStatus = ChatRecord;
 type ResetResult = { status?: unknown; [key: string]: unknown };
 type ResetRequest = { chatKey: string; target: TelegramResetTarget };
 type ResetRequestImpl = (request: ResetRequest) => Promise<ResetResult>;
@@ -69,8 +67,8 @@ type StatusRecord = { chatKey?: unknown; status?: RunStatus | null };
 type StatusImpl = (chatKey: string) => RunStatus | null;
 type SetStatusIfImpl = (
   chatKey: string,
-  expected: Record<string, unknown>,
-  patch: Record<string, unknown>,
+  expected: ChatRecordExpected,
+  patch: ChatRecordPatch,
 ) => RunStatus | null;
 type RetirementResetImpl = (
   chatKey: string,
@@ -307,10 +305,7 @@ export async function completeScopedResetState(
       discardThroughUpdateId?: number,
       resetRequestedAt?: number,
     ) => Promise<void>;
-    setStatusImpl?: (
-      chatKey: string,
-      patch: Record<string, unknown>,
-    ) => unknown;
+    setStatusImpl?: (chatKey: string, patch: ChatRecordPatch) => unknown;
   } = {},
 ) {
   // For private chats the queue belongs to the reset session, so clear it
@@ -322,16 +317,8 @@ export async function completeScopedResetState(
 
   setStatusImpl(chatKey, {
     status: "idle",
-    sessionId: null,
-    turnId: null,
-    draftId: null,
-    ingressId: null,
-    ingressAt: null,
-    turnAt: null,
-    firstOutputAt: null,
-    latencyLogged: null,
+    ...TURN_FIELDS_CLEARED,
     wasCancelled: null,
-    compacting: null,
     retiredSessionId: null,
     restartRetryData: null,
     restartRetryUpdate: null,
@@ -714,16 +701,8 @@ function clearFailedDirectIngress(
     },
     {
       status: "idle",
-      sessionId: null,
-      turnId: null,
-      draftId: null,
-      ingressId: null,
-      ingressAt: null,
-      turnAt: null,
-      firstOutputAt: null,
-      latencyLogged: null,
+      ...TURN_FIELDS_CLEARED,
       wasCancelled: null,
-      compacting: null,
       ...QUEUED_STATUS_CLEARED,
       resetAt: observedAt,
     },
@@ -787,7 +766,7 @@ export async function retireSettledSessions({
     const key = record.chatKey;
     const status = record.status;
     const marker = parseTelegramSessionRetirement(status?.retireAfterTurn);
-    if (typeof key !== "string" || status?.status !== "idle" || !marker)
+    if (typeof key !== "string" || chatState(status) !== "retiring" || !marker)
       continue;
 
     let current: RunStatus | null;
@@ -804,7 +783,8 @@ export async function retireSettledSessions({
       current?.retireAfterTurn,
     );
     if (
-      current?.status !== "idle" ||
+      !current ||
+      chatState(current) !== "retiring" ||
       !sameRetirement(marker, currentMarker) ||
       inFlight.has(key)
     )
@@ -919,7 +899,7 @@ export async function retireSettledSessions({
 // сообщения ждут в очереди моста. Сказать «повтори запрос» было бы неправдой.
 async function notifyInterruptedTurn(
   key: string,
-  status: Record<string, unknown>,
+  status: RunStatus,
   sendImpl: (chatKey: string, text: string) => Promise<unknown>,
   trImpl: (en: string, ru: string) => string,
   safeLog: (...args: unknown[]) => void,
@@ -985,9 +965,8 @@ export async function reapStaleRuns({
     const status = record?.status;
     if (
       typeof key !== "string" ||
-      status?.status !== "running" ||
-      now() - ((status.updatedAt as number | null | undefined) ?? 0) <=
-        staleMs ||
+      !status ||
+      chatState(status, now(), staleMs) !== "stale" ||
       inFlight.has(key)
     ) {
       continue;
@@ -1006,16 +985,8 @@ export async function reapStaleRuns({
         },
         {
           status: "idle",
-          sessionId: null,
-          turnId: null,
-          draftId: null,
-          ingressId: null,
-          ingressAt: null,
-          turnAt: null,
-          firstOutputAt: null,
-          latencyLogged: null,
+          ...TURN_FIELDS_CLEARED,
           wasCancelled: null,
-          compacting: null,
           ...QUEUED_STATUS_CLEARED,
           resetAt: reapedAt,
           restartRetryData,
@@ -1055,7 +1026,7 @@ export async function reapStaleRuns({
 /** Что сказать человеку, чьё сообщение встало в очередь: чат занят ходом или пересказом. */
 export function queuedNoticeText(
   count: number,
-  status: Record<string, unknown> | null | undefined,
+  status: RunStatus | null | undefined,
   trImpl: (en: string, ru: string) => string = tr,
 ): string {
   return status?.status === "running" && status.compacting === true

@@ -193,7 +193,13 @@ async function systemdDoctorEvents(
     messagePrefix?: string;
     statuses?: Array<{
       chatKey: string;
-      status: { status?: string; updatedAt?: number };
+      status: {
+        status?: "idle" | "running";
+        updatedAt?: number;
+        ingressId?: string;
+        sessionId?: string;
+        compacting?: true;
+      };
     }>;
   },
 ): Promise<Array<[string, string]>> {
@@ -243,7 +249,8 @@ async function systemdDoctorEvents(
     now: () => now,
     telegramInboxFile: join(data, "telegram-inbox.json"),
     telegramQueueFile: join(data, "telegram-queue.json"),
-    listChatStatusesImpl: () => statuses,
+    // Доктор читает и записи, каких писатели не оставляют (running без владельца).
+    listChatStatusesImpl: () => statuses as never,
     log: () => undefined,
     exit: () => undefined,
   })();
@@ -700,6 +707,40 @@ test("doctor treats a running chat without updatedAt as stuck", async (t) => {
         "bridge backlog: 1 stuck chat(s) — check: journalctl --user -u iva-telegram-poll; use /stop or iva restart",
       ],
     ],
+  );
+});
+
+test("doctor names what each busy chat is doing, in the words of the chat record", async (t) => {
+  const root = await sandbox(t);
+  writeFileSync(join(root, ".env"), "present=true\n");
+  const now = 100_000_000;
+  const live = { status: "running", updatedAt: now - 1_000 } as const;
+
+  assert.deepEqual(
+    await systemdDoctorEvents(root, {
+      now,
+      messagePrefix: "chats busy:",
+      statuses: [
+        { chatKey: "1:", status: { ...live, ingressId: "i" } },
+        { chatKey: "2:", status: { ...live, sessionId: "s" } },
+        { chatKey: "3:", status: { ...live, sessionId: "s" } },
+        {
+          chatKey: "4:",
+          status: { ...live, sessionId: "s", compacting: true },
+        },
+        { chatKey: "5:", status: { status: "running", sessionId: "s" } },
+        { chatKey: "6:", status: { status: "idle", updatedAt: now } },
+      ],
+    }),
+    [["ok", "chats busy: 1 accepted, 2 turn, 1 compacting, 1 stale"]],
+  );
+  assert.deepEqual(
+    await systemdDoctorEvents(root, {
+      now,
+      messagePrefix: "chats busy:",
+      statuses: [{ chatKey: "6:", status: { status: "idle", updatedAt: now } }],
+    }),
+    [],
   );
 });
 

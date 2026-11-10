@@ -1,5 +1,10 @@
 import { randomInt } from "node:crypto";
-import { chatKeyOf, getChatStatus, setChatStatusIf } from "./run-status.ts";
+import {
+  chatKeyOf,
+  getChatStatus,
+  setChatStatusIf,
+  TURN_FIELDS_CLEARED,
+} from "./run-status.ts";
 import { scanOutbound } from "./security-gate.ts";
 import { traceOutboundGate, traceWithScope } from "./trace.ts";
 import { parseTelegramDelivery } from "./telegram-delivery.ts";
@@ -437,14 +442,16 @@ export function telegramDraftTurn(
           st.sessionId === pair.sessionId &&
           st.turnId === pair.turnId &&
           st.draftId === pair.draftId
-        : [
-            "status",
-            "sessionId",
-            "turnId",
-            "draftId",
-            "resetAt",
-            "ingressId",
-          ].every((field) => st?.[field] === snapshot?.[field]),
+        : (
+            [
+              "status",
+              "sessionId",
+              "turnId",
+              "draftId",
+              "resetAt",
+              "ingressId",
+            ] as const
+          ).every((field) => st?.[field] === snapshot?.[field]),
   });
   if (!stream.closed) turns.set(key, stream);
   return stream;
@@ -514,15 +521,7 @@ export async function finishTelegramStatus(
       { sessionId, ...(turnId === undefined ? {} : { turnId }) },
       {
         status: "idle",
-        sessionId: null,
-        turnId: null,
-        draftId: null,
-        compacting: null,
-        ingressId: null,
-        ingressAt: null,
-        turnAt: null,
-        firstOutputAt: null,
-        latencyLogged: null,
+        ...TURN_FIELDS_CLEARED,
         ...(keepBusy ? { status: "running", sessionId, compacting: true } : {}),
       },
     ),

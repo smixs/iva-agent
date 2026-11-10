@@ -44,6 +44,9 @@ test("NoSilentLoss: the shared run-status.json is neither read nor touched", () 
 
 // specs/UpdateFloor.tla: NoSilentLoss. Releases before 0.4.0 wrote continuationToken into a
 // chat record. The record is read whole; the field is neither used nor stripped.
+// A field this version does not know stays outside the typed record.
+const rawStatus = (key: string): Record<string, unknown> | null =>
+  status.getChatStatus(key);
 test("NoSilentLoss: a chat record that carries continuationToken is read whole and the field stays", () => {
   const key = "token-chat:";
   mkdirSync(join(dataDir, "run-status.d"), { recursive: true });
@@ -64,11 +67,11 @@ test("NoSilentLoss: a chat record that carries continuationToken is read whole a
   );
 
   assert.equal(status.getChatStatus(key)?.sessionId, "s");
-  assert.equal(status.getChatStatus(key)?.continuationToken, "old");
+  assert.equal(rawStatus(key)?.continuationToken, "old");
   status.setChatStatus(key, { turnId: "t2" });
   assert.equal(status.getChatStatus(key)?.turnId, "t2");
   assert.equal(status.getChatStatus(key)?.sessionId, "s");
-  assert.equal(status.getChatStatus(key)?.continuationToken, "old");
+  assert.equal(rawStatus(key)?.continuationToken, "old");
 });
 
 test("distinct chats survive bounded concurrent writers", async () => {
@@ -428,14 +431,15 @@ test(
 
 test("markTelegramSessionForRetirement помечает ровно нужную сессию", () => {
   const { markTelegramSessionForRetirement } = status;
-  const running = (over: Record<string, unknown> = {}) => ({
-    status: "running",
-    generation: 3,
-    updatedAt: 1000,
-    sessionId: "s1",
-    turnId: "t1",
-    ...over,
-  });
+  const running = (over: Record<string, unknown> = {}) =>
+    ({
+      status: "running",
+      generation: 3,
+      updatedAt: 1000,
+      sessionId: "s1",
+      turnId: "t1",
+      ...over,
+    }) as import("./run-status.ts").ChatRecord;
   const calls: unknown[][] = [];
   // Приманки ПЕРЕД целью: выключение любого условия ниже обязано дать лишний вызов.
   const listStatusesImpl = () => [
@@ -446,7 +450,7 @@ test("markTelegramSessionForRetirement помечает ровно нужную 
   ];
   const setStatusIfImpl = (...args: unknown[]) => {
     calls.push(args);
-    return { ok: true };
+    return {};
   };
 
   assert.equal(
@@ -484,7 +488,7 @@ test("markTelegramSessionForRetirement молчит, когда помечать
       {
         chatKey: "tg:9",
         status: {
-          status: "running",
+          status: "running" as const,
           sessionId: "s1",
           turnId: "t1",
           retiredSessionId: "s1",
@@ -493,7 +497,7 @@ test("markTelegramSessionForRetirement молчит, когда помечать
       {
         chatKey: "tg:8",
         status: {
-          status: "running",
+          status: "running" as const,
           sessionId: "s1",
           turnId: "t1",
           retireAfterTurn: { replayMs: 1, sessionId: "s1", turnId: "t1" },

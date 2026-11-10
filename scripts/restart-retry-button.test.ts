@@ -123,6 +123,7 @@ void test("an old notification cannot submit the next interrupted question", asy
   const fx = await interrupted("старый вопрос");
   status.setChatStatus(fx.key, {
     status: "running",
+    sessionId: "next",
     turnQuestion: "новый вопрос",
   });
   await queue.reapStaleRuns({

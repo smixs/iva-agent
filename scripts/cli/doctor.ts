@@ -1179,10 +1179,8 @@ type BridgeState = {
   readonly unreadable: boolean;
 };
 
-type ChatStatusesReport = {
-  readonly statuses: ReturnType<typeof listChatStatuses>;
-  readonly staleRunMs: number | null;
-};
+/** Состояния чатов словами (agent/lib/run-status.ts chatState); пусто, если записи недоступны. */
+type ChatStates = readonly string[];
 
 /**
  * Очереди моста. Загрузчик при обычной работе чинит pending/corrupt-файлы, а доктор
@@ -1240,34 +1238,29 @@ async function loadBridgeState(ctx: DoctorContext): Promise<BridgeState> {
   return { module, documents, unreadable };
 }
 
-async function readChatStatuses(
+async function readChatStates(
   ctx: DoctorContext,
-): Promise<ChatStatusesReport> {
+  checkedAt: number,
+): Promise<ChatStates> {
   try {
     const runStatus = await import("../../agent/lib/run-status.ts");
-    return {
-      statuses: (ctx.listChatStatuses ?? runStatus.listChatStatuses)(),
-      staleRunMs: runStatus.RUN_STALE_MS,
-    };
+    return (ctx.listChatStatuses ?? runStatus.listChatStatuses)().map(
+      ({ status }) => runStatus.chatState(status, checkedAt),
+    );
   } catch {
     // Authored tree или run-status каталог недоступны (CLI обязан грузиться
     // и без них) — протухшие чаты в этой среде проверить нечем.
-    return { statuses: [], staleRunMs: null };
+    return [];
   }
 }
 
-function countStuckChats(
-  statuses: ReturnType<typeof listChatStatuses>,
-  staleRunMs: number | null,
-  checkedAt: number,
-): number {
-  if (staleRunMs === null) return 0;
-  return statuses.filter(
-    ({ status }) =>
-      status.status === "running" &&
-      (typeof status.updatedAt !== "number" ||
-        checkedAt - status.updatedAt > staleRunMs),
-  ).length;
+/** Чем заняты чаты: «1 turn, 1 compacting»; пусто — все свободны. */
+function busyChatsLine(states: ChatStates): string {
+  return ["accepted", "turn", "compacting", "stale"]
+    .map((name) => [name, states.filter((state) => state === name).length])
+    .filter(([, count]) => count !== 0)
+    .map(([name, count]) => `${count} ${name}`)
+    .join(", ");
 }
 
 function countQueueItems(
@@ -1296,9 +1289,9 @@ function countQueueItems(
 
 async function checkBridge(ctx: DoctorContext): Promise<void> {
   const { module, documents, unreadable } = await loadBridgeState(ctx);
-  const { statuses, staleRunMs } = await readChatStatuses(ctx);
   const checkedAt = ctx.now();
-  const stuckChats = countStuckChats(statuses, staleRunMs, checkedAt);
+  const states = await readChatStates(ctx, checkedAt);
+  const stuckChats = states.filter((state) => state === "stale").length;
   const { itemCount, oldestEnqueuedAt } = countQueueItems(module, documents);
   const oldestAgeMs =
     itemCount > 0 && oldestEnqueuedAt !== null
@@ -1317,6 +1310,8 @@ async function checkBridge(ctx: DoctorContext): Promise<void> {
   } else if (!unreadable) {
     ctx.ok("bridge backlog: clear");
   }
+  const busy = busyChatsLine(states);
+  if (busy !== "") ctx.ok(`chats busy: ${busy}`);
 }
 
 // 6. Vault + git origin (report only — we don't initiate git operations)

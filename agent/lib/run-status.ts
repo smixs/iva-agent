@@ -22,19 +22,172 @@ import {
 } from "./fs-atomic.ts";
 import { dataDir } from "./data-dir.ts";
 
-type StatusRecord = {
-  generation?: number;
-  status?: string;
-  updatedAt?: number;
-  [key: string]: unknown;
-};
-type StatusPatch = Record<string, unknown>;
+// ── Запись чата: одно объединение состояний (specs/ChatRecord.tla) ────────────────────────
+// Формат файла прежний: плоский JSON с теми же именами полей. Незнакомое поле остаётся
+// в файле как есть — его могла записать другая версия. Схема без внешних пакетов:
+// восстановление перед стартом сервиса грузит этот файл раньше всего остального.
+const text = (v: unknown): v is string => typeof v === "string" && v.length > 0;
+const str = (v: unknown): v is string => typeof v === "string";
+const num = (v: unknown): v is number =>
+  typeof v === "number" && !Number.isNaN(v);
+const mark = (v: unknown): v is true => v === true;
+const bool = (v: unknown): v is boolean => typeof v === "boolean";
+const legacy = (v: unknown): v is unknown => v !== null;
 
 export type TelegramSessionRetirement = {
   replayMs: number;
   sessionId: string;
   turnId: string;
 };
+const retirement = (v: unknown): v is TelegramSessionRetirement =>
+  parseTelegramSessionRetirement(v) !== null;
+
+/** Поля хода: заполнены, только пока чат держит ход, принятый вход или свёртка. */
+const turnFields = {
+  ingressId: text,
+  ingressAt: num,
+  sessionId: text,
+  turnId: text,
+  draftId: num,
+  turnAt: num,
+  firstOutputAt: num,
+  latencyLogged: mark,
+  compacting: mark,
+};
+/** Отметки: переживают конец хода и не говорят, занят ли чат. */
+const markFields = {
+  status: (v: unknown): v is "idle" | "running" =>
+    v === "idle" || v === "running",
+  generation: (v: unknown): v is number =>
+    Number.isSafeInteger(v) && Number(v) >= 0,
+  updatedAt: num,
+  wasCancelled: mark,
+  resetAt: num,
+  turnQuestion: str,
+  turnQuestionMedia: bool,
+  queuedIngressId: text,
+  queuedIngressAt: num,
+  queuedSessionId: text,
+  pendingInputRequestIds: (v: unknown): v is string[] =>
+    Array.isArray(v) && v.length > 0 && v.every(text),
+  pendingInputSessionId: text,
+  retireAfterTurn: retirement,
+  retiredSessionId: text,
+  restartRetryData: str,
+  restartRetryUpdate: num,
+  restartRetryQuestion: str,
+  restartRetryMedia: bool,
+  // Следы индикаторов версий до 0.5.0: уходят, когда меняется пара хода.
+  statusMessageId: legacy,
+  statusAt: legacy,
+  queuedStatusMessageId: legacy,
+  queuedStatusAt: legacy,
+};
+const fieldChecks: Record<string, (v: unknown) => boolean> = {
+  ...turnFields,
+  ...markFields,
+};
+type Checked<T> = {
+  [K in keyof T]: T[K] extends (v: unknown) => v is infer U ? U : never;
+};
+type TurnFields = Checked<typeof turnFields>;
+type TurnField = keyof TurnFields;
+type Marks = Partial<Omit<Checked<typeof markFields>, "status">>;
+type Running<Own extends TurnField, Absent extends TurnField> = Marks & {
+  status: "running";
+} & Pick<TurnFields, Own> &
+  Partial<Omit<TurnFields, Own | Absent>> & { [K in Absent]?: undefined };
+
+// Инварианты строки (TurnFieldsOnlyWhenBusy): какие поля хода состояние обязано нести и
+// каких нести не может. Свободный чат не несёт ни одного; у принятого входа есть ingressId
+// и ещё нет сессии, а значит нет ни хода, ни свёртки; свёртка идёт под сессией и без хода.
+const turnFieldNames = Object.keys(turnFields) as TurnField[];
+const rowRules: Record<
+  "free" | "accepted" | "turn" | "compacting",
+  { own: readonly TurnField[]; absent: readonly TurnField[] }
+> = {
+  free: { own: [], absent: turnFieldNames },
+  accepted: { own: ["ingressId"], absent: ["turnId", "compacting"] },
+  turn: { own: ["sessionId"], absent: ["compacting"] },
+  compacting: { own: ["sessionId", "compacting"], absent: ["turnId"] },
+};
+export type ChatRecord =
+  | (Marks & { status?: "idle" } & { [K in TurnField]?: undefined })
+  | Running<"ingressId", "sessionId" | "turnId" | "compacting">
+  | Running<"sessionId", "compacting">
+  | Running<"sessionId" | "compacting", "turnId">;
+type ChatRecordFields = Partial<Checked<typeof markFields> & TurnFields>;
+/** Ожидание CAS: поле сравнивается с записью; `undefined` значит «поля нет». */
+export type ChatRecordExpected = ChatRecordFields;
+/** Частичная запись: `null` убирает поле. */
+export type ChatRecordPatch = {
+  [K in keyof ChatRecordFields]?: ChatRecordFields[K] | null;
+};
+
+/** Состояние чата. Занят: accepted, turn, compacting. Остальные Bridge считает свободными. */
+export type ChatState =
+  | "free"
+  | "awaiting-owner"
+  | "retry-offered"
+  | "retiring"
+  | "accepted"
+  | "turn"
+  | "compacting"
+  | "stale";
+
+type RawRecord = Record<string, unknown>;
+const rowOf = (raw: RawRecord): keyof typeof rowRules =>
+  raw.status !== "running"
+    ? "free"
+    : raw.compacting !== undefined
+      ? "compacting"
+      : raw.sessionId !== undefined
+        ? "turn"
+        : "accepted";
+
+/** Что в записи нарушает схему: `поле: причина`. Пусто — запись верна. */
+export function chatRecordViolations(raw: RawRecord): string[] {
+  const row = rowOf(raw);
+  const { own, absent } = rowRules[row];
+  return [
+    ...Object.keys(fieldChecks)
+      .filter(
+        (field) => raw[field] !== undefined && !fieldChecks[field](raw[field]),
+      )
+      .map((field) => `${field}: wrong type`),
+    ...absent
+      .filter((field) => raw[field] !== undefined)
+      .map((field) => `${field}: not allowed on a ${row} chat`),
+    ...own
+      .filter((field) => raw[field] === undefined)
+      .map((field) => `${field}: required on a ${row} chat`),
+  ];
+}
+
+// Запись без нарушающих полей. Чего не исправить удалением поля (running без владельца),
+// остаётся как есть: такую запись снимет жнец.
+function repairedRecord(raw: RawRecord): ChatRecord {
+  let record = raw;
+  for (let pass = 0; pass < 3; pass++) {
+    const violations = chatRecordViolations(record);
+    if (violations.length === 0) break;
+    record = { ...record };
+    for (const violation of violations) delete record[violation.split(":")[0]];
+  }
+  return record;
+}
+
+// Писатель, нарушивший инвариант строки: в тесте (node --test) — ошибка на записи; в живом
+// процессе запись уходит без нарушающих полей, а нарушение названо в журнале сервиса.
+const STRICT_RECORDS = process.env.NODE_TEST_CONTEXT !== undefined;
+function enforcedRecord(chatKey: string, next: RawRecord): ChatRecord {
+  const violations = chatRecordViolations(next);
+  if (violations.length === 0) return next;
+  const message = `chat record ${chatKey} breaks TurnFieldsOnlyWhenBusy (specs/ChatRecord.tla): ${violations.join("; ")}`;
+  if (STRICT_RECORDS) throw new Error(message);
+  console.error(`[run-status] ${message}; the fields are dropped`);
+  return repairedRecord(next);
+}
 
 const errorCode = (error: unknown): string | undefined =>
   error !== null && typeof error === "object" && "code" in error
@@ -69,6 +222,20 @@ export const QUEUED_STATUS_CLEARED = {
   queuedSessionId: null,
 } as const;
 
+// Освобождение чата снимает все поля хода одним патчем (TurnFieldsOnlyWhenBusy,
+// specs/ChatRecord.tla): писатель, перечисляющий поля сам, забывает одно из них.
+export const TURN_FIELDS_CLEARED = {
+  ingressId: null,
+  ingressAt: null,
+  sessionId: null,
+  turnId: null,
+  draftId: null,
+  turnAt: null,
+  firstOutputAt: null,
+  latencyLogged: null,
+  compacting: null,
+} as const satisfies Record<TurnField, null>;
+
 // Ход длиннее этого считаем зависшим/осиротевшим (упал без terminal-события):
 // мост перестаёт буферизовать, чтобы сообщения не копились вечно.
 export const RUN_STALE_MS = Number(
@@ -89,7 +256,7 @@ function statusFileOf(chatKey: string): string {
   );
 }
 
-function readObject(file: string): StatusRecord | null {
+function readObject(file: string): RawRecord | null {
   try {
     const parsed: unknown = JSON.parse(readFileSync(file, "utf8"));
     if (
@@ -101,7 +268,7 @@ function readObject(file: string): StatusRecord | null {
       Object.assign(error, { code: "ERR_RUN_STATUS_SCHEMA" });
       throw error;
     }
-    return parsed as StatusRecord;
+    return parsed as RawRecord;
   } catch (error) {
     if (errorCode(error) === "ENOENT") return null;
     throw error;
@@ -114,14 +281,11 @@ function isCorruptStatus(error: unknown): boolean {
   );
 }
 
-function isRecord(value: unknown): value is StatusRecord {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function readPerChat(chatKey: string): StatusRecord | null {
+function readPerChat(chatKey: string): ChatRecord | null {
   const file = statusFileOf(chatKey);
   try {
-    return readObject(file);
+    const raw = readObject(file);
+    return raw === null ? null : repairedRecord(raw);
   } catch (error) {
     if (!isCorruptStatus(error)) throw error;
     const backup = `${file}.corrupt-${Date.now()}-${randomUUID()}`;
@@ -151,11 +315,11 @@ export function acquireChatLock(
   return held;
 }
 
-function writeCurrent(file: string, value: StatusRecord): void {
+function writeCurrent(file: string, value: ChatRecord): void {
   writeFileAtomicSync(file, JSON.stringify(value), { mode: 0o600 });
 }
 
-export function getChatStatus(chatKey: string): StatusRecord | null {
+export function getChatStatus(chatKey: string): ChatRecord | null {
   return readPerChat(chatKey);
 }
 
@@ -163,7 +327,7 @@ export function getChatStatus(chatKey: string): StatusRecord | null {
 // Служебные lock/tmp/corrupt файлы и legacy whole-map сюда не попадают.
 export function listChatStatuses(): Array<{
   chatKey: string;
-  status: StatusRecord;
+  status: ChatRecord;
 }> {
   let names: string[];
   try {
@@ -173,7 +337,7 @@ export function listChatStatuses(): Array<{
     throw error;
   }
 
-  const records: Array<{ chatKey: string; status: StatusRecord }> = [];
+  const records: Array<{ chatKey: string; status: ChatRecord }> = [];
   for (const name of names) {
     if (!name.endsWith(".json")) continue;
     const encoded = name.slice(0, -".json".length);
@@ -259,36 +423,70 @@ export function updateTelegramPendingInputRequests(
   return false;
 }
 
+/**
+ * Состояние чата по записи — единственное место, где оно выводится из полей. Занятый чат
+ * (ход, принятый вход, свёртка) с записью старше срока — `stale`: его снимет жнец Bridge.
+ * У свободного чата отметки читаются по старшинству: покой сессии, предложенный повтор,
+ * открытый вопрос владельцу.
+ */
+export function chatState(
+  record: ChatRecord | null | undefined,
+  now = Date.now(),
+  staleMs = RUN_STALE_MS,
+): ChatState {
+  if (record?.status === "running") {
+    if (
+      typeof record.updatedAt !== "number" ||
+      now - record.updatedAt >= staleMs
+    )
+      return "stale";
+    if (record.compacting === true) return "compacting";
+    return record.sessionId === undefined ? "accepted" : "turn";
+  }
+  if (!record) return "free";
+  if (record.retireAfterTurn !== undefined) return "retiring";
+  if (record.restartRetryData !== undefined) return "retry-offered";
+  return record.pendingInputSessionId !== undefined &&
+    pendingInputIds(record.pendingInputRequestIds).length > 0
+    ? "awaiting-owner"
+    : "free";
+}
+
+/** Чат занят: Bridge держит новые сообщения в очереди. */
+export const chatBusy = (state: ChatState): boolean =>
+  state === "turn" || state === "accepted" || state === "compacting";
+
+/** Запись держит чат: занят либо завис и ждёт жнеца. */
+export const chatHeld = (state: ChatState): boolean =>
+  chatBusy(state) || state === "stale";
+
 // true, когда по chatKey реально идёт ход или свёртка между ходами (running и не протух).
 export function isRunning(chatKey: string, now = Date.now()): boolean {
-  const st = getChatStatus(chatKey);
-  return Boolean(
-    st && st.status === "running" && now - (st.updatedAt ?? 0) < RUN_STALE_MS,
-  );
+  return chatBusy(chatState(getChatStatus(chatKey), now));
 }
 
 // true, когда чат занят свёрткой между ходами (agent/lib/idle-compaction.ts): запись
 // running несёт compacting: true. Срок у неё тот же, что у хода.
 export function isCompacting(chatKey: string, now = Date.now()): boolean {
-  return isRunning(chatKey, now) && getChatStatus(chatKey)?.compacting === true;
+  return chatState(getChatStatus(chatKey), now) === "compacting";
 }
 
 // Чем запись метит updatedAt: обычная — временем записи, запись знака очереди — прежним.
-type Stamp = (prev: StatusRecord) => number | undefined;
+type Stamp = (prev: ChatRecord) => number | undefined;
 const stampNow: Stamp = () => Date.now();
 const keepStamp: Stamp = (prev) => prev.updatedAt;
 
 function updateChatStatus(
   chatKey: string,
-  patch: StatusPatch,
-  expected: StatusPatch | null,
+  patch: ChatRecordPatch,
+  expected: ChatRecordExpected | null,
   stamp: Stamp,
-): StatusRecord | null {
+): ChatRecord | null {
   const file = statusFileOf(chatKey);
   const lock = acquireChatLock(file);
   try {
     // Первый write лениво мигрирует этот ключ из legacy whole-map.
-    const prev = readPerChat(chatKey) ?? {};
+    const prev: RawRecord = readPerChat(chatKey) ?? {};
     if (
       expected &&
       Object.entries(expected).some(
@@ -303,7 +501,7 @@ function updateChatStatus(
       prev.generation >= 0
         ? prev.generation
         : 0;
-    const next: StatusRecord = {
+    const next: RawRecord = {
       ...prev,
       ...patch,
       generation: previousGeneration + 1,
@@ -325,8 +523,9 @@ function updateChatStatus(
         delete next[field];
     for (const key of Object.keys(next))
       if (next[key] === null) delete next[key];
-    writeCurrent(file, next);
-    return next;
+    const record = enforcedRecord(chatKey, next);
+    writeCurrent(file, record);
+    return record;
   } finally {
     releaseFileLock(lock);
   }
@@ -335,9 +534,9 @@ function updateChatStatus(
 // Частичное обновление записи chatKey; null-поля в patch удаляют ключ.
 export function setChatStatus(
   chatKey: string,
-  patch: StatusPatch,
-): StatusRecord {
-  return updateChatStatus(chatKey, patch, null, stampNow) as StatusRecord;
+  patch: ChatRecordPatch,
+): ChatRecord {
+  return updateChatStatus(chatKey, patch, null, stampNow) as ChatRecord;
 }
 
 // Atomic compare-and-set для terminal Eve events: reset может успеть удалить
@@ -346,10 +545,10 @@ export function setChatStatus(
 // прожила бы ещё RUN_STALE_MS. generation растёт всегда — на нём держатся CAS.
 export function setChatStatusIf(
   chatKey: string,
-  expected: StatusPatch,
-  patch: StatusPatch,
+  expected: ChatRecordExpected,
+  patch: ChatRecordPatch,
   options?: { touch?: boolean },
-): StatusRecord | null {
+): ChatRecord | null {
   return updateChatStatus(
     chatKey,
     patch,
@@ -361,8 +560,9 @@ export function setChatStatusIf(
 export function parseTelegramSessionRetirement(
   value: unknown,
 ): TelegramSessionRetirement | null {
-  if (!isRecord(value)) return null;
-  const { replayMs, sessionId, turnId } = value;
+  if (typeof value !== "object" || value === null || Array.isArray(value))
+    return null;
+  const { replayMs, sessionId, turnId } = value as RawRecord;
   if (
     typeof replayMs !== "number" ||
     !Number.isFinite(replayMs) ||

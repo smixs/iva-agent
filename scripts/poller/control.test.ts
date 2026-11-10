@@ -483,8 +483,11 @@ test("/stop takes the same door and stays silent while the status message speaks
 test("Stop on an idle chat explains itself and never calls cancel", async () => {
   status.setChatStatus("7:", {
     status: "idle",
+    ingressId: null,
+    ingressAt: null,
     sessionId: null,
     turnId: null,
+    draftId: null,
   });
   const { cancels, acks, replies, deps } = recordingDeps();
 
@@ -501,6 +504,7 @@ test("an early running status without a session is not cancellable", async () =>
     status: "running",
     sessionId: null,
     turnId: null,
+    draftId: null,
     ingressId: "ingress-1",
   });
   const { cancels, acks, deps } = recordingDeps();
@@ -532,6 +536,7 @@ function stopTurn(key: string) {
     status: "idle",
     sessionId: null,
     turnId: null,
+    draftId: null,
   });
 }
 
@@ -1061,8 +1066,11 @@ test("a falsey local reply does not authorize offset acknowledgement", async () 
 test("a falsey callback ack does not claim a local control", async () => {
   status.setChatStatus("7:", {
     status: "idle",
+    ingressId: null,
+    ingressAt: null,
     sessionId: null,
     turnId: null,
+    draftId: null,
   });
 
   const consumed = await handleControl(
@@ -1084,8 +1092,11 @@ test("a falsey callback ack does not claim a local control", async () => {
 test("a false callback ack result does not claim a local control", async () => {
   status.setChatStatus("7:", {
     status: "idle",
+    ingressId: null,
+    ingressAt: null,
     sessionId: null,
     turnId: null,
+    draftId: null,
   });
 
   const consumed = await handleControl(
@@ -1833,11 +1844,13 @@ function resetDeps(
   };
 }
 
+// Запись помнит сессию, только пока её держит ход: по ней /new и находит диалог.
 function idleSession() {
   status.setChatStatus("7:", {
-    status: "idle",
+    status: "running",
     sessionId: "session-r",
     turnId: null,
+    draftId: null,
   });
 }
 
@@ -3294,9 +3307,10 @@ test("native stop is handled before admission and leaves the next turn and compa
   assert.equal(await handleControl(nativeStop(), deps), true);
   assert.equal(cancels.length, 1);
   assert.equal(status.getChatStatus("7:")?.wasCancelled, undefined);
-  runningTurn({ turnId: "turn-compacting", draftId: 41, compacting: true });
+  // Свёртка черновика не держит: запись без turnId и draftId, нативный Стоп её не касается.
+  runningTurn({ turnId: null, draftId: null, compacting: true });
   assert.equal(await handleControl(nativeStop(), deps), true);
-  assert.equal(cancels.length, 2);
+  assert.equal(cancels.length, 1);
   assert.equal(status.getChatStatus("7:")?.wasCancelled, undefined);
   assert.deepEqual(replies, []);
   assert.deepEqual(acks, []);

@@ -163,6 +163,10 @@ const settle = async () => {
     await new Promise<void>((resolve) => setImmediate(resolve));
 };
 const statusOf = (chatId: number) => runStatus.getChatStatus(`${chatId}:`);
+const stopPressedOf = (chatId: number): unknown => {
+  const record: Record<string, unknown> | null = statusOf(chatId);
+  return record?.stopPressed;
+};
 const settings = join(dataDir, "settings.json");
 
 let seq = 0;
@@ -469,7 +473,8 @@ test("порядок queue: сообщение во время пересказ�
     "Queued (2). I'll start it automatically when the current task finishes.",
   );
   assert.equal(
-    queuedNoticeText(1, { status: "idle", compacting: true }),
+    // Запись, какой писатели не оставляют: текст всё равно решает статус.
+    queuedNoticeText(1, { status: "idle", compacting: true } as never),
     "Queued (1). I'll start it automatically when the current task finishes.",
   );
 });
@@ -667,7 +672,12 @@ test("сообщение успело занять чат до парковки:
 test("сессию сбросили (/new оставил resetAt): пересказа нет", async () => {
   const s = session("s-reset", 50);
   await s.turn([LIMIT]);
-  runStatus.setChatStatus("50:", { status: "idle", resetAt: Date.now() });
+  runStatus.setChatStatus("50:", {
+    status: "idle",
+    sessionId: null,
+    compacting: null,
+    resetAt: Date.now(),
+  });
   await s.waiting();
   assert.deepEqual(compactCalls, []);
   assert.equal(statusOf(50)?.status, "idle");
@@ -709,13 +719,13 @@ test("отмена пересказа (turn.cancelled, как после /stop):
   await s.cancelled();
   assert.equal(statusOf(51)?.status, "idle");
   assert.equal(statusOf(51)?.wasCancelled, undefined);
-  assert.equal(statusOf(51)?.stopPressed, undefined);
+  assert.equal(stopPressedOf(51), undefined);
   // Без нажатия Стоп отмена настоящего хода тоже не ставит отметку.
   const real = session("s-stop-turn", 52);
   await real.started();
   await real.cancelled();
   assert.equal(statusOf(52)?.wasCancelled, undefined);
-  assert.equal(statusOf(52)?.stopPressed, undefined);
+  assert.equal(stopPressedOf(52), undefined);
 });
 
 test("законченный пересказ, который не помог, больше не повторяется", async () => {
@@ -764,8 +774,15 @@ for (const language of ["ru", "en"] as const) {
       t.mock.timers.tick(3000);
       runStatus.setChatStatus(`${chatId}:`, {
         status: state === "idle" || state === "legacy" ? "idle" : "running",
-        sessionId: `s-note-${index}`,
-        turnId: "old",
+        ingressId: null,
+        ingressAt: null,
+        draftId: null,
+        sessionId:
+          state === "idle" || state === "legacy" ? null : `s-note-${index}`,
+        turnId:
+          state === "idle" || state === "legacy" || state === "compacting"
+            ? null
+            : "old",
         compacting: state === "compacting" ? true : null,
         wasCancelled: state === "legacy" || state === "pressed" ? true : null,
       });
@@ -775,7 +792,7 @@ for (const language of ["ru", "en"] as const) {
       if (state === "legacy" || state === "pressed") {
         assert.ok(wire.includes(stop), wire);
         assert.ok(!wire.includes(neutral), wire);
-        assert.equal(statusOf(chatId)?.stopPressed, undefined);
+        assert.equal(stopPressedOf(chatId), undefined);
         assert.equal(statusOf(chatId)?.wasCancelled, undefined);
       } else if (state === "running") {
         assert.ok(wire.includes(neutral), wire);
