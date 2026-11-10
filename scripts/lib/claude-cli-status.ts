@@ -243,6 +243,9 @@ const runClaude: ClaudeRunner = (command, { env, input, timeoutMs, cwd }) =>
       finish({ stdout, stderr, failed });
     });
     child.on("close", () => finish({ stdout, stderr, failed }));
+    // CLI, который вышел, не открыв stdin, отвечает на запись EPIPE: без слушателя это
+    // исключение процесса, а итог запуска и так придёт по `close`.
+    child.stdin?.on("error", () => undefined);
     child.stdin?.end(input);
   });
 
