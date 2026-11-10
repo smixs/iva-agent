@@ -69,9 +69,40 @@ export async function awaitUserbotHealth(
 export type UserbotHealthState =
   "off" | "starting" | "unreachable" | "unauthorized" | "ready";
 
+/** The state in the owner's words, one wording for every menu screen. */
+export const userbotStateLabel = (
+  tr: (en: string, ru: string) => string,
+  state: UserbotHealthState,
+) =>
+  ({
+    off: tr("off", "выкл"),
+    starting: tr("starting", "запускается"),
+    unreachable: tr("unreachable", "недоступен"),
+    unauthorized: tr("login required", "нужен вход"),
+    ready: tr("ready", "готов"),
+  })[state];
+
+/**
+ * The login phases of the proxy: `Phase` in services/telegram-userbot/onboarding.py lists
+ * them and `/healthz` sends one as `login` (specs/UserbotLogin.tla).
+ */
+export const USERBOT_LOGIN_PHASES = [
+  "idle",
+  "starting",
+  "waiting",
+  "password_needed",
+  "authorized",
+  "expired",
+  "error",
+  "interrupted",
+] as const;
+export type UserbotLoginPhase = (typeof USERBOT_LOGIN_PHASES)[number];
+
 export interface UserbotHealth {
   readonly state: UserbotHealthState;
   readonly reason: string;
+  /** Named by a proxy that answered; `ready` goes with `authorized` and only with it. */
+  readonly login?: UserbotLoginPhase;
 }
 
 interface SystemctlResult {
@@ -112,8 +143,12 @@ interface ProbeOptions {
   readonly signal?: AbortSignal;
 }
 
-function fixed(state: UserbotHealthState, reason: string): UserbotHealth {
-  return { state, reason };
+function fixed(
+  state: UserbotHealthState,
+  reason: string,
+  login?: UserbotLoginPhase,
+): UserbotHealth {
+  return login ? { state, reason, login } : { state, reason };
 }
 
 function defaultRunSystemctl(
@@ -146,10 +181,18 @@ async function defaultReadToken(dataDir: string): Promise<string> {
   }
 }
 
-function payloadState(payload: unknown): string | undefined {
-  if (typeof payload !== "object" || payload === null) return undefined;
-  const state = (payload as { state?: unknown }).state;
-  return typeof state === "string" ? state : undefined;
+function payloadHealth(payload: unknown): UserbotHealth {
+  const { state, login: named } = (payload ?? {}) as Record<string, unknown>;
+  const login = USERBOT_LOGIN_PHASES.find((phase) => phase === named);
+  const ready = state === "ready";
+  if (
+    (ready || state === "unauthorized") &&
+    (login === undefined || ready === (login === "authorized"))
+  )
+    return ready
+      ? fixed("ready", "ok", login)
+      : fixed("unauthorized", "telegram_login_required", login);
+  return fixed("unreachable", "invalid_proxy_response");
 }
 
 interface RunProbeOptions {
@@ -197,11 +240,7 @@ async function runProbe({
     return fixed("unreachable", "proxy_auth_rejected");
   if (!response.ok) return fixed("unreachable", "proxy_unreachable");
 
-  const state = payloadState(await response.json());
-  if (state === "ready") return fixed("ready", "ok");
-  if (state === "unauthorized")
-    return fixed("unauthorized", "telegram_login_required");
-  return fixed("unreachable", "invalid_proxy_response");
+  return payloadHealth(await response.json());
 }
 
 export async function probeUserbotHealth({
