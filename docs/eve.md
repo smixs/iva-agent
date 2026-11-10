@@ -70,6 +70,9 @@ The copy has no test suite of its own. A change to eve is checked from Iva's sid
   `README.md`, `bin/eve.js` and `dist/src/compiled/.vendor-stamp.json`. After
   `npm run build`, the eve modules in `.output/server` (the `//#region` markers)
   are the same set with the same content; only the version string differs.
+  `npm run build` gives one of two outputs for the same tree: they differ in the
+  numeric suffixes of colliding names inside ten vendored modules. Compare
+  outputs of the same kind and rebuild when the kinds differ.
 - `npm run build`, `node node_modules/eve/bin/eve.js --help` and
   `node node_modules/eve/bin/eve.js start --help` exit 0.
 - `scripts/eve-copy.test.ts` pins what the copy no longer carries.
