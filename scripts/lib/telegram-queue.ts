@@ -14,6 +14,7 @@ import {
   TELEGRAM_MESSAGE_ENVELOPE_KEYS,
   TELEGRAM_MESSAGE_TEXT_KEYS,
 } from "#lib/telegram-parts.ts";
+import { isRecord } from "../../packages/guards/index.ts";
 
 export type TelegramId = string | number;
 
@@ -63,10 +64,6 @@ export type TelegramQueueUpdate = {
   stopped_message_generation?: import("#lib/telegram-stop.ts").TelegramDraftStop;
   [key: string]: unknown;
 };
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 function optionalField(
   value: Record<string, unknown>,

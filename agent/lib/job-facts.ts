@@ -22,6 +22,7 @@ import {
   releaseLock,
   saveJsonAtomic,
 } from "./json-store.ts";
+import { isSafeInteger } from "../../packages/guards/index.ts";
 
 /** Сколько живёт строка: старше — удаляется при записи. */
 export const JOB_FACT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
@@ -89,15 +90,11 @@ export function jobTail(
     : joined;
 }
 
-function isSafeInt(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value);
-}
-
 function isWake(value: unknown): value is JobWake {
   if (typeof value !== "object" || value === null) return false;
   const wake = value as Record<string, unknown>;
   return (
-    isSafeInt(wake.at) &&
+    isSafeInteger(wake.at) &&
     (wake.status === "answered" ||
       wake.status === "empty" ||
       wake.status === "failed") &&
@@ -112,12 +109,12 @@ function isFact(value: unknown): value is JobFact {
   return (
     typeof fact.name === "string" &&
     fact.name.length > 0 &&
-    isSafeInt(fact.startedAt) &&
-    isSafeInt(fact.finishedAt) &&
+    isSafeInteger(fact.startedAt) &&
+    isSafeInteger(fact.finishedAt) &&
     fact.finishedAt >= fact.startedAt &&
     typeof fact.ok === "boolean" &&
     (fact.error === null || typeof fact.error === "string") &&
-    (fact.exitCode === null || isSafeInt(fact.exitCode)) &&
+    (fact.exitCode === null || isSafeInteger(fact.exitCode)) &&
     typeof fact.tail === "string" &&
     typeof fact.acked === "boolean" &&
     (fact.wake === null || isWake(fact.wake))

@@ -1,11 +1,9 @@
+import { isRecord } from "../../packages/guards/index.ts";
+
 // Формат data/telegram-offset.json: { offset } — курсор getUpdates. Повторы после падения
 // между доставкой и записью курсора держат входящие Bridge. Поле delivered, которое писали
 // выпуски до 0.3.24, читатель пропускает.
 export type OffsetState = { offset: number | null };
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 export function parseOffsetFile(raw: string): { offset: number } {
   const j: unknown = JSON.parse(raw);

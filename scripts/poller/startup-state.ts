@@ -8,6 +8,7 @@ import {
   assertTelegramProcessLease,
   type TelegramProcessLease,
 } from "./process-lock.ts";
+import { isRecord } from "../../packages/guards/index.ts";
 
 const MARKER_SCHEMA = "iva-telegram-backlog-drop/v1";
 export const BACKLOG_DROP_MARKER_FILE = join(
@@ -24,10 +25,6 @@ export type StartupDecision =
   | { action: "ambiguous" };
 
 type ErrorLike = { code?: unknown; message?: unknown };
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 export function parseBacklogDropMarker(raw: string): BacklogDropMarker {
   const parsed: unknown = JSON.parse(raw);

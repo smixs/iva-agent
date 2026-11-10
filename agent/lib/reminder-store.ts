@@ -24,6 +24,7 @@ import {
 } from "./json-store.ts";
 import { nextCronRunMs } from "./reminder-time.ts";
 import { listChatStatuses, RUN_STALE_MS } from "./run-status.ts";
+import { isRecord, isSafeInteger } from "../../packages/guards/index.ts";
 
 export const REMINDER_SCHEMA_VERSION = 2;
 /** Сколько держим сработавшую разовую строку: столько владелец видит факт в remind list. */
@@ -103,14 +104,6 @@ function badReminder(file: string, idLabel: string, message: string): never {
   fail(file, `reminder ${idLabel}: ${message}`);
 }
 
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isSafeInt(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value);
-}
-
 function hasExactKeys(
   value: Record<string, unknown>,
   keys: readonly string[],
@@ -129,7 +122,7 @@ function hasExactKeys(
  * нормализуется в себя.
  */
 export function normalizeSchedule(input: unknown): ReminderSchedule {
-  if (!isPlainObject(input))
+  if (!isRecord(input))
     throw new ReminderStoreError(
       `schedule must be an object, got ${JSON.stringify(input)}`,
     );
@@ -139,7 +132,7 @@ export function normalizeSchedule(input: unknown): ReminderSchedule {
       throw new ReminderStoreError(
         `schedule: kind "at" takes exactly kind and atMs, got ${JSON.stringify(input)}`,
       );
-    if (!isSafeInt(input.atMs) || input.atMs < 0)
+    if (!isSafeInteger(input.atMs) || input.atMs < 0)
       throw new ReminderStoreError(
         `schedule: atMs must be a safe integer >= 0, got ${JSON.stringify(input.atMs)}`,
       );
@@ -195,7 +188,7 @@ function assertChat(
 ): ReminderChat | null {
   if (value === null || value === undefined) return null;
   if (
-    !isPlainObject(value) ||
+    !isRecord(value) ||
     typeof value.id !== "string" ||
     value.id.trim() === "" ||
     (value.threadId !== null && typeof value.threadId !== "string")
@@ -225,7 +218,7 @@ function assertTime(
   name: string,
   value: unknown,
 ): number {
-  if (!isSafeInt(value) || value < 0)
+  if (!isSafeInteger(value) || value < 0)
     badReminder(
       file,
       idLabel,
@@ -261,7 +254,7 @@ function assertStatus(
       `status must be "pending" or "fired", got ${JSON.stringify(status)}`,
     );
   const firedAt = value.firedAt;
-  if (firedAt !== null && (!isSafeInt(firedAt) || firedAt < 0))
+  if (firedAt !== null && (!isSafeInteger(firedAt) || firedAt < 0))
     badReminder(
       file,
       idLabel,
@@ -300,7 +293,7 @@ const commandTimes = z.object({
   running_timeout_minutes: minutes,
 });
 function assertReminder(file: string, value: unknown): Reminder {
-  if (!isPlainObject(value))
+  if (!isRecord(value))
     fail(file, `reminder row must be an object, got ${JSON.stringify(value)}`);
 
   const idLabel = JSON.stringify(value.id);
@@ -383,7 +376,7 @@ export function parseReminderTable(
   raw: unknown,
   { damaged }: { damaged?: DamagedRow[] } = {},
 ): Reminder[] {
-  if (!isPlainObject(raw) || typeof raw.schemaVersion !== "number")
+  if (!isRecord(raw) || typeof raw.schemaVersion !== "number")
     fail(file, "no schemaVersion");
   const version = raw.schemaVersion;
   if (!Number.isInteger(version))
@@ -579,12 +572,12 @@ export async function fireDue(
   limit: number,
   file = reminderFile(),
 ): Promise<Reminder[]> {
-  if (!isSafeInt(nowMs) || nowMs < 0)
+  if (!isSafeInteger(nowMs) || nowMs < 0)
     fail(
       file,
       `nowMs must be a safe integer >= 0, got ${JSON.stringify(nowMs)}`,
     );
-  if (!isSafeInt(limit) || limit < 1)
+  if (!isSafeInteger(limit) || limit < 1)
     fail(
       file,
       `limit must be a safe integer >= 1, got ${JSON.stringify(limit)}`,
@@ -817,8 +810,7 @@ export async function clearCommandAlert(id: string): Promise<void> {
     file,
     async () => {
       const state = await loadJsonStrict<unknown>(file, {});
-      if (!isPlainObject(state) || !Object.hasOwn(state, `schedule-${id}`))
-        return;
+      if (!isRecord(state) || !Object.hasOwn(state, `schedule-${id}`)) return;
       delete state[`schedule-${id}`];
       await saveJsonAtomic(file, state, { mode: 0o600 });
     },

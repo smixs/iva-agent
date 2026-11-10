@@ -9,6 +9,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { isRecord, isSafeInteger } from "../../packages/guards/index.ts";
 
 export const TELEGRAM_RESET_INTENT_VERSION = 1;
 
@@ -23,14 +24,6 @@ interface TelegramResetIntentOptions {
   now?: () => number;
   nonce?: () => string;
   discardThroughUpdateId?: number;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isSafeInteger(value: unknown): value is number {
-  return Number.isSafeInteger(value);
 }
 
 function hasErrorCode(error: unknown, code: string): boolean {

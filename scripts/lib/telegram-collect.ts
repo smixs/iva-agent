@@ -3,6 +3,7 @@ import type {
   TelegramQueueMessage,
   TelegramQueueUpdate,
 } from "./telegram-queue.ts";
+import { isSafeInteger } from "../../packages/guards/index.ts";
 
 export const COLLECT_QUIET_MS = 800;
 export const COLLECT_MEDIA_QUIET_MS = 1500;
@@ -41,10 +42,6 @@ export type CollectorOfferResult =
   | { status: "passthrough"; update: TelegramCollectUpdate }
   | { status: "buffered" }
   | { status: "ready"; update: TelegramCollectUpdate };
-
-function isSafeInteger(value: unknown): value is number {
-  return Number.isSafeInteger(value);
-}
 
 function finiteNonNegative(value: unknown, fallback: number) {
   return Number.isFinite(value) && (value as number) >= 0
