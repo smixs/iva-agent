@@ -79,6 +79,9 @@ builds the tree. Four shapes, in descending order of preference:
   (the chat Iva writes to on her own), `reasoning-levels` (the canonical reasoning
   vocabulary), `guards`, `vault-walk` and `codex-auth` (the Codex OAuth constants and the
   token file: its path, its read and its atomic 0600 write) are reached by relative path.
+  glob and grep keep their own shorter skip list instead of the technical list of
+  `vault-walk`: the model must be able to read any file of the person by name, also one in
+  a folder named `.claude` or `.obsidian`.
   The IANA-zone predicate the synchronous `writeUnits()` needs exists once, in
   `packages/timezone`; `scripts/lib/timezone.test.ts` still runs both routes to it, the
   package name and the relative path, on one table.

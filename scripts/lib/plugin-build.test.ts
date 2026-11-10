@@ -19,7 +19,11 @@ import {
   PLUGIN_SCHEMA_URL,
   pluginNameProblem,
 } from "#lib/plugin-reader.ts";
-import { readPluginsState } from "#lib/plugin-store.ts";
+import {
+  pluginMode,
+  readPluginsState,
+  type PluginMode,
+} from "#lib/plugin-store.ts";
 import {
   codePlugins,
   connectionNameProblem,
@@ -248,6 +252,29 @@ test("switching a plugin off is one field in plugins.json", async () => {
   // Второй раз выключать нечего, и файл не переписывается зря.
   assert.equal(await disableCodePlugin(data, "trace"), false);
   assert.equal(await disableCodePlugin(data, "absent"), false);
+});
+
+test("PluginMode UpdateGrantsNothing: the update's switch-off only ever takes a mode down", async () => {
+  // Четыре режима — весь вход: обновление выключает плагин, чей код не собрался, и
+  // больше ничего в паре тумблеров не трогает. Включить или доверить оно не может.
+  const after: Record<PluginMode, PluginMode> = {
+    full: "paused",
+    "no-processes": "off",
+    paused: "paused",
+    off: "off",
+  };
+  for (const enabled of [true, false])
+    for (const trusted of [true, false]) {
+      const data = join(world(), "data");
+      plant(data, "trace");
+      state(data, [{ name: "trace", enabled, trusted }]);
+      const before = pluginMode({ enabled, trusted });
+
+      assert.equal(await disableCodePlugin(data, "trace"), enabled, before);
+
+      const [entry] = (await readPluginsState(data)).plugins;
+      assert.equal(pluginMode(entry), after[before], before);
+    }
 });
 
 test("any name the spec allows either maps to a mount eve accepts or is refused", () => {

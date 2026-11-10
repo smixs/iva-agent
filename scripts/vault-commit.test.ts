@@ -845,6 +845,267 @@ test("ignore новых путей не отменяет соседний бэк
   assert.equal(readFileSync(privateFile, "utf8"), "private\n");
 });
 
+test("BrainOversize: a file over 90 MB stays out of every commit and the index; its deletion still goes", async (t) => {
+  const vault = makeVault(t);
+  const big = join(vault, "cards/notes/film.mp4");
+  const small = join(vault, "cards/notes/note.md");
+  execFileSync("truncate", ["-s", "91M", big]);
+  writeFileSync(small, "note\n");
+  const { value: outcome, logged } = await journal(() =>
+    tool.seam.commitVaultWrite("write", [big, small], vault),
+  );
+  assert.deepEqual(outcome, {
+    ok: true,
+    committed: true,
+    oversize: ["cards/notes/film.mp4"],
+  });
+  assert.deepEqual(touched(vault), ["cards/notes/note.md"]);
+  assert.match(logged, /больше 90 МБ.*film\.mp4/u);
+  assert.equal(statusAll(vault), "?? cards/notes/film.mp4");
+  assert.deepEqual(await tool.seam.commitVaultWrite("write", [big], vault), {
+    ok: true,
+    committed: false,
+    oversize: ["cards/notes/film.mp4"],
+  });
+  // Ровно порог — ещё файл, а не огромный.
+  execFileSync("truncate", ["-s", String(90 * 1024 * 1024), small]);
+  rmSync(big);
+  assert.deepEqual(await tool.seam.commitVaultWrite("edge", [small], vault), {
+    ok: true,
+    committed: true,
+  });
+  // Удаление файла — не файл больше порога: оно коммитится.
+  rmSync(small);
+  assert.deepEqual(await tool.seam.commitVaultWrite("gone", [small], vault), {
+    ok: true,
+    committed: true,
+  });
+  assert.equal(statusAll(vault), "");
+});
+
+// Второй писатель растит файл после lstat: перед `git add` (git читает большой файл) и
+// перед записью HEAD (`write-tree`/`commit-tree`/`update-ref` берут блоб индекса, а не рабочее
+// дерево ещё раз).
+for (const moment of ["add", "update-ref"]) {
+  test(`BrainOversize BigNeverCommitted: a file grown to 91 MB just before git ${moment} stays out of the commit`, async (t) => {
+    const vault = makeVault(t);
+    const grows = join(vault, "cards/notes/grows.bin");
+    const small = join(vault, "cards/notes/note.md");
+    writeFileSync(grows, "small\n");
+    writeFileSync(small, "before\n");
+    sh(["add", "."], vault);
+    sh(["commit", "-qm", "seed"], vault);
+    writeFileSync(grows, "small but changed\n");
+    writeFileSync(small, "after\n");
+    const bin = mkdtempSync(join(tmpdir(), "iva-grow-git-"));
+    const fake = join(bin, "git");
+    writeFileSync(
+      fake,
+      `#!/bin/sh\nif [ "$1" = ${moment} ] && [ ! -f ${JSON.stringify(`${bin}/grown`)} ]; then\n` +
+        `  touch ${JSON.stringify(`${bin}/grown`)}; truncate -s 91M ${JSON.stringify(grows)}\nfi\n` +
+        `exec /usr/bin/git "$@"\n`,
+    );
+    chmodSync(fake, 0o755);
+    const path = process.env.PATH;
+    process.env.PATH = `${bin}:${path ?? ""}`;
+    t.after(() => {
+      process.env.PATH = path;
+      rmSync(bin, { recursive: true, force: true });
+    });
+
+    const { value: outcome, logged } = await journal(() =>
+      tool.seam.commitVaultSweep("night", vault),
+    );
+    process.env.PATH = path;
+
+    assert.ok(existsSync(join(bin, "grown")), "the second writer ran");
+    // Перед add git читает большой файл: блоб снят с индекса, в HEAD прежняя версия. Перед
+    // commit в индексе уже маленький блоб: он и уходит, большой файл остаётся на диске.
+    const read = moment === "add";
+    assert.deepEqual(outcome, {
+      ok: true,
+      committed: true,
+      ...(read ? { oversize: ["cards/notes/grows.bin"] } : {}),
+    });
+    if (read) assert.match(logged, /больше 90 МБ.*grows\.bin/u);
+    assert.equal(sh(["show", "HEAD:cards/notes/note.md"], vault), "after");
+    assert.equal(
+      sh(["show", "HEAD:cards/notes/grows.bin"], vault),
+      read ? "small" : "small but changed",
+    );
+    assert.equal(statusAll(vault), "M cards/notes/grows.bin");
+    // Следующая ночь видит большой файл до add и называет его.
+    assert.deepEqual(await tool.seam.commitVaultSweep("night", vault), {
+      ok: true,
+      committed: false,
+      oversize: ["cards/notes/grows.bin"],
+    });
+  });
+}
+
+// Второй писатель коммитит соседний файл между снимком HEAD и нашей записью HEAD.
+// Модель: specs/VaultCommit.tla, инвариант ForeignKept. Обёртка вокруг git только ставит
+// барьер: всё делает настоящий /usr/bin/git, как и у writers владельца вне этой машины.
+// `save` - команды sh, которые коммитят своё; счётчик попыток лежит в `$tries`.
+function neighborWriter(
+  t: { after(fn: () => void): void },
+  save: string,
+  { every }: { every: boolean } = { every: false },
+): { attempts: () => number } {
+  const dir = mkdtempSync(join(tmpdir(), "iva-neighbor-git-"));
+  const done = join(dir, "done");
+  const tries = join(dir, "tries");
+  writeFileSync(tries, "");
+  writeFileSync(
+    join(dir, "git"),
+    `#!/bin/sh\nif [ "$1" = update-ref ]; then\n` +
+      `  echo x >> ${JSON.stringify(tries)}\n` +
+      `  if ${every ? "true" : `[ ! -f ${JSON.stringify(done)} ]`}; then\n` +
+      `    touch ${JSON.stringify(done)}\n` +
+      `    tries=${JSON.stringify(tries)}\n` +
+      `${save}\n` +
+      `  fi\nfi\nexec /usr/bin/git "$@"\n`,
+  );
+  chmodSync(join(dir, "git"), 0o755);
+  const path0 = process.env.PATH;
+  process.env.PATH = `${dir}:${path0 ?? ""}`;
+  t.after(() => {
+    process.env.PATH = path0;
+    rmSync(dir, { recursive: true, force: true });
+  });
+  return {
+    attempts: () => readFileSync(tries, "utf8").split("\n").length - 1,
+  };
+}
+
+/** Второй писатель сохраняет свою карточку: git add, git commit и только свой путь. */
+const ownerSave = (path: string) =>
+  `    env -u GIT_INDEX_FILE /usr/bin/git add -- ${JSON.stringify(path)}\n` +
+  `    env -u GIT_INDEX_FILE /usr/bin/git -c user.name=Owner -c user.email=owner@example.invalid commit -qm 'owner save' -- ${JSON.stringify(path)}`;
+
+test("VaultCommit ForeignKept: чужой коммит соседнего файла между снимком и записью не откатывается", async (t) => {
+  const vault = makeVault(t);
+  const mine = join(vault, "cards", "notes", "моя.md");
+  const neighbor = join(vault, "cards", "notes", "сосед.md");
+  writeFileSync(mine, "моя до\n");
+  writeFileSync(neighbor, "сосед до\n");
+  sh(["add", "."], vault);
+  sh(["commit", "-qm", "seed"], vault);
+  writeFileSync(mine, "моя после\n");
+  const writer = neighborWriter(
+    t,
+    `    printf 'сосед после\\n' > ${JSON.stringify(neighbor)}\n${ownerSave("cards/notes/сосед.md")}`,
+  );
+
+  const { value: outcome, logged } = await journal(() =>
+    tool.seam.commitVaultWrite("card моя: fact", [mine], vault),
+  );
+
+  assert.deepEqual(outcome, { ok: true, committed: true }, logged);
+  assert.equal(
+    sh(["show", "HEAD:cards/notes/сосед.md"], vault),
+    "сосед после",
+    "коммит соседа остаётся в HEAD: снимок пересобран от нового HEAD",
+  );
+  assert.equal(
+    sh(["show", "HEAD^:cards/notes/сосед.md"], vault),
+    "сосед после",
+    "чужой коммит лежит ниже нашего и не отменён",
+  );
+  assert.deepEqual(
+    touched(vault),
+    ["cards/notes/моя.md"],
+    "наш коммит меняет только свои пути",
+  );
+  assert.equal(
+    writer.attempts(),
+    2,
+    "первая запись HEAD отказала, вторая прошла",
+  );
+  assert.equal(sh(["status", "--porcelain"], vault), "");
+});
+
+test("VaultCommit ForeignKept: HEAD сдвигается на каждой записи, коммит отказывает после трёх снимков", async (t) => {
+  const vault = makeVault(t);
+  const mine = join(vault, "cards", "notes", "моя.md");
+  writeFileSync(mine, "моя до\n");
+  sh(["add", "."], vault);
+  sh(["commit", "-qm", "seed"], vault);
+  writeFileSync(mine, "моя после\n");
+  // Сосед каждый раз сохраняет новую карточку: HEAD сдвигается на каждой нашей попытке.
+  const writer = neighborWriter(
+    t,
+    `    n=$(wc -l < "$tries" | tr -d ' ')\n` +
+      `    printf 'сосед\\n' > cards/notes/сосед-$n.md\n` +
+      ownerSave("cards/notes/сосед-$n.md"),
+    { every: true },
+  );
+
+  const { value: outcome, logged } = await journal(() =>
+    tool.seam.commitVaultWrite("card моя: fact", [mine], vault),
+  );
+
+  assert.equal(outcome.ok, false, "повторы кончились - обычная ошибка записи");
+  assert.equal(
+    writer.attempts(),
+    3,
+    "снимок пересобирается не больше трёх раз",
+  );
+  assert.match(logged, /^\[vault-commit\] card моя: fact: /u);
+  assert.equal(logged.split("\n").length, 1, "причина отказа - одна строка");
+  assert.equal(
+    sh(["show", "HEAD:cards/notes/сосед-3.md"], vault),
+    "сосед",
+    "отказ ничего не теряет: последний чужой коммит остаётся в HEAD",
+  );
+  assert.equal(
+    sh(["show", "HEAD:cards/notes/моя.md"], vault),
+    "моя до",
+    "наша правка в HEAD не ушла",
+  );
+  assert.equal(readFileSync(mine, "utf8"), "моя после\n");
+  assert.match(statusAll(vault), /^M cards\/notes\/моя\.md$/mu);
+});
+
+// Коммит собирается низкоуровневыми командами, и хуки `git commit` они не зовут: шов зовёт их
+// сам, в том же порядке. `commit-msg` может сообщение переписать, `post-commit` идёт после.
+test("хуки vault работают при своей записи HEAD: сообщение через commit-msg, post-commit после", async (t) => {
+  const vault = makeVault(t);
+  const file = join(vault, "cards", "notes", "хук.md");
+  const seen = join(process.env.ASSISTANT_DATA_DIR!, "post-commit");
+  const script = (name: string, body: string) => {
+    const path = join(vault, ".git", "hooks", name);
+    writeFileSync(path, `#!/bin/sh\n${body}\n`);
+    chmodSync(path, 0o755);
+  };
+  script("prepare-commit-msg", 'printf "prepared\\n" >> "$1"');
+  script("commit-msg", 'printf "checked\\n" >> "$1"');
+  script(
+    "post-commit",
+    `printf '%s\\n' "$(git log -1 --pretty=%s)" > "${seen}"`,
+  );
+  writeFileSync(file, "правка\n");
+
+  const outcome = await tool.seam.commitVaultWrite(
+    "card хук: fact",
+    [file],
+    vault,
+  );
+
+  assert.deepEqual(outcome, { ok: true, committed: true });
+  assert.equal(
+    sh(["log", "-1", "--pretty=%B"], vault),
+    "card хук: fact\nprepared\nchecked",
+    "оба хука сообщения видят файл и могут его дописать",
+  );
+  assert.equal(
+    readFileSync(seen, "utf8"),
+    "card хук: fact prepared checked\n",
+    "post-commit видит уже переписанное сообщение",
+  );
+  assert.deepEqual(touched(vault), ["cards/notes/хук.md"]);
+});
+
 test("отслеживаемый литеральный путь под ignored каталогом продолжает историю (#257)", async (t) => {
   const vault = makeVault(t);
   const path = "cards/notes/отчёт-*.md";
@@ -1101,7 +1362,7 @@ const cp = require("node:child_process");
 const args = process.argv.slice(2);
 const countFile = ${JSON.stringify(count)};
 let count = fs.existsSync(countFile) ? Number(fs.readFileSync(countFile, "utf8")) : 0;
-if (args.includes("commit") && count < ${hangs}) {
+if (args.includes("update-ref") && count < ${hangs}) {
   fs.writeFileSync(countFile, String(count + 1));
   setInterval(() => {}, 1000);
 } else {
@@ -1120,7 +1381,7 @@ import { syncBuiltinESMExports } from "node:module";
 const original = cp.execFile;
 cp.execFile = (file, args, options, callback) => {
   fs.appendFileSync(${JSON.stringify(trace)}, JSON.stringify({ args, timeout: options.timeout }) + "\\n");
-  return original(file, args, { ...options, timeout: args.includes("commit") && (!fs.existsSync(${JSON.stringify(count)}) || Number(fs.readFileSync(${JSON.stringify(count)}, "utf8")) < ${hangs}) ? options.timeout / 20 : options.timeout }, callback);
+  return original(file, args, { ...options, timeout: args.includes("update-ref") && (!fs.existsSync(${JSON.stringify(count)}) || Number(fs.readFileSync(${JSON.stringify(count)}, "utf8")) < ${hangs}) ? options.timeout / 20 : options.timeout }, callback);
 };
 syncBuiltinESMExports();`;
     const seam = join(REPO, "agent/lib/vault-commit.ts");
@@ -1175,7 +1436,7 @@ syncBuiltinESMExports();`;
       .map((row) => JSON.parse(row) as { args: string[]; timeout: number });
     assert.deepEqual(
       calls
-        .filter((row) => row.args.includes("commit"))
+        .filter((row) => row.args.includes("update-ref"))
         .map((row) => row.timeout),
       [12_000, 24_000],
     );

@@ -28,6 +28,7 @@ import { readLiveSkills } from "#lib/custom-skills.ts";
 import { PLUGIN_SCHEMA_URL, pluginTreeDigest } from "#lib/plugin-reader.ts";
 import {
   pluginDataDir,
+  pluginMode,
   pluginRoot,
   pluginsStateFile,
   readPluginsState,
@@ -2519,6 +2520,194 @@ test("a trust whose version build fails leaves the plugin untrusted", async () =
 
   assert.equal((await readPluginsState(data)).plugins[0].trusted, false);
   assert.deepEqual(units.units(), [], "nothing runs for an untrusted plugin");
+});
+
+/**
+ * Сборка, которая не проходит, а пока идёт — пропускает вперёд другую команду. Так тест
+ * проигрывает контрпримеры `specs/PluginMode.tla`: между записью `enable`/`trust` и их
+ * откатом замок команды свободен.
+ */
+function failingBuildAfter(meanwhile: () => Promise<void>): Build {
+  const built: PluginVersionBuild = {
+    status: "built",
+    version: "0.3.24-abcdefabcdef",
+  };
+  let spent = false;
+  const stub: Build = {
+    calls: [],
+    outcome: built,
+    buildVersion: async (options) => {
+      stub.calls.push({ requirePlugins: options.requirePlugins });
+      // Отказывает одна сборка: первая после того, как тест задал отказ. Сборка
+      // вклинившейся команды и всё, что было раньше, проходят.
+      if (stub.outcome.status !== "failed" || spent) return built;
+      spent = true;
+      await meanwhile();
+      return stub.outcome;
+    },
+  };
+  return stub;
+}
+
+test("PluginMode DisabledIsStopped: an enable that will not build takes the units back down", async () => {
+  const root = home();
+  const units = unitWorld();
+  const build = buildStub();
+  const { cmdPlugin, data } = commands(root, undefined, undefined, {}, build, {
+    units,
+  });
+  await cmdPlugin(["add", processPlugin("trace"), "--trust"]);
+  await cmdPlugin(["disable", "trace"]);
+  assert.deepEqual(units.units(), []);
+  build.outcome = { status: "failed", reason: "eve: boom" };
+
+  await assert.rejects(
+    cmdPlugin(["enable", "trace"]),
+    /trace stays disabled: eve: boom/u,
+  );
+
+  const [entry] = (await readPluginsState(data)).plugins;
+  assert.equal(pluginMode(entry), "paused");
+  assert.deepEqual(units.units(), [], "a disabled plugin runs nothing");
+});
+
+test("PluginMode TrustIsOwners: the undo of an enable keeps a trust the owner took away meanwhile", async () => {
+  const root = home();
+  const units = unitWorld();
+  const build = failingBuildAfter(() => cmdPlugin(["untrust", "trace"]));
+  const { cmdPlugin, data } = commands(root, undefined, undefined, {}, build, {
+    units,
+  });
+  await cmdPlugin(["add", processPlugin("trace"), "--trust"]);
+  await cmdPlugin(["disable", "trace"]);
+  build.outcome = { status: "failed", reason: "eve: boom" };
+
+  await assert.rejects(cmdPlugin(["enable", "trace"]), /stays disabled/u);
+
+  const [entry] = (await readPluginsState(data)).plugins;
+  assert.equal(pluginMode(entry), "off", "the undo flips its own switch only");
+  assert.deepEqual(units.units(), []);
+});
+
+test("PluginMode EnableIsOwners: the undo of a trust keeps a plugin switched off meanwhile", async () => {
+  const root = home();
+  const units = unitWorld();
+  const build = failingBuildAfter(() => cmdPlugin(["disable", "trace"]));
+  const { cmdPlugin, data } = commands(root, undefined, undefined, {}, build, {
+    units,
+  });
+  await cmdPlugin(["add", processPlugin("trace")]);
+  build.outcome = { status: "failed", reason: "eve: boom" };
+
+  await assert.rejects(cmdPlugin(["trust", "trace"]), /stays untrusted/u);
+
+  const [entry] = (await readPluginsState(data)).plugins;
+  assert.equal(pluginMode(entry), "off", "the undo flips its own switch only");
+  assert.deepEqual(units.units(), []);
+});
+
+test("PluginMode TrustIsOwners: the undo of an enable does not bring back a plugin removed meanwhile", async () => {
+  const root = home();
+  const units = unitWorld();
+  const build = failingBuildAfter(() => cmdPlugin(["remove", "trace"]));
+  const { cmdPlugin, data } = commands(root, undefined, undefined, {}, build, {
+    units,
+  });
+  await cmdPlugin(["add", processPlugin("trace"), "--trust"]);
+  await cmdPlugin(["disable", "trace"]);
+  build.outcome = { status: "failed", reason: "eve: boom" };
+
+  await assert.rejects(cmdPlugin(["enable", "trace"]), /stays disabled/u);
+
+  assert.deepEqual((await readPluginsState(data)).plugins, []);
+  assert.deepEqual(units.units(), []);
+});
+
+/** Плагин с процессами и кодом: `update` пересобирает версию при любом доверии. */
+function codeProcessPlugin(name: string): string {
+  const folder = processPlugin(name);
+  write(folder, "sh.iva/index.ts", "export {};\n");
+  write(folder, "sh.iva/tsconfig.json", '{ "include": ["*.ts"] }\n');
+  write(
+    folder,
+    "sh.iva/package.json",
+    JSON.stringify({
+      name,
+      version: "1.0.0",
+      eve: { extension: { source: "./extension", dist: "./dist/extension" } },
+    }),
+  );
+  return folder;
+}
+
+/** `update` с отказом сборки, пока она идёт — `meanwhile`; итог: запись и юниты после отката. */
+async function failedUpdate(
+  meanwhile: (cmd: (argv: string[]) => Promise<void>) => Promise<void>,
+  trusted: boolean,
+) {
+  const units = unitWorld();
+  const build = failingBuildAfter(() => meanwhile(cmdPlugin));
+  const { cmdPlugin, data } = commands(
+    home(),
+    undefined,
+    undefined,
+    {},
+    build,
+    {
+      units,
+    },
+  );
+  const source = codeProcessPlugin("trace");
+  await cmdPlugin(["add", source, ...(trusted ? ["--trust"] : [])]);
+  const before = (await readPluginsState(data)).plugins[0];
+  write(source, "notes.md", "new code\n");
+  build.outcome = { status: "failed", reason: "eve: boom" };
+  await assert.rejects(
+    cmdPlugin(["update", "trace", "--force"]),
+    /nothing was updated: eve: boom/u,
+  );
+  const [entry] = (await readPluginsState(data)).plugins;
+  return { before, entry, units, data, cmdPlugin };
+}
+
+test("PluginMode TrustIsOwners: the undo of an update keeps a trust the owner took away meanwhile", async () => {
+  const { before, entry, units, cmdPlugin } = await failedUpdate(
+    (cmd) => cmd(["untrust", "trace"]),
+    true,
+  );
+  assert.equal(pluginMode(entry), "no-processes", "no trust comes back");
+  assert.equal(entry.digest, before.digest, "the code and version come back");
+  assert.deepEqual(units.units(), []);
+  await cmdPlugin(["sync"]);
+  assert.deepEqual(units.units(), [], "the next sync starts nothing");
+});
+
+test("PluginMode ProcessesNeedTrust: the undo of an update keeps a trust the owner gave meanwhile", async () => {
+  const { entry, units } = await failedUpdate(
+    (cmd) => cmd(["trust", "trace"]),
+    false,
+  );
+  assert.equal(pluginMode(entry), "full");
+  assert.ok(units.units().length > 0, "the units the trust started run");
+});
+
+test("PluginMode EnableIsOwners: the undo of an update keeps a plugin switched off meanwhile", async () => {
+  const { entry, units } = await failedUpdate(
+    (cmd) => cmd(["disable", "trace"]),
+    true,
+  );
+  assert.equal(pluginMode(entry), "paused");
+  assert.deepEqual(units.units(), []);
+});
+
+test("PluginMode EnableIsOwners: the undo of an update does not bring back a plugin removed meanwhile", async () => {
+  const { entry, units, data } = await failedUpdate(
+    (cmd) => cmd(["remove", "trace"]),
+    true,
+  );
+  assert.equal(entry, undefined);
+  assert.equal(existsSync(pluginRoot(data, "trace")), false, "nor its folder");
+  assert.deepEqual(units.units(), []);
 });
 
 test("trust of an MCP-only Plugin keeps the generated connection, trusted flag and unit", async () => {

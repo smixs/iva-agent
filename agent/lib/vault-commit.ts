@@ -20,7 +20,17 @@
 // агентского дерева (scripts/authored-tree-guard.test.ts), а сам шов не ищет vault - его
 // называет вызывающий, который свой vault уже разрешил.
 import { execFile } from "node:child_process";
-import { lstatSync, realpathSync, rmSync, statSync } from "node:fs";
+import {
+  copyFileSync,
+  lstatSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import {
   basename,
   dirname,
@@ -52,11 +62,29 @@ const gitRecovery = new Map<string, { raises: number; timeout: number }>();
 const IVA_IDENTITY = ["-c", "user.name=Iva", "-c", "user.email=iva@localhost"];
 const REASON_CAP = 200;
 const LOG_PREFIX = "[vault-commit]";
+/**
+ * GitHub отклоняет блоб от 100 МБ, и тогда не уходит весь push бэкапа. Файл больше порога в
+ * коммит не идёт ни у одного писателя: остаётся на диске, а Brain называет его владельцу
+ * (`specs/BrainOversize.tla`).
+ */
+export const VAULT_BLOB_LIMIT_BYTES = 90 * 1024 * 1024;
 /** Бит записи индекса: файл добавлен без содержимого (`git add -N`). */
 const INTENT_TO_ADD = 0x2000_0000;
 /** Пустой блоб: с ним в индексе лежит и `add -N`, и честно застейдженный пустой файл. */
 const EMPTY_BLOB = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391";
 const ZERO_OBJECT = "0".repeat(40);
+/** Сколько раз снимок HEAD пересобирается, если другой писатель сдвинул HEAD между снимком и
+ * записью: за это время успевает пройти соседский коммит. */
+const HEAD_MOVES = 3;
+/** Дерево совпало с деревом снимка: так же, как `git commit` отвечал «нечего коммитить», а
+ * commitFitting считает это не отказом, а отсутствием правки. */
+const NOTHING_TO_COMMIT_RUN: GitRun = {
+  code: 1,
+  err: "nothing to commit",
+  out: "",
+  timeout: false,
+};
+const OK_RUN: GitRun = { code: 0, err: "", out: "", timeout: false };
 
 /** Что наследуется от процесса: git ищет себя и конфиг владельца. Белый список, а не чёрный
  * список запрещённых GIT_*: чужой `GIT_DIR` (его оставляет после себя git-хук или
@@ -97,6 +125,8 @@ export type VaultCommit =
       readonly reason?: string;
       /** Пути вне бэкапа по правилам ignore владельца, относительно vault. */
       readonly skipped?: readonly string[];
+      /** Пути больше VAULT_BLOB_LIMIT_BYTES: в коммит не пошли, лежат на диске. */
+      readonly oversize?: readonly string[];
     }
   | { readonly ok: false; readonly reason: string };
 
@@ -120,12 +150,16 @@ function gitOnce(
   cwd: string,
   timeout: number,
   input?: string,
+  index?: string,
+  program = "git",
 ): Promise<GitRun> {
+  const env = gitEnv();
+  if (index !== undefined) env.GIT_INDEX_FILE = index;
   return new Promise((done) => {
     const child = execFile(
-      "git",
+      program,
       [...args],
-      { cwd, env: gitEnv(), timeout, windowsHide: true },
+      { cwd, env, timeout, windowsHide: true },
       (error, stdout, stderr) => {
         const failed = error !== null;
         done({
@@ -141,11 +175,15 @@ function gitOnce(
   });
 }
 
-/** Один повтор той же команды; поднятия общие для всех вызовов git этого процесса. */
+/** Один повтор той же команды; поднятия общие для всех вызовов git этого процесса.
+ * `index` - свой файл индекса (`GIT_INDEX_FILE`) вместо общего индекса vault, `program` -
+ * исполняемый файл вместо git (хук vault: его звал `git commit`, и таймаут у него тот же). */
 async function git(
   args: readonly string[],
   cwd: string,
   input?: string,
+  index?: string,
+  program = "git",
 ): Promise<GitRun> {
   const file = nightSettingsFile();
   const { values } = readNightSettings(file);
@@ -157,7 +195,7 @@ async function git(
     values.maxGitTimeoutMs,
     Math.max(values.gitTimeoutMs, state.timeout),
   );
-  const first = await gitOnce(args, cwd, timeout, input);
+  const first = await gitOnce(args, cwd, timeout, input, index, program);
   if (!first.timeout) return first;
   if (
     timeout >= values.maxGitTimeoutMs ||
@@ -185,7 +223,7 @@ async function git(
     vaultGitNotices.push(failed);
     console.error(`${LOG_PREFIX} ${failed[1]}`);
   }
-  const retried = await gitOnce(args, cwd, retryTimeout, input);
+  const retried = await gitOnce(args, cwd, retryTimeout, input, index, program);
   if (
     retried.timeout &&
     (retryTimeout >= values.maxGitTimeoutMs ||
@@ -269,22 +307,203 @@ async function withIndexRetry(
   return result;
 }
 
-/** Коммит от Ивы, если в vault нет identity владельца. Пути названы и здесь: коммит без
- * pathspec забирает весь индекс, а индекс в vault общий с владельцем. */
+/** Хук vault: его звал `git commit`, а `write-tree` и `commit-tree` не зовут. Файл берётся там
+ * же, где его ищет git (и `core.hooksPath` тоже), и исполняется с тем же временным индексом,
+ * какой видел хук при `git commit`. Нет файла или он не исполняемый - не отказ: у большинства
+ * vault хуков нет. */
+async function runHook(
+  vault: string,
+  hooks: string,
+  index: string,
+  name: string,
+  args: readonly string[] = [],
+): Promise<GitRun> {
+  const file = join(hooks, name);
+  try {
+    if ((statSync(file).mode & 0o111) === 0) return OK_RUN;
+  } catch {
+    return OK_RUN;
+  }
+  return await git(args, vault, undefined, index, file);
+}
+
+/** Сообщение через `prepare-commit-msg` и `commit-msg`: хук может его переписать или отказать.
+ * `-m` даёт этим хукам источник `message`, как и `git commit -m`; текст возвращается тот,
+ * что остался в файле после хуков. */
+async function messageWithHooks(
+  vault: string,
+  hooks: string,
+  index: string,
+  file: string,
+  message: string,
+): Promise<{ run: GitRun; text: string }> {
+  try {
+    writeFileSync(file, `${message.replace(/\s+$/u, "")}\n`);
+  } catch (error) {
+    return {
+      run: { code: 1, err: String(error), out: "", timeout: false },
+      text: message,
+    };
+  }
+  for (const [name, args] of [
+    ["prepare-commit-msg", [file, "message"]],
+    ["commit-msg", [file]],
+  ] as const) {
+    const denied = await runHook(vault, hooks, index, name, args);
+    if (denied.code !== 0) return { run: denied, text: message };
+  }
+  try {
+    return { run: OK_RUN, text: readFileSync(file, "utf8") };
+  } catch (error) {
+    return {
+      run: { code: 1, err: String(error), out: "", timeout: false },
+      text: message,
+    };
+  }
+}
+
+/** Коммит-объект от готового дерева и родителя; от Ивы, если в vault нет identity владельца. */
+async function commitTree(
+  vault: string,
+  tree: string,
+  parent: string,
+  message: string,
+): Promise<GitRun> {
+  const args = ["commit-tree", tree, ...(parent ? ["-p", parent] : [])];
+  const made = await git(args, vault, message);
+  if (made.code === 0 || !IDENTITY_MISSING.test(detail(made))) return made;
+  // await: временный индекс удаляет finally, а git ещё не начал его читать.
+  return await git([...IVA_IDENTITY, ...args], vault, message);
+}
+
+/** Коммит ровно тех блобов, что лежат в индексе по нашим путям; от Ивы, если в vault нет
+ * identity владельца. `commit -- <пути>` перечитал бы рабочее дерево, и файл, выросший после
+ * проверки размера, ушёл бы в коммит; коммит без путей забрал бы весь индекс, а он общий с
+ * владельцем. Поэтому свой индекс: дерево HEAD и наши записи общего индекса.
+ *
+ * Дерево собирается снимком HEAD, а HEAD переводится сравнением с этим снимком:
+ * `write-tree` -> `commit-tree -p <снимок>` -> `update-ref HEAD <новый> <снимок>`. Обычный
+ * `git commit` берёт родителем уже новый HEAD, поэтому чужой коммит соседнего файла между
+ * снимком и записью возвращался к старому блобу и уходил в следующий push
+ * (`specs/VaultCommit.tla`). HEAD сдвинулся, пока индекс собирался, - снимок пересобирается
+ * от нового (до HEAD_MOVES раз), дальше обычная ошибка записи. Пустой репозиторий: первая
+ * ветка создаётся тем же `update-ref` с нулевым старым значением. */
 async function commitWith(
   vault: string,
   message: string,
   paths: readonly string[],
+  staged: ReadonlyMap<string, StagedBlob>,
+  oversize: ReadonlySet<string>,
 ): Promise<GitRun> {
-  const plain = await git(
-    ["commit", "-q", "-m", message, "--", ...paths],
-    vault,
-  );
-  if (plain.code === 0 || !IDENTITY_MISSING.test(detail(plain))) return plain;
-  return git(
-    [...IVA_IDENTITY, "commit", "-q", "-m", message, "--", ...paths],
-    vault,
-  );
+  const dir = mkdtempSync(join(tmpdir(), "iva-vault-index-"));
+  const index = join(dir, "index");
+  try {
+    const places = await git(
+      ["rev-parse", "--git-path", "hooks", "--git-path", "COMMIT_EDITMSG"],
+      vault,
+    );
+    if (places.code !== 0) return places;
+    const [hooks, messageFile] = places.out
+      .split("\n")
+      .map((path) => resolve(vault, path.trim()));
+    const shared = await git(["rev-parse", "--git-path", "index"], vault);
+    if (shared.code !== 0) return shared;
+    try {
+      copyFileSync(resolve(vault, shared.out.trim()), index);
+    } catch (error) {
+      return { code: 1, err: String(error), out: "", timeout: false };
+    }
+    let text = message;
+    for (let attempt = 1; ; attempt += 1) {
+      const head = await git(["rev-parse", "-q", "--verify", "HEAD"], vault);
+      const snapshot = head.code === 0 ? head.out.trim() : "";
+      const parent = snapshot
+        ? await git(
+            ["rev-parse", "-q", "--verify", `${snapshot}^{tree}`],
+            vault,
+          )
+        : undefined;
+      if (parent !== undefined && parent.code !== 0) return parent;
+      const read = await git(
+        ["read-tree", ...(snapshot ? ["--reset", snapshot] : ["--empty"])],
+        vault,
+        undefined,
+        index,
+      );
+      if (read.code !== 0) return read;
+      // Как `commit -- <пути>`: всё, что HEAD держит под нашими путями, сменяется записями
+      // общего индекса (путь-каталог - его файлами); нет записи - это удаление. Блоб больше
+      // порога не идёт, его прежняя версия остаётся.
+      const held = await git(
+        ["ls-files", "-z", "--", ...paths],
+        vault,
+        undefined,
+        index,
+      );
+      if (held.code !== 0) return held;
+      const payload = [
+        ...held.out
+          .split("\0")
+          .filter((path) => path && !oversize.has(path))
+          .map((path) => `0 ${ZERO_OBJECT}\t${path}\0`),
+        ...[...staged]
+          .filter(([path]) => !oversize.has(path))
+          .map(([, blob]) => `${blob.record}\0`),
+      ].join("");
+      const put = await git(
+        ["update-index", "-z", "--index-info"],
+        vault,
+        payload,
+        index,
+      );
+      if (put.code !== 0) return put;
+      if (attempt === 1) {
+        const denied = await runHook(vault, hooks, index, "pre-commit");
+        if (denied.code !== 0) return denied;
+      }
+      const tree = await git(["write-tree"], vault, undefined, index);
+      if (tree.code !== 0) return tree;
+      if (parent !== undefined && parent.out.trim() === tree.out.trim())
+        return NOTHING_TO_COMMIT_RUN;
+      if (attempt === 1) {
+        const checked = await messageWithHooks(
+          vault,
+          hooks,
+          index,
+          messageFile,
+          message,
+        );
+        if (checked.run.code !== 0) return checked.run;
+        text = checked.text;
+      }
+      const made = await commitTree(vault, tree.out.trim(), snapshot, text);
+      if (made.code !== 0) return made;
+      // update-ref со старым значением: HEAD, сдвинутый чужим коммитом, не переписываем и
+      // чужой коммит не откатываем. reflog называет коммит так же, как это делал git.
+      const moved = await git(
+        [
+          "update-ref",
+          "-m",
+          `commit${snapshot ? "" : " (initial)"}: ${text.split("\n")[0]}`,
+          "HEAD",
+          made.out.trim(),
+          snapshot || ZERO_OBJECT,
+        ],
+        vault,
+      );
+      if (moved.code === 0) {
+        // Отказ post-commit коммит не отменяет: так же и у `git commit`.
+        await runHook(vault, hooks, index, "post-commit");
+        return moved;
+      }
+      // Таймаут - не сдвиг HEAD: git убили до или после записи, и второй круг заново
+      // выяснять это незачем (повтор того же вызова уже сделал git() сам).
+      if (moved.timeout) return moved;
+      if (attempt >= HEAD_MOVES) return moved;
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 function realOf(path: string): string | null {
@@ -385,6 +604,48 @@ async function indexEntries(
   return entries;
 }
 
+/** Запись общего индекса по нашему пути после `git add` и размер её блоба: это и уйдёт в коммит. */
+type StagedBlob = {
+  /** Строка `ls-files -s -z`: её понимает `update-index --index-info`. */
+  readonly record: string;
+  readonly bytes: number;
+};
+
+/** Записи индекса по нашим путям после `git add` с размером каждого блоба, или null - индекс
+ * или база объектов не прочитались. Ссылка на вложенный репозиторий (режим 160000) - не блоб:
+ * её объекта в этой базе нет, размер ей не меряем. */
+async function stagedBlobs(
+  vault: string,
+  paths: readonly string[],
+): Promise<Map<string, StagedBlob> | null> {
+  const run = await git(["ls-files", "-s", "-z", "--", ...paths], vault);
+  if (run.code !== 0) return null;
+  const staged = new Map<string, StagedBlob>();
+  const measured: { path: string; object: string }[] = [];
+  for (const record of run.out.split("\0").filter(Boolean)) {
+    const tab = record.indexOf("\t");
+    if (tab <= 0) continue;
+    const [mode, object] = record.slice(0, tab).split(" ");
+    const path = record.slice(tab + 1);
+    staged.set(path, { record, bytes: 0 });
+    if (mode !== "160000") measured.push({ path, object });
+  }
+  if (measured.length === 0) return staged;
+  const sizes = await git(
+    ["cat-file", "--batch-check=%(objectsize)"],
+    vault,
+    measured.map(({ object }) => `${object}\n`).join(""),
+  );
+  if (sizes.code !== 0) return null;
+  const lines = sizes.out.split("\n");
+  for (const [at, { path }] of measured.entries()) {
+    const bytes = Number(lines[at]);
+    if (!Number.isSafeInteger(bytes)) return null;
+    staged.set(path, { ...staged.get(path)!, bytes });
+  }
+  return staged;
+}
+
 /** Вернуть индекс по нашим путям как было: одной пачкой, снимком записей. Чужой индекс (другие
  * пути) не трогаем - он не наш; путь, которого в снимке не было, снимается нулевым режимом, а
  * стадии конфликта слияния возвращаются тем же форматом, в каком лежали. */
@@ -433,7 +694,35 @@ function serialized<T>(task: () => Promise<T>): Promise<T> {
   return queued;
 }
 
+/** Больше порога ли файл. Пропавший путь - это удаление, и оно коммитится как раньше. */
+function oversized(file: string): boolean {
+  try {
+    // lstat: у ссылки в блоб идёт она сама, а не файл, на который она указывает.
+    return lstatSync(file).size > VAULT_BLOB_LIMIT_BYTES;
+  } catch {
+    return false;
+  }
+}
+
+/** Пути больше порога остаются вне коммита и вне индекса; остальные коммитятся как всегда.
+ * Проверка по диску здесь только бережёт базу объектов от огромного блоба. Решает размер
+ * блоба в индексе (commitFitting): файл может вырасти между lstat и чтением git. */
 async function commitPaths(
+  vault: string,
+  message: string,
+  paths: readonly string[],
+): Promise<VaultCommit> {
+  const early = paths.filter((path) => oversized(join(vault, path)));
+  const fitting = paths.filter((path) => !early.includes(path));
+  const outcome = fitting.length
+    ? await commitFitting(vault, message, fitting)
+    : ({ ok: true, committed: false } as const);
+  if (!outcome.ok) return outcome;
+  const oversize = [...early, ...(outcome.oversize ?? [])];
+  return oversize.length ? { ...outcome, oversize } : outcome;
+}
+
+async function commitFitting(
   vault: string,
   message: string,
   paths: readonly string[],
@@ -504,25 +793,33 @@ async function commitPaths(
     await restoreIndex(vault, accepted, before);
     return { ok: false, reason: reasonOf(staged) };
   }
+  // Размер решается по блобу, который git прочитал: блоб больше порога снимается с индекса
+  // к прежней записи, а коммит берёт ровно остальные блобы (`specs/BrainOversize.tla`: Store).
+  const blobs = await stagedBlobs(vault, accepted);
+  if (blobs === null) {
+    await restoreIndex(vault, accepted, before);
+    return { ok: false, reason: "не удалось прочитать индекс vault" };
+  }
+  const oversize = [...blobs]
+    .filter(([, blob]) => blob.bytes > VAULT_BLOB_LIMIT_BYTES)
+    .map(([path]) => path);
+  if (oversize.length) await restoreIndex(vault, oversize, before);
+  const going = accepted.filter((path) => !oversize.includes(path));
+  const extra = {
+    ...(skipped.length ? { skipped } : {}),
+    ...(oversize.length ? { oversize } : {}),
+  };
+  if (!going.length) return { ok: true, committed: false, ...extra };
   const committed = await withIndexRetry(vault, () =>
-    commitWith(vault, message, accepted),
+    commitWith(vault, message, going, blobs, new Set(oversize)),
   );
-  if (committed.code === 0)
-    return {
-      ok: true,
-      committed: true,
-      ...(skipped.length ? { skipped } : {}),
-    };
+  if (committed.code === 0) return { ok: true, committed: true, ...extra };
   // Коммит не состоялся (hook, отказ git): бросок не должен остаться в индексе, иначе его
   // подметёт чужой коммит или следующий наш.
-  await restoreIndex(vault, accepted, before);
+  await restoreIndex(vault, going, before);
   // Правка не изменила ни одного байта - коммитить нечего, и это не отказ.
   if (NOTHING_TO_COMMIT.test(detail(committed)))
-    return {
-      ok: true,
-      committed: false,
-      ...(skipped.length ? { skipped } : {}),
-    };
+    return { ok: true, committed: false, ...extra };
   return { ok: false, reason: reasonOf(committed) };
 }
 
@@ -551,6 +848,10 @@ export async function commitVaultWrite(
   if (outcome.ok && outcome.skipped?.length)
     console.error(
       `${LOG_PREFIX} ${message}: вне git-бэкапа по ignore: ${JSON.stringify(outcome.skipped)}`,
+    );
+  if (outcome.ok && outcome.oversize?.length)
+    console.error(
+      `${LOG_PREFIX} ${message}: вне git-бэкапа, больше 90 МБ: ${JSON.stringify(outcome.oversize)}`,
     );
   return outcome;
 }

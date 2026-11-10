@@ -13,7 +13,9 @@ import {
   ModelValidationError,
   validateModelSelection,
 } from "../lib/model-validation.ts";
+import fc from "fast-check";
 import { CATALOG } from "../lib/model-catalog.ts";
+import { isWizardStep, WIZARD_STEPS, type WizardStep } from "../lib/tg-flow.ts";
 import { DATA_DIR_ABS } from "./config.ts";
 import {
   currentConfig,
@@ -125,6 +127,75 @@ test("wizard lookup preserves Telegram's string user ID", () => {
   const state = flows.start(chatId, userId, "model");
 
   assert.equal(getWizard(chatId, userId), state);
+});
+
+// Оракул шлюза, записанный независимо от таблицы кода: на каком шаге работает какая кнопка.
+const BUTTON_STEPS: Readonly<Record<string, readonly WizardStep[]>> = {
+  "prov:": ["provider"],
+  "m:": ["models"],
+  "eff:": ["effort"],
+  "rs:": ["saved"],
+  keep: ["intro", "effort"],
+  chg: ["intro"],
+  helper: ["intro"],
+  "helper-same": ["models", "model_error"],
+  nokey: ["awaiting_key"],
+  retry: ["model_error", "cli_status"],
+  back: ["model_error", "models"],
+  cancel: [...WIZARD_STEPS],
+};
+const buttonAction = fc.oneof(
+  fc.constantFrom(
+    "keep",
+    "chg",
+    "helper",
+    "helper-same",
+    "nokey",
+    "retry",
+    "back",
+    "cancel",
+  ),
+  fc
+    .tuple(fc.constantFrom("prov:", "m:", "eff:", "rs:"), fc.string())
+    .map(([prefix, tail]) => prefix + tail),
+);
+const ownSteps = (action: string): readonly WizardStep[] =>
+  BUTTON_STEPS[action] ??
+  BUTTON_STEPS[action.slice(0, action.indexOf(":") + 1)] ??
+  [];
+
+test("WizardStep: every button works on the steps that draw it and on no other step", () => {
+  const seed = 20261110;
+  console.error(`wizard step gate seed=${seed}`);
+  fc.assert(
+    fc.property(
+      fc.constantFrom(...WIZARD_STEPS),
+      buttonAction,
+      (step, action) => {
+        assert.equal(
+          wizardActionAllowed({ step }, action),
+          ownSteps(action).includes(step),
+          `${step} ${action}`,
+        );
+      },
+    ),
+    { seed, numRuns: 2000 },
+  );
+});
+
+test("WizardStep: a slot step outside the list lets through only Cancel, without throwing", () => {
+  const seed = 20261111;
+  console.error(`wizard unknown step seed=${seed}`);
+  const unknownStep = fc.oneof(
+    fc.constantFrom(null, undefined, "", "__proto__", "toString", "INTRO"),
+    fc.string().filter((value) => !isWizardStep(value)),
+  );
+  fc.assert(
+    fc.property(unknownStep, buttonAction, (step, action) => {
+      assert.equal(wizardActionAllowed({ step }, action), action === "cancel");
+    }),
+    { seed, numRuns: 1000 },
+  );
 });
 
 test("wizard action guards, model selection and effort selection preserve the state machine", () => {

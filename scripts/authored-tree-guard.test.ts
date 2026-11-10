@@ -2,15 +2,16 @@
 // Guard for the authored tree: eve rebuilds `agent/` at service start, so any module
 // specifier there that resolves outside `agent/` drags `scripts/` into the bundle — the
 // failure that produced the 0.3.14 crash loop (issue #176). agent/ never imports
-// scripts/; the only exits are shared packages via @iva/*, and the explicit edge
-// list is pinned by the test below — a new edge out of `agent/` is red on sight.
+// scripts/; its only exits are the shared packages in `packages/`, named as `@iva/<name>`
+// or by relative path, and the explicit edge list is pinned by the test below — a new
+// edge out of `agent/` is red on sight.
 //
 // What replaced the last of them is the seam: the half the authored tree needs lives in
 // `agent/lib`, the half `iva` loads on an install whose `agent/` is missing stays in
 // `scripts/`, and neither reaches the other at load time. Where the two halves must know
-// the same thing anyway — an env-var name, the OAuth constants, the reasoning vocabulary —
-// each side is deliberately self-contained and a test pins the copies together, the way
-// `usage` shares only its log path (docs/tech-debt.md §3).
+// the same thing — the reasoning vocabulary, the Codex token file, the secret rule, the
+// claude command, the vault walk — it lives once in a package both import, and the edge
+// list names it (docs/tech-debt.md §3).
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";

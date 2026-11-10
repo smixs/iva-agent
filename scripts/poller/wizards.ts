@@ -42,11 +42,27 @@ import type {
   ModelOption,
   ProviderCatalogEntry,
 } from "../lib/model-catalog.ts";
-import type { TelegramFlowState } from "../lib/tg-flow.ts";
+import {
+  isWizardStep,
+  type AwaitText,
+  type TelegramFlowState,
+  type WizardStep,
+} from "../lib/tg-flow.ts";
 import { ALLOWED, DATA_DIR_ABS, ENV_PATH, log } from "./config.ts";
 import { reply, sc, tg } from "./transport.ts";
 
 type FlowId = number | string;
+
+// Шаги, которые ждут текст в чате, и kind ожидания, который ставит их экран
+// (askBaseUrl, askModelId, askKey): шаг и kind меняются вместе.
+type WizardInput =
+  | { step: "awaiting_base"; kind: "baseurl" }
+  | { step: "awaiting_model"; kind: "modelid" }
+  | { step: "awaiting_key"; kind: "apikey" };
+type WizardAwait = AwaitText & {
+  kind: WizardInput["kind"];
+  data: Record<string, unknown>;
+};
 
 type WizardState = TelegramFlowState & {
   chatId: FlowId;
@@ -57,7 +73,8 @@ type WizardState = TelegramFlowState & {
   model: string;
   efforts: string[];
   effort: string | null;
-  step: string;
+  step: WizardStep;
+  awaitText: WizardAwait | null;
   pendingKey?: string | null;
   // Владелец явно выбрал «без ключа»: строку ключа из .env надо убрать, а не оставить
   // старую от прошлого эндпоинта.
@@ -108,7 +125,8 @@ const replySucceeded = (value: unknown) =>
   typeof (value as { message_id?: unknown }).message_id === "number";
 type WizardSnapshot = {
   msgId?: number | null;
-  step?: string;
+  /** Шаг слота как он есть: тап может прийти в слот другого флоу или без шага. */
+  step?: string | null;
   modelOptions?: ModelOption[];
   efforts?: string[];
   effort?: string | null;
@@ -179,7 +197,7 @@ export function isStaleWizard(
 
 // Verb без аргумента живёт на своих шагах: таблица вместо цепочки if, потому что шагов
 // становится больше, а правило остаётся одним — кнопка работает там, где её нарисовали.
-const PLAIN_STEPS = new Map<string, readonly string[]>([
+const PLAIN_STEPS = new Map<string, readonly WizardStep[]>([
   ["keep", ["intro", "effort"]],
   ["chg", ["intro"]],
   ["helper", ["intro"]],
@@ -200,7 +218,8 @@ export function wizardActionAllowed(
   if (action.startsWith("m:")) return st.step === "models";
   if (action.startsWith("eff:")) return st.step === "effort";
   if (action.startsWith("rs:")) return st.step === "saved";
-  return PLAIN_STEPS.get(action)?.includes(st.step ?? "") ?? false;
+  if (!isWizardStep(st.step)) return false;
+  return PLAIN_STEPS.get(action)?.includes(st.step) ?? false;
 }
 
 export function selectWizardModel(
@@ -1006,7 +1025,7 @@ async function handleWizardText(
   msg: { chat: { id: number }; message_id: number; text: string },
   st: WizardState,
 ) {
-  const kind = (st.awaitText as { kind?: string } | null | undefined)?.kind;
+  const kind = st.awaitText?.kind;
   if (kind === "baseurl") return handleBaseUrlText(msg, st);
   if (kind === "modelid") return handleModelIdText(msg, st);
   const chatId = msg.chat.id;

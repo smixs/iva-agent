@@ -11,6 +11,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -293,6 +294,70 @@ globalThis.fetch = async (_url, init) => {
     1,
     "та же проблема на другом языке — без повтора",
   );
+});
+
+void test("BrainOversize: a file over 90 MB stays out of the backup and is named once; the rest is pushed", (t) => {
+  const fx = brainFixture(t);
+  fx.gh("exit 1");
+  const bare = join(fx.root, "backup.git");
+  git(fx.root, "init", "-q", "--bare", bare);
+  git(fx.vault, "remote", "add", "origin", bare);
+  writeFileSync(join(fx.vault, "cards/grows.md"), "# Grows\n");
+  git(fx.vault, "add", "-A");
+  git(fx.vault, "commit", "-qm", "grows");
+  const before = git(fx.vault, "rev-parse", "HEAD:cards/grows.md");
+  // Разреженные файлы: размер 91 МБ, на диске почти ничего.
+  const big = join(fx.vault, "attachments/film.mp4");
+  mkdirSync(join(fx.vault, "attachments"));
+  execFileSync("truncate", ["-s", "91M", big]);
+  execFileSync("truncate", ["-s", "91M", join(fx.vault, "cards/grows.md")]);
+  writeFileSync(join(fx.vault, "cards/b.md"), "# B\n");
+  const sent = join(fx.root, "sent.log");
+  const preload = join(fx.root, "telegram-double.mjs");
+  writeFileSync(
+    preload,
+    `import { appendFileSync } from "node:fs";
+globalThis.fetch = async (_url, init) => {
+  appendFileSync(${JSON.stringify(sent)}, String(init?.body ?? "") + "\\n");
+  return new Response(JSON.stringify({ ok: true, result: { message_id: 1 } }));
+};
+`,
+  );
+  const chat = {
+    TELEGRAM_BOT_TOKEN: "123:abc",
+    TELEGRAM_DIGEST_CHAT_ID: "42",
+    NODE_OPTIONS: `--import=${preload}`,
+  };
+  const alerts = () =>
+    existsSync(sent)
+      ? readFileSync(sent, "utf8")
+          .split("\n")
+          .filter((row) => row.includes("film.mp4"))
+      : [];
+
+  const run = fx.brain(chat);
+  assert.equal(run.status, 0, run.stderr);
+
+  // BigNeverCommitted: ни новый файл, ни выросший не попали в коммит.
+  assert.equal(git(fx.vault, "ls-files", "attachments"), "");
+  // HistoryKept: прежняя версия выросшего файла осталась в бэкапе как была.
+  assert.equal(git(fx.vault, "rev-parse", "HEAD:cards/grows.md"), before);
+  assert.equal(git(bare, "rev-parse", "HEAD:cards/grows.md"), before);
+  // OthersGo: остальное закоммичено и ушло push.
+  assert.match(git(fx.vault, "ls-files", "cards"), /cards\/b\.md/u);
+  assert.equal(
+    git(bare, "rev-parse", "HEAD"),
+    git(fx.vault, "rev-parse", "HEAD"),
+  );
+  // Файлы владельца на месте.
+  assert.equal(statSync(big).size, 91 * 1024 * 1024);
+  // SkippedIsTold: один Alert называет оба файла.
+  assert.equal(alerts().length, 1, run.stderr);
+  assert.match(alerts()[0], /cards\/grows\.md/u);
+
+  // OneAlertPerSet: тот же набор следующей ночью не повторяется.
+  assert.equal(fx.brain(chat).status, 0);
+  assert.equal(alerts().length, 1, "the same set is not told again");
 });
 
 /** Brain с origin и двойником эмбеддингов (NODE_OPTIONS доходит до дочернего embed-index):

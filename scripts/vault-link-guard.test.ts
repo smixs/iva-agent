@@ -9,6 +9,7 @@ import "./lib/ts-esm-hooks.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  chmodSync,
   cpSync,
   existsSync,
   mkdirSync,
@@ -25,7 +26,7 @@ import type { ToolContext } from "eve/tools";
 import { settled } from "./fixtures/tool-result.ts";
 import { unresolvedLinkTargets } from "../agent/lib/vault-links.ts";
 import { tempDir } from "./fixtures/temp-dir.ts";
-import { buildVaultGraph } from "./memory/graph.ts";
+import { buildVaultGraph, writeVaultGraph } from "./memory/graph.ts";
 
 const REPO = fileURLToPath(new URL("..", import.meta.url));
 const VAULT = mkdtempSync(join(tmpdir(), "iva-links-"));
@@ -388,3 +389,44 @@ test("write_file: не-markdown внутри вольта не проверяе�
   const result = await callFile(path, "ссылка [[никуда-не-ведёт]]\n");
   assert.equal(result.ok, true, result.error);
 });
+
+// Проба слепого критика F1: ночь не публикует неполный граф как полный. Права 000 root не
+// останавливают, под root проба ничего не доказывает.
+test(
+  "graph: an unreadable folder keeps last night's graph byte for byte and names the folder; the write check stays tolerant",
+  { skip: process.getuid?.() === 0 && "root reads a folder with mode 000" },
+  (t) => {
+    const vault = tempDir("iva-graph-unreadable-");
+    mkdirSync(join(vault, "cards/locked"), { recursive: true });
+    writeFileSync(join(vault, "cards/ok.md"), "# OK\n\n[[secret]]\n");
+    writeFileSync(join(vault, "cards/locked/secret.md"), "# Secret\n");
+    const file = writeVaultGraph(vault);
+    const complete = readFileSync(file, "utf8");
+    assert.match(complete, /cards\/locked\/secret/u);
+
+    chmodSync(join(vault, "cards/locked"), 0);
+    t.after(() => chmodSync(join(vault, "cards/locked"), 0o700));
+    assert.throws(() => writeVaultGraph(vault), /cards\/locked/u);
+    assert.equal(readFileSync(file, "utf8"), complete);
+
+    // Проверка ссылки при записи карточки нечитаемого каталога не боится.
+    assert.deepEqual(
+      unresolvedLinkTargets(["ok"], { vaultDir: vault, source: "cards/new" }),
+      [],
+    );
+  },
+);
+
+test(
+  "graph: a card that cannot be read stops the graph instead of reading as empty",
+  { skip: process.getuid?.() === 0 && "root reads a file with mode 000" },
+  (t) => {
+    const vault = tempDir("iva-graph-unreadable-card-");
+    mkdirSync(join(vault, "cards"), { recursive: true });
+    writeFileSync(join(vault, "cards/a.md"), "# A\n\n[[b]]\n");
+    writeFileSync(join(vault, "cards/b.md"), "# B\n");
+    chmodSync(join(vault, "cards/a.md"), 0);
+    t.after(() => chmodSync(join(vault, "cards/a.md"), 0o600));
+    assert.throws(() => buildVaultGraph(vault), /EACCES/u);
+  },
+);

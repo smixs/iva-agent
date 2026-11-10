@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-floating-promises -- Node's test runner owns registrations. */
 // Один обход vault на поиск, индекс ссылок, эмбеддинги и чистку: технические каталоги
-// пропускают все, каталог человека — только тот, кто его назвал.
+// пропускают все, каталог человека — только тот, кто его назвал. У glob и grep свой список.
 // Запуск: node --test scripts/vault-walk.test.ts
 import "./lib/ts-esm-hooks.ts";
 import assert from "node:assert/strict";
@@ -138,8 +138,9 @@ test(
 );
 
 // Кто что видит в одном vault. Поиск не теряет ничего, что находил до общего обходчика:
-// архив, бэкап и вложения — содержимое человека. Ссылка на архивную карточку принимается.
-test("поиск видит каталоги человека, индекс ссылок — кроме attachments, чистка в них не заходит", async (t) => {
+// архив, бэкап и вложения — содержимое человека. Ссылка на архивную карточку принимается,
+// на копию в backup — нет: копии в индексе ссылок нет.
+test("поиск видит каталоги человека, индекс ссылок — кроме attachments и backup, чистка в них не заходит", async (t) => {
   const cards = ["live", ...HUMAN.map((dir) => `${dir}/x`)];
   const technical = TECHNICAL.map((dir) => `${dir}/x`);
   const root = vault(
@@ -170,13 +171,17 @@ test("поиск видит каталоги человека, индекс сс
       source: "cards/new",
       today: Date.UTC(2026, 10, 10),
     }),
-    ["cards/attachments/x", ...technical.map((card) => `cards/${card}`)],
+    [
+      "cards/backup/x",
+      "cards/attachments/x",
+      ...technical.map((card) => `cards/${card}`),
+    ],
   );
 
   assert.equal(cleanupVault(root, false).cleaned, 1);
 });
 
-test("индекс ссылок видит ровно те карточки, что и обход без attachments", (t) => {
+test("индекс ссылок видит ровно те карточки, что и обход без attachments и backup", (t) => {
   const root = vault(t, [
     "cards/a.md",
     "cards/archive/old.md",
@@ -185,13 +190,50 @@ test("индекс ссылок видит ровно те карточки, ч�
     "weekly/2026-W46.md",
   ]);
   assert.deepEqual(vaultLinks(root).cards, [
-    "backup/old-copy",
     "cards/a",
     "cards/archive/old",
     "weekly/2026-W46",
   ]);
   assert.deepEqual(
     vaultLinks(root).cards,
-    seen(root, root, { skip: ["attachments"] }).map((rel) => rel.slice(0, -3)),
+    seen(root, root, { skip: ["attachments", "backup"] }).map((rel) =>
+      rel.slice(0, -3),
+    ),
+  );
+});
+
+test("ссылка [[topic]] при копии в cards/backup/topic.md: принята и ведёт на саму карточку", (t) => {
+  const root = vault(t, ["cards/topic.md", "cards/backup/topic.md"]);
+  const links = vaultLinks(root);
+  assert.deepEqual(links.judge("topic", "cards/other"), {
+    target: "topic",
+    card: "cards/topic",
+    broken: false,
+  });
+  assert.deepEqual(
+    unresolvedLinkTargets(["topic"], {
+      vaultDir: root,
+      source: "cards/other",
+      today: Date.UTC(2026, 10, 10),
+    }),
+    [],
+  );
+});
+
+test("glob и grep пропускают свой короткий список: файл человека в .claude или .obsidian модель находит по имени", async (t) => {
+  const own = [".git", "node_modules", ".next", "dist", ".cache"];
+  const root = vault(t, [
+    "cards/a.md",
+    ...[...TECHNICAL, ...HUMAN].map((dir) => `cards/${dir}/x.md`),
+  ]);
+  const { walkFiles } = await import("../agent/lib/vault-file-search.ts");
+  assert.deepEqual(
+    (await walkFiles(root)).map((file) => relative(root, file)).sort(),
+    [
+      "cards/a.md",
+      ...[...TECHNICAL, ...HUMAN]
+        .filter((dir) => !own.includes(dir))
+        .map((dir) => `cards/${dir}/x.md`),
+    ].sort(),
   );
 });

@@ -127,6 +127,72 @@ Witnesses must fail: `PluginProposal-norename.cfg` (the tap copies the proposal 
 specs/plugin-proposal-check.sh
 ```
 
+## BrainOversize
+
+`BrainOversize.tla` models the nightly backup of the vault against a file over 90 MB (decision of the owner, 10.11.2026). GitHub refuses a blob from 100 MB, and one such blob stops the whole push. Sizes are two values, `small` and `big`; the starting history already holds one big blob written before the guard. The owner, the agent or an attachment writes files at any moment; Brain commits what changed and then tells the owner. The comment in the model maps every action to its function.
+
+The threshold sits in `commitPaths` (`agent/lib/vault-commit.ts`), which every commit of the vault goes through: the writers of the day, the sweep of the night before it starts, and Brain. A file can grow between the size check and the moment git reads it, so the model has two steps. `Check` is the `lstat` before `git add`: a path over `VAULT_BLOB_LIMIT_BYTES` does not go to `git add`, and its blob never enters the object store. `Store` decides: `commitFitting` measures each blob `git add` put in the index (`stagedBlobs`), takes one over the threshold back off the index, and `commitWith` commits exactly the remaining blobs from its own index, so the commit does not read the working tree again. Both sets come back as `oversize`; Brain names them in one Alert (`scripts/memory/brain.ts`, `alertOversize`).
+
+Checked invariants:
+
+1. `BigNeverCommitted`: no version over the threshold reaches the history.
+2. `SkippedIsTold`: after the night, the last Alert names the skipped set, or its send failed and the next night repeats it. `OneAlertPerSet`: the same set is not told twice in a row (the week of the throttle in `packages/alert-state` is outside the model).
+3. `OthersGo`: a commit takes every changed file under the threshold.
+4. `HistoryKept`: what the backup already holds stays; a tracked file that grew keeps its last committed version.
+
+Mutants must fail: `BrainOversize-no-threshold.cfg` (`BigNeverCommitted`), `BrainOversize-silent.cfg` (a skip without an Alert, `SkippedIsTold`), `BrainOversize-abort.cfg` (a skip stops the whole commit, `OthersGo`), `BrainOversize-every-night.cfg` (`OneAlertPerSet`), `BrainOversize-unstage.cfg` (a skip takes a tracked file out of the index, `HistoryKept`), `BrainOversize-check-before-add.cfg` (only the check before `git add` decides, so a file grown before git reads it is committed, `BigNeverCommitted`). The tests named `BrainOversize` in `scripts/memory/brain.test.ts` and `scripts/vault-commit.test.ts` run the real Brain and the real seam on a git repository with sparse 91 MB files; two of them grow the file through a wrapper around git, just before `git add` and just before the write of HEAD (`update-ref`).
+
+Outside the model: a commit that git refuses (no Alert that night, the next one repeats), a blob over the limit already in the history before the guard (the push keeps failing, and the Alert about the backup says so), Git LFS, and the 100 MB limit of other hosts.
+
+```sh
+specs/brain-oversize-check.sh
+```
+
+## VaultCommit
+
+`VaultCommit.tla` models one commit of the memory seam (`commitWith` in `agent/lib/vault-commit.ts`) against a second writer of the same vault: the nightly Brain in its own process, or the owner's own git. The model was written after the code and checks a defect the blind critic found on 10.11.2026 (B3-R).
+
+`commitWith` builds a throwaway index from a snapshot of HEAD plus the blobs `git add` staged, and the commit is built from that tree. A plain `git commit` takes the HEAD of the moment as its parent, so a neighbour commit of another file that landed between the snapshot and the write came back to its old blob: the working file stayed new, but HEAD and the next push carried the old content. The seam now writes with `git write-tree` → `git commit-tree -p <snapshot>` → `git update-ref HEAD <new> <snapshot>`, and the comparison with the old value is what keeps the neighbour's commit. `Retry` rebuilds the snapshot from the new HEAD (up to `HEAD_MOVES`, three attempts in the code), `GiveUp` is the usual write error after that. `CompareHead = FALSE` is the old `git commit`.
+
+Checked invariants:
+
+1. `ForeignKept`: a foreign commit of a neighbouring file stays in HEAD; our commit never brings back a blob the other writer replaced.
+2. `OursStored`: the blob of our own path that went into the commit stays in HEAD.
+
+Mutants must fail: `VaultCommit-no-head-compare.cfg` writes HEAD from the snapshot without comparing it, the old `git commit`, and breaks `ForeignKept`. The tests named `VaultCommit ForeignKept` in `scripts/vault-commit.test.ts` run the real seam on a git repository with a real second writer inside a wrapper around git, between the snapshot and the write of HEAD; one of them moves HEAD on every attempt and checks that our commit refuses after three snapshots and loses nothing.
+
+Outside the model: a crash between `commit-tree` and `update-ref` (an unreferenced commit object, the next write repeats the work), the size threshold of a blob (`BrainOversize.tla`), the reflog, and a hook in the vault (the seam runs `pre-commit`, `prepare-commit-msg`, `commit-msg` and `post-commit` itself, because `write-tree` and `commit-tree` do not run hooks).
+
+```sh
+specs/vault-commit-check.sh
+```
+
+## PluginMode
+
+`PluginMode.tla` models the two switches of one plugin entry in `data/custom/plugins.json`, `enabled` and `trusted` (ADR-0009), and the units that follow them. It was written after the code and checks the code. The four pairs are four named modes, read in the code by `pluginMode` (`agent/lib/plugin-store.ts`): `full`, `no-processes`, `paused` (switched off, the trust is remembered) and `off`. The plugin of the model has processes: a `stdio` server in `mcp.json` or a service in `sh.iva/services/`.
+
+Three actors write the entry: the owner (a terminal, or a tap that the Bridge carries out outside a model turn), a model turn (`bash` with `IVA_AGENT_TURN=1`) and `iva update`. One `iva plugin` command writes the file and reconciles the units under the update lock, which is one step of the model. `enable`, `trust` and `update` then build a version outside that lock, so any other command fits between their write and the undo of a build that failed. The undo of `update` (`undoInstalls`) puts back the folder and the code and version fields of the entry it replaced; both switches come from the entry read under the lock of the undo, and a plugin removed meanwhile stays removed, folder included. The comment in the model maps every action to its function.
+
+Checked invariants:
+
+1. `ProcessesNeedTrust`: the processes of a plugin run only while it is trusted.
+2. `DisabledIsStopped`: no unit of a switched-off plugin runs.
+3. `TrustIsOwners`: the trust in the entry was given by the owner.
+4. `UpdateGrantsNothing`: an update of Iva enables nothing and trusts nothing.
+5. `EnableIsOwners`: a plugin is on by the owner's action only; neither a turn nor the undo of another command's build switches it on.
+
+Mutants must fail: `PluginMode-enabled-only.cfg` (the unit plan looks at `enabled` alone, `ProcessesNeedTrust`), `PluginMode-disable-keeps-units.cfg` (`disable` writes the state without reconciling the units, `DisabledIsStopped`), `PluginMode-turn-trusts.cfg` (`iva plugin trust` passes inside a model turn, `TrustIsOwners`), `PluginMode-update-reenables.cfg` (the update switches a plugin back on, `UpdateGrantsNothing`).
+
+Witnesses of the code before the repair must fail too. `PluginMode-undo-keeps-units.cfg`: the undo of an `enable` that did not build wrote "disabled" and left the units running (`DisabledIsStopped`). `PluginMode-stale-undo.cfg`: the undo wrote the entry it had read before the build, so a plugin switched off, untrusted or removed while the build ran came back (`EnableIsOwners`, and `TrustIsOwners` once the first is left out). `PluginMode-update-undo-whole.cfg`: the undo of a failed `iva plugin update` wrote back the whole entry it replaced, so a trust given while the build ran was taken away under running units (`ProcessesNeedTrust`), a revoked trust came back without a new tap (`TrustIsOwners`) and so did a switch-off or a removal (`EnableIsOwners`). Each has a test in `scripts/cli/plugin.test.ts` that carries the invariant in its name.
+
+`PluginMode-update-off.cfg` is an open finding, not a mutant: it is the updater as it works today. `settlePlugins` (`scripts/lib/version-update.ts`) switches off a plugin whose code no longer builds and reconciles no units, so `DisabledIsStopped` breaks until the next `iva plugin` command. The clean configuration leaves that action out and speaks about the `iva plugin` commands.
+
+Outside the model: a crash between the write and the unit reconcile (the next `iva plugin` command reconciles again), a unit that systemd refuses to stop, a plugin of skills alone (a model turn installs it itself), `sync` (it writes and reconciles under one lock and builds nothing), the units after the undo of `update` (they follow switches the undo leaves as they are, and keep running the process `update` restarted onto the new code until the next command), a `plugins.json` edited by hand or by a model past the CLI (the honest caveat of ADR-0009), and the connection files inside a built version.
+
+```sh
+specs/plugin-mode-check.sh
+```
+
 ## DraftStop
 
 `DraftStop.tla` models a private chat's draft stream and native stop. The final

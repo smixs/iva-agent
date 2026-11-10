@@ -219,6 +219,30 @@ test("m: выбирает модель и рисует уровни размыш
   }
 });
 
+test("WizardStep: a slot with a step outside the list answers every tap, and /model starts it over at intro", async () => {
+  spy();
+  try {
+    // Слот с шагом не из списка: так выглядит слот /menu (шага нет) или чужое имя шага.
+    for (const step of [null, "awaiting_password", "__proto__"]) {
+      for (const action of ["keep", "chg", "m:0", "eff:low", "retry", "back"]) {
+        const { chat, user } = seed(step as string);
+        assert.equal(await tap(chat, user, `iva_model:${action}`), false);
+        assert.equal(
+          getWizard(chat, user)?.step,
+          step,
+          "a refused tap moves nothing",
+        );
+      }
+      const { chat, user } = seed(step as string);
+      await handleModelCmd(chat, user, { msgId: 11 });
+      assert.equal(getWizard(chat, user)?.step, "intro");
+      assert.equal(await tap(chat, user, "iva_model:chg"), true);
+    }
+  } finally {
+    if (previousFetch) globalThis.fetch = previousFetch;
+  }
+});
+
 test("R8 helper model: full /model path, back button, saved clears helper flag", async () => {
   spy();
   try {

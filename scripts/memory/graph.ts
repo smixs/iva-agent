@@ -16,20 +16,31 @@ export interface VaultGraph {
   readonly broken: Array<{ source: string; target: string }>;
 }
 
-/** Тело карточки без frontmatter; исчезла между обходом и чтением — пустое. */
+/** Тело карточки без frontmatter; исчезла между обходом и чтением — пустое. Любой другой
+ * отказ чтения — наружу: граф без рёбер этой карточки был бы неполным, а выглядел полным. */
 function bodyOf(root: string, card: string): string {
   const file = join(root, `${card}.md`);
   let text: string;
   try {
     text = readFileSync(file, "utf8");
-  } catch {
-    return "";
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return "";
+    throw error;
   }
   return parseFrontmatterOrSkip(text, file)?.body ?? text;
 }
 
+/** Граф ночи строится по полному обходу: нечитаемый каталог прерывает сборку, и Brain
+ * оставляет прошлый граф как был, называя каталог (scripts/memory/brain.ts, refreshGraph). */
+function unreadable(dir: string, error: unknown): never {
+  const code = (error as NodeJS.ErrnoException | null)?.code ?? String(error);
+  throw new Error(`vault graph not rebuilt: ${dir} is unreadable (${code})`, {
+    cause: error,
+  });
+}
+
 export function buildVaultGraph(root: string, today?: number): VaultGraph {
-  const links = vaultLinks(root, { today });
+  const links = vaultLinks(root, { today, onUnreadable: unreadable });
   const nodes: Record<string, GraphNode> = {};
   const broken: VaultGraph["broken"] = [];
   for (const source of links.cards) {

@@ -25,6 +25,7 @@
 // never a static import: `iva` has to start on an installation whose `agent/` is
 // missing (ADR-0003, scripts/authored-tree-guard.test.ts).
 import { existsSync } from "node:fs";
+import type { PluginMode } from "#lib/plugin-store.ts";
 import { createLazyTranslate, type Translate } from "../lib/cli-translate.ts";
 import { DEFAULT_MARKETPLACE } from "../lib/marketplace.ts";
 import { tryLoadPluginCore, type PluginCore } from "../lib/plugin-core.ts";
@@ -65,6 +66,14 @@ type PluginDependencies = {
   readonly interactive?: () => boolean;
   /** Telegram sends of `propose` and `install-proposal`. */
   readonly sends?: ProposalSends;
+};
+
+/** Режим плагина словами владельца: два тумблера, как он их и переключает. */
+const MODE_FLAGS: Record<PluginMode, string> = {
+  full: "enabled · trusted",
+  "no-processes": "enabled · untrusted",
+  paused: "disabled · trusted",
+  off: "disabled · untrusted",
 };
 
 export function createPluginCommands(
@@ -154,7 +163,7 @@ ${C.b}iva plugin${C.x} — ${translate("install and manage plugins", "устан
     const { context, marketplace, trust, install } = commandsFor(core, argv);
     const { components } = context;
     const { readPlugin } = core.reader;
-    const { pluginRoot, pluginsDir, readPluginsState } = core.store;
+    const { pluginMode, pluginRoot, pluginsDir, readPluginsState } = core.store;
     const { available } = marketplace;
 
     /** Что стоит: состав, флаги, источник — и недоделки, если они остались. */
@@ -177,10 +186,7 @@ ${C.b}iva plugin${C.x} — ${translate("install and manage plugins", "устан
       }
       for (const entry of state.plugins) {
         const root = pluginRoot(data, entry.name);
-        const flags = [
-          entry.enabled ? "enabled" : "disabled",
-          entry.trusted ? "trusted" : "untrusted",
-        ].join(" · ");
+        const flags = MODE_FLAGS[pluginMode(entry)];
         if (!existsSync(root)) {
           bad(
             `${entry.name}  ${flags}  ${translate("missing — run: iva plugin sync", "папки нет — запусти: iva plugin sync")}`,

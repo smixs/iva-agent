@@ -322,8 +322,13 @@ export async function codePlugins(dataDir: string): Promise<CodePlugins> {
       ],
     };
   const { readPlugin, pluginTreeDigest } = loaded.reader;
-  const { enabledPlugins, pluginConfigFile, pluginRoot, readPluginsStateSafe } =
-    loaded.store;
+  const {
+    enabledPlugins,
+    pluginConfigFile,
+    pluginMode,
+    pluginRoot,
+    readPluginsStateSafe,
+  } = loaded.store;
   const diagnostics: string[] = [];
   const { state, damaged } = await readPluginsStateSafe(dataDir);
   if (damaged)
@@ -351,15 +356,16 @@ export async function codePlugins(dataDir: string): Promise<CodePlugins> {
         continue;
       }
     }
-    const connections = entry.trusted
-      ? pluginConnections({
-          name: entry.name,
-          servers: report.mcp,
-          ports: entry.mcp ?? {},
-          description: report.manifest.description,
-          diagnostics,
-        })
-      : [];
+    const connections =
+      pluginMode(entry) === "full"
+        ? pluginConnections({
+            name: entry.name,
+            servers: report.mcp,
+            ports: entry.mcp ?? {},
+            description: report.manifest.description,
+            diagnostics,
+          })
+        : [];
     // Neither code nor connections: nothing about this plugin is in a version, and its
     // skills are live anyway.
     if (!report.code && connections.length === 0) continue;
