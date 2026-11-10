@@ -32,6 +32,7 @@ import {
   escapeRichText,
   menuBackLine,
 } from "../telegram-buttons.ts";
+import type { AwaitText } from "../tg-flow.ts";
 
 const SID = "voice";
 const PARENT = "r";
@@ -43,7 +44,6 @@ const TERMS_SHOWN_CHARS = 300;
 // Ровно те значения, что предлагает экран; всё прочее (напр. ru-RU) трансляция отдаёт как есть.
 const LANGS = ["multi", "ru", "en", "uz"] as const;
 type Language = (typeof LANGS)[number];
-type AwaitText = { kind: string; secret: boolean };
 type MenuState = { chatId: number; awaitText: AwaitText | null };
 type MenuContext = {
   deps: {
