@@ -2,7 +2,17 @@ import { existsSync } from "node:fs";
 import { readdir, realpath, stat } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { resolveVaultDir } from "@iva/vault-dir";
-import { TECHNICAL_DIRS } from "../../packages/vault-walk/index.ts";
+
+// Свой короткий список, а не технический список обхода vault (packages/vault-walk): glob и
+// grep — глаза модели, и любой файл человека, в том числе внутри `.claude` или `.obsidian`,
+// она должна уметь найти и прочитать по имени.
+const IGNORE_DIRS = new Set([
+  ".git",
+  "node_modules",
+  ".next",
+  "dist",
+  ".cache",
+]);
 
 export function globToRegExp(pattern: string): RegExp {
   const normalized = pattern.split(sep).join("/");
@@ -104,7 +114,7 @@ async function* walk(
 }
 
 function skippedDir(name: string): boolean {
-  return TECHNICAL_DIRS.has(name) || name.includes(".trash-");
+  return IGNORE_DIRS.has(name) || name.includes(".trash-");
 }
 
 // Файлы по одному, пока граница не достигнута: работа потребителя между ними (чтение grep)

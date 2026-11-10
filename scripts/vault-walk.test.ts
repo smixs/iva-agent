@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-floating-promises -- Node's test runner owns registrations. */
 // Один обход vault на поиск, индекс ссылок, эмбеддинги и чистку: технические каталоги
-// пропускают все, каталог человека — только тот, кто его назвал.
+// пропускают все, каталог человека — только тот, кто его назвал. У glob и grep свой список.
 // Запуск: node --test scripts/vault-walk.test.ts
 import "./lib/ts-esm-hooks.ts";
 import assert from "node:assert/strict";
@@ -220,7 +220,8 @@ test("ссылка [[topic]] при копии в cards/backup/topic.md: при�
   );
 });
 
-test("glob и grep пропускают те же технические каталоги, что и обход vault, и видят каталоги человека", async (t) => {
+test("glob и grep пропускают свой короткий список: файл человека в .claude или .obsidian модель находит по имени", async (t) => {
+  const own = [".git", "node_modules", ".next", "dist", ".cache"];
   const root = vault(t, [
     "cards/a.md",
     ...[...TECHNICAL, ...HUMAN].map((dir) => `cards/${dir}/x.md`),
@@ -228,6 +229,11 @@ test("glob и grep пропускают те же технические кат�
   const { walkFiles } = await import("../agent/lib/vault-file-search.ts");
   assert.deepEqual(
     (await walkFiles(root)).map((file) => relative(root, file)).sort(),
-    ["cards/a.md", ...HUMAN.map((dir) => `cards/${dir}/x.md`)].sort(),
+    [
+      "cards/a.md",
+      ...[...TECHNICAL, ...HUMAN]
+        .filter((dir) => !own.includes(dir))
+        .map((dir) => `cards/${dir}/x.md`),
+    ].sort(),
   );
 });
