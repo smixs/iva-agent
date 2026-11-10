@@ -15,8 +15,8 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import test, { type TestContext } from "node:test";
 import { createVersionStore, versionName } from "./lib/version-store.ts";
 
@@ -636,9 +636,7 @@ store.activate(name);
 store.settle(name);
 report({ status: "updated", version: name, previous, custom: "none", migrations: [], removed: [] });
 `;
-const STEP = /^STEP_BRANCH="release\/(.+)"$/mu.exec(
-  readFileSync(REPAIR, "utf8"),
-)![1];
+const STEP = /^STEP="(.+)"$/mu.exec(readFileSync(REPAIR, "utf8"))![1];
 const NEWEST = "0.5.12";
 const SHIPPED = ["scripts", "agent", "packages", "bin", "package.json"];
 
@@ -658,8 +656,9 @@ function unpackShipped(tag: string, dir: string): void {
 }
 
 /**
- * origin: the installed release, the step release on `release/<step>` with its tag, and
- * this tree as the newest release on main and on beta.
+ * origin as the real one is: the installed release and the step release by their tags
+ * only - no `release/<step>` branch -, and this tree as the newest release on main and
+ * on beta.
  */
 function floorRemote(fixture: string, from: string) {
   const source = join(fixture, "source");
@@ -679,7 +678,6 @@ function floorRemote(fixture: string, from: string) {
   writeFileSync(join(source, "scripts/update-finish.ts"), FINISH);
   const step = commit(STEP);
   git(source, "tag", `v${STEP}`);
-  git(source, "branch", `release/${STEP}`);
   for (const path of SHIPPED.slice(0, 4)) {
     rmSync(join(source, path), { recursive: true, force: true });
     cpSync(join(ROOT, path), join(source, path), { recursive: true });
@@ -717,6 +715,12 @@ function belowFloorWorld(t: TestContext, from: string) {
     writeFileSync(join(fakeBin, name), "#!/bin/sh\nexit 1\n");
     chmodSync(join(fakeBin, name), 0o755);
   }
+  // `npm ci` of the step tree: the dependencies of this tree stand in for its own.
+  writeFileSync(
+    join(fakeBin, "npm"),
+    '#!/bin/sh\n[ "$1" = ci ] && exec ln -s "$IVA_TEST_NODE_MODULES" node_modules\nexit 1\n',
+  );
+  chmodSync(join(fakeBin, "npm"), 0o755);
   const env = {
     ...process.env,
     GIT_CONFIG_GLOBAL: "/dev/null",
@@ -758,26 +762,58 @@ function belowFloorWorld(t: TestContext, from: string) {
       ).stdout.trim(),
     repair: () =>
       spawnSync("bash", [REPAIR], { encoding: "utf8", env, timeout: 120_000 }),
+    /** What repair set up for the step is gone: branch ref, tree, and origin as it was. */
+    stepGone: () => {
+      const repo = join(home, "repo");
+      const config = (...args: string[]) =>
+        spawnSync("git", ["--git-dir", repo, "config", ...args], {
+          encoding: "utf8",
+          env,
+        }).stdout.trim();
+      assert.equal(config("--get", "remote.origin.url"), origin.remote);
+      assert.equal(config("--get-regexp", "^url\\."), "");
+      assert.notEqual(
+        spawnSync(
+          "git",
+          [
+            "--git-dir",
+            repo,
+            "rev-parse",
+            "-q",
+            "--verify",
+            `refs/heads/release/${STEP}`,
+          ],
+          { env },
+        ).status,
+        0,
+      );
+      assert.equal(existsSync(join(home, ".iva-repair-step")), false);
+      assert.equal(existsSync(join(home, ".iva-repair-branch")), false);
+    },
   };
 }
 
 /** The versions layout serving the shipped `from`, as its own updater left it. */
-function versionsInstallation(
+async function versionsInstallation(
   world: ReturnType<typeof belowFloorWorld>,
   from: string,
   branch: string,
-): string {
+): Promise<string> {
   const { home, remote, installed } = world;
   mkdirSync(home);
   git(home, "clone", "--quiet", "--mirror", remote, join(home, "repo"));
   if (branch)
     git(join(home, "repo"), "config", "--local", "iva.updateBranch", branch);
   world.seed(home);
-  const store = world.store();
   const name = world.name(from, installed);
-  const dir = store.stage(name);
+  const dir = world.store().stage(name);
   unpackShipped(`v${from}`, dir);
   symlinkSync(join(ROOT, "node_modules"), join(dir, "node_modules"));
+  // The release's own store writes active.json: v0.3.15-v0.3.23 in schema iva-active/v1.
+  const shipped = (await import(
+    pathToFileURL(join(dir, "scripts/lib/version-store.ts")).href
+  )) as { createVersionStore: typeof createVersionStore };
+  const store = shipped.createVersionStore(home);
   store.linkState(dir);
   store.complete(name);
   store.activate(name);
@@ -785,16 +821,69 @@ function versionsInstallation(
   return name;
 }
 
+/**
+ * The dependencies a checkout of `tag` has: the packages its own package-lock.json names,
+ * no others. This tree's copies stand in for their versions, which is what `npm ci` of
+ * that lock would leave as far as a missing package goes.
+ */
+function shippedDependencies(tag: string, dir: string): void {
+  const lock = JSON.parse(
+    execFileSync("git", ["show", `${tag}:package-lock.json`], {
+      cwd: ROOT,
+      encoding: "utf8",
+      maxBuffer: 64 * 1024 * 1024,
+    }),
+  ) as { packages: Record<string, unknown> };
+  mkdirSync(dir);
+  for (const path of Object.keys(lock.packages)) {
+    const name = /^node_modules\/((?:@[^/]+\/)?[^/]+)$/u.exec(path)?.[1];
+    if (!name || !existsSync(join(ROOT, "node_modules", name))) continue;
+    mkdirSync(dirname(join(dir, name)), { recursive: true });
+    symlinkSync(join(ROOT, "node_modules", name), join(dir, name));
+  }
+}
+
+/** A checkout of v0.3.14 with its own dependencies, as its installer left it. */
+function checkoutInstallation(world: ReturnType<typeof belowFloorWorld>): void {
+  const { home } = world;
+  git(world.fixture, "clone", "--quiet", world.remote, home);
+  git(home, "reset", "--quiet", "--hard", world.installed);
+  git(home, "config", "--local", "iva.updateBranch", "main");
+  world.seed(home);
+  shippedDependencies("v0.3.14", join(home, "node_modules"));
+}
+
+/** `iva` starts: the version in `current`, or the checkout while there is none. */
+function starts(world: ReturnType<typeof belowFloorWorld>): string | null {
+  const current = join(world.home, "current/bin/iva.mjs");
+  const entry = existsSync(current) ? current : join(world.home, "bin/iva.mjs");
+  const ran = spawnSync(process.execPath, [entry, "--help"], {
+    cwd: world.home,
+    encoding: "utf8",
+    env: world.env,
+    timeout: 60_000,
+  });
+  return ran.status === 0 ? null : `${entry}: ${ran.status}\n${ran.stderr}`;
+}
+
 // specs/UpdateFloor.tla: Repaired, BranchKept.
 for (const [from, branch] of [
+  ["0.3.20", "main"],
   ["0.3.29", "main"],
   ["0.4.8", ""],
   ["0.4.17", "beta"],
 ] as const) {
-  test(`Repaired, BranchKept: repair takes a shipped v${from} through the step release onto the newest, Update branch ${branch || "unset"} is back`, (t) => {
+  test(`Repaired, BranchKept: repair takes a shipped v${from} through the step release onto the newest, Update branch ${branch || "unset"} is back`, async (t) => {
     const world = belowFloorWorld(t, from);
-    versionsInstallation(world, from, branch);
+    await versionsInstallation(world, from, branch);
     const before = world.kept();
+    const active = () =>
+      (
+        JSON.parse(
+          readFileSync(join(world.store().layout.data, "active.json"), "utf8"),
+        ) as { schema: string }
+      ).schema;
+    if (from === "0.3.20") assert.equal(active(), "iva-active/v1");
 
     const ran = world.repair();
 
@@ -806,13 +895,14 @@ for (const [from, branch] of [
     assert.equal(store.previousName(), world.name(STEP, world.step));
     assert.deepEqual(world.kept(), before);
     assert.equal(world.branch(join(world.home, "repo")), branch);
-    assert.equal(existsSync(join(world.home, ".iva-repair-branch")), false);
+    assert.equal(active(), "iva-active/v2");
+    world.stepGone();
   });
 }
 
-test("Repaired, BranchKept: repair killed after the first update leaves Iva on the step release, and the next run puts the branch back and finishes", (t) => {
+test("Repaired, BranchKept: repair killed after the first update leaves Iva on the step release, and the next run puts the branch back and finishes", async (t) => {
   const world = belowFloorWorld(t, "0.4.17");
-  versionsInstallation(world, "0.4.17", "main");
+  await versionsInstallation(world, "0.4.17", "main");
   const before = world.kept();
   // `node … update` runs as it is, then kills the shell that called it: repair.sh dies
   // with no chance to put the branch back.
@@ -841,18 +931,15 @@ test("Repaired, BranchKept: repair killed after the first update leaves Iva on t
   assert.equal(world.store().currentName(), world.name(NEWEST, world.newest));
   assert.deepEqual(world.kept(), before);
   assert.equal(world.branch(join(world.home, "repo")), "main");
-  assert.equal(existsSync(join(world.home, ".iva-repair-branch")), false);
+  world.stepGone();
 });
 
-test("Repaired, BranchKept: repair takes a checkout of v0.3.14 onto the step release, its updater moves it to versions, then onto the newest", (t) => {
+test("Repaired, BranchKept: repair takes a checkout of v0.3.14 with its own dependencies through the step release, run from its own tree, onto the newest", (t) => {
   const world = belowFloorWorld(t, "0.3.14");
+  checkoutInstallation(world);
   const { home } = world;
-  git(world.fixture, "clone", "--quiet", world.remote, home);
-  git(home, "reset", "--quiet", "--hard", world.installed);
-  git(home, "config", "--local", "iva.updateBranch", "main");
-  world.seed(home);
-  symlinkSync(join(ROOT, "node_modules"), join(home, "node_modules"));
   const before = world.kept();
+  assert.equal(starts(world), null);
 
   const ran = world.repair();
 
@@ -862,14 +949,151 @@ test("Repaired, BranchKept: repair takes a checkout of v0.3.14 onto the step rel
   assert.equal(store.currentName(), world.name(NEWEST, world.newest));
   assert.equal(store.previousName(), world.name(STEP, world.step));
   assert.deepEqual(world.kept(), before);
+  // The checkout itself was never reset: the step release took it over as it stood.
+  assert.equal(git(home, "rev-parse", "HEAD"), world.installed);
   assert.equal(world.branch(join(home, "repo")), "main");
   assert.equal(world.branch(join(home, ".git")), "main");
-  assert.equal(existsSync(join(home, ".iva-repair-branch")), false);
+  world.stepGone();
 });
 
-test("repair leaves an installation below the floor on its rollback branch to its own updater", (t) => {
+test("Repaired: repair killed before any one of its commands leaves an Iva that starts, and the next run finishes", (t) => {
+  const world = belowFloorWorld(t, "0.3.14");
+  const killBin = join(world.fixture, "kill-bin");
+  mkdirSync(killBin);
+  // Each command the repair shell itself runs counts; the k-th kills that shell first.
+  for (const [name, real] of [
+    [
+      "git",
+      execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim(),
+    ],
+    ["node", process.execPath],
+    ["npm", join(world.fakeBin, "npm")],
+    [
+      "tar",
+      execFileSync("sh", ["-c", "command -v tar"], { encoding: "utf8" }).trim(),
+    ],
+    [
+      "mv",
+      execFileSync("sh", ["-c", "command -v mv"], { encoding: "utf8" }).trim(),
+    ],
+  ]) {
+    writeFileSync(
+      join(killBin, name),
+      `#!/bin/sh\nif [ "$PPID" = "$IVA_TEST_REPAIR_PID" ] || [ "$$" = "$IVA_TEST_REPAIR_PID" ]; then\n  n=$(($(cat "$IVA_TEST_COUNT" 2>/dev/null || echo 0) + 1))\n  echo "$n" > "$IVA_TEST_COUNT"\n  [ "$n" = "$IVA_TEST_KILL_AT" ] && kill -9 "$IVA_TEST_REPAIR_PID"\nfi\nexec "${real}" "$@"\n`,
+    );
+    chmodSync(join(killBin, name), 0o755);
+  }
+  const broken: string[] = [];
+  for (let at = 1; ; at++) {
+    rmSync(world.home, { recursive: true, force: true });
+    checkoutInstallation(world);
+    const before = world.kept();
+    const count = join(world.fixture, "count");
+    rmSync(count, { force: true });
+    const killed = spawnSync(
+      "bash",
+      ["-c", 'IVA_TEST_REPAIR_PID=$$ exec bash "$0"', REPAIR],
+      {
+        encoding: "utf8",
+        timeout: 120_000,
+        env: {
+          ...world.env,
+          PATH: `${killBin}:${world.env.PATH}`,
+          IVA_TEST_COUNT: count,
+          IVA_TEST_KILL_AT: String(at),
+        },
+      },
+    );
+    if (killed.signal !== "SIGKILL") {
+      assert.equal(killed.status, 0, `${killed.stdout}\n${killed.stderr}`);
+      assert.ok(at > 20, `only ${at - 1} commands`);
+      break;
+    }
+    const start = starts(world);
+    const again = world.repair();
+    const done =
+      again.status === 0 &&
+      world.store().currentName() === world.name(NEWEST, world.newest) &&
+      world.branch(join(world.home, "repo")) === "main" &&
+      !existsSync(join(world.home, ".iva-repair-step")) &&
+      !existsSync(join(world.home, ".iva-repair-branch"));
+    if (start !== null || !done || String(world.kept()) !== String(before))
+      broken.push(
+        `kill before command ${at}: starts ${start ?? "yes"}, rerun ${again.status}\n${again.stderr}`,
+      );
+  }
+  assert.deepEqual(broken, []);
+});
+
+// specs/UpdateFloor.tla: SupportedIsServed. The step release turns these forms over only at
+// the start of its Bridge and at a chat's first write; repair runs that code of the step
+// before the next update, so this tree reads what the step would have served.
+test("SupportedIsServed: the queue of strings and the shared run-status.json a checkout carries reach the newest release turned over by the step", (t) => {
+  const world = belowFloorWorld(t, "0.3.14");
+  checkoutInstallation(world);
+  const { home } = world;
+  // The whole-map chat record, by the writer of v0.3.0, the last one with it.
+  const writer = join(world.fixture, "v0.3.0");
+  mkdirSync(writer);
+  execFileSync("tar", ["-xf", "-", "-C", writer], {
+    input: execFileSync("git", ["archive", "v0.3.0", "scripts/lib"], {
+      cwd: ROOT,
+      maxBuffer: 64 * 1024 * 1024,
+    }),
+  });
+  execFileSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      'const m = await import(process.argv[1]); m.setChatStatus("42:", { status: "idle", sessionId: "s-1" });',
+      join(writer, "scripts/lib/run-status.mjs"),
+    ],
+    { cwd: home, env: { ...world.env, ASSISTANT_DATA_DIR: "data" } },
+  );
+  assert.ok(existsSync(join(home, "data/run-status.json")));
+  // The queue of strings, as the bridge before 0.3.5 wrote it (scripts/telegram-poll.mjs).
+  writeFileSync(
+    join(home, "data/telegram-queue.json"),
+    JSON.stringify({ "42:": ["keep this request"] }),
+  );
+
+  const ran = world.repair();
+
+  assert.equal(ran.status, 0, `${ran.stdout}\n${ran.stderr}`);
+  assert.equal(world.store().currentName(), world.name(NEWEST, world.newest));
+  const read = execFileSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      `const q = await import(${JSON.stringify(join(ROOT, "scripts/lib/telegram-queue.ts"))});
+       const s = await import(${JSON.stringify(join(ROOT, "agent/lib/run-status.ts"))});
+       const { document } = await q.loadQueueFile(process.argv[1], { strict: true });
+       console.log(JSON.stringify({ head: q.queueHead(document, "42:"), chat: s.getChatStatus("42:") }));`,
+      join(home, "data/telegram-queue.json"),
+    ],
+    {
+      cwd: home,
+      encoding: "utf8",
+      env: { ...world.env, ASSISTANT_DATA_DIR: join(home, "data") },
+    },
+  );
+  const { head, chat } = JSON.parse(read) as {
+    head: { legacyText?: string } | null;
+    chat: { sessionId?: string } | null;
+  };
+  assert.equal(head?.legacyText, "keep this request");
+  assert.equal(chat?.sessionId, "s-1");
+});
+
+test("repair leaves an installation below the floor on its rollback branch to its own updater", async (t) => {
   const world = belowFloorWorld(t, "0.4.17");
-  const installed = versionsInstallation(world, "0.4.17", "release/0.4.17");
+  const installed = await versionsInstallation(
+    world,
+    "0.4.17",
+    "release/0.4.17",
+  );
   git(
     join(world.home, "repo"),
     "push",
