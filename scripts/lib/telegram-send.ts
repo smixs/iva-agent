@@ -11,6 +11,8 @@
 //     ненулевым кодом, а оставшиеся чанки Telegram не получает;
 //   • retryTransient=true даёт каждому HTML/plain-вызову до трёх попыток при сети,
 //     5xx, 408, 425 и 429; по умолчанию повторов нет;
+//   • beforeAttempt (по умолчанию нет) спрашивается перед каждой попыткой, повторы после паузы
+//     тоже: false — попытки нет, отправка кончается отказом без повтора;
 //   • пустой отчёт — тоже ok=false: слать нечего, и молчать об этом нельзя;
 //   • НИКОГДА не бросает — на любую ошибку возвращает { ok:false, error }.
 // Возвращает { ok, fellBack, error } — вызывающий cron-скрипт по fellBack даёт агенту
@@ -55,6 +57,11 @@ export type TelegramSendOptions = {
    * По умолчанию выключено: ночные отчёты идут прежним HTML-путём.
    */
   readonly rich?: boolean;
+  /**
+   * Проверка перед каждой попыткой, включая повтор после паузы: false — сообщение больше не
+   * нужно, попытки нет. Alert о брошенном напоминании перечитывает здесь факт доставки.
+   */
+  readonly beforeAttempt?: () => Promise<boolean>;
 };
 
 // Rich-пост (`iva post`): те же гейт и фолбэки, плюс два поля Bot API, которых у
@@ -101,6 +108,21 @@ function telegramRetryAfterMs(text: string): number | undefined {
   }
 }
 
+/** beforeAttempt сказал «не слать»: попытки не было, и повторять её незачем. */
+class AttemptWithdrawn extends Error {}
+
+function checkedFetch(
+  fetchImpl: FetchImpl,
+  beforeAttempt: (() => Promise<boolean>) | undefined,
+): FetchImpl {
+  if (beforeAttempt === undefined) return fetchImpl;
+  return async (...request) => {
+    if (!(await beforeAttempt()))
+      throw new AttemptWithdrawn("not sent: withdrawn before the attempt");
+    return fetchImpl(...request);
+  };
+}
+
 async function post(
   bot: string,
   method: string,
@@ -133,7 +155,7 @@ async function post(
       ok: false,
       error: errorMessage(e),
       retryPlain: false,
-      retryable: true,
+      retryable: !(e instanceof AttemptWithdrawn),
     };
   }
 }
@@ -249,6 +271,7 @@ export async function sendTelegramHtml(
     fetchImpl = fetch,
     trace,
     rich,
+    beforeAttempt,
   }: TelegramSendOptions = {},
 ): Promise<{ ok: boolean; fellBack: boolean; error: string }> {
   const { text, silent } =
@@ -257,7 +280,7 @@ export async function sendTelegramHtml(
       : { text: md, silent: false };
   const transport = messageTransport(
     chat,
-    poster(bot, retryTransient, fetchImpl, sleep),
+    poster(bot, retryTransient, checkedFetch(fetchImpl, beforeAttempt), sleep),
     {
       ...(silent ? { disable_notification: true } : {}),
       ...(threadId ? { message_thread_id: threadId } : {}),

@@ -12,7 +12,8 @@ import { stepLimitNotice } from "#lib/model-response.ts";
 //
 // Вызов `fire.ts <id> abandoned` хода не ведёт: тик закрыл срабатывание, оставшееся без исхода
 // (агент упал между взятием строки и фактом), и ребёнок шлёт владельцу Alert с причиной. Строка
-// перечитывается перед отправкой: опоздавший факт доставки Alert снимает. Факт «Alert
+// перечитывается перед каждой попыткой транспорта, повтором после паузы тоже: опоздавший факт
+// доставки Alert снимает. Факт «Alert
 // отправлен» пишет дроссель Alert (alertOnce): тик зовёт ребёнка, пока факта нет. Текст
 // напоминания заново не отправляется: успел ли его отправить умерший ребёнок, таблица не знает
 // (specs/ReminderLifecycle.tla, OneAttemptPerCapture, NoFalseAlert, AbandonedAlerted).
@@ -45,6 +46,7 @@ import {
 } from "#lib/reminder-store.ts";
 import { dataDir } from "#lib/data-dir.ts";
 import { alertOnce } from "../lib/notice-policy.ts";
+import { alertDue } from "../../packages/alert-state/index.ts";
 import { resolveTimeZone } from "../../packages/timezone/index.ts";
 import { formatZoned } from "#lib/zoned-time.ts";
 import { noticeTranslator } from "../lib/notice-policy.ts";
@@ -452,6 +454,18 @@ async function alertAbandoned(id: string, deps: Wiring): Promise<number> {
   );
   const { target } = routed;
   const { key, essence } = abandonedAlertKey(row, false);
+  // Перед каждой попыткой: факт, который лёг, пока транспорт ждал повтора, или Alert, который
+  // записал другой ребёнок, снимают эту отправку (NoFalseAlert).
+  let withdrawn = false;
+  const stillOwed = async (): Promise<boolean> => {
+    const now = await loadRow(id, deps);
+    if (typeof now === "number") return false;
+    withdrawn =
+      now.firedAt !== row.firedAt ||
+      !owesAlert(now) ||
+      !alertDue(dataDir(), key, essence);
+    return !withdrawn;
+  };
   let refusal = "";
   const outcome = await alertOnce(dataDir(), key, essence, async () => {
     const result = await deps.send(
@@ -465,11 +479,16 @@ async function alertAbandoned(id: string, deps: Wiring): Promise<number> {
         retryTransient: true,
         threadId: target.threadId ?? undefined,
         trace: { source: "reminder" },
+        beforeAttempt: stillOwed,
       },
     );
     refusal = result.error;
     return result.ok;
   });
+  if (withdrawn) {
+    deps.log(`reminders: ${row.id} has an outcome now, no alert`);
+    return 0;
+  }
   deps.log(
     outcome === "failed"
       ? `reminders: ${row.id} abandoned, alert not sent: ${refusal}`

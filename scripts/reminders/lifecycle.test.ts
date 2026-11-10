@@ -376,6 +376,50 @@ void test("ReminderLifecycle NoFalseAlert: опоздавший факт дос�
   assert.deepEqual(next.calls, []);
 });
 
+void test("ReminderLifecycle NoFalseAlert: факт доставки лёг, пока транспорт ждал повтора Alert — повтор не уходит", async () => {
+  const now = Date.now();
+  await once(now);
+  await takenThenCrash(now);
+  const [taken] = await list();
+  assert.equal((await closeAbandoned(now + RUN_STALE_MS + MINUTE)).length, 1);
+  let requests = 0;
+  const send: typeof sendTelegramHtml = (bot, target, text, options) =>
+    sendTelegramHtml(bot, target, text, {
+      ...options,
+      // Ребёнок, переживший агента, пишет факт, пока транспорт ждёт после 503.
+      sleep: () =>
+        recordDelivery("lost", {
+          firedAt: taken?.firedAt ?? null,
+          delivered: true,
+          error: null,
+        }).then(() => undefined),
+      fetchImpl: () => {
+        requests += 1;
+        return Promise.resolve(
+          requests === 1
+            ? new Response("temporary", { status: 503 })
+            : new Response("{}", { status: 200 }),
+        );
+      },
+    });
+  assert.equal(
+    await runReminderFire(
+      "lost",
+      { ...fireDeps(chat().send), send },
+      "abandoned",
+    ),
+    0,
+  );
+  assert.equal(requests, 1, "повтор транспорта отправил ложный Alert");
+  const next = jobs();
+  await runReminderTick({
+    nowMs: now + RUN_STALE_MS + 2 * MINUTE,
+    runJob: next.runJob,
+    log: quiet,
+  });
+  assert.deepEqual(next.calls, []);
+});
+
 void test("ReminderLifecycle AlertBeforeDrop: агент упал после причины, сутки простоя — уборка не убирает строку, пока Alert не ушёл", async () => {
   const now = Date.now();
   await once(now);
