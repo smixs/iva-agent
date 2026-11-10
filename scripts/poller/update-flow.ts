@@ -14,6 +14,7 @@ import { modelSummary } from "../lib/model-summary.ts";
 import { reporterFor } from "../lib/telegram-status.ts";
 import { classifyRoot, upstreamQuery } from "../lib/version-layout.ts";
 import { createVersionStore, updateRunning } from "../lib/version-store.ts";
+import { readUpdateRun, type UpdateRun } from "../lib/update-run-journal.ts";
 import { writeFileAtomic } from "#lib/fs-atomic.ts";
 import { getLang, tr } from "#lib/i18n.ts";
 import {
@@ -448,6 +449,29 @@ async function deliverFinal(
   }
 }
 
+/**
+ * The "did not finish" screen: a job whose updater left no verdict. Sent through the same
+ * reporter and the same Gate as the ✅ one, and once - the file goes with it.
+ */
+async function deliverUnfinished(
+  job: UpdateJob,
+  beforeVersion: string,
+  detail?: string,
+): Promise<boolean> {
+  let reporter;
+  try {
+    const env = await readEnvFresh(ENV_PATH);
+    reporter = reporterFor(job, env.TELEGRAM_BOT_TOKEN, env);
+    if (!reporter) return false; // No chat, no message: nothing to answer.
+    return await reporter.unfinished(beforeVersion, detail);
+  } catch (error) {
+    log("update failure delivery failed:", (error as ErrorLike).message);
+    return false;
+  } finally {
+    reporter?.dispose();
+  }
+}
+
 /** The version that runs now, when it is not the one the tap was made on. */
 function flippedTo(store: VersionStore, job: UpdateJob): string | null {
   if (typeof job.currentAtStart !== "string") return null;
@@ -517,6 +541,44 @@ async function dropDeliveredJob(path: string): Promise<void> {
  * invented without one is worse than the spinner it would replace: a job nothing
  * proves is left to the TTL rather than answered with a guess.
  */
+/**
+ * Итог, записанный журналом хода (specs/UpdateJob.tla): одна запись вместо четырёх
+ * источников. `ok` — фаза "settled"/"done": она пишется после того, как кандидат ответил и
+ * active.json назвал его. `unfinished` — ход закрыт отказом, и версия на месте.
+ * `null` — ход ещё идёт (его повторяет retryInterruptedUpdate) или журнал про другую версию.
+ */
+function journalVerdict(
+  journal: UpdateRun | null,
+  moved: string,
+):
+  | { ok: true; before?: string }
+  | { ok: false; before?: string; detail?: string }
+  | null {
+  if (!journal || journal.version !== moved) return null;
+  const before = journal.outcome?.before ?? journal.from ?? undefined;
+  if (journal.phase === "settled" || journal.phase === "done") {
+    return journal.outcome &&
+      journal.outcome.status !== "updated" &&
+      journal.outcome.status !== "current"
+      ? {
+          ok: false,
+          ...(before ? { before } : {}),
+          ...(journal.outcome.message
+            ? { detail: journal.outcome.message }
+            : {}),
+        }
+      : { ok: true, ...(before ? { before } : {}) };
+  }
+  if (journal.phase === "rolledback" || journal.phase === "failed") {
+    return {
+      ok: false,
+      ...(before ? { before } : {}),
+      ...(journal.outcome?.message ? { detail: journal.outcome.message } : {}),
+    };
+  }
+  return null;
+}
+
 async function concludeUpdateJob(
   path: string,
   job: UpdateJob,
@@ -524,6 +586,39 @@ async function concludeUpdateJob(
   moved: string | null,
 ): Promise<void> {
   if (moved) {
+    // С журналом хода исход читается из него одного: фаза "settled" пишется после ответа
+    // кандидата и settle, поэтому «✅ старая → новая» отсюда не может обогнать ответ.
+    const journal = readUpdateRun(store.layout.data);
+    const verdict = journalVerdict(journal, moved);
+    if (verdict?.ok) {
+      if (
+        await deliverFinal(job, {
+          beforeVersion: verdict.before ?? job.currentAtStart,
+          afterVersion: moved,
+        })
+      )
+        await dropDeliveredJob(path);
+      return;
+    }
+    if (verdict && !verdict.ok) {
+      if (
+        await deliverUnfinished(
+          job,
+          verdict.before ?? job.currentAtStart ?? moved,
+          verdict.detail,
+        )
+      )
+        await dropDeliveredJob(path);
+      return;
+    }
+    if (journal?.version === moved) {
+      // Ход ещё идёт: исход в журнале появится, и его прочтёт следующий тик или срок.
+      log("update job waits for the run in its journal:", basename(path));
+    }
+    if (journal?.version === moved) return;
+    // Ниже — ход, начатый версией без журнала (обновление с 0.5.0-0.5.11): исход
+    // выводится из четырёх источников. Новый код этот путь не теряет, потому что такой
+    // ход живёт до первого обновления с журналом.
     // An update is a move that finished onto a version that lives, off a version
     // that lived. Three questions, and a "✅" needs all three answered.
     //
@@ -653,7 +748,11 @@ async function watchUpdateJob(
       log("update job watch failed:", (error as ErrorLike).message);
     }
   }
-  log("update job watch gave up on:", basename(path));
+  // Срок вышел, пока ход шёл: задание получает итог «не завершилось», а не остаётся
+  // крутилкой навсегда (specs/UpdateJob.tla, NoEndlessWatch).
+  const running = store.currentName() ?? "the current version";
+  if (await deliverUnfinished(snapshot, running)) await dropDeliveredJob(path);
+  else log("update job watch gave up on:", basename(path));
 }
 
 /** The claim that an interrupted update was already restarted, beside its job file. */
