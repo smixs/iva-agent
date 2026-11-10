@@ -136,12 +136,31 @@ Checked invariants:
 3. `OthersGo`: a commit takes every changed file under the threshold.
 4. `HistoryKept`: what the backup already holds stays; a tracked file that grew keeps its last committed version.
 
-Mutants must fail: `BrainOversize-no-threshold.cfg` (`BigNeverCommitted`), `BrainOversize-silent.cfg` (a skip without an Alert, `SkippedIsTold`), `BrainOversize-abort.cfg` (a skip stops the whole commit, `OthersGo`), `BrainOversize-every-night.cfg` (`OneAlertPerSet`), `BrainOversize-unstage.cfg` (a skip takes a tracked file out of the index, `HistoryKept`), `BrainOversize-check-before-add.cfg` (only the check before `git add` decides, so a file grown before git reads it is committed, `BigNeverCommitted`). The tests named `BrainOversize` in `scripts/memory/brain.test.ts` and `scripts/vault-commit.test.ts` run the real Brain and the real seam on a git repository with sparse 91 MB files; two of them grow the file through a wrapper around git, just before `git add` and just before `git commit`.
+Mutants must fail: `BrainOversize-no-threshold.cfg` (`BigNeverCommitted`), `BrainOversize-silent.cfg` (a skip without an Alert, `SkippedIsTold`), `BrainOversize-abort.cfg` (a skip stops the whole commit, `OthersGo`), `BrainOversize-every-night.cfg` (`OneAlertPerSet`), `BrainOversize-unstage.cfg` (a skip takes a tracked file out of the index, `HistoryKept`), `BrainOversize-check-before-add.cfg` (only the check before `git add` decides, so a file grown before git reads it is committed, `BigNeverCommitted`). The tests named `BrainOversize` in `scripts/memory/brain.test.ts` and `scripts/vault-commit.test.ts` run the real Brain and the real seam on a git repository with sparse 91 MB files; two of them grow the file through a wrapper around git, just before `git add` and just before the write of HEAD (`update-ref`).
 
 Outside the model: a commit that git refuses (no Alert that night, the next one repeats), a blob over the limit already in the history before the guard (the push keeps failing, and the Alert about the backup says so), Git LFS, and the 100 MB limit of other hosts.
 
 ```sh
 specs/brain-oversize-check.sh
+```
+
+## VaultCommit
+
+`VaultCommit.tla` models one commit of the memory seam (`commitWith` in `agent/lib/vault-commit.ts`) against a second writer of the same vault: the nightly Brain in its own process, or the owner's own git. The model was written after the code and checks a defect the blind critic found on 10.11.2026 (B3-R).
+
+`commitWith` builds a throwaway index from a snapshot of HEAD plus the blobs `git add` staged, and the commit is built from that tree. A plain `git commit` takes the HEAD of the moment as its parent, so a neighbour commit of another file that landed between the snapshot and the write came back to its old blob: the working file stayed new, but HEAD and the next push carried the old content. The seam now writes with `git write-tree` → `git commit-tree -p <snapshot>` → `git update-ref HEAD <new> <snapshot>`, and the comparison with the old value is what keeps the neighbour's commit. `Retry` rebuilds the snapshot from the new HEAD (up to `HEAD_MOVES`, three attempts in the code), `GiveUp` is the usual write error after that. `CompareHead = FALSE` is the old `git commit`.
+
+Checked invariants:
+
+1. `ForeignKept`: a foreign commit of a neighbouring file stays in HEAD; our commit never brings back a blob the other writer replaced.
+2. `OursStored`: the blob of our own path that went into the commit stays in HEAD.
+
+Mutants must fail: `VaultCommit-no-head-compare.cfg` writes HEAD from the snapshot without comparing it, the old `git commit`, and breaks `ForeignKept`. The tests named `VaultCommit ForeignKept` in `scripts/vault-commit.test.ts` run the real seam on a git repository with a real second writer inside a wrapper around git, between the snapshot and the write of HEAD; one of them moves HEAD on every attempt and checks that our commit refuses after three snapshots and loses nothing.
+
+Outside the model: a crash between `commit-tree` and `update-ref` (an unreferenced commit object, the next write repeats the work), the size threshold of a blob (`BrainOversize.tla`), the reflog, and a hook in the vault (the seam runs `pre-commit`, `prepare-commit-msg`, `commit-msg` and `post-commit` itself, because `write-tree` and `commit-tree` do not run hooks).
+
+```sh
+specs/vault-commit-check.sh
 ```
 
 ## PluginMode
