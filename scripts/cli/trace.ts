@@ -29,6 +29,7 @@ import { tryLoadPluginCore, type PluginCore } from "../lib/plugin-core.ts";
 import { resolveTimeZone } from "../../packages/timezone/index.ts";
 import { parseTurnRef, turnRef } from "../lib/turn-ref.ts";
 import type { createCliRuntime } from "./runtime.ts";
+import { isRecord } from "../../packages/guards/index.ts";
 
 type CliRuntime = ReturnType<typeof createCliRuntime>;
 
@@ -118,10 +119,6 @@ const FACT_KEYS = [
 ] as const;
 
 const MEMORY_PARTS = ["core", "persona", "moc", "daily"] as const;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 function isScalar(value: unknown): value is string | number | boolean {
   return (

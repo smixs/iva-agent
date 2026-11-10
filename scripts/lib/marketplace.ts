@@ -37,6 +37,7 @@ import {
   positional,
   type PluginSource,
 } from "./plugin-source.ts";
+import { isRecord } from "../../packages/guards/index.ts";
 
 /** Ours, implicit while the owner's list is empty (ADR-0009). */
 export const DEFAULT_MARKETPLACE = "smixs/iva-plugins";
@@ -126,10 +127,6 @@ export function parseMarketplaceRequest(
   const match = NAME_REQUEST.exec(raw.trim());
   if (!match) return null;
   return { name: match[1], marketplace: match[2] ?? null };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /** A string field that is present and not empty, or null. */

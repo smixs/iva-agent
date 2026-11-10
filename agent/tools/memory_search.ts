@@ -9,6 +9,7 @@ import { embedTexts, cosine, hasEmbeddingKey } from "../lib/embeddings.js";
 import { cardIndex, cardTitle } from "../lib/card-index.js";
 import { resolveVaultDir } from "@iva/vault-dir";
 import { vaultDirErrorText } from "../lib/vault-error.ts";
+import { isRecord } from "../../packages/guards/index.ts";
 
 // node:sqlite — встроенный модуль (Node 24+). В ESM нет глобального require, поэтому
 // поднимаем его через createRequire; грузим лениво внутри bm25Search (с fallback, если нет).
@@ -288,10 +289,6 @@ function toFtsQuery(tokens: string[]): string {
 }
 
 type GraphNodes = Record<string, { incoming?: string[]; outgoing?: string[] }>;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 function isStringArray(value: unknown): value is string[] {
   return (

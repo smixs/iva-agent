@@ -29,6 +29,7 @@ import { traceInboundReceived } from "./trace.ts";
 import { appendDaily } from "./vault-daily.ts";
 import { buildTelegramReplyContext } from "./telegram-reply-context.ts";
 import {
+  asText,
   readTelegramMessageText,
   type RichMessageReading,
   type TelegramMessageTextReading,
@@ -92,10 +93,6 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
-}
-
-function asText(value: unknown): string {
-  return typeof value === "string" ? value : "";
 }
 
 function asScalarText(value: unknown): string {
