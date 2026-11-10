@@ -49,10 +49,15 @@ export function jobReservation(entry: unknown): JobReservation {
     : { kind: "none" };
 }
 
-/** Владелец брони умер: процесса с таким pid нет. */
+/**
+ * Владелец брони умер: процесса с таким pid нет. Свой pid с чужим воплощением — прошлый
+ * процесс, чей номер достался этому после перезапуска: его бронь мертва (как в helper-tick.ts).
+ */
 export function reservationOwnerIsDead(
   reservation: Extract<JobReservation, { kind: "owned" }>,
 ): boolean {
+  if (reservation.ownerPid === process.pid)
+    return reservation.ownerStartedAt !== OWNER_STARTED_AT;
   try {
     process.kill(reservation.ownerPid, 0);
     return false;

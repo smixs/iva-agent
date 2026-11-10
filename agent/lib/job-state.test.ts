@@ -218,6 +218,32 @@ void test("JobRun FactKept: a completed run leaves its fact, a failed fact write
   );
 });
 
+void test("JobRun DeadFreed: a reservation left by an earlier process that had this pid does not block", async () => {
+  const { root, statusPath } = await scaffold();
+  await writeFile(join(root, "ok.ts"), "process.exit(0);\n");
+  await writeFile(
+    statusPath,
+    JSON.stringify({
+      "memory-night": {
+        inProgressSince: Date.now(),
+        ownerPid: process.pid,
+        ownerStartedAt: OWNER_STARTED_AT - 60_000,
+      },
+    }),
+  );
+  const result = await runScheduledJob({
+    name: "memory-night",
+    argv: ["ok.ts"],
+    root,
+    nodeBin: process.execPath,
+    statusPath,
+    timeoutMs: null,
+    log: () => {},
+  });
+  assert.equal(result.skipped, false);
+  assert.equal(result.ok, true);
+});
+
 void test("JobRun OneLive: a reservation of this very process blocks a second admission", async () => {
   const { root, statusPath } = await scaffold();
   await writeFile(join(root, "ok.ts"), "process.exit(0);\n");

@@ -12,6 +12,7 @@ import { randomBytes } from "node:crypto";
 
 import { readFacts } from "./job-facts.ts";
 import {
+  OWNER_STARTED_AT,
   ScheduleStatusError,
   readStatus,
   runScheduledJob,
@@ -626,6 +627,7 @@ void test("a fresh reservation owned by a dead process is recovered immediately"
 });
 
 void test("a fresh reservation owned by a live process still blocks duplicate entry", async () => {
+  // Живой владелец — этот же процесс: свой pid с чужим OWNER_STARTED_AT — прошлое воплощение.
   const root = scaffold();
   await writeFile(join(root, "boom.ts"), "process.exit(1);\n");
   const statusPath = join(root, "data/rollup-status.json");
@@ -636,7 +638,7 @@ void test("a fresh reservation owned by a live process still blocks duplicate en
       "memory-daily": {
         inProgressSince: Date.now(),
         ownerPid: process.pid,
-        ownerStartedAt: Date.now(),
+        ownerStartedAt: OWNER_STARTED_AT,
       },
     }),
   );

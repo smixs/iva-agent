@@ -530,3 +530,21 @@ Witnesses must fail: `-clear-first` (the intent is removed before the queue is c
 ```sh
 specs/reset-intent-check.sh
 ```
+
+## JobRun
+
+`JobRun.tla` models a Job — a scheduled run through `runScheduledJob` — and was written after the code: the reservation of a schedule name in `data/rollup-status.json` (`admitUnderLock`, `completeUnderLock`, `clearReservation` in `agent/lib/schedule-runner.ts`, read by `jobState` in `agent/lib/job-state.ts`), its fact in `data/jobs.json` (`recordJobFact`), the agent wake and the Job watchdog (`scripts/lib/job-watchdog.ts`). One name, Iva processes as slots that die and come back as a new incarnation, admission under the status lock as one step, the child, the fact (or a failed write that rejects the run's promise), completion and the `finally` cleanup that release only their own reservation, the reservation deadline (`timeoutMs`, `Deadline = FALSE` for none) and the watchdog's daily message. `PidReuse` gives a new incarnation the old pid, so `process.kill(pid, 0)` sees an old reservation alive; `SelfCheck` is the v5 fix that treats this process's pid with another `ownerStartedAt` as dead. The guard on the last success, seeding by the migration, the status lock's steal, flock around the child and the fact's text are outside the model.
+
+Checked invariants:
+
+1. `OneLive`: at most one live child per schedule name.
+2. `DeadFreed`: a reservation of a dead owner never blocks an admission.
+3. `FactKept`: a run that wrote its outcome to the status left a fact, or its promise was rejected with "fact not recorded".
+4. `NoForeignClear`: completion and cleanup never remove another run's reservation.
+5. `WatchOnce`: one watchdog message per day.
+
+`JobRun.cfg` (two processes, deadline), `-nodeadline` and `-selfreuse` (one process that gets its pid back) pass. Mutants must fail: `-foreign-clear` (`NoForeignClear`), `-over-live` (admission over a live reservation, `OneLive`), `-no-fact` (`FactKept`), `-ignore-death` (`DeadFreed`), `-selfreuse-nocheck` (the code before v5, `DeadFreed`). Accepted windows stay as witnesses: `-pidreuse` (another process took the dead owner's pid: the reservation holds until its deadline, `DeadFreed`), `-grace` (the child lives up to `killGraceMs` past the deadline while a second run starts, `OneLive`; flock on `.memory.lock` serializes the night) and `-orphan` (the child outlives Iva; `KillMode=control-group` of `iva.service` rules it out on Linux, `OneLive`). Conformance tests: `agent/lib/job-state.test.ts` (`JobRun …`, with a differential property against the admission condition before v5).
+
+```sh
+specs/job-run-check.sh
+```
