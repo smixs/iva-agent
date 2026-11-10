@@ -2,6 +2,8 @@
 // проснулся (wake падал или хода не было), владелец получает одно сообщение в сутки.
 // Политик и повторов в коде нет: состояние одного сообщения — lastSentAt в
 // data/jobs-watchdog.json, а само сообщение отправляет дневное расписание.
+// Провал — последний факт имени по состоянию Job (agent/lib/job-state.ts, через
+// openJobFailures, общий с Brief и ходом агента). Брони расписаний сторож не читает и не пишет.
 import { readFileSync } from "node:fs";
 import { writeFileAtomicSync } from "#lib/fs-atomic.ts";
 import { jobFactsFile, readFactsSync, type JobFact } from "#lib/job-facts.ts";

@@ -113,8 +113,8 @@ export function authoredTreeMissing(error: unknown): boolean {
 export async function scheduleFactsReport(
   dataDirectory: string,
 ): Promise<ScheduleFactsReport> {
-  const { jobFactsFile, latestFact, readFactsSync } =
-    await import("#lib/job-facts.ts");
+  const { jobFactsFile, readFactsSync } = await import("#lib/job-facts.ts");
+  const { jobState } = await import("#lib/job-state.ts");
   const { openJobFailures } = await import("#lib/open-failures.ts");
   const { PROACTIVE_SCHEDULE, SCHEDULE_CRON } =
     await import("#lib/schedule-table.ts");
@@ -124,7 +124,11 @@ export async function scheduleFactsReport(
   const names = [...Object.keys(SCHEDULE_CRON), PROACTIVE_SCHEDULE].sort();
   const lastRuns: string[] = [];
   for (const name of names) {
-    const line = lastRunLine(name, latestFact(facts, name), succeeded[name]);
+    const line = lastRunLine(
+      name,
+      jobState(name, { facts }).last,
+      succeeded[name],
+    );
     if (line !== null) lastRuns.push(line);
   }
   return { lastRuns, openFailures: openJobFailures(facts), facts };
