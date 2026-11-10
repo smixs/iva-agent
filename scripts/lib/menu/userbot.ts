@@ -15,7 +15,7 @@ import { join } from "node:path";
 import { readEnvValues, upsertEnv } from "../env-file.ts";
 import { resolveDataDir } from "../data-dir.ts";
 import { probeUserbotHealth } from "../userbot-health.ts";
-import { button } from "../telegram-buttons.ts";
+import { button, menuBackLine } from "../telegram-buttons.ts";
 
 type ErrorLike = { code?: unknown; message?: unknown };
 type Health = { state: string };
@@ -65,11 +65,6 @@ const SVC = "iva-telegram-userbot.service";
 
 const isPrivate = (st: MenuState) => Number(st.chatId) > 0;
 
-const backLine = (ctx: MenuContext) =>
-  `${button(ctx.tr("‹ Menu", "‹ Меню"), `iva_menu:${PARENT}:o`)} — ${ctx.tr(
-    "back to the settings.",
-    "вернуться в настройки.",
-  )}`;
 const cancelLine = (ctx: MenuContext) =>
   `${button(ctx.tr("Cancel", "Отмена"), `iva_menu:${SID}:o`, "danger")} — ${ctx.tr(
     "leave the prompt without entering anything.",
@@ -193,7 +188,7 @@ async function buildScreen(st: MenuState, ctx: MenuContext): Promise<View> {
         "enter api_id and api_hash in a private chat.",
         "ввести api_id и api_hash в личном чате.",
       )}`,
-      backLine(ctx),
+      menuBackLine(ctx, PARENT),
     ].join("\n\n");
     return { text };
   }
@@ -212,7 +207,7 @@ async function buildScreen(st: MenuState, ctx: MenuContext): Promise<View> {
         "запустить прокси (сборка venv, до ~3 мин).",
       )}`,
       refreshLine(ctx),
-      backLine(ctx),
+      menuBackLine(ctx, PARENT),
     ].join("\n\n");
     return { text };
   }
@@ -228,7 +223,7 @@ async function buildScreen(st: MenuState, ctx: MenuContext): Promise<View> {
       ),
       turnOffLine(ctx),
       refreshLine(ctx),
-      backLine(ctx),
+      menuBackLine(ctx, PARENT),
     ].join("\n\n");
     return { text };
   }
@@ -244,7 +239,7 @@ async function buildScreen(st: MenuState, ctx: MenuContext): Promise<View> {
       ),
       turnOffLine(ctx),
       refreshLine(ctx),
-      backLine(ctx),
+      menuBackLine(ctx, PARENT),
     ].join("\n\n");
     return { text };
   }
@@ -266,7 +261,7 @@ async function buildScreen(st: MenuState, ctx: MenuContext): Promise<View> {
     accountHint,
     turnOffLine(ctx),
     refreshLine(ctx),
-    backLine(ctx),
+    menuBackLine(ctx, PARENT),
   ].join("\n\n");
   return { text };
 }
@@ -307,7 +302,7 @@ export default {
           `${ctx.tr(
             "Credentials are secrets — open a private chat and enter them there.",
             "Ключи — это секрет. Открой личный чат и введи их там.",
-          )}\n\n${backLine(ctx)}`,
+          )}\n\n${menuBackLine(ctx, PARENT)}`,
         );
       }
       st.data.ub = {};
@@ -348,7 +343,7 @@ export default {
                   "run the proxy setup again.",
                   "запустить настройку прокси заново.",
                 )}`,
-                backLine(ctx),
+                menuBackLine(ctx, PARENT),
               ].join("\n\n"),
             );
           }
@@ -361,7 +356,7 @@ export default {
             "◇ Setting up the userbot proxy…",
             "◇ Собираю userbot-прокси…",
           ),
-          backLine(ctx),
+          menuBackLine(ctx, PARENT),
         ].join("\n\n"),
       );
     }
@@ -420,7 +415,7 @@ export default {
           `${ctx.tr(
             `Couldn't write .env: ${String(errorMessage(error))}`,
             `Не удалось записать .env: ${String(errorMessage(error))}`,
-          )}\n\n${backLine(ctx)}`,
+          )}\n\n${menuBackLine(ctx, PARENT)}`,
         );
       }
       // Ключи есть — экран покажет [Включить].

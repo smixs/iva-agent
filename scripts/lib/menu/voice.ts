@@ -26,7 +26,12 @@ import {
   keytermsForRequest,
   parseKeyterms,
 } from "#transcribe.ts";
-import { button, buttonRow, escapeRichText } from "../telegram-buttons.ts";
+import {
+  button,
+  buttonRow,
+  escapeRichText,
+  menuBackLine,
+} from "../telegram-buttons.ts";
 
 const SID = "voice";
 const PARENT = "r";
@@ -74,12 +79,6 @@ const languageLabel = (value: string, ctx: MenuContext) =>
           ? "Oʻzbek"
           : escapeRichText(value);
 
-const backLine = (ctx: MenuContext) =>
-  `${button(ctx.tr("‹ Menu", "‹ Меню"), `iva_menu:${PARENT}:o`)} — ${ctx.tr(
-    "back to the settings.",
-    "вернуться в настройки.",
-  )}`;
-
 const cancelLine = (ctx: MenuContext) =>
   `${button(ctx.tr("Cancel", "Отмена"), `iva_menu:${SID}:o`, "danger")} — ${ctx.tr(
     "leave the prompt without changing anything.",
@@ -120,7 +119,7 @@ async function restartOffer(st: MenuState, ctx: MenuContext, note?: string) {
       ),
       button(ctx.tr("Later", "Позже"), `iva_menu:${SID}:rs:later`),
     ]),
-    backLine(ctx),
+    menuBackLine(ctx, PARENT),
   ].join("\n\n");
   return ctx.flows.screen(st, text);
 }
@@ -135,7 +134,7 @@ async function promptKey(st: MenuState, ctx: MenuContext) {
       `${ctx.tr(
         "A key is a secret — open a private chat with me and set the Deepgram key there.",
         "Ключ — это секрет. Открой личный чат со мной и введи ключ Deepgram там.",
-      )}\n\n${backLine(ctx)}`,
+      )}\n\n${menuBackLine(ctx, PARENT)}`,
     );
   }
   st.awaitText = { kind: "deepgramkey", secret: true };
@@ -227,7 +226,7 @@ export default {
         "names and words Deepgram should spell your way.",
         "имена и слова, которые Deepgram должен писать как у тебя.",
       )}`,
-      backLine(ctx),
+      menuBackLine(ctx, PARENT),
     ].join("\n\n");
     return { text };
   },

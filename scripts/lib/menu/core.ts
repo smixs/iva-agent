@@ -23,7 +23,7 @@ import {
   VaultDirError,
   resolveVaultDir,
 } from "../../../packages/vault-dir/index.ts";
-import { button, escapeRichText } from "../telegram-buttons.ts";
+import { button, escapeRichText, menuBackLine } from "../telegram-buttons.ts";
 import { readSettings, writeSettings } from "#lib/settings.ts";
 
 const SID = "core";
@@ -85,13 +85,6 @@ type MenuContext = {
     screen: (state: MenuState, text: string) => Promise<void>;
   };
 };
-
-function backLine(ctx: MenuContext): string {
-  return `${button(ctx.tr("‹ Menu", "‹ Меню"), `iva_menu:${PARENT}:o`)} — ${ctx.tr(
-    "back to the settings.",
-    "вернуться в настройки.",
-  )}`;
-}
 
 function errorMessage(error: unknown): string {
   return (error as { readonly message: string }).message;
@@ -268,7 +261,7 @@ function renderInterviewQuestion(st: MenuState, ctx: MenuContext) {
       "stop here and send what you've answered.",
       "остановиться и отдать уже отвеченное.",
     )}`,
-    backLine(ctx),
+    menuBackLine(ctx, PARENT),
   ].join("\n\n");
   return ctx.flows.screen(st, text);
 }
@@ -345,7 +338,7 @@ async function finish(
       `${ctx.tr(
         `Couldn't save the interview: ${message}`,
         `Не удалось сохранить интервью: ${message}`,
-      )}\n\n${backLine(ctx)}`,
+      )}\n\n${menuBackLine(ctx, PARENT)}`,
     );
   }
 
@@ -358,7 +351,7 @@ async function finish(
       `${ctx.tr(
         "Answers saved to vault/core-interview.md. Iva is busy right now — send her «update your memory core» once she's free.",
         "Ответы сохранены в vault/core-interview.md. Ива сейчас занята — напиши ей «обнови ядро памяти», когда освободится.",
-      )}\n\n${backLine(ctx)}`,
+      )}\n\n${menuBackLine(ctx, PARENT)}`,
     );
   }
 
@@ -377,7 +370,7 @@ async function finish(
       `${ctx.tr(
         "Sent to Iva — she'll distill your answers into the memory core and confirm.",
         "Передал иве — она сожмёт ответы в ядро памяти и подтвердит.",
-      )}\n\n${backLine(ctx)}`,
+      )}\n\n${menuBackLine(ctx, PARENT)}`,
     );
     return true;
   }
@@ -415,7 +408,7 @@ export default {
           : T("🌙 Night: off", "🌙 Ночь: выкл"),
         `iva_menu:${SID}:night`,
       )} — ${T("toggle code-driven nightly memory.", "включить или остановить ночную память.")}`,
-      backLine(ctx),
+      menuBackLine(ctx, PARENT),
     ].join("\n\n");
     return { text };
   },
