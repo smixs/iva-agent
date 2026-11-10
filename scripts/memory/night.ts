@@ -6,7 +6,7 @@ import { z } from "zod";
 import { setTimeout as pause } from "node:timers/promises";
 import { resolveVaultDir } from "@iva/vault-dir";
 import { resolveDataDir } from "#lib/data-dir.ts";
-import { resolveTimeZone } from "#lib/timezone.ts";
+import { resolveTimeZone } from "../../packages/timezone/index.ts";
 import { readSettings } from "#lib/settings.ts";
 import {
   commitVaultSweep,

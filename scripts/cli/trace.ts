@@ -26,7 +26,7 @@ import { join } from "node:path";
 import type { TraceEvent } from "#lib/trace.ts";
 import { createLazyTranslate, type Translate } from "../lib/cli-translate.ts";
 import { tryLoadPluginCore, type PluginCore } from "../lib/plugin-core.ts";
-import { resolveTimeZone } from "../lib/timezone.ts";
+import { resolveTimeZone } from "../../packages/timezone/index.ts";
 import { parseTurnRef, turnRef } from "../lib/turn-ref.ts";
 import type { createCliRuntime } from "./runtime.ts";
 

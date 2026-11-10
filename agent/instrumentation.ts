@@ -30,7 +30,10 @@ import { defineInstrumentation } from "eve/instrumentation";
 import { PROBE_FLAG, probeEveHealth } from "./lib/eve-health.ts";
 import { dataDir as configuredDataDir } from "./lib/data-dir.ts";
 import { runScheduleMigration } from "./lib/schedule-migration.ts";
-import { resolveTimeZone, validateTimeZone } from "./lib/timezone.ts";
+import {
+  resolveTimeZone,
+  validateTimeZone,
+} from "../packages/timezone/index.ts";
 
 const log = (...args: unknown[]) =>
   console.log(new Date().toISOString(), ...args);

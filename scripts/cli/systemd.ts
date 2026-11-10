@@ -24,7 +24,10 @@ import {
   cleanupSystemdUnits,
   systemdExecArgument,
 } from "../lib/systemd-control.ts";
-import { resolveTimeZone, validateTimeZone } from "../lib/timezone.ts";
+import {
+  resolveTimeZone,
+  validateTimeZone,
+} from "../../packages/timezone/index.ts";
 import type { createCliRuntime } from "./runtime.ts";
 import { resolveVaultDir } from "../../packages/vault-dir/index.ts";
 import { servicePath } from "../../packages/claude-command/index.ts";

@@ -4,7 +4,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { button, buttonRow, escapeRichText } from "./buttons.ts";
+import { button, buttonRow, escapeRichText } from "../telegram-buttons.ts";
 
 const PER_PAGE = 8;
 

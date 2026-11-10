@@ -23,7 +23,7 @@ import {
   VaultDirError,
   resolveVaultDir,
 } from "../../../packages/vault-dir/index.ts";
-import { button, escapeRichText } from "./buttons.ts";
+import { button, escapeRichText } from "../telegram-buttons.ts";
 import { readSettings, writeSettings } from "#lib/settings.ts";
 
 const SID = "core";

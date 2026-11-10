@@ -33,7 +33,7 @@ import {
   type Reminder,
   type ReminderChat,
 } from "#lib/reminder-store.ts";
-import { resolveTimeZone } from "#lib/timezone.ts";
+import { resolveTimeZone } from "../../packages/timezone/index.ts";
 import { formatZoned } from "#lib/zoned-time.ts";
 import { noticeTranslator } from "../lib/notice-policy.ts";
 import {

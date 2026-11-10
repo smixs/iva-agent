@@ -6,7 +6,7 @@ import { restartFailure } from "../systemd-control.ts";
 // (agent/lib/telegram-rich-replies.ts), поэтому новое значение ждёт перезапуска iva.service —
 // предлагаем его сразу, как на экране поиска.
 import { readEnvValues, upsertEnv } from "../env-file.ts";
-import { button, buttonRow, escapeRichText } from "./buttons.ts";
+import { button, buttonRow, escapeRichText } from "../telegram-buttons.ts";
 
 const SID = "rich";
 const PARENT = "r";

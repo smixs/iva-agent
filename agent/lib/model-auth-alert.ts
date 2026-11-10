@@ -24,7 +24,7 @@ import {
 import type { AuthObservation } from "./model-auth-state.ts";
 import { isQuietHour, parseProactive } from "./proactive-config.ts";
 import { readSettingsState } from "./settings.ts";
-import { resolveTimeZone } from "./timezone.ts";
+import { resolveTimeZone } from "../../packages/timezone/index.ts";
 import {
   configureAlertLock,
   recordAlert,

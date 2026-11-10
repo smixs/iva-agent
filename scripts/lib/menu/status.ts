@@ -12,7 +12,7 @@ import { modelSummary, compactNumber } from "../model-summary.ts";
 import { SEARCH_CATALOG } from "../search-catalog.ts";
 import { readEntries, summarize } from "../usage.ts";
 import { probeUserbotHealth } from "../userbot-health.ts";
-import { button, escapeRichText } from "./buttons.ts";
+import { button, escapeRichText } from "../telegram-buttons.ts";
 
 type Env = Record<string, string | undefined>;
 type VersionPackage = { version?: unknown };

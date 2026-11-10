@@ -26,7 +26,7 @@ import {
   keytermsForRequest,
   parseKeyterms,
 } from "#transcribe.ts";
-import { button, buttonRow, escapeRichText } from "./buttons.ts";
+import { button, buttonRow, escapeRichText } from "../telegram-buttons.ts";
 
 const SID = "voice";
 const PARENT = "r";

@@ -15,7 +15,7 @@ import {
   personaMarkdown,
 } from "../quiz.ts";
 import { resolveVaultDir } from "../../../packages/vault-dir/index.ts";
-import { button, buttonRow } from "./buttons.ts";
+import { button, buttonRow } from "../telegram-buttons.ts";
 
 const SID = "chr";
 const PARENT = "r";

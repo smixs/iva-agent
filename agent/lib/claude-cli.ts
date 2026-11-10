@@ -135,8 +135,11 @@ const CLAUDE_ENV: Record<string, string> = {
   DISABLE_COMPACT: "1",
   CLAUDE_CODE_TOTAL_TOKENS_REMINDER: "off",
 };
-export { claudeModel, claudeContextWindow } from "./context-window.ts";
-import { claudeModel } from "./context-window.ts";
+export {
+  claudeModel,
+  claudeContextWindow,
+} from "../../packages/context-window/index.ts";
+import { claudeModel } from "../../packages/context-window/index.ts";
 
 /** Имя модели в том виде, в каком его понимает `claude -p --model`. */
 export function claudeNativeModel(route: string): string {

@@ -20,7 +20,7 @@ import {
   childEnv,
   AUTH_SERVICES,
 } from "./gws-auth.ts";
-import { button } from "./buttons.ts";
+import { button } from "../telegram-buttons.ts";
 
 const SID = "gws";
 const PARENT = "r";

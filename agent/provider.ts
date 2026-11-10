@@ -26,7 +26,7 @@ import {
   codexAuthHeaders,
   forceRefreshAccessToken,
 } from "./lib/codex-auth.ts";
-import { providerContextWindow } from "./lib/context-window.ts";
+import { providerContextWindow } from "../packages/context-window/index.ts";
 import {
   MODEL_PROVIDERS,
   resolveModelProvider,

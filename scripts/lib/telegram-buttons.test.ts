@@ -9,10 +9,10 @@ import {
   button,
   buttonRow,
   classicScreen,
+  escapeRichText,
   markTappedButton,
   screenPayload,
 } from "./telegram-buttons.ts";
-import { escapeRichText } from "./menu/buttons.ts";
 
 void test("classic: a button line becomes one keyboard row and its explanation stays in the text", () => {
   const md = [

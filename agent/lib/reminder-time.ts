@@ -3,7 +3,7 @@
 // стреляет своими расписаниями; своя арифметика cron-выражений - ровно тот путь, что дал
 // ошибку на пять часов в инциденте 24.08 (R3 ресёрча).
 import { Cron } from "croner";
-import { resolveTimeZone } from "./timezone.ts";
+import { resolveTimeZone } from "../../packages/timezone/index.ts";
 import {
   addDaysToDate,
   formatZoned,

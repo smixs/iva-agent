@@ -15,7 +15,7 @@ import { join } from "node:path";
 import { readEnvValues, upsertEnv } from "../env-file.ts";
 import { resolveDataDir } from "../data-dir.ts";
 import { probeUserbotHealth } from "../userbot-health.ts";
-import { button } from "./buttons.ts";
+import { button } from "../telegram-buttons.ts";
 
 type ErrorLike = { code?: unknown; message?: unknown };
 type Health = { state: string };

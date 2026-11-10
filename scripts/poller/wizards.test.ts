@@ -7,7 +7,7 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { after, mock, type TestContext } from "node:test";
-import { ContextWindowConfigurationError } from "../../agent/lib/context-window.ts";
+import { ContextWindowConfigurationError } from "../../packages/context-window/index.ts";
 import { MODEL_PROVIDER_NAMES } from "#lib/model-provider.ts";
 import {
   ModelValidationError,

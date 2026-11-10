@@ -1,7 +1,7 @@
 // Экран обработки новых сообщений. Настройка читается каналом перед каждой отправкой,
 // поэтому переключение действует сразу и не требует рестарта.
 import { readSettings, writeSettings } from "#lib/settings.ts";
-import { button, buttonRow } from "./buttons.ts";
+import { button, buttonRow } from "../telegram-buttons.ts";
 
 const PARENT = "r";
 

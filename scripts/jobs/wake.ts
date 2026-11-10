@@ -10,7 +10,7 @@ import { jobFactsFile } from "#lib/job-facts.ts";
 import { failureWaitsForBrief, parseProactive } from "#lib/proactive-config.ts";
 import { readSettings } from "#lib/settings.ts";
 import { zonedParts } from "#lib/zoned-time.ts";
-import { resolveTimeZone } from "../lib/timezone.ts";
+import { resolveTimeZone } from "../../packages/timezone/index.ts";
 import { ownerChat } from "../../packages/notification-chat/index.ts";
 import { noticeTranslator } from "../lib/notice-policy.ts";
 import { runJobWake, type JobWakeDeps } from "../lib/job-wake.ts";

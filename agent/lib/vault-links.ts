@@ -7,7 +7,7 @@ import {
 } from "node:fs";
 import { isAbsolute, join, relative, sep } from "node:path";
 import { parseFrontmatterOrSkip } from "./frontmatter.ts";
-import { resolveTimeZone } from "./timezone.ts";
+import { resolveTimeZone } from "../../packages/timezone/index.ts";
 
 // Ссылки [[…]], которые ведут в никуда. Модель пишет их с опечаткой в слаге, с выдуманной
 // транслитерацией или на карточку, которой никогда не создавали, — и это не косметика:

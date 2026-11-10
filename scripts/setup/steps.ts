@@ -13,7 +13,7 @@ import {
   providerBase,
 } from "../lib/model-catalog.ts";
 import { resolveMemorySearchMode } from "../lib/memory-mode.ts";
-import { validateTimeZone } from "../lib/timezone.ts";
+import { validateTimeZone } from "../../packages/timezone/index.ts";
 import {
   claudeContextWindow,
   type ClaudeStatus,

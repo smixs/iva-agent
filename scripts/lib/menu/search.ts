@@ -11,7 +11,7 @@ import { restartFailure } from "../systemd-control.ts";
 
 import { readEnvValues, upsertEnv } from "../env-file.ts";
 import { SEARCH_CATALOG, checkSearchKey } from "../search-catalog.ts";
-import { button, buttonRow } from "./buttons.ts";
+import { button, buttonRow } from "../telegram-buttons.ts";
 
 const SID = "srch";
 const PARENT = "r";
