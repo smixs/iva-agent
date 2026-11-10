@@ -37,6 +37,60 @@ HOME_DIR="$(cd "$HOME" && pwd -P)"
 [ "$INSTALL_DIR" != "/" ] || die "unsafe installation path"
 [ "$INSTALL_DIR" != "$HOME_DIR" ] || die "unsafe installation path"
 
+# Нижняя граница новейшего выпуска (update-compat.json) и ступенька: последний выпуск,
+# чей обновлятор принимает любую установку ниже границы. Установку ниже границы ремонт
+# ведёт двумя обновлениями - на ступеньку, затем на новейший. На первое Update branch
+# закреплён на ступеньке; ветка владельца на это время записана в файл и возвращается, чем
+# бы ремонт ни кончился (specs/UpdateFloor.tla: Repaired, BranchKept).
+FLOOR="0.5.0"
+STEP_BRANCH="release/0.5.11"
+RETURN_FILE="$INSTALL_DIR/.iva-repair-branch"
+
+# $1 - package.json того, что стоит. Нечитаемая версия - не ниже границы: ступеньки нет.
+below_floor() {
+  node -e '
+    const own = String(require(process.argv[1]).version ?? "");
+    const core = own.replace(/-[0-9A-Za-z.-]+$/u, "");
+    const [a, b] = [core, process.argv[2]].map((v) => v.split(".").map(Number));
+    if (a.length !== 3 || a.some(Number.isNaN)) process.exit(1);
+    for (let i = 0; i < 3; i++) if (a[i] !== b[i]) process.exit(a[i] < b[i] ? 0 : 1);
+    process.exit(core === own ? 1 : 0);
+  ' "$1" "$FLOOR" 2>/dev/null
+}
+
+# Возвращает ветку владельца везде, где ещё стоит ступенька, и убирает запись. Зовётся и
+# первым делом при каждом запуске: прошлый ремонт могли убить между обновлениями.
+restore_branch() {
+  [ -f "$RETURN_FILE" ] || return 0
+  local own dir
+  own="$(cat "$RETURN_FILE")"
+  for dir in "$INSTALL_DIR/repo" "$INSTALL_DIR/.git"; do
+    [ -d "$dir" ] || continue
+    [ "$(git --git-dir="$dir" config --local --get iva.updateBranch || true)" = "$STEP_BRANCH" ] || continue
+    if [ -n "$own" ]; then git --git-dir="$dir" config --local iva.updateBranch "$own"
+    else git --git-dir="$dir" config --local --unset-all iva.updateBranch; fi
+  done
+  rm -f "$RETURN_FILE"
+}
+
+# Первое обновление: обновлятор $1 ставит ступеньку. Не поставил - ветка владельца уже
+# возвращена, установка стоит на своём выпуске.
+step_up() {
+  say "This Iva is older than $FLOOR: updating to ${STEP_BRANCH#release/} first, then to the newest release." \
+    "Эта Iva старше $FLOOR: обновляю сначала до ${STEP_BRANCH#release/}, затем до новейшего выпуска."
+  trap restore_branch EXIT
+  local ok=1
+  node "$1" update || ok=0
+  restore_branch
+  trap - EXIT
+  [ "$ok" = 1 ] && [ -f "$INSTALL_DIR/current/bin/iva.mjs" ] \
+    && ! below_floor "$INSTALL_DIR/current/package.json" || fail \
+    "the update to ${STEP_BRANCH#release/} did not finish; Iva runs as it did. Run this command again." \
+    "обновление до ${STEP_BRANCH#release/} не завершилось; Iva работает как работала. Запустите эту команду ещё раз."
+}
+
+restore_branch
+
 # Самая свежая версия на диске - ею ремонтируется установка, у которой `current` потерян
 # (обрыв на переключении): сам обновлятор переключение и доводит.
 newest_version_entry() {
@@ -52,6 +106,18 @@ newest_version_entry() {
 # только начало конвертироваться (есть и versions/, и .git), идёт ниже по пути чекаута:
 # обновление доводит конверсию само.
 if [ -f "$INSTALL_DIR/current/bin/iva.mjs" ]; then
+  # Update branch каталогов версий обновлятор читает в зеркале repo. Ветка отката
+  # (release/<v>) - выбор владельца: её обновлятор новейший выпуск не берёт, и ступенька
+  # увела бы установку с выпуска, на котором её закрепили.
+  repo="$INSTALL_DIR/repo"
+  if [ -d "$repo" ] && below_floor "$INSTALL_DIR/current/package.json"; then
+    own="$(git --git-dir="$repo" config --local --get iva.updateBranch || true)"
+    if [ "${own#release/}" = "$own" ]; then
+      printf '%s' "$own" > "$RETURN_FILE"
+      git --git-dir="$repo" config --local iva.updateBranch "$STEP_BRANCH"
+      step_up "$INSTALL_DIR/current/bin/iva.mjs"
+    fi
+  fi
   say "Updating Iva..." "Обновляю Iva..."
   exec node "$INSTALL_DIR/current/bin/iva.mjs" update
 fi
@@ -125,6 +191,13 @@ branch="$(git -C "$INSTALL_DIR" config --get iva.updateBranch || true)"
 # IVA_BETA=1 и прежний флаг при main или без ветки (как у обновлятора) - ветка beta.
 if [ "${IVA_BETA:-}" = 1 ] || { [ "$(git -C "$INSTALL_DIR" config --get iva.beta || true)" = true ] && [ "${branch:-main}" = main ]; }; then branch=beta; fi
 [ -n "$branch" ] || branch="main"
+# Чекаут ниже границы идёт через ступеньку: дерево ставится на неё, и её обновлятор
+# переводит установку в каталоги версий. Ветка отката остаётся как есть.
+own=""
+if below_floor "$INSTALL_DIR/package.json" && [ "${branch#release/}" = "$branch" ]; then
+  own="$branch"
+  branch="$STEP_BRANCH"
+fi
 
 say "Getting Iva $branch..." "Получаю Iva ($branch)..."
 installed="$(git -C "$INSTALL_DIR" rev-parse -q --verify HEAD || true)"
@@ -143,9 +216,13 @@ if [ "$branch" = main ] && [ -n "$installed" ]; then
   for head in $heads; do git -C "$INSTALL_DIR" merge-base --is-ancestor "$installed" "$head" && { keep="$installed"; break; }; done
 fi
 # Ветка пишется до сброса: не записалась - ничего не сброшено.
+[ -z "$own" ] || printf '%s' "$own" > "$RETURN_FILE"
 git -C "$INSTALL_DIR" config --local iva.updateBranch "$branch"
 checkout_release "$INSTALL_DIR" "$keep" "$tip"
 say "Local changes to Iva's code were removed." "Локальные правки в коде удалены."
 say "Your .env, data/, vault/ and attachments/ stay in place." "Ваши .env, data/, vault/ и attachments/ остались на месте."
 
-exec node "$INSTALL_DIR/bin/iva.mjs" update
+[ -n "$own" ] || exec node "$INSTALL_DIR/bin/iva.mjs" update
+step_up "$INSTALL_DIR/bin/iva.mjs"
+say "Updating Iva..." "Обновляю Iva..."
+exec node "$INSTALL_DIR/current/bin/iva.mjs" update

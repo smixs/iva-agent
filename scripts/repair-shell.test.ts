@@ -3,11 +3,14 @@ import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import {
   chmodSync,
+  cpSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   realpathSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   utimesSync,
   writeFileSync,
 } from "node:fs";
@@ -15,6 +18,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test, { type TestContext } from "node:test";
+import { createVersionStore, versionName } from "./lib/version-store.ts";
 
 const ROOT = fileURLToPath(new URL("../", import.meta.url));
 const REPAIR = join(ROOT, "repair.sh");
@@ -602,4 +606,293 @@ test("repair failure table: every step fails alone, nothing is left half-done or
       broken.push(`${step}: exit ${code}, ${JSON.stringify(after)}`);
   }
   assert.deepEqual(broken, []);
+});
+
+// --- An installation below the floor: repair takes it up through the step release. -------
+// The shipped CLI of the installed release and the shipped CLI of the step release run as
+// they are. What stands in for a build is the new half of each tree: it flips the version
+// in, and the one of this tree asks the floor question first with the tree's own code.
+
+const FINISH = `import { existsSync, symlinkSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { createVersionStore } from "./lib/version-store.ts";
+import * as check from "./lib/update-check.ts";
+const [home, name] = process.argv.slice(2);
+const report = (outcome) =>
+  writeFileSync(process.env.IVA_UPDATE_OUTCOME, JSON.stringify(outcome));
+const refusal = check.belowFloor?.(home, join(import.meta.dirname, ".."));
+if (refusal) {
+  report({ status: "failed", message: refusal });
+  process.exit(1);
+}
+const store = createVersionStore(home);
+const dir = join(home, "versions", name);
+if (!existsSync(join(dir, "node_modules")))
+  symlinkSync(process.env.IVA_TEST_NODE_MODULES, join(dir, "node_modules"));
+const previous = store.currentName();
+store.linkState(dir);
+store.complete(name);
+store.activate(name);
+store.settle(name);
+report({ status: "updated", version: name, previous, custom: "none", migrations: [], removed: [] });
+`;
+const STEP = /^STEP_BRANCH="release\/(.+)"$/mu.exec(
+  readFileSync(REPAIR, "utf8"),
+)![1];
+const NEWEST = "0.5.12";
+const SHIPPED = ["scripts", "agent", "packages", "bin", "package.json"];
+
+/** The files of a shipped release, as they were, into `dir`. */
+function unpackShipped(tag: string, dir: string): void {
+  const paths = [...SHIPPED, "update-compat.json"].filter(
+    (path) =>
+      spawnSync("git", ["cat-file", "-e", `${tag}:${path}`], { cwd: ROOT })
+        .status === 0,
+  );
+  execFileSync("tar", ["-xf", "-", "-C", dir], {
+    input: execFileSync("git", ["archive", tag, ...paths], {
+      cwd: ROOT,
+      maxBuffer: 64 * 1024 * 1024,
+    }),
+  });
+}
+
+/**
+ * origin: the installed release, the step release on `release/<step>` with its tag, and
+ * this tree as the newest release on main and on beta.
+ */
+function floorRemote(fixture: string, from: string) {
+  const source = join(fixture, "source");
+  mkdirSync(source);
+  git(source, "init", "--quiet", "--initial-branch=main");
+  const commit = (message: string) => {
+    git(source, "add", "-A");
+    git(source, "commit", "--quiet", "-m", message);
+    return git(source, "rev-parse", "HEAD");
+  };
+  unpackShipped(`v${from}`, source);
+  const installed = commit(from);
+  git(source, "tag", `v${from}`);
+  for (const path of SHIPPED)
+    rmSync(join(source, path), { recursive: true, force: true });
+  unpackShipped(`v${STEP}`, source);
+  writeFileSync(join(source, "scripts/update-finish.ts"), FINISH);
+  const step = commit(STEP);
+  git(source, "tag", `v${STEP}`);
+  git(source, "branch", `release/${STEP}`);
+  for (const path of SHIPPED.slice(0, 4)) {
+    rmSync(join(source, path), { recursive: true, force: true });
+    cpSync(join(ROOT, path), join(source, path), { recursive: true });
+  }
+  cpSync(join(ROOT, "update-compat.json"), join(source, "update-compat.json"));
+  writeFileSync(
+    join(source, "package.json"),
+    JSON.stringify({
+      ...(JSON.parse(
+        readFileSync(join(ROOT, "package.json"), "utf8"),
+      ) as object),
+      version: NEWEST,
+    }),
+  );
+  writeFileSync(join(source, "scripts/update-finish.ts"), FINISH);
+  const newest = commit(NEWEST);
+  git(source, "tag", `v${NEWEST}`);
+  git(source, "branch", "beta");
+  const remote = join(fixture, "remote.git");
+  git(fixture, "clone", "--quiet", "--bare", source, remote);
+  return { remote, installed, step, newest };
+}
+
+function belowFloorWorld(t: TestContext, from: string) {
+  const fixture = realpathSync(mkdtempSync(join(tmpdir(), "iva-repair-")));
+  t.after(() => rmSync(fixture, { recursive: true, force: true }));
+  const origin = floorRemote(fixture, from);
+  const home = join(fixture, "iva");
+  const userHome = join(fixture, "user");
+  const fakeBin = join(fixture, "bin");
+  mkdirSync(userHome);
+  mkdirSync(fakeBin);
+  // Nothing here may reach the machine's services.
+  for (const name of ["systemctl", "launchctl", "loginctl"]) {
+    writeFileSync(join(fakeBin, name), "#!/bin/sh\nexit 1\n");
+    chmodSync(join(fakeBin, name), 0o755);
+  }
+  const env = {
+    ...process.env,
+    GIT_CONFIG_GLOBAL: "/dev/null",
+    GIT_CONFIG_COUNT: "0",
+    HOME: userHome,
+    PATH: `${fakeBin}:${process.env.PATH ?? ""}`,
+    IVA_INSTALL_DIR: home,
+    IVA_TEST_NODE_MODULES: join(ROOT, "node_modules"),
+    AGENT_LANGUAGE: "en",
+    IVA_BETA: "",
+  };
+  const seed = (dir: string) => {
+    writeFileSync(join(dir, ".env"), "MODEL_PROVIDER=ollama\nIVA_PORT=8723\n");
+    mkdirSync(join(dir, "data"), { recursive: true });
+    writeFileSync(join(dir, "data/sentinel"), "user data\n");
+    mkdirSync(join(dir, "vault"), { recursive: true });
+    writeFileSync(join(dir, "vault/note.md"), "# mine\n");
+  };
+  const kept = () =>
+    [".env", "data/sentinel", "vault/note.md"].map((path) =>
+      readFileSync(join(home, path), "utf8"),
+    );
+  const name = (version: string, sha: string) => versionName(version, sha);
+  return {
+    ...origin,
+    fixture,
+    home,
+    fakeBin,
+    env,
+    seed,
+    kept,
+    name,
+    store: () => createVersionStore(home),
+    branch: (dir: string) =>
+      spawnSync(
+        "git",
+        ["--git-dir", dir, "config", "--local", "--get", "iva.updateBranch"],
+        { encoding: "utf8", env },
+      ).stdout.trim(),
+    repair: () =>
+      spawnSync("bash", [REPAIR], { encoding: "utf8", env, timeout: 120_000 }),
+  };
+}
+
+/** The versions layout serving the shipped `from`, as its own updater left it. */
+function versionsInstallation(
+  world: ReturnType<typeof belowFloorWorld>,
+  from: string,
+  branch: string,
+): string {
+  const { home, remote, installed } = world;
+  mkdirSync(home);
+  git(home, "clone", "--quiet", "--mirror", remote, join(home, "repo"));
+  if (branch)
+    git(join(home, "repo"), "config", "--local", "iva.updateBranch", branch);
+  world.seed(home);
+  const store = world.store();
+  const name = world.name(from, installed);
+  const dir = store.stage(name);
+  unpackShipped(`v${from}`, dir);
+  symlinkSync(join(ROOT, "node_modules"), join(dir, "node_modules"));
+  store.linkState(dir);
+  store.complete(name);
+  store.activate(name);
+  store.settle(name);
+  return name;
+}
+
+// specs/UpdateFloor.tla: Repaired, BranchKept.
+for (const [from, branch] of [
+  ["0.3.29", "main"],
+  ["0.4.8", ""],
+  ["0.4.17", "beta"],
+] as const) {
+  test(`Repaired, BranchKept: repair takes a shipped v${from} through the step release onto the newest, Update branch ${branch || "unset"} is back`, (t) => {
+    const world = belowFloorWorld(t, from);
+    versionsInstallation(world, from, branch);
+    const before = world.kept();
+
+    const ran = world.repair();
+
+    assert.equal(ran.status, 0, `${ran.stdout}\n${ran.stderr}`);
+    assert.match(ran.stdout, new RegExp(`updating to ${STEP} first`, "u"));
+    const store = world.store();
+    assert.equal(store.currentName(), world.name(NEWEST, world.newest));
+    assert.equal(store.settled(), world.name(NEWEST, world.newest));
+    assert.equal(store.previousName(), world.name(STEP, world.step));
+    assert.deepEqual(world.kept(), before);
+    assert.equal(world.branch(join(world.home, "repo")), branch);
+    assert.equal(existsSync(join(world.home, ".iva-repair-branch")), false);
+  });
+}
+
+test("Repaired, BranchKept: repair killed after the first update leaves Iva on the step release, and the next run puts the branch back and finishes", (t) => {
+  const world = belowFloorWorld(t, "0.4.17");
+  versionsInstallation(world, "0.4.17", "main");
+  const before = world.kept();
+  // `node … update` runs as it is, then kills the shell that called it: repair.sh dies
+  // with no chance to put the branch back.
+  writeFileSync(
+    join(world.fakeBin, "node"),
+    `#!/bin/sh\nif [ "\${2:-}" = update ] && [ ! -e "${world.fixture}/killed" ]; then\n  "${process.execPath}" "$@"\n  : > "${world.fixture}/killed"\n  kill -9 "$PPID"\n  exit 0\nfi\nexec "${process.execPath}" "$@"\n`,
+  );
+  chmodSync(join(world.fakeBin, "node"), 0o755);
+
+  const killed = world.repair();
+
+  assert.equal(killed.signal, "SIGKILL", `${killed.stdout}\n${killed.stderr}`);
+  const step = world.name(STEP, world.step);
+  assert.equal(world.store().currentName(), step);
+  assert.equal(world.store().settled(), step);
+  assert.deepEqual(world.kept(), before);
+  assert.equal(world.branch(join(world.home, "repo")), `release/${STEP}`);
+  assert.equal(
+    readFileSync(join(world.home, ".iva-repair-branch"), "utf8"),
+    "main",
+  );
+
+  const again = world.repair();
+
+  assert.equal(again.status, 0, `${again.stdout}\n${again.stderr}`);
+  assert.equal(world.store().currentName(), world.name(NEWEST, world.newest));
+  assert.deepEqual(world.kept(), before);
+  assert.equal(world.branch(join(world.home, "repo")), "main");
+  assert.equal(existsSync(join(world.home, ".iva-repair-branch")), false);
+});
+
+test("Repaired, BranchKept: repair takes a checkout of v0.3.14 onto the step release, its updater moves it to versions, then onto the newest", (t) => {
+  const world = belowFloorWorld(t, "0.3.14");
+  const { home } = world;
+  git(world.fixture, "clone", "--quiet", world.remote, home);
+  git(home, "reset", "--quiet", "--hard", world.installed);
+  git(home, "config", "--local", "iva.updateBranch", "main");
+  world.seed(home);
+  symlinkSync(join(ROOT, "node_modules"), join(home, "node_modules"));
+  const before = world.kept();
+
+  const ran = world.repair();
+
+  assert.equal(ran.status, 0, `${ran.stdout}\n${ran.stderr}`);
+  assert.match(ran.stdout, new RegExp(`updating to ${STEP} first`, "u"));
+  const store = world.store();
+  assert.equal(store.currentName(), world.name(NEWEST, world.newest));
+  assert.equal(store.previousName(), world.name(STEP, world.step));
+  assert.deepEqual(world.kept(), before);
+  assert.equal(world.branch(join(home, "repo")), "main");
+  assert.equal(world.branch(join(home, ".git")), "main");
+  assert.equal(existsSync(join(home, ".iva-repair-branch")), false);
+});
+
+test("repair leaves an installation below the floor on its rollback branch to its own updater", (t) => {
+  const world = belowFloorWorld(t, "0.4.17");
+  const installed = versionsInstallation(world, "0.4.17", "release/0.4.17");
+  git(
+    join(world.home, "repo"),
+    "push",
+    "--quiet",
+    world.remote,
+    `${world.installed}:refs/heads/release/0.4.17`,
+  );
+
+  const ran = world.repair();
+
+  assert.equal(ran.status, 0, `${ran.stdout}\n${ran.stderr}`);
+  assert.doesNotMatch(ran.stdout, /first, then/u);
+  assert.equal(world.store().currentName(), installed);
+  assert.equal(world.branch(join(world.home, "repo")), "release/0.4.17");
+});
+
+test("the floor repair steps over is the floor of this tree", () => {
+  assert.equal(
+    /^FLOOR="(.+)"$/mu.exec(readFileSync(REPAIR, "utf8"))?.[1],
+    (
+      JSON.parse(readFileSync(join(ROOT, "update-compat.json"), "utf8")) as {
+        minUpdater: string;
+      }
+    ).minUpdater,
+  );
 });
