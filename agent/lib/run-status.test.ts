@@ -6,19 +6,18 @@ import {
   chmodSync,
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   readdirSync,
   rmSync,
   utimesSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { acquireFileLockSync, releaseFileLock } from "./fs-atomic.ts";
+import { tempDir } from "../../scripts/fixtures/temp-dir.ts";
 
-const dataDir = mkdtempSync(join(tmpdir(), "iva-run-status-"));
+const dataDir = tempDir("iva-run-status-");
 process.env.ASSISTANT_DATA_DIR = dataDir;
 process.env.IVA_RUN_STATUS_LOCK_STALE_MS = "300";
 process.env.IVA_RUN_STATUS_LOCK_TIMEOUT_MS = "150";

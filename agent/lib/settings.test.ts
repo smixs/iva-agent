@@ -19,6 +19,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import fc from "fast-check";
+import { tempDir } from "../../scripts/fixtures/temp-dir.ts";
 
 // settings.ts фиксирует каталог данных на импорте, поэтому ASSISTANT_DATA_DIR ставим
 // ДО динамического импорта. Абсолютный temp-путь заодно уводит запись подальше от
@@ -333,7 +334,7 @@ test("a crashed settings-lock owner leaves evidence and stale takeover recovers"
 test("data dir defaults to <cwd>/data for a relative ASSISTANT_DATA_DIR", () => {
   // Абсолютный ASSISTANT_DATA_DIR у родителя минует эту ветку, поэтому проверяем её
   // в отдельном процессе с cwd=temp и без ASSISTANT_DATA_DIR (дефолт "data").
-  const cwd = mkdtempSync(join(tmpdir(), "iva-settings-cwd-"));
+  const cwd = tempDir("iva-settings-cwd-");
   const url = pathToFileURL(join(import.meta.dirname, "settings.ts")).href;
   const code =
     'const { writeSettings } = await import(process.env.__URL); writeSettings({ language: "en" });';
