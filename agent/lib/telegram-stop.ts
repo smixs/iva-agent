@@ -6,7 +6,12 @@ import { requestTelegramCancel } from "./telegram-cancel-client.ts";
 import { verifyTelegramRequest } from "eve/channels/telegram";
 import { localCancelUrl } from "./telegram-cancel-route.ts";
 import { allowedTelegramUsers } from "./telegram-allowlist.ts";
-import { chatKeyOf, getChatStatus, setChatStatusIf } from "./run-status.ts";
+import {
+  chatKeyOf,
+  getChatStatus,
+  setChatStatusIf,
+  type ChatRecord,
+} from "./run-status.ts";
 import { tr } from "./i18n.ts";
 import { isPrivateTelegramChat } from "./telegram-private-chat.ts";
 import { traceStop } from "./trace.ts";
@@ -17,7 +22,7 @@ import { traceStop } from "./trace.ts";
 export type StopOutcome = "requested" | "unresponsive" | "idle" | "failed";
 // Текст ответа описывает запрос отмены, состояние idle или отказ.
 export type StopReplyOutcome = Exclude<StopOutcome, "unresponsive">;
-export type StopStatus = Record<string, unknown> | null;
+export type StopStatus = ChatRecord | null;
 export type StopCancelResult = { readonly status?: unknown };
 export type StopCancelRequest = {
   url: string;

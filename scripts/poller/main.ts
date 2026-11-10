@@ -1,5 +1,5 @@
 import { reconcileDeferred } from "../lib/deferred-command.ts";
-import { listChatStatuses } from "#lib/run-status.ts";
+import { chatHeld, chatState, listChatStatuses } from "#lib/run-status.ts";
 import { launchIvaCommand } from "./update-flow.ts";
 import { real } from "../lib/version-layout.ts";
 import { createHelperOutcomeScan } from "./helper-outcomes.ts";
@@ -302,7 +302,7 @@ const configuredCollectQuietMs =
     : COLLECT_QUIET_MS;
 
 const turnsRunning = () =>
-  listChatStatuses().some(({ status }) => status.status === "running");
+  listChatStatuses().some(({ status }) => chatHeld(chatState(status)));
 const pollTimeout = (queued: number, collected: number) =>
   queued > 0 || collected > 0 || turnsRunning() ? 1 : 30;
 

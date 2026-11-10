@@ -25,7 +25,11 @@ import {
   sweepFired,
   type Reminder,
 } from "./reminder-store.ts";
-import { listChatStatuses, setChatStatusIf } from "./run-status.ts";
+import {
+  listChatStatuses,
+  setChatStatusIf,
+  TURN_FIELDS_CLEARED,
+} from "./run-status.ts";
 import {
   runScheduledJob,
   type RunScheduledJobOptions,
@@ -174,7 +178,7 @@ function releaseReminderStatus(
       setChatStatusIf(
         chatKey,
         { sessionId },
-        { status: "idle", sessionId: null, turnId: null, draftId: null },
+        { status: "idle", ...TURN_FIELDS_CLEARED },
       );
     }
   } catch (error) {

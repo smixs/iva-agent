@@ -2,14 +2,22 @@ import { randomUUID } from "node:crypto";
 import { traceContextParts, traceTurnBound } from "./trace.ts";
 import { localStamp } from "./vault-daily.ts";
 import { resolveVaultDir } from "@iva/vault-dir";
-import { QUEUED_STATUS_CLEARED } from "./run-status.ts";
+import {
+  chatBusy,
+  chatState,
+  QUEUED_STATUS_CLEARED,
+  TURN_FIELDS_CLEARED,
+  type ChatRecord,
+  type ChatRecordExpected,
+  type ChatRecordPatch,
+} from "./run-status.ts";
 
-type ChatStatus = Record<string, unknown> | null;
+type ChatStatus = ChatRecord | null;
 type GetStatus = (chatKey: string) => ChatStatus;
 type SetStatusIf = (
   chatKey: string,
-  expected: Record<string, unknown>,
-  patch: Record<string, unknown>,
+  expected: ChatRecordExpected,
+  patch: ChatRecordPatch,
   options?: { touch?: boolean },
 ) => unknown;
 
@@ -74,7 +82,7 @@ export type TurnHeartbeat = { sessionId: string; at: number };
 
 export interface TakeOverTelegramChatOptions {
   chatKey: string;
-  patch: Record<string, unknown>;
+  patch: ChatRecordPatch;
   now?: () => number;
   staleMs?: number;
   getStatusImpl: GetStatus;
@@ -83,20 +91,10 @@ export interface TakeOverTelegramChatOptions {
   refuseImpl?: (status: ChatStatus) => boolean;
 }
 
-export function chatTakeOverPatch(
-  fields: Record<string, unknown>,
-): Record<string, unknown> {
+export function chatTakeOverPatch(fields: ChatRecordPatch): ChatRecordPatch {
   return {
     status: "running",
-    ingressId: null,
-    ingressAt: null,
-    turnAt: null,
-    firstOutputAt: null,
-    sessionId: null,
-    turnId: null,
-    compacting: null,
-    draftId: null,
-    latencyLogged: null,
+    ...TURN_FIELDS_CLEARED,
     resetAt: null,
     // Принятая реплика заберёт Стоп в inbound; новый фоновый ход его снимает.
     ...(fields.ingressId === undefined ? { wasCancelled: null } : {}),
@@ -108,18 +106,9 @@ export function chatTakeOverPatch(
   };
 }
 
-const freshRunning = (
-  status: ChatStatus,
-  at: number,
-  staleMs: number,
-): boolean =>
-  status?.status === "running" &&
-  typeof status.updatedAt === "number" &&
-  at - status.updatedAt < staleMs;
-
 type ClaimStep = {
   readonly chatKey: string;
-  readonly patch: Record<string, unknown>;
+  readonly patch: ChatRecordPatch;
   readonly at: number;
   readonly staleMs: number;
   readonly getStatusImpl: GetStatus;
@@ -133,7 +122,7 @@ function claimOnce(step: ClaimStep): {
 } {
   const current = step.getStatusImpl(step.chatKey);
   if (
-    freshRunning(current, step.at, step.staleMs) ||
+    chatBusy(chatState(current, step.at, step.staleMs)) ||
     step.refuseImpl?.(current)
   )
     return { taken: false, live: true };
@@ -233,7 +222,7 @@ const finiteNumber = (value: unknown): number | undefined =>
 function queuedStatusOf(
   current: ChatStatus,
   sessionId: string,
-): Record<string, unknown> {
+): ChatRecordPatch {
   if (current?.queuedIngressId === undefined) return {};
   const ingressAt =
     current.queuedSessionId === sessionId
@@ -428,15 +417,7 @@ function abandonOwnEarlyStatus({
   const cleared = setStatusIfImpl(
     chatKey,
     { status: "running", ingressId, sessionId: undefined },
-    {
-      status: "idle",
-      ingressId: null,
-      ingressAt: null,
-      turnAt: null,
-      firstOutputAt: null,
-      draftId: null,
-      latencyLogged: null,
-    },
+    { status: "idle", ...TURN_FIELDS_CLEARED },
   );
   if (!cleared) return Promise.resolve(false);
   return Promise.resolve(true);

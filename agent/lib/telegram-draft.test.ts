@@ -91,7 +91,10 @@ await test("отмена освобождает статус без пометк
     true,
   );
   assert.equal(runStatus.getChatStatus(key)?.wasCancelled, undefined);
-  assert.equal(runStatus.getChatStatus(key)?.stopPressed, undefined);
+  assert.equal(
+    (runStatus.getChatStatus(key) as Record<string, unknown>).stopPressed,
+    undefined,
+  );
 });
 
 await test("освобождение записи после сбоя хода обходится без Bot API", async () => {
@@ -187,7 +190,7 @@ await test("вход очереди переживает любой финал �
       [],
       mode,
     );
-    const after = runStatus.getChatStatus(key);
+    const after = runStatus.getChatStatus(key) as Record<string, unknown>;
     for (const [field, value] of Object.entries(queued))
       assert.equal(after?.[field], value, `${mode}: ${field}`);
   }
@@ -456,6 +459,11 @@ await test("PBT смешивает ходы, шаги, инструменты, �
                 turnId: null,
                 draftId: null,
                 compacting: null,
+                ingressId: null,
+                ingressAt: null,
+                turnAt: null,
+                firstOutputAt: null,
+                latencyLogged: null,
                 resetAt: Date.now(),
               });
               await advance(4500);

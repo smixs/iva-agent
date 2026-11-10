@@ -58,10 +58,12 @@ import { rememberTurnQuestion, turnQuestion } from "../lib/turn-question.js";
 // мост по ним буферизует входящие, канал хранит sessionId/turnId для отмены.
 import {
   chatKeyOf,
+  chatState,
   getChatStatus,
   RUN_STALE_MS,
   setChatStatus,
   setChatStatusIf,
+  TURN_FIELDS_CLEARED,
 } from "../lib/run-status.js";
 import { handleTelegramResetRequest } from "../lib/telegram-reset-route.js";
 // Отмена хода: публичный cancel eve отдаётся только роутам, поэтому «Стоп» — свой
@@ -422,7 +424,7 @@ const releaseCompactionClaim = (chatKey: string, sessionId: string) =>
   setChatStatusIf(
     chatKey,
     { sessionId, compacting: true },
-    { status: "idle", sessionId: null, compacting: null },
+    { status: "idle", ...TURN_FIELDS_CLEARED },
   );
 
 const telegram = telegramChannel({
@@ -743,12 +745,10 @@ const telegram = telegramChannel({
     const tg = ctx.telegram;
     const chatKey = chatKeyOf(message.chat.id, message.messageThreadId);
     const ingressId = randomUUID();
-    const receivedStatus = getChatStatus(chatKey);
+    const receivedState = chatState(getChatStatus(chatKey));
     const receivedDuringTurn =
       telegramTurnPolicy() === "steer" &&
-      receivedStatus?.status === "running" &&
-      receivedStatus.compacting !== true &&
-      Date.now() - (receivedStatus.updatedAt ?? 0) < RUN_STALE_MS;
+      (receivedState === "turn" || receivedState === "accepted");
     return rememberAccepted(
       chatKey,
       message,

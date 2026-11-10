@@ -47,8 +47,8 @@ void test("native stop cancels the snapshot pair even if the next turn replaces 
       getStatusImpl: () => {
         reads++;
         return reads === 1
-          ? { sessionId: "s", turnId: "old", draftId: 41 }
-          : { sessionId: "s", turnId: "new", draftId: 42 };
+          ? { status: "running", sessionId: "s", turnId: "old", draftId: 41 }
+          : { status: "running", sessionId: "s", turnId: "new", draftId: 42 };
       },
     }),
     "requested",
@@ -148,7 +148,7 @@ void test("/stop still cancels a stale record and handles pre-turn or no_active_
     await requestTurnCancel("7:", {
       ...f.deps,
       url: "http://localhost/cancel",
-      getStatusImpl: () => ({ status: "running" }),
+      getStatusImpl: () => ({ status: "running", ingressId: "early" }),
     }),
     "idle",
   );

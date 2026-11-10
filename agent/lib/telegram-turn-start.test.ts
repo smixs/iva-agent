@@ -882,7 +882,7 @@ void test("early ingress time survives adoption when the same session also owns 
 
 void test("a takeover for compaction or a reminder clears the previous Stop fact", async () => {
   for (const fields of [
-    { sessionId: "session-1", compacting: true },
+    { sessionId: "session-1", compacting: true as const },
     { sessionId: "session-reminder" },
   ]) {
     const store = statusStore({

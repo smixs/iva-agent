@@ -20,6 +20,7 @@ import {
   chatKeyOf,
   getChatStatus,
   setChatStatusIf,
+  TURN_FIELDS_CLEARED,
 } from "#lib/run-status.ts";
 import {
   chatTakeOverPatch,
@@ -157,7 +158,7 @@ function releaseChat(chatKey: string, sessionId: string): void {
   setChatStatusIf(
     chatKey,
     { sessionId },
-    { status: "idle", sessionId: null, turnId: null, draftId: null },
+    { status: "idle", ...TURN_FIELDS_CLEARED },
   );
 }
 
