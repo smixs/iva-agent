@@ -627,14 +627,17 @@ test("SupportedIsServed: a schema 1 table its shipped writer left, read but not 
     deliver: { chatId: "42" },
   });
   const written = readFileSync(reminderFile(), "utf8");
-  assert.equal(JSON.parse(written).schemaVersion, 1);
+  assert.equal(
+    (JSON.parse(written) as { schemaVersion: unknown }).schemaVersion,
+    1,
+  );
   const step = await shippedStore("v0.5.11");
   const stepRows = await step.list(reminderFile());
   assert.equal(readFileSync(reminderFile(), "utf8"), written);
 
   const rows = await list();
   // createdAt перевода - время чтения; остальное как у 0.5.11.
-  const bare = (all: Reminder[]) => all.map(({ createdAt: _, ...r }) => r);
+  const bare = (all: Reminder[]) => all.map((r) => ({ ...r, createdAt: 0 }));
   assert.deepEqual(bare(rows), bare(stepRows));
   assert.deepEqual(
     rows.map((r) => [r.id, r.text, r.status, r.nextRunAtMs]),
