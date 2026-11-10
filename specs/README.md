@@ -123,6 +123,32 @@ Witnesses must fail: `PluginProposal-norename.cfg` (the tap copies the proposal 
 specs/plugin-proposal-check.sh
 ```
 
+## PluginMode
+
+`PluginMode.tla` models the two switches of one plugin entry in `data/custom/plugins.json`, `enabled` and `trusted` (ADR-0009), and the units that follow them. It was written after the code and checks the code. The four pairs are four named modes, read in the code by `pluginMode` (`agent/lib/plugin-store.ts`): `full`, `no-processes`, `paused` (switched off, the trust is remembered) and `off`. The plugin of the model has processes: a `stdio` server in `mcp.json` or a service in `sh.iva/services/`.
+
+Three actors write the entry: the owner (a terminal, or a tap that the Bridge carries out outside a model turn), a model turn (`bash` with `IVA_AGENT_TURN=1`) and `iva update`. One `iva plugin` command writes the file and reconciles the units under the update lock, which is one step of the model. `enable` and `trust` then build a version outside that lock, so any other command fits between their write and the undo of a build that failed. The comment in the model maps every action to its function.
+
+Checked invariants:
+
+1. `ProcessesNeedTrust`: the processes of a plugin run only while it is trusted.
+2. `DisabledIsStopped`: no unit of a switched-off plugin runs.
+3. `TrustIsOwners`: the trust in the entry was given by the owner.
+4. `UpdateGrantsNothing`: an update of Iva enables nothing and trusts nothing.
+5. `EnableIsOwners`: a plugin is on by the owner's action only; neither a turn nor the undo of another command's build switches it on.
+
+Mutants must fail: `PluginMode-enabled-only.cfg` (the unit plan looks at `enabled` alone, `ProcessesNeedTrust`), `PluginMode-disable-keeps-units.cfg` (`disable` writes the state without reconciling the units, `DisabledIsStopped`), `PluginMode-turn-trusts.cfg` (`iva plugin trust` passes inside a model turn, `TrustIsOwners`), `PluginMode-update-reenables.cfg` (the update switches a plugin back on, `UpdateGrantsNothing`).
+
+Witnesses of the code before the repair must fail too. `PluginMode-undo-keeps-units.cfg`: the undo of an `enable` that did not build wrote "disabled" and left the units running (`DisabledIsStopped`). `PluginMode-stale-undo.cfg`: the undo wrote the entry it had read before the build, so a plugin switched off, untrusted or removed while the build ran came back (`EnableIsOwners`, and `TrustIsOwners` once the first is left out). Each has a test in `scripts/cli/plugin.test.ts` that carries the invariant in its name.
+
+`PluginMode-update-off.cfg` is an open finding, not a mutant: it is the updater as it works today. `settlePlugins` (`scripts/lib/version-update.ts`) switches off a plugin whose code no longer builds and reconciles no units, so `DisabledIsStopped` breaks until the next `iva plugin` command. The clean configuration leaves that action out and speaks about the `iva plugin` commands.
+
+Outside the model: a crash between the write and the unit reconcile (the next `iva plugin` command reconciles again), a unit that systemd refuses to stop, a plugin of skills alone (a model turn installs it itself), `iva plugin update` and `sync` (they keep both switches of an entry), a `plugins.json` edited by hand or by a model past the CLI (the honest caveat of ADR-0009), and the connection files inside a built version.
+
+```sh
+specs/plugin-mode-check.sh
+```
+
 ## DraftStop
 
 `DraftStop.tla` models a private chat's draft stream and native stop. The final
