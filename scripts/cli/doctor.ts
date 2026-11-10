@@ -1486,7 +1486,7 @@ async function checkPluginEntry(
 ): Promise<void> {
   const { readPlugin } = core.reader;
   const { readPluginConfigState } = core.config;
-  const { pluginConfigFile, pluginRoot } = core.store;
+  const { pluginConfigFile, pluginMode, pluginRoot } = core.store;
   const root = pluginRoot(ctx.dataDirectory, entry.name);
   if (!existsSync(root)) {
     ctx.fail(
@@ -1519,7 +1519,7 @@ async function checkPluginEntry(
   ctx.ok(
     `plugin ${entry.name}${entry.enabled ? "" : " (disabled)"}: ${parts.join(", ")}`,
   );
-  if (entry.enabled && entry.trusted)
+  if (pluginMode(entry) === "full")
     expectPluginUnits(report, entry, inspection);
   // Код плагина живёт в версии, а не в папке (ADR-0009): запись «включён» без
   // сборки в работающей версии значит, что тулов плагина у агента нет.

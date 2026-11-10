@@ -42,6 +42,7 @@ export type PluginEntry = {
   readonly sha: string;
   /** Отпечаток содержимого папки на момент установки; пусто — неизвестен. */
   readonly digest: string;
+  /** Скиллы и код плагина в работе. Вместе с `trusted` читается как `pluginMode`. */
   readonly enabled: boolean;
   /** Разрешение поднимать MCP-серверы плагина. Тумблер отдельный (ADR-0009). */
   readonly trusted: boolean;
@@ -56,6 +57,26 @@ export type PluginEntry = {
   /** Порт каждого сервиса `sh.iva/services/<svc>/`. Нет поля — не выдано. */
   readonly services?: PluginPorts;
 };
+
+/**
+ * Что из плагина работает. На диске это два тумблера записи, в коде — одно слово: кто
+ * решает по обоим тумблерам сразу, спрашивает режим, а не складывает пару сам
+ * (`specs/PluginMode.tla`).
+ *
+ * - `full` — включён и доверен: скиллы, код и процессы (MCP-серверы, сервисы).
+ * - `no-processes` — включён без доверия: скиллы и код, на машине ничего не запускается.
+ * - `paused` — выключен, доверие помнится: не работает ничего, а `enable` возвращает
+ *   всё сразу, без нового вопроса о процессах.
+ * - `off` — выключен и не доверен.
+ */
+export type PluginMode = "full" | "no-processes" | "paused" | "off";
+
+export function pluginMode(
+  entry: Pick<PluginEntry, "enabled" | "trusted">,
+): PluginMode {
+  if (entry.enabled) return entry.trusted ? "full" : "no-processes";
+  return entry.trusted ? "paused" : "off";
+}
 
 export type PluginsState = {
   readonly marketplaces: readonly string[];

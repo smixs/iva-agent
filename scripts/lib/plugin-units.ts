@@ -1,3 +1,4 @@
+import type { PluginMode } from "#lib/plugin-store.ts";
 import { systemdEnvironmentSegment } from "./systemd-values.ts";
 import { launchdPlan } from "./launchd-plist.ts";
 import { unitPath, launchdLabel } from "./launchd.ts";
@@ -239,8 +240,7 @@ function systemdEnvironment(key: string, value: string): string {
 /** What the caller already read about one plugin: enough to plan its units. */
 export type PluginUnitSource = {
   readonly name: string;
-  readonly enabled: boolean;
-  readonly trusted: boolean;
+  readonly mode: PluginMode;
   /** `PLUGIN_ROOT`: `data/custom/plugins/<name>`. */
   readonly root: string;
   /** `PLUGIN_DATA`: `data/plugin-data/<name>`. */
@@ -279,15 +279,16 @@ function markPlannedUnits(units: readonly PluginUnit[]): PluginUnit[] {
 
 /**
  * Every unit the installation should have right now. A plugin contributes units only
- * while it is enabled AND trusted: `enabled` is the text in the prompt, `trusted` is a
- * process on the machine, and one switch for both was rejected in ADR-0009.
+ * in the mode `full`, enabled AND trusted: `enabled` is the text in the prompt, `trusted`
+ * is a process on the machine, and one switch for both was rejected in ADR-0009
+ * (`ProcessesNeedTrust` and `DisabledIsStopped` in `specs/PluginMode.tla`).
  */
 export function pluginUnitPlan(options: PluginUnitPlanOptions): PluginUnitPlan {
   const { scope, plugins } = options;
   const units: PluginUnit[] = [];
   const diagnostics: string[] = [];
   for (const plugin of plugins) {
-    if (!plugin.enabled || !plugin.trusted) continue;
+    if (plugin.mode !== "full") continue;
     const named = unitPartProblem("plugin", plugin.name);
     if (named) {
       diagnostics.push(named);
