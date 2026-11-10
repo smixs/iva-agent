@@ -33,7 +33,7 @@ function options(snapshot: Record<string, unknown> | null) {
     },
   };
 }
-void test("native stop cancels the snapshot pair even if the next turn replaces it during the request", async () => {
+void test("TurnLifecycle OldTurnStopped: native stop cancels the snapshot pair even if the next turn replaces it during the request", async () => {
   const f = options({
     status: "running",
     sessionId: "s",

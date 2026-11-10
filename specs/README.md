@@ -545,3 +545,28 @@ Outside the model: `move` and `run_now` (`ScheduleTool`), the turn itself (`Turn
 ```sh
 specs/reminder-lifecycle-check.sh
 ```
+
+## TurnLifecycle
+
+`TurnLifecycle.tla` models the outcome of one Reminder turn and its two guards (`scripts/lib/reminder-turn.ts`: `settleTurn`, `readTurnStream`, `stopParkedTurn`, `resetSession`) together with the identity check of the owner's stop (`agent/lib/telegram-stop.ts`, `scripts/poller/control.ts`). Time is three abstract stages: inactivity, bounded cancel, bounded reset. `ReminderSilence` refines the guard of `Expire`.
+
+Checked invariants:
+
+1. `OwnerFirst`: a turn the owner stopped ends as cancelled, whatever else happened.
+2. `LimitFirst`: without a stop, the session limit decides the outcome.
+3. `FailurePreserved`: a failed turn ends as failed, not as text.
+4. `CancelBeforeStart`: the silence watchdog requests the cancel also when the turn has not started.
+5. `ResetReached`: the watchdog returns only after the reset.
+6. `OldTurnStopped`: a stop aimed at a turn that has been replaced does not wait for the new one.
+
+| Config                   | Mutation                                            | Fails               |
+| ------------------------ | --------------------------------------------------- | ------------------- |
+| `TurnLifecycle-failure`  | a failed turn is settled as text                    | `FailurePreserved`  |
+| `TurnLifecycle-silence`  | the watchdog cancels only a turn that has started   | `CancelBeforeStart` |
+| `TurnLifecycle-identity` | the stop observes the turn without comparing its id | `OldTurnStopped`    |
+
+The tests named `TurnLifecycle …` in `scripts/lib/reminder-turn.test.ts` and `agent/lib/telegram-stop.test.ts` hold the invariants on the real turn. Outside the model: durable server execution, helper completion and the effects of tools.
+
+```sh
+specs/turn-lifecycle-check.sh
+```
