@@ -14,7 +14,7 @@ import {
   readFactsSync,
   type JobFact,
 } from "./job-facts.ts";
-import { list, type Reminder } from "./reminder-store.ts";
+import { list, owesAlert, type Reminder } from "./reminder-store.ts";
 import { isLiveSchedule } from "./schedule-table.ts";
 
 /** Окно провала напоминания: строку разовой напоминалки уборка снимает через сутки. */
@@ -60,8 +60,9 @@ export function openReminderFailures(
   for (const row of reminders) {
     // Провал напоминания — именно недоставка (спека T20 п.3): ход пробуждения мог упасть и
     // ПОСЛЕ того, как текст ушёл владельцу, и такая строка несёт причину при delivered=true
-    // — висеть открытым провалом каждый ход ей не за что (проверка T20, раунд 3).
-    if (row.delivered !== false) continue;
+    // — висеть открытым провалом каждый ход ей не за что (проверка T20, раунд 3). Брошенное
+    // срабатывание, закрытое тиком, — тоже: дошёл ли текст, неизвестно.
+    if (row.delivered !== false && !owesAlert(row)) continue;
     if (row.error === null || row.error.length === 0) continue;
     if (row.firedAt === null) continue;
     if (now - row.firedAt > OPEN_FAILURES_WINDOW_MS) continue;
