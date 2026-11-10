@@ -7,7 +7,7 @@ eve_root="$repo_root/eve"
 package_root="$eve_root/packages/eve"
 package_json="$package_root/package.json"
 build_json="$package_root/BUILD.json"
-version="0.51.1-iva.5"
+version="0.51.1-iva.6"
 pnpm_version="11.25.0"
 upstream_commit="eb5949a622801b35a2a6f78bb58d9eef27273cac"
 if [[ -n "${EVE_PNPM_BIN:-}" ]]; then

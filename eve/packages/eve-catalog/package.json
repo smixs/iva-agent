@@ -21,12 +21,7 @@
     "clean": "rm -rf dist",
     "build": "pnpm run clean && tsc -p tsconfig.build.json",
     "build:types": "tsc -p tsconfig.build.json --emitDeclarationOnly",
-    "test": "pnpm run test:unit",
-    "test:unit": "vitest run --config vitest.config.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
-  },
-  "devDependencies": {
-    "vitest": "catalog:"
   },
   "engines": {
     "node": ">=24"

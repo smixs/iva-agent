@@ -59,6 +59,34 @@ test("eve source files match the git index", async () => {
   );
 });
 
+test("the eve copy holds no tests, documentation or dropped entry points (ADR-0027)", async () => {
+  const dropped =
+    /(?:^|\/)(?:__snapshots__|__fixtures__)\/|\.test(?:-d)?\.tsx?$|^docs\/|^packages\/eve\/(?:test|extension-contracts)\/|^packages\/eve\/src\/(?:internal\/testing|react|vue|svelte|self-modification|public\/(?:next|nuxt|sveltekit|channels\/(?:slack|teams|discord|linear|twilio|chat-sdk|photon|linq)))\//u;
+  const files = await listEveTreeFiles(SOURCE_ROOT, "source");
+  assert.deepEqual(
+    files.filter((file) => dropped.test(file)),
+    [],
+    "eve/ carries files that ADR-0027 removed",
+  );
+  const manifest = await readJson<{
+    readonly files: readonly string[];
+    readonly exports: Record<string, unknown>;
+  }>(path.join(SOURCE_ROOT, "packages/eve/package.json"));
+  assert.ok(
+    !manifest.files.includes("docs"),
+    "the eve package ships without its documentation",
+  );
+  assert.deepEqual(
+    Object.keys(manifest.exports).filter((entry) =>
+      /^\.\/(?:react|vue|svelte|next|nuxt|sveltekit|self-modification(?:\/.*)?|channels\/(?:slack|teams|discord|linear|twilio|chat-sdk|photon|linq))$/u.test(
+        entry,
+      ),
+    ),
+    [],
+    "the eve package exports an entry point that ADR-0027 removed",
+  );
+});
+
 test("installed eve is the package built from the current eve source tree", async () => {
   const build = await readJson<EveBuildMetadata>(
     path.join(INSTALLED_ROOT, "BUILD.json"),

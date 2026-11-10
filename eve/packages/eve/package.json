@@ -36,7 +36,6 @@
   "files": [
     "bin",
     "dist",
-    "docs",
     "CHANGELOG.md",
     "NOTICE",
     "README.md"
@@ -65,36 +64,6 @@
       "types": "./dist/src/client/index.d.ts",
       "import": "./dist/src/client/index.js",
       "default": "./dist/src/client/index.js"
-    },
-    "./react": {
-      "types": "./dist/src/react/index.d.ts",
-      "import": "./dist/src/react/index.js",
-      "default": "./dist/src/react/index.js"
-    },
-    "./vue": {
-      "types": "./dist/src/vue/index.d.ts",
-      "import": "./dist/src/vue/index.js",
-      "default": "./dist/src/vue/index.js"
-    },
-    "./svelte": {
-      "types": "./dist/src/svelte/index.d.ts",
-      "import": "./dist/src/svelte/index.js",
-      "default": "./dist/src/svelte/index.js"
-    },
-    "./next": {
-      "types": "./dist/src/public/next/index.d.ts",
-      "import": "./dist/src/public/next/index.js",
-      "default": "./dist/src/public/next/index.js"
-    },
-    "./nuxt": {
-      "types": "./dist/src/public/nuxt/index.d.ts",
-      "import": "./dist/src/public/nuxt/index.js",
-      "default": "./dist/src/public/nuxt/index.js"
-    },
-    "./sveltekit": {
-      "types": "./dist/src/public/sveltekit/index.d.ts",
-      "import": "./dist/src/public/sveltekit/index.js",
-      "default": "./dist/src/public/sveltekit/index.js"
     },
     "./tools/approval": {
       "types": "./dist/src/public/tools/approval/index.d.ts",
@@ -281,24 +250,6 @@
       "import": "./dist/src/public/local-dev.js",
       "default": "./dist/src/public/local-dev.js"
     },
-    "./self-modification": {
-      "eve-source": "./src/self-modification/extension/extension.ts",
-      "types": "./dist/src/self-modification/extension/extension.d.ts",
-      "import": "./dist/src/self-modification/extension/extension.js",
-      "default": "./dist/src/self-modification/extension/extension.js"
-    },
-    "./self-modification/agent": {
-      "eve-source": "./src/self-modification/agent.ts",
-      "types": "./dist/src/self-modification/agent.d.ts",
-      "import": "./dist/src/self-modification/agent.js",
-      "default": "./dist/src/self-modification/agent.js"
-    },
-    "./self-modification/sandbox": {
-      "eve-source": "./src/self-modification/sandbox.ts",
-      "types": "./dist/src/self-modification/sandbox.d.ts",
-      "import": "./dist/src/self-modification/sandbox.js",
-      "default": "./dist/src/self-modification/sandbox.js"
-    },
     "./extension": {
       "types": "./dist/src/public/extension/index.d.ts",
       "import": "./dist/src/public/extension/index.js",
@@ -339,55 +290,15 @@
       "import": "./dist/src/public/channels/mcp.js",
       "default": "./dist/src/public/channels/mcp.js"
     },
-    "./channels/slack": {
-      "types": "./dist/src/public/channels/slack/index.d.ts",
-      "import": "./dist/src/public/channels/slack/index.js",
-      "default": "./dist/src/public/channels/slack/index.js"
-    },
-    "./channels/chat-sdk": {
-      "types": "./dist/src/public/channels/chat-sdk/index.d.ts",
-      "import": "./dist/src/public/channels/chat-sdk/index.js",
-      "default": "./dist/src/public/channels/chat-sdk/index.js"
-    },
-    "./channels/photon": {
-      "types": "./dist/src/public/channels/photon/index.d.ts",
-      "import": "./dist/src/public/channels/photon/index.js",
-      "default": "./dist/src/public/channels/photon/index.js"
-    },
-    "./channels/linq": {
-      "types": "./dist/src/public/channels/linq/index.d.ts",
-      "import": "./dist/src/public/channels/linq/index.js",
-      "default": "./dist/src/public/channels/linq/index.js"
-    },
     "./channels/github": {
       "types": "./dist/src/public/channels/github/index.d.ts",
       "import": "./dist/src/public/channels/github/index.js",
       "default": "./dist/src/public/channels/github/index.js"
     },
-    "./channels/discord": {
-      "types": "./dist/src/public/channels/discord/index.d.ts",
-      "import": "./dist/src/public/channels/discord/index.js",
-      "default": "./dist/src/public/channels/discord/index.js"
-    },
-    "./channels/twilio": {
-      "types": "./dist/src/public/channels/twilio/index.d.ts",
-      "import": "./dist/src/public/channels/twilio/index.js",
-      "default": "./dist/src/public/channels/twilio/index.js"
-    },
     "./channels/telegram": {
       "types": "./dist/src/public/channels/telegram/index.d.ts",
       "import": "./dist/src/public/channels/telegram/index.js",
       "default": "./dist/src/public/channels/telegram/index.js"
-    },
-    "./channels/teams": {
-      "types": "./dist/src/public/channels/teams/index.d.ts",
-      "import": "./dist/src/public/channels/teams/index.js",
-      "default": "./dist/src/public/channels/teams/index.js"
-    },
-    "./channels/linear": {
-      "types": "./dist/src/public/channels/linear/index.d.ts",
-      "import": "./dist/src/public/channels/linear/index.js",
-      "default": "./dist/src/public/channels/linear/index.js"
     },
     "./package.json": "./package.json",
     "./setup/scaffold": {
@@ -408,23 +319,16 @@
   },
   "scripts": {
     "clean": "node -e \"fs.rmSync('dist', { recursive: true, force: true })\"",
-    "build": "pnpm run check:bin-runtime-dependencies && pnpm run build:js && node ./scripts/copy-docs.mjs && node ./scripts/stamp-version-tokens.mjs",
+    "build": "pnpm run check:bin-runtime-dependencies && pnpm run build:js && node ./scripts/stamp-version-tokens.mjs",
     "build:compiled": "node ./scripts/vendor-compiled.mjs",
     "build:js": "pnpm run build:compiled && pnpm run clean && pnpm run build:types && node ./scripts/copy-compiled-assets.mjs && node --conditions=eve-source ./scripts/build-rolldown.mjs && node ./scripts/copy-runtime-assets.mjs",
     "build:types": "pnpm run build:compiled && tsc -p tsconfig.build.json",
     "check:bin-runtime-dependencies": "node ./scripts/check-bin-runtime-dependencies.mjs",
     "dev": "pnpm run build:compiled && node ./scripts/copy-runtime-assets.mjs && tsc -p tsconfig.dev.json --watch --preserveWatchOutput",
     "prepack": "pnpm run build && node ../../scripts/copy-package-license.mjs .",
-    "test": "pnpm run test:unit && pnpm run test:integration",
-    "test:integration": "pnpm run build:js && vitest run --config vitest.integration.config.ts",
-    "test:scenario": "pnpm run build:compiled && vitest run --config vitest.scenario.config.ts",
-    "test:unit": "pnpm run build:compiled && vitest run --config vitest.unit.config.ts",
-    "test:watch": "pnpm run build:compiled && vitest --config vitest.unit.config.ts",
     "typecheck": "pnpm run check:web-template && pnpm run build:compiled && tsc -p tsconfig.json --noEmit",
     "generate:web-template": "node src/setup/build.ts --write",
-    "check:web-template": "node src/setup/build.ts --check",
-    "test:tui": "pnpm run build:js && tsc -p tsconfig.tui.json --noEmit && node test/tui-client/run-all.mjs",
-    "test:vercel": "vitest run --config vitest.vercel.config.ts"
+    "check:web-template": "node src/setup/build.ts --check"
   },
   "dependencies": {
     "nitro": "3.0.260610-beta",
@@ -447,18 +351,13 @@
     "@eve/catalog": "workspace:*",
     "@linqapp/chat-sdk-adapter": "^0.5.1",
     "@modelcontextprotocol/server": "2.0.0",
-    "@nuxt/kit": "^4.0.0",
-    "@nuxt/schema": "^4.0.0",
     "@opentelemetry/context-async-hooks": "catalog:",
     "@opentelemetry/core": "catalog:",
     "@opentelemetry/otlp-transformer": "0.214.0",
     "@opentelemetry/sdk-trace-base": "catalog:",
     "@photon-ai/chat-adapter-imessage": "3.2.0",
     "@standard-schema/spec": "1.1.0",
-    "@sveltejs/kit": "^2.0.0",
     "@types/json-schema": "7.0.15",
-    "@types/react": "catalog:",
-    "@types/react-test-renderer": "19.1.0",
     "@vercel/blob": "2.8.0",
     "@vercel/detect-agent": "1.2.3",
     "@vercel/oidc": "3.8.0",
@@ -479,28 +378,19 @@
     "chat": "4.34.0",
     "chokidar": "5.0.0",
     "commander": "14.0.3",
-    "emulate": "0.6.0",
     "env-runner": "0.1.16",
     "eventsource-parser": "3.1.0",
     "gray-matter": "4.0.3",
-    "historical-eve-0-30-8": "npm:eve@0.30.8",
     "jose": "6.2.3",
     "jsonc-parser": "3.3.1",
     "just-bash": "3.1.0",
     "marked": "catalog:",
     "microsandbox": "0.5.5",
-    "next": "catalog:",
     "picocolors": "catalog:",
-    "react": "catalog:",
-    "react-test-renderer": "19.2.6",
     "run": "2.1.2",
     "semver": "7.8.4",
     "shadcn": "4.18.0",
-    "svelte": "^5.0.0",
     "turndown": "7.2.4",
-    "vite": "^8.1.5",
-    "vitest": "catalog:",
-    "vue": "^3.5.0",
     "zod": "catalog:",
     "zod-validation-error": "5.0.0"
   },
@@ -527,12 +417,5 @@
   },
   "engines": {
     "node": ">=24"
-  },
-  "eve": {
-    "builtInExtensions": {
-      "./self-modification": {
-        "dist": "./dist/src/self-modification/extension"
-      }
-    }
   }
 }
