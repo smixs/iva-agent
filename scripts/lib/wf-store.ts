@@ -75,11 +75,6 @@ export function quarantinePath(
   return dest;
 }
 
-// Старое имя остаётся публичным alias для существующих вызовов и тестов.
-export function quarantineDir(dir: string, stamp?: string): string | null {
-  return quarantinePath(dir, stamp);
-}
-
 /** Session state that an update retires before the new version starts. */
 export function sessionStateTargets(root: string, dataDir: string): string[] {
   let rollupSessions: string[];
