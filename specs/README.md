@@ -230,6 +230,33 @@ Witnesses must fail: `-staleack` (the removal writes the snapshot of the pass wi
 specs/queue-drain-check.sh
 ```
 
+## UserbotLogin
+
+`UserbotLogin.tla` models the QR login of the userbot proxy (`services/telegram-userbot/onboarding.py`): one account, one process, one Telegram auth key. The proxy holds the phase in memory (`idle`, `starting`, `waiting`, `password_needed`, `authorized`, `expired`, `error`, `interrupted`) and one marker file on disk, `telegram-userbot.login`, beside the session file. Telegram holds its own side of the login for the auth key. The owner scans the QR, may be asked for the cloud password and may mistype it, the QR expires, Telegram names a flood wait, the session file disappears, the owner signs the session out from another device, and the unit restarts the proxy at any step. The phase that is told is `Login.phase()`: Telegram's answer first, the phase in memory otherwise.
+
+`userbot-login-check.sh` checks `UserbotLogin.cfg` (672 distinct states), five mutants and one witness:
+
+- `WrongPasswordKeepsAsking`: a refused password, wrong or too early, leaves the phase `password_needed`. `UserbotLogin-wrong-password-ends.cfg` is the code before the model: the refusal ends the login in `error`, and the owner starts from the QR.
+- `NoSilentIdle`: a login cut by a restart reads `interrupted`, unless Telegram already let the account in or the session file is gone; it never reads as a login that was not begun. `UserbotLogin-no-marker.cfg` keeps the phase in memory only.
+- `AuthorizedHasSession`: `authorized` is told only while the session file is on disk. `UserbotLogin-no-session-check.cfg` trusts Telegram's answer alone.
+- `NoSecretLeaves`: the password, the login token and the bot token stay out of the journal, the disk and the tool replies. `UserbotLogin-raw-error.cfg` tells a failure in the words of the exception.
+- `WaitRespected`: no password goes to Telegram before the wait it named has passed. `UserbotLogin-no-wait.cfg` forgets the wait. The proxy knows the wait in memory only: the first password after a restart reaches Telegram, which names the wait again.
+- `UserbotLogin-retry-witness.cfg` must fail on `NoLoginAfterWrongPassword`: a login that got a wrong password still ends `authorized` without a second QR.
+
+| Model action                                                                         | Code                                                                  |
+| ------------------------------------------------------------------------------------ | --------------------------------------------------------------------- |
+| `StartLogin`                                                                         | `Login.start`: the marker is written before the login task exists     |
+| `QrSent`, `ProxySeesLogin`, `ProxySeesPasswordAsked`, `QrExpires`                    | `Login._run`                                                          |
+| `LoginFails`, `PasswordCheckFails`                                                   | `Login._fail`: fixed words and the class of the exception             |
+| `PasswordHeldBack`, `WrongPassword`, `TelegramNamesWait`, `RightPassword`            | `Login.password`                                                      |
+| `Restart`                                                                            | `Login.__init__`: the marker decides between `interrupted` and `idle` |
+| `Reported`                                                                           | `Login.phase`, sent by `/healthz` as `login`                          |
+| `OwnerScans`, `TooManyChecks`, `WaitPasses`, `SessionFileLost`, `SignedOutElsewhere` | Telegram, the clock, the disk and the owner                           |
+
+`services/telegram-userbot/test_onboarding.py` replays the counterexamples against the code with Telegram replaced and walks random sequences of the model's actions, checking the five invariants after every step; each test names its invariant. `scripts/lib/userbot-health.test.ts` holds the list of phases in TypeScript to the list `onboarding.py` sends.
+
+Outside the model: a QR scanned after the restart that cut its login, a marker file that cannot be written (the login is refused before it begins), the flood wait of up to sixty seconds that Telethon sleeps through by itself, a second account.
+
 ## LaunchdUnit
 
 `LaunchdUnit.tla` models the units of Iva under launchd on macOS (spec `.scratch/macos-install/spec.md` v3, sections 3.1, 3.3 and 7) and was written before the code: it checks the design of the seam that maps `systemctl --user` verbs to `launchctl`. Two labels: a KeepAlive service (`Restart=always`, for example the userbot) and a oneshot with a calendar, where `iva-brain.timer` and `iva-brain.service` share one label `app.iva.iva-brain`. A label is `unloaded`, `idle`, `running`, `throttled` or `stopping` (`state = SIGTERMed`: `bootout` and `kill` are asynchronous, `bootout` returns 0 while the process still exits, and `bootstrap` in this window gives 5 while `print` still shows the job, so the label vanishes afterwards), has the `enabled` flag and a `stale` flag for a plist rewritten after the last `bootstrap` (launchd reads the plist only there). launchd itself crashes and respawns the KeepAlive process (`throttleExpire` and `processExit` are weakly fair), fires the calendar, bootstraps every plist at login and boots everything out at logout. Writers: `stop`, `start`, `restart`, `enable --now`, `disable --now`, `is-active`, cancel and start of the night from the menu, `restart` of a plugin timer, and the update path `captureOptionalWriterState` + `stopWriterUnits`, a body that may change `enabled`, and `restoreOptionalWriterState` one unit name per step. Writers and launchd events other than `throttleExpire` do not interleave with the update; plists are always present; process exit codes, `SuccessfulExit`, the launcher's process group and the 10 s wait are abstracted.
