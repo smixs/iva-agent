@@ -24,7 +24,6 @@
     "memory": "node --env-file=.env scripts/memory/night.ts",
     "cleanup": "node scripts/vault-cleanup.ts",
     "brain": "node --env-file=.env scripts/memory/brain.ts",
-    "doctor": "npm run brain",
     "typecheck": "tsgo",
     "lint": "eslint --flag unstable_native_nodejs_ts_config .",
     "lint:fix": "eslint --flag unstable_native_nodejs_ts_config . --fix",

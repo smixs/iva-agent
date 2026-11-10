@@ -2,6 +2,9 @@
 
 Known gaps and deferred decisions, tracked so they don't get lost between releases.
 
+Closed items are removed from this page. Numbers stay fixed, because code comments and
+`specs/README.md` cite them (§3, §13, §18), so a gap in the numbering is a closed item.
+
 `agent/lib/repeat-guard.ts` temporarily stops repeated failed tool calls at the model boundary; remove it when eve itself stops a turn on a repeated invalid tool call.
 
 ## 1. Approval prompts (eve `tools.approval` + Telegram HITL)
@@ -50,7 +53,7 @@ and the three runs no unit starts are named in the guard: the setup wizard (`ins
 ever built the tree, and the updater's second half, which the previous version spawns inside
 the version it just fetched. One unit is exempt on purpose: the Telegram bridge renders Iva's
 own UI (`#lib/i18n.ts`, `#lib/run-status.ts`) and runs beside `iva.service`, which is what
-builds the tree. Three shapes, in descending order of preference:
+builds the tree. Four shapes, in descending order of preference:
 
 - **A plain move**, where every reader is either the authored tree itself or a process that
   runs beside it: `schedule-migration` — which, living beside the schedules it migrates onto,
@@ -60,27 +63,36 @@ builds the tree. Three shapes, in descending order of preference:
 - **A lazy import inside the one call that needs it**, where the process loads a module but
   only exercises that call on a tree that exists: `scripts/lib/config-transaction.ts`
   pulls the health poll at the health check itself (a tree that cannot start fails the
-  apply and rolls back either way), `scripts/lib/codex-oauth.ts` pulls the token
-  headers inside `listCodexModelCatalog`, which only the `/model` wizard and setup call, and
-  `scripts/memory/brain.ts` pulls the whole card format — `core-cap`, `core-clamp` and, via
-  `scripts/memory/card-fences.ts`, `card-text` — at the CORE clamp and the fence scan. That
-  script is its own systemd oneshot, so a static edge there would kill the nightly vault
-  backup on a broken tree; the lazy edge costs those two steps, reports itself, and lets §3
-  commit and push the vault anyway.
+  apply and rolls back either way), and `scripts/lib/codex-oauth.ts` pulls the token
+  headers inside `listCodexModelCatalog`, which only the `/model` wizard and setup call.
+  `scripts/memory/brain.ts` is the wide case: one dynamic import at the top of `main()`
+  brings `core-cap`, `vault-commit`, the Outbox behind `scripts/lib/telegram-send.ts` and
+  the nightly graph (`scripts/memory/graph.ts`, which reads frontmatter through `#lib/`).
+  That script is its own systemd oneshot, so a static edge there would keep the unit from
+  loading on a broken tree; with the dynamic one it loads, prints
+  `brain: agent tree did not load` and exits 1. That night has no vault backup: the commit
+  itself comes from the tree.
+- **A shared module in `packages/`**, where both sides need the same code while loading.
+  Neither tree owns it, so both may import it: `timezone`, `data-dir`, `vault-dir`,
+  `context-window` and `opencode-protocol` are `file:packages/<name>` dependencies
+  (`@iva/<name>`), `secret-redaction`, `alert-state` and `claude-command` are reached by
+  relative path. `agent/lib/timezone.ts` and `scripts/lib/timezone.ts` both re-export
+  `packages/timezone`, so the IANA-zone predicate the synchronous `writeUnits()` needs
+  exists once; `scripts/lib/timezone.test.ts` still runs both entry points on one table.
 - **Two self-contained halves pinned by a test**, where both sides genuinely need the same
   small thing while loading: the probe-flag name (`scripts/lib/health-probe.ts` writes it,
   `agent/lib/eve-health.ts` reads it), the retired systemd unit names
-  (`scripts/lib/legacy-memory-units.ts`), the IANA-zone predicate
-  (`scripts/lib/timezone.ts`, needed by the synchronous `writeUnits()`), the canonical
+  (`scripts/lib/legacy-memory-units.ts` and `agent/lib/schedule-migration.ts`), the chat
+  Iva writes to on her own (`notification-chat.ts` in both `lib/` folders), the canonical
   reasoning vocabulary, and the Codex OAuth constants plus the token file (its path, its
   atomic 0600 write and the read the setup wizard needs) — `iva login` and the wizard must
   run without the authored tree, so `scripts/lib/codex-oauth.ts` keeps the sign-in flows
   while `agent/lib/codex-auth.ts` owns refreshing the token and signing requests with it.
   Each pair is pinned by a test that imports both halves
-  (`scripts/lib/{timezone,reasoning-levels,health-probe,codex-auth-seam}.test.ts`,
-  `agent/lib/schedule-paths.test.ts`), the way `usage` shares only its journal path and
-  `scripts/lib/usage.test.ts` round-trips it. A pair without such a test is drift waiting
-  to happen; add the test before adding the pair.
+  (`scripts/lib/{reasoning-levels,health-probe,codex-auth-seam}.test.ts`,
+  `agent/lib/schedule-migration.test.ts`, `scripts/notification-chat-contract.test.ts`), the
+  way `usage` shares only its journal path and `scripts/lib/usage.test.ts` round-trips it. A
+  pair without such a test is drift waiting to happen; add the test before adding the pair.
 
   The newest pair is the model provider: `agent/lib/model-provider.ts` holds the names the
   runtime accepts, each provider's model variable, its default model and the rule that turns
@@ -98,8 +110,10 @@ update` and the `/menu` screens load without the authored tree, so they cannot i
 
 ## 4. Evals
 
-The `#evals/*` import alias is declared in `package.json` but unused. eve ships a native
-`eve/evals` module — adopt it before adding product-level skill evals.
+Iva has no product-level skill evals: there is no `evals/` directory. The `#evals/*` import
+alias in `package.json` and the `evals/**/*.ts` include in `tsconfig.json` point at it and
+resolve to nothing. eve ships a native evals module (`eve/evals`, with `/expect`, `/loaders`
+and `/reporters`) — adopt it before adding product-level skill evals.
 
 ## 5. Discovery guardrails are not part of the release check
 
@@ -112,29 +126,6 @@ So the wiring can rot between releases and the first place it surfaces is a user
 install. There is no CI to hang the check on
 ([ADR-0004](adr/0004-philosophy-is-the-review-bar.md)); the fix is either a pre-release
 habit of reading `npx eve info` or a script that asserts the expected counts.
-
-## 6. `sessionTimeoutMs: false` — CLOSED
-
-Closed 2026-09-02: `agent/agent.ts` sets a 24-hour session lifetime. A day of active chat
-grew one durable session to ~6400 events and a 220–660 s replay per turn, past the 240 s
-workflow ceiling; the upstream lifetime is the retirement story.
-
-Original note:
-
-Disabled in `agent/agent.ts` to preserve eve 0.27's behavior (no auto-expiry) after
-the 0.28 default changed to a 30-day session lifetime. This was the safe choice for
-existing self-hosted installs with long-lived Telegram/rollup sessions, but it opts
-out of a framework-owned cleanup mechanism. Revisit deliberately once Iva has its own
-session-retirement story, rather than leaving the override in place indefinitely.
-
-## 7. Opt-in UI for the scheduled Notices — CLOSED
-
-`/menu` → **🔔 Notices** (`scripts/lib/menu/notices.ts`) switches the nightly memory reports
-(`memoryReports.enabled`) and **Writes on her own** — Watch and the Brief, which replaced the
-morning Report (`proactive.enabled`, ADR-0020) — so neither needs a raw `settings.json` edit,
-and **Insight** (`proactive.insightTimes`): a switch and three times.
-All three keys are read at fire time, so a tap applies on the next tick with no restart. The rules
-the screen enforces: ADR-0007, ADR-0020 and ADR-0022.
 
 ## 8. TypeScript-only Node source
 
@@ -157,38 +148,6 @@ single `memory-night` schedule. It compares the last recorded success
 runs it once when stale and still inside the 20-hour grace window — home-grown and
 specific to this app, not a general answer other eve apps could reuse. Superseded if/when eve
 grows a native catch-up story.
-
-## 10. Rollup-turn workarounds for vercel/eve#1450
-
-Closed (T96). A parked session no longer resumes: every night turn creates its own
-session, and the turn's deadline is the abort signal of its model request
-(`scripts/memory/night-call.ts`), not a timer race. The `Promise.race` timeout is gone.
-
-## 11. Cron/name metadata duplicated across schedules, migration, and the menu
-
-The same 5 schedule names + cron expressions used to be hand-maintained in three places:
-`agent/schedules/*.ts` (the actual cron strings), `agent/lib/schedule-migration.ts`'s
-`PERIOD_SCHEDULE` (hour/minute per period, for catch-up math), and
-`scripts/lib/menu/crons.ts`'s `EVE_SCHEDULES` (for the /menu → ⏰ display). Changing one
-schedule's cadence meant remembering to update up to three files by hand; a missed one
-would make the menu display (or the catch-up math) silently wrong.
-
-RESOLVED: the table lives once, in `agent/lib/schedule-table.ts` (`SCHEDULE_CRON`), and
-all three read it — the schedule files take their `cron` from it, the migration places its
-catch-up point with `parseCron()`, time of day and day constraint alike (it keeps only
-its own per-period grace window, which is catch-up policy, not schedule metadata), and the
-menu renders the entries in table order. `agent/lib/schedule-table.test.ts` cross-checks
-all three against the table — the migration through its behavior, by bisecting the point
-where a recorded success stops counting as stale and checking that instant against the cron
-— and fails if any cron expression reappears in another source file, so the copies cannot
-silently grow back.
-
-## 12. Bundled Autograph was removed
-
-The non-night Autograph engine now lives in the standalone Autograph repository. Iva
-keeps only the TypeScript seams its product uses: frontmatter, card sections, the nightly
-graph and the streaming description cleanup. Fixes to the standalone engine do not ship
-with Iva automatically.
 
 ## 13. Markdown parsing has one implementation
 
@@ -258,12 +217,7 @@ Remove this item when Bot API exposes a plain-text projection of `rich_message` 
 blocks, or when eve upstream resolves the addressing before the update reaches the Bridge.
 Until then the workaround in a group is to reply to one of Iva's messages.
 
-## 16. Rollup stale-cursor workaround for vercel/eve#2461
-
-Closed (T96). The bug ([vercel/eve#2461](https://github.com/vercel/eve/issues/2461))
-needs a resumed session: `result()` read from a lagging cursor. The night now
-creates a fresh session per turn and reads its stream from index 0, so the drain,
-the prompt nonce and the foreign-result check are removed.
+## 16. The `ai` pin is gone
 
 The `ai` pin is gone: Iva used to override `ai` to 7.0.39 against eve 0.51.1's peer `ai ^7.0.82`, so eve's bundled `@ai-sdk/code-mode` (it imports `experimental_toolCaller`) did not link and any Workflow/code-mode tool would crash server start. `package.json` now asks for `ai ^7.0.82` with no override. ADR-0013 rejected the workflow-tool route for Reminders (variant C) partly on that pin; the pin no longer stands in its way, the rest of the ADR's reasoning does.
 
@@ -279,30 +233,7 @@ The `ai` pin is gone: Iva used to override `ai` to 7.0.39 against eve 0.51.1's p
 
 Startup recovery uses the same chat-status lock with a two-second stale threshold; ordinary chat writers retain their usual thirty-second threshold. A killed writer's fresh lock becomes reclaimable within two seconds. A live synchronous writer stalled beyond this recovery threshold can lose its lock (`FileLock-sync-slow.cfg`); normal writes must finish well within the threshold.
 
-## 19. Daily-summary conflicts across nights
-
-Closed by storing the original summary hash in the open day pass before the model
-call and the last published hash in `cache.writtenSummaryHash` before writing the
-summary. The published hash survives day completion. Subsequent passes compare
-against that publication, so a late entry preserves owner edits with absent,
-matching or mismatching `body_hash`, including description-only edits. Interrupted
-publication can finish its git commit after the raw day, model or instruction
-changes. The comparison uses the saved publication hash throughout recovery.
-
-Three-night process tests in `scripts/memory/night-process.test.ts` assert the
-preserved bytes and "день ждёт владельца" on repeated nights. The message and the
-old-queue reminder name `iva jobs skip memory-night <date>` or restoring the summary.
-An explicit owner skip takes precedence over an open pass; the CLI writes it even
-when an ordinary completion marker already exists. Other days, CORE and periods
-continue to finish. The property test runs 100 cases with seed `20261020`.
-
-`NightWriter.HumanEditWins` covers open passes and edits after day completion, before
-a late entry opens the next pass, including closed 0.5.5 caches without a publication
-hash. `PublishedSummaryResumes` covers publication,
-interruption and continuation after input changes. Mutants that reread the expected
-hash, omit the published hash or compare with recomputed output produce witnesses.
-The model retains the filesystem stability assumption between the final comparison
-and atomic publication from ADR-0016.
+## 19. Daily-summary conflicts across nights: what an old cache leaves
 
 Both `pass.summaryHash` and `writtenSummaryHash` are optional in cache version 1.
 With a closed old cache, an existing summary and a new pass, the day waits for the

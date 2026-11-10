@@ -20,10 +20,11 @@ that a new behaviour should be a skill (a markdown file the agent reads), not a 
 mechanism in TypeScript. A PR that adds a subsystem where a skill would do gets sent
 back, and that is not a comment on the code.
 
-[AGENTS.md](AGENTS.md) is the working contract: layout, the `#*` import alias, the
-review rules that also apply to humans — secrets never land in tracked files, auth
-checks only ever get narrower, user data stays out of the repo, and anything under
-`agent/` needs a rebuild before it does anything.
+The layout is short: the runtime lives in `agent/` (the `#*` import alias points there),
+operational scripts in `scripts/`, modules both of them share in `packages/`, and the CLI
+is `bin/iva.mjs`. Four review rules apply to every change — secrets never land in tracked
+files, auth checks only ever get narrower, user data stays out of the repo, and anything
+under `agent/` needs a rebuild before it does anything.
 
 ## Local setup
 
