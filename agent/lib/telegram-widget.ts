@@ -12,11 +12,6 @@
 // Импорты с расширением .ts: модуль грузится и голым node (cron → scripts/lib/telegram-send.ts).
 import { deflateSync } from "node:zlib";
 
-// sendWidget пока есть только в beta Bot API: на api.telegram.org/bot… он отвечает 404,
-// на api.telegram.org/beta/bot… работает на боевых серверах (проверено 06.11.2026).
-// Beta — надмножество обычного Bot API, после выхода 10.4 адрес можно вернуть в общий.
-export const WIDGET_API_BASE = "https://api.telegram.org/beta";
-
 // Пределы сервера: HTML до 32768 байт, после zlib уровня 9 до 4096 (PHP gzcompress($html, 9)).
 // deflateSync даёт тот же поток RFC 1950, Node жмёт на десяток байт плотнее PHP, отсюда запас.
 const MAX_HTML_BYTES = 32768;

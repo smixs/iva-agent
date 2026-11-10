@@ -1,5 +1,5 @@
 // Виджет на cron-пути (Watch, Brief, Insight → scripts/lib/telegram-send.ts): sendWidget идёт в
-// beta Bot API, отказ по самому виджету оставляет подпись обычным sendMessage, а сеть или 429
+// общий адрес Bot API, отказ по самому виджету оставляет подпись обычным sendMessage, а сеть или 429
 // обрывают отчёт, как у HTML-пути. Проверяется на проводе: адрес, метод и тело запроса.
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
@@ -38,7 +38,7 @@ function fakeFetch(answer: (url: string) => [number, unknown]) {
   return { wire, fetchImpl };
 }
 
-await test("a widget goes to the beta Bot API with its caption", async () => {
+await test("a widget goes to the Bot API with its caption", async () => {
   const { wire, fetchImpl } = fakeFetch(() => [200, { ok: true }]);
   const sent = await sendTelegramHtml("T", "42", REPLY, {
     fetchImpl,
@@ -49,7 +49,7 @@ await test("a widget goes to the beta Bot API with its caption", async () => {
     wire.map((w) => w.url),
     [
       "https://api.telegram.org/botT/sendMessage",
-      "https://api.telegram.org/beta/botT/sendWidget",
+      "https://api.telegram.org/botT/sendWidget",
     ],
   );
   assert.deepEqual(wire[1].body, {

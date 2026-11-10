@@ -13,13 +13,8 @@ process.env.ASSISTANT_DATA_DIR = join(root, "data");
 mkdirSync(process.env.ASSISTANT_DATA_DIR, { recursive: true });
 process.on("exit", () => rmSync(root, { recursive: true, force: true }));
 
-const {
-  splitWidgets,
-  widgetMode,
-  widgetProblem,
-  withoutWidgetCode,
-  WIDGET_API_BASE,
-} = await import("./telegram-widget.ts");
+const { splitWidgets, widgetMode, widgetProblem, withoutWidgetCode } =
+  await import("./telegram-widget.ts");
 const { sendThroughOutbox } = await import("./outbox.ts");
 type OutboxAck = import("./outbox.ts").OutboxAck;
 type OutboxTransport = import("./outbox.ts").OutboxTransport;
@@ -149,7 +144,6 @@ await test("TELEGRAM_WIDGETS takes auto or never, anything else stops the start"
   assert.equal(widgetMode(""), "auto");
   assert.equal(widgetMode("never"), "never");
   assert.throws(() => widgetMode("off"), /TELEGRAM_WIDGETS/);
-  assert.equal(WIDGET_API_BASE, "https://api.telegram.org/beta");
 });
 
 await test("Outbox: text, widget, text go out in order as three messages", async () => {
