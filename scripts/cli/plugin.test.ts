@@ -3389,6 +3389,8 @@ for (const sameName of [false, true])
         state = join(dir, "manager.json");
       mkdirSync(user);
       mkdirSync(fakebin);
+      // The extensionless fake uses require even when TMPDIR is inside an ESM tree.
+      writeFileSync(join(fakebin, "package.json"), '{"type":"commonjs"}\n');
       writeFileSync(
         state,
         JSON.stringify({ calls: [], active: {}, enabled: {}, loaded: {} }),
