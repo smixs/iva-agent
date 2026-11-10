@@ -62,17 +62,21 @@ by executable tests and the accepted residual windows in `docs/tech-debt.md` §1
 
 ## UpdateFloor
 
-`UpdateFloor.tla` models one update onto a tree that names the oldest release it is taken from (`minUpdater` in `update-compat.json`). The old half is the CLI already on disk: from 0.3.30 it reads the marker before its first write, 0.3.15 to 0.3.29 do not know the marker and hand off all the same. The new half is the first code of the new tree to run. Once the new tree serves, it meets one state file that only releases below the floor wrote.
+`UpdateFloor.tla` models one installation and a tree that names the oldest release an update is taken from (`minUpdater` in `update-compat.json`). The updater already on disk is one of three classes: from 0.3.30 it reads the marker before its first write; 0.3.15 to 0.3.29 unpack the new tree and hand off to its new half without knowing the marker; 0.3.7 to 0.3.14 build a candidate of the new tree beside the checkout, where `npm ci` is the first code of the new tree to run. An update aims at the newest release, or at the step release while `repair.sh` has the Update branch pinned to it: the last release that takes an update from every release below the floor. Once the new tree serves, it meets one file that only releases below the floor wrote and one that a release at the floor or above wrote.
 
-`update-floor-check.sh` checks `UpdateFloor.cfg` and four mutants:
+`update-floor-check.sh` checks `UpdateFloor.cfg` and nine mutants:
 
-- `StaysOnItsRelease`: an installation below the floor keeps serving its own release. `UpdateFloor-no-finish-check.cfg` drops the check in the new half and a CLI that does not read the marker lands on the new tree.
-- `NothingWritten`: a CLI that reads the marker stops before it unpacks anything. `UpdateFloor-late-check.cfg` moves the check after the unpack.
+- `StaysOnItsRelease`: the new release is put in place only by an updater at the floor or above, so an installation below the floor reaches it through the step release alone. `UpdateFloor-no-finish-check.cfg` drops the check in the new half and a CLI that does not read the marker lands on the new tree; `UpdateFloor-no-install-check.cfg` drops the check in `npm ci` and an in-place updater does.
+- `NothingWritten`: a CLI that reads the marker stops before it unpacks anything, and an in-place updater has removed its candidate by the time it reports. `UpdateFloor-late-check.cfg` moves the marker check after the unpack.
+- `OnlyTheVersionDirectory`: 0.3.15 to 0.3.29 are refused after the unpack, so the unpacked version directory is the one thing written and what serves is what served. `UpdateFloor-finish-after-stop.cfg` moves the new half's check after services are stopped.
 - `RefusedIsTold`: a refusal names the release and the way out (`UpdateFloor-mute.cfg`).
-- `NoSilentLoss`: an old-format file is refused by name or left as it was (`UpdateFloor-silent-drop.cfg`).
+- `NoSilentLoss`: a file only releases below the floor wrote is refused by name or left as it was (`UpdateFloor-silent-drop.cfg`).
+- `SupportedIsServed`: a file a release at the floor or above wrote is read and served as before; moving its record out of the working file is a violation (`UpdateFloor-quarantine.cfg`).
+- `BranchKept`: `repair.sh` records the owner's Update branch before it pins the step release, and the branch is back once repair is over, killed in between or not (`UpdateFloor-no-saved-branch.cfg`).
 - `Served`: at the floor and above the update ends on the new release.
+- `Repaired`: repair, killed once between its two updates or not, ends on the new release with the owner's branch back. `UpdateFloor-no-step.cfg` runs the installed updater straight at the newest release and it is refused for good.
 
-Outside the model: `repair.sh` on a checkout, which resets the tree before any CLI runs, and the in-place updater before 0.3.15, which never hands off.
+Outside the model: the updater of 0.3.0 to 0.3.6, which moves the checkout and replaces `node_modules` before any code of the new tree runs; a failed fetch or build, which is the updater's own rollback (`UpdateCrash.tla`); a kill in the middle of one update.
 
 ## RestartRecovery
 
