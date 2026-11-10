@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import {
   chmod,
   mkdir,
@@ -8,11 +8,12 @@ import {
   rm,
   writeFile,
 } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { notificationChat } from "../../packages/notification-chat/index.ts";
 import { button, escapeRichText, screenPayload } from "./telegram-buttons.ts";
 import { resolveReleaseTarget, type GitResult } from "./update-channel.ts";
+import { layoutFor, parseVersionName } from "./version-store.ts";
 
 export { notificationChat };
 
@@ -213,6 +214,28 @@ export function floorCompat(own: string, minUpdater: string): UpdaterCompat {
   return comparison === 1
     ? { status: "too-old", own, minUpdater }
     : { status: "ok" };
+}
+
+/**
+ * Why the tree at `tree` is not installed over what serves at `home`, or null. From 0.3.30
+ * the old half reads `minUpdater` itself before its first write. 0.3.15 to 0.3.29 hand off
+ * without reading it, so the new half asks first (scripts/update-finish.ts); 0.3.7 to
+ * 0.3.14 never hand off, so the candidate's `npm ci` asks (scripts/floor-guard.ts). A
+ * checkout that was never converted is named by its own package.json
+ * (specs/UpdateFloor.tla, StaysOnItsRelease).
+ */
+export function belowFloor(home: string, tree: string): string | null {
+  const layout = layoutFor(home);
+  const serving = existsSync(layout.current)
+    ? parseVersionName(basename(realpathSync(layout.current)))?.version
+    : installedVersion(home);
+  if (!serving) return null;
+  const floor = parseMinUpdater(
+    readFileSync(join(tree, UPDATE_COMPAT_FILE), "utf8"),
+  );
+  return floorCompat(serving, floor).status === "too-old"
+    ? updaterTooOldMessage(serving, layout.values.AGENT_LANGUAGE)
+    : null;
 }
 
 /** The way out of a too-old install: one text, every place that has to say it. */

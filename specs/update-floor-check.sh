@@ -17,6 +17,13 @@ check() {
 }
 check UpdateFloor none
 check UpdateFloor-no-finish-check StaysOnItsRelease
+check UpdateFloor-no-install-check StaysOnItsRelease
 check UpdateFloor-late-check NothingWritten
+check UpdateFloor-finish-after-stop OnlyTheVersionDirectory
 check UpdateFloor-mute RefusedIsTold
 check UpdateFloor-silent-drop NoSilentLoss
+check UpdateFloor-quarantine SupportedIsServed
+check UpdateFloor-lazy-unread SupportedIsServed
+check UpdateFloor-lazy-unturned SupportedIsServed
+check UpdateFloor-no-saved-branch BranchKept
+check UpdateFloor-no-step Repaired

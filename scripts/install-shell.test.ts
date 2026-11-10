@@ -578,7 +578,7 @@ function createWorld(t: TestContext, options: { env?: boolean } = {}): World {
     `${JSON.stringify(
       {
         name: "iva",
-        version: "0.0.0",
+        version: "0.5.0",
         private: true,
         type: "module",
         dependencies: { eve: "0.30.8" },
@@ -592,11 +592,11 @@ function createWorld(t: TestContext, options: { env?: boolean } = {}): World {
     `${JSON.stringify(
       {
         name: "iva",
-        version: "0.0.0",
+        version: "0.5.0",
         lockfileVersion: 3,
         requires: true,
         packages: {
-          "": { name: "iva", version: "0.0.0" },
+          "": { name: "iva", version: "0.5.0" },
           "node_modules/eve": { version: "0.30.8" },
         },
       },

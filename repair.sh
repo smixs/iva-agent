@@ -37,6 +37,123 @@ HOME_DIR="$(cd "$HOME" && pwd -P)"
 [ "$INSTALL_DIR" != "/" ] || die "unsafe installation path"
 [ "$INSTALL_DIR" != "$HOME_DIR" ] || die "unsafe installation path"
 
+# Нижняя граница новейшего выпуска (update-compat.json) и ступенька: последний выпуск,
+# чей обновлятор принимает любую установку ниже границы. Установку ниже границы ремонт
+# ведёт двумя обновлениями - на ступеньку, затем на новейший. На первое Update branch
+# закреплён на ступеньке; ветка владельца на это время записана в файл и возвращается, чем
+# бы ремонт ни кончился (specs/UpdateFloor.tla: Repaired, BranchKept).
+FLOOR="0.5.0"
+STEP="0.5.11"
+STEP_BRANCH="release/$STEP"
+RETURN_FILE="$INSTALL_DIR/.iva-repair-branch"
+# Дерево ступеньки со своими зависимостями: из него идёт первое обновление чекаута.
+STEP_TREE="$INSTALL_DIR/.iva-repair-step"
+no_origin() { fail "can't check origin, repair cancelled: nothing changed" "не могу проверить origin, ремонт отменён: ничего не изменено"; }
+
+# $1 - package.json того, что стоит. Нечитаемая версия - не ниже границы: ступеньки нет.
+below_floor() {
+  node -e '
+    const own = String(require(process.argv[1]).version ?? "");
+    const core = own.replace(/-[0-9A-Za-z.-]+$/u, "");
+    const [a, b] = [core, process.argv[2]].map((v) => v.split(".").map(Number));
+    if (a.length !== 3 || a.some(Number.isNaN)) process.exit(1);
+    for (let i = 0; i < 3; i++) if (a[i] !== b[i]) process.exit(a[i] < b[i] ? 0 : 1);
+    process.exit(core === own ? 1 : 0);
+  ' "$1" "$FLOOR" 2>/dev/null
+}
+
+# Возвращает ветку владельца везде, где ещё стоит ступенька, и убирает всё, что ремонт
+# ставил для неё. Зовётся и первым делом при каждом запуске: прошлый ремонт могли убить
+# между обновлениями.
+restore_branch() {
+  rm -rf "$STEP_TREE"
+  [ -f "$RETURN_FILE" ] || return 0
+  local own dir
+  own="$(cat "$RETURN_FILE")"
+  for dir in "$INSTALL_DIR/repo" "$INSTALL_DIR/.git"; do
+    [ -d "$dir" ] || continue
+    [ "$(git --git-dir="$dir" config --local --get iva.updateBranch || true)" = "$STEP_BRANCH" ] || continue
+    if [ -n "$own" ]; then git --git-dir="$dir" config --local iva.updateBranch "$own"
+    else git --git-dir="$dir" config --local --unset-all iva.updateBranch; fi
+  done
+  [ ! -d "$INSTALL_DIR/repo" ] || git --git-dir="$INSTALL_DIR/repo" update-ref -d "refs/heads/$STEP_BRANCH" 2>/dev/null || true
+  rm -f "$RETURN_FILE"
+}
+
+# Ступенька - метка v$STEP на origin: она есть и не меняется. Обновлятор следует ветке и
+# берёт её с origin, поэтому ветка ступеньки ставится из метки в само зеркало, а origin
+# зеркала на время первого обновления ведёт в него же - только в окружении этого запуска
+# (step_up), на диске адрес прежний. Сеть - до первой записи: метку тянет fetch_step.
+fetch_step() {
+  git --git-dir="$INSTALL_DIR/repo" fetch --quiet origin "+refs/tags/v$STEP:refs/tags/v$STEP" || no_origin
+}
+# $1 - ветка владельца: пишется первой, всё прочее после неё возвращает restore_branch.
+pin_step() {
+  local repo="$INSTALL_DIR/repo"
+  printf '%s' "$1" > "$RETURN_FILE"
+  git --git-dir="$repo" update-ref "refs/heads/$STEP_BRANCH" "refs/tags/v$STEP^{commit}"
+  git --git-dir="$repo" config --local iva.updateBranch "$STEP_BRANCH"
+}
+
+# Первое обновление: команда "$@" ставит ступеньку. Не поставила - ветка владельца уже
+# возвращена, установка стоит на своём выпуске.
+step_up() {
+  say "This Iva is older than $FLOOR: updating to $STEP first, then to the newest release." \
+    "Эта Iva старше $FLOOR: обновляю сначала до $STEP, затем до новейшего выпуска."
+  trap restore_branch EXIT
+  local ok=1 n="${GIT_CONFIG_COUNT:-0}" repo="$INSTALL_DIR/repo"
+  env GIT_CONFIG_COUNT="$((n + 1))" "GIT_CONFIG_KEY_$n=url.$repo.insteadOf" \
+    "GIT_CONFIG_VALUE_$n=$(git --git-dir="$repo" config --get remote.origin.url)" "$@" || ok=0
+  restore_branch
+  trap - EXIT
+  [ "$ok" = 1 ] && [ -f "$INSTALL_DIR/current/bin/iva.mjs" ] \
+    && ! below_floor "$INSTALL_DIR/current/package.json" || fail \
+    "the update to $STEP did not finish; Iva runs as it did. Run this command again." \
+    "обновление до $STEP не завершилось; Iva работает как работала. Запустите эту команду ещё раз."
+}
+
+# Что ступенька переводит не обновлением, а лениво - при старте своего Bridge (очередь и
+# входящие, scripts/poller/main.ts выпуска) и первой записью чата (общий run-status.json).
+# Новейший выпуск этих форм не читает, а ступенька живёт минуты, поэтому её же код
+# переводит их здесь, до второго обновления. Повтор ничего не меняет.
+step_converts() {
+  local root="$INSTALL_DIR/current" raw=""
+  [ ! -f "$INSTALL_DIR/.env" ] \
+    || raw="$(grep -E '^ASSISTANT_DATA_DIR=' "$INSTALL_DIR/.env" | tail -n1 | cut -d= -f2- | tr -d '"' || true)"
+  (cd "$root" && node --input-type=module -e '
+    const [root, raw] = process.argv.slice(1);
+    const { existsSync, readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const { dataDirSetting, resolveDataDir } = await import(`${root}/scripts/lib/data-dir.ts`);
+    const data = resolveDataDir(root, dataDirSetting(raw));
+    process.env.ASSISTANT_DATA_DIR = data;
+    const queue = await import(`${root}/scripts/lib/telegram-queue.ts`);
+    for (const name of ["telegram-queue.json", "telegram-inbox.json"])
+      await queue.migrateQueueFile(join(data, name), { strict: true });
+    let legacy = null;
+    try { legacy = JSON.parse(readFileSync(join(data, "run-status.json"), "utf8")); } catch {}
+    if (legacy === null || typeof legacy !== "object" || Array.isArray(legacy)) process.exit(0);
+    const status = await import(`${root}/agent/lib/run-status.ts`);
+    for (const key of Object.keys(legacy)) {
+      const own = join(data, "run-status.d", `${Buffer.from(key, "utf8").toString("base64url")}.json`);
+      if (!existsSync(own)) status.setChatStatusIf(key, {}, {}, { touch: false });
+    }
+  ' "$root" "$raw") || fail \
+    "Iva $STEP is installed, but converting its data did not finish. Run this command again." \
+    "Iva $STEP установлена, но перевод её данных не завершился. Запустите эту команду ещё раз."
+}
+
+# Обновление новейшим выпуском из `current`: со ступеньки - после её ленивых переводов.
+update_current() {
+  if [ "$(node -p 'require(process.argv[1]).version' "$INSTALL_DIR/current/package.json" 2>/dev/null)" = "$STEP" ]; then
+    step_converts
+  fi
+  say "Updating Iva..." "Обновляю Iva..."
+  exec node "$INSTALL_DIR/current/bin/iva.mjs" update
+}
+
+restore_branch
+
 # Самая свежая версия на диске - ею ремонтируется установка, у которой `current` потерян
 # (обрыв на переключении): сам обновлятор переключение и доводит.
 newest_version_entry() {
@@ -52,8 +169,19 @@ newest_version_entry() {
 # только начало конвертироваться (есть и versions/, и .git), идёт ниже по пути чекаута:
 # обновление доводит конверсию само.
 if [ -f "$INSTALL_DIR/current/bin/iva.mjs" ]; then
-  say "Updating Iva..." "Обновляю Iva..."
-  exec node "$INSTALL_DIR/current/bin/iva.mjs" update
+  # Update branch каталогов версий обновлятор читает в зеркале repo. Ветка отката
+  # (release/<v>) - выбор владельца: её обновлятор новейший выпуск не берёт, и ступенька
+  # увела бы установку с выпуска, на котором её закрепили.
+  repo="$INSTALL_DIR/repo"
+  if [ -d "$repo" ] && below_floor "$INSTALL_DIR/current/package.json"; then
+    own="$(git --git-dir="$repo" config --local --get iva.updateBranch || true)"
+    if [ "${own#release/}" = "$own" ]; then
+      fetch_step
+      pin_step "$own"
+      step_up node "$INSTALL_DIR/current/bin/iva.mjs" update
+    fi
+  fi
+  update_current
 fi
 if [ -d "$INSTALL_DIR/versions" ] && [ ! -d "$INSTALL_DIR/.git" ]; then
   entry="$(newest_version_entry)"
@@ -125,12 +253,35 @@ branch="$(git -C "$INSTALL_DIR" config --get iva.updateBranch || true)"
 # IVA_BETA=1 и прежний флаг при main или без ветки (как у обновлятора) - ветка beta.
 if [ "${IVA_BETA:-}" = 1 ] || { [ "$(git -C "$INSTALL_DIR" config --get iva.beta || true)" = true ] && [ "${branch:-main}" = main ]; }; then branch=beta; fi
 [ -n "$branch" ] || branch="main"
+# Чекаут ниже границы идёт через ступеньку, и сам он до её конца не меняется: CLI ступеньки
+# исполняется из своего дерева (STEP_TREE) со своими зависимостями, а установкой для него
+# остаётся чекаут - её он и переводит в каталоги версий. Зеркало ставится так же, как его
+# ставит обновлятор (ensureMirror). Ветка отката остаётся как есть.
+if below_floor "$INSTALL_DIR/package.json" && [ "${branch#release/}" = "$branch" ]; then
+  repo="$INSTALL_DIR/repo"
+  if [ ! -d "$repo" ]; then
+    rm -rf "$repo.repair"
+    git clone --quiet --mirror "$INSTALL_DIR/.git" "$repo.repair"
+    git --git-dir="$repo.repair" remote set-url origin "$origin_url"
+    mv "$repo.repair" "$repo"
+  fi
+  fetch_step
+  mkdir "$STEP_TREE"
+  git --git-dir="$repo" archive "v$STEP" | tar -xf - -C "$STEP_TREE"
+  (cd "$STEP_TREE" && npm ci --no-audit --no-fund) || { rm -rf "$STEP_TREE"; fail \
+    "the dependencies of Iva $STEP did not install; Iva runs as it did. Run this command again." \
+    "зависимости Iva $STEP не установились; Iva работает как работала. Запустите эту команду ещё раз."; }
+  pin_step "$branch"
+  step_up node --input-type=module \
+    -e 'const [cli, root] = process.argv.slice(1); await (await import(cli)).main(root, ["update"]);' \
+    "$STEP_TREE/scripts/cli/main.ts" "$INSTALL_DIR"
+  update_current
+fi
 
 say "Getting Iva $branch..." "Получаю Iva ($branch)..."
 installed="$(git -C "$INSTALL_DIR" rev-parse -q --verify HEAD || true)"
 # Вся сеть - до сброса: головы всех веток origin, своя ветка, метки. Не ответил origin -
 # ничего не сброшено. FETCH_HEAD, не `origin/<ветка>`: remote-tracking ref может не быть.
-no_origin() { fail "can't check origin, repair cancelled: nothing changed" "не могу проверить origin, ремонт отменён: ничего не изменено"; }
 heads="$(git -C "$INSTALL_DIR" ls-remote --heads origin | cut -f1)" || no_origin
 git -C "$INSTALL_DIR" fetch --quiet origin $heads || no_origin
 git -C "$INSTALL_DIR" fetch --quiet origin "$branch" || no_origin

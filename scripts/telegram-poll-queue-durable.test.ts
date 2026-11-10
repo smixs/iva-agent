@@ -727,7 +727,10 @@ test("button tap daily text survives durable queue reload and materialization", 
     queues: { "42:": [createQueueItem(update)] },
   });
   const loaded = await loadQueueFile(file, { strict: true });
-  const materialized = materializeQueueItem(loaded.document.queues["42:"][0]);
+  const materialized = materializeQueueItem(
+    "42:",
+    loaded.document.queues["42:"][0],
+  );
   assert.deepEqual(materialized, update);
   assert.equal(
     materialized?.message?.[TELEGRAM_BUTTON_TAP_DAILY_TEXT_FIELD],

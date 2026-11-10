@@ -349,6 +349,46 @@ function assertReminder(file: string, value: unknown): Reminder {
   };
 }
 
+/**
+ * Строка версии 1: режим доставки, аренда и счётчики провалов отброшены, срок, текст и факт
+ * последней попытки сохранены. Разовой строке, которая уже пыталась сработать, ставится
+ * fired — иначе она сработала бы второй раз; повторяющаяся остаётся pending на свой срок.
+ */
+function migrateV1Row(
+  file: string,
+  value: unknown,
+  nowMs: number,
+): Record<string, unknown> {
+  if (!isRecord(value))
+    fail(file, `reminder row must be an object, got ${JSON.stringify(value)}`);
+
+  let schedule: ReminderSchedule;
+  try {
+    schedule = normalizeSchedule(value.schedule);
+  } catch (error) {
+    badReminder(file, JSON.stringify(value.id), (error as Error).message);
+  }
+  const firedAt =
+    typeof value.lastRunAtMs === "number" &&
+    Number.isSafeInteger(value.lastRunAtMs)
+      ? value.lastRunAtMs
+      : null;
+  const alreadyRan = firedAt !== null;
+  return {
+    id: value.id,
+    text: value.text,
+    chat: null,
+    schedule,
+    nextRunAtMs: value.nextRunAtMs,
+    createdAt: nowMs,
+    status: schedule.kind === "at" && alreadyRan ? "fired" : "pending",
+    firedAt,
+    delivered: alreadyRan ? value.lastStatus === "ok" : null,
+    error: typeof value.lastError === "string" ? value.lastError : null,
+    sessionId: null,
+  };
+}
+
 /** Путь считается на каждом вызове: тесты меняют ASSISTANT_DATA_DIR между кейсами. */
 export function reminderFile(): string {
   return join(dataDir(), "reminders.json");
@@ -360,7 +400,7 @@ async function loadTable(file: string): Promise<Reminder[]> {
     rows: [],
   });
   const damaged: DamagedRow[] = [];
-  const rows = parseReminderTable(file, raw, { damaged });
+  const rows = parseReminderTable(file, raw, Date.now(), { damaged });
   for (const entry of damaged) quarantineDamagedRecord(file, entry);
   return rows;
 }
@@ -374,6 +414,7 @@ type DamagedRow = Parameters<typeof quarantineDamagedRecord>[1];
 export function parseReminderTable(
   file: string,
   raw: unknown,
+  nowMs: number,
   { damaged }: { damaged?: DamagedRow[] } = {},
 ): Reminder[] {
   if (!isRecord(raw) || typeof raw.schemaVersion !== "number")
@@ -386,13 +427,7 @@ export function parseReminderTable(
       file,
       `schemaVersion ${version} is newer than this Iva (${REMINDER_SCHEMA_VERSION}); update Iva or restore the file`,
     );
-  // Таблицу схемы 1 писала Iva старше 0.4.1. Она не читается и не трогается: отказ с именем
-  // файла, а не разбор строк, который увёл бы их в карантин.
-  if (version < REMINDER_SCHEMA_VERSION)
-    fail(
-      file,
-      `schemaVersion ${version} was written by Iva older than 0.4.1; this Iva reads ${REMINDER_SCHEMA_VERSION} and leaves the file as it is`,
-    );
+  if (version < 1) fail(file, `unsupported schemaVersion ${version}`);
 
   if (!Array.isArray(raw.rows))
     fail(file, `rows must be an array, got ${JSON.stringify(raw.rows)}`);
@@ -402,7 +437,10 @@ export function parseReminderTable(
   raw.rows.forEach((value) => {
     let reminder: Reminder;
     try {
-      reminder = assertReminder(file, value);
+      reminder =
+        version === 1
+          ? assertReminder(file, migrateV1Row(file, value, nowMs))
+          : assertReminder(file, value);
       if (seen.has(reminder.id)) throw new ReminderStoreError("duplicate id");
     } catch (error) {
       if (!(error instanceof ReminderStoreError)) throw error;

@@ -233,7 +233,10 @@ export type TelegramQueueItem = {
   version: number;
   updateId: number;
   enqueuedAt?: number;
-  update: TelegramQueueUpdate;
+  update?: TelegramQueueUpdate;
+  // Releases up to 0.5.11 wrote a queue of strings they found as items of this shape.
+  legacyText?: string;
+  migratedFrom?: string;
   [key: string]: unknown;
 };
 
@@ -271,6 +274,11 @@ type QueueFileOptions = {
   replace?: boolean;
   now?: () => number;
   logImpl?: (...parts: unknown[]) => void;
+};
+
+type SplitChatKey = {
+  chatId: number | string;
+  threadId: number | null;
 };
 
 type TelegramEntity = {
@@ -345,7 +353,7 @@ function normalizeItem(
     !Array.isArray(candidate.update) &&
     (candidate.update as Record<string, unknown>).update_id ===
       candidate.updateId;
-  if (!hasUpdate) {
+  if (!hasUpdate && typeof candidate.legacyText !== "string") {
     throw new Error(
       `Telegram queue item ${chatKey}[${index}] has no replayable payload`,
     );
@@ -562,10 +570,63 @@ export function clearQueueKey(
   };
 }
 
+function splitChatKey(chatKey: string): SplitChatKey | null {
+  const colon = chatKey.lastIndexOf(":");
+  if (colon < 0) return null;
+  const chat = chatKey.slice(0, colon);
+  const thread = chatKey.slice(colon + 1);
+  if (!chat.length) return null;
+  const chatNumber = Number(chat);
+  const threadNumber = thread === "" ? null : Number(thread);
+  return {
+    chatId: Number.isSafeInteger(chatNumber) ? chatNumber : chat,
+    threadId: Number.isSafeInteger(threadNumber) ? threadNumber : null,
+  };
+}
+
 export function materializeQueueItem(
+  chatKey: string,
   item: TelegramQueueItem,
-): TelegramQueueUpdate {
-  return cloneJson(item.update);
+  {
+    legacyAllowedUserIds,
+  }: {
+    legacyAllowedUserIds?: ReadonlySet<string> | Iterable<unknown> | null;
+  } = {},
+): TelegramQueueUpdate | null {
+  if (item.update) return cloneJson(item.update);
+  const route = splitChatKey(chatKey);
+  const allowed =
+    legacyAllowedUserIds instanceof Set
+      ? legacyAllowedUserIds
+      : new Set(legacyAllowedUserIds ?? []);
+  // The old string[] format did not retain a sender. A private Telegram chat id
+  // is also its participant's user id, so an allowlisted private route is the
+  // only legacy item whose author can be reconstructed. A group/topic key says
+  // nothing about which member wrote the text and must stay undelivered.
+  if (
+    !route ||
+    typeof route.chatId !== "number" ||
+    route.chatId <= 0 ||
+    !allowed.has(String(route.chatId))
+  ) {
+    return null;
+  }
+  const ownerId = route.chatId;
+  const messageId = Math.max(1, Math.abs(item.updateId));
+  return {
+    update_id: item.updateId,
+    message: {
+      message_id: messageId,
+      date: 0,
+      chat: {
+        id: route.chatId,
+        type: "private",
+      },
+      from: { id: ownerId, is_bot: false, first_name: "Owner" },
+      text: item.legacyText,
+      ...(route.threadId === null ? {} : { message_thread_id: route.threadId }),
+    },
+  };
 }
 
 const TELEGRAM_USERNAME = /^[A-Za-z0-9_]{5,32}$/u;

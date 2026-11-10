@@ -9,6 +9,7 @@
     "#*": "./agent/*"
   },
   "scripts": {
+    "preinstall": "node scripts/floor-guard.ts",
     "setup": "node scripts/setup.mjs",
     "build": "node --env-file-if-exists=.env scripts/build.ts",
     "build:core": "eve build",
