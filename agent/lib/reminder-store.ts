@@ -7,6 +7,10 @@
 // же переходом получает следующий срок от croner и остаётся pending — факт последнего
 // срабатывания при ней.
 //
+// Срабатывание без исхода (агент упал между взятием и фактом) закрывает тик: closeAbandoned
+// пишет причину, когда срок жизни срабатывания истёк. До этого строку не берут заново и не
+// убирают. Жизненный цикл строки и его инварианты — specs/ReminderLifecycle.tla.
+//
 // Файл, записанный более новой версией Ивы, читается как явная ошибка: читать его наугад
 // значит молча испортить данные следующей записью. Файл версии 1 (режимы verbatim/agent,
 // аренда, счётчики провалов) переводится построчно: срок и текст сохраняются, режим и все
@@ -43,6 +47,9 @@ export type ReminderStatus = "pending" | "fired";
  */
 export type ReminderPhase =
   "waiting" | "running" | "delivered" | "failed" | "abandoned";
+/** Причина, которую тик пишет брошенному срабатыванию. */
+export const REMINDER_ABANDONED =
+  "abandoned: the firing ended without an outcome";
 /** `at` — один точный срок; `cron` — повторяющееся расписание (cron-выражение пользователя). */
 export type ReminderSchedule =
   { kind: "at"; atMs: number } | { kind: "cron"; expr: string; tz: string };
@@ -103,6 +110,10 @@ const ROW_KEYS = [
   "timeout_minutes",
   "running_timeout_minutes",
 ] as const;
+
+/** Срабатывание без исхода: ни факта, ни причины. Такую строку не берут и не убирают. */
+const isOpen = (row: Reminder): boolean =>
+  row.firedAt !== null && row.delivered === null && row.error === null;
 
 function fail(file: string, message: string): never {
   throw new ReminderStoreError(`${file}: ${message}`);
@@ -568,6 +579,7 @@ export async function remove(
 /**
  * Срабатывание: pending-строки со сроком не позже nowMs переходят в fired и получают
  * firedAt — один атомарный переход под локом, поэтому два тика не могут взять одну строку.
+ * Строка, чьё прошлое срабатывание ещё без исхода, ждёт: её ребёнок идёт либо её закроет тик.
  * Повторяющаяся строка тем же переходом пересчитывается на следующий срок и остаётся
  * pending: её факт срабатывания (firedAt) уже проставлен, а доставку допишет ребёнок.
  *
@@ -596,9 +608,7 @@ export async function fireDue(
     const due = rows
       .filter(
         (row) =>
-          row.status === "pending" &&
-          row.nextRunAtMs <= nowMs &&
-          reminderPhase(row, nowMs, file === commandFile()) !== "running",
+          row.status === "pending" && row.nextRunAtMs <= nowMs && !isOpen(row),
       )
       .sort(byDeadline)
       .slice(0, limit);
@@ -733,7 +743,10 @@ function recordLog(
   );
 }
 
-/** Уборка: сработавшие разовые строки живут сутки — столько владелец видит факт. */
+/**
+ * Уборка: сработавшие разовые строки живут сутки — столько владелец видит факт. Строку без
+ * исхода уборка не трогает: сначала её закрывает closeAbandoned.
+ */
 export async function sweepFired(
   nowMs: number,
   keepMs: number = REMINDER_FIRED_KEEP_MS,
@@ -746,12 +759,36 @@ export async function sweepFired(
         !(
           row.status === "fired" &&
           row.firedAt !== null &&
-          row.firedAt <= nowMs - keepMs
+          row.firedAt <= nowMs - keepMs &&
+          !isOpen(row)
         ),
     );
     const swept = rows.length - kept.length;
     if (swept > 0) await saveTable(file, kept);
     return swept;
+  });
+}
+
+/**
+ * Брошенные срабатывания получают причину одним переходом под локом, как взятие строки:
+ * второй раз строку не закроют, поэтому Alert о ней уходит не больше одного раза. Текст
+ * строки заново не отправляется: таблица не знает, успел ли его отправить умерший ребёнок.
+ */
+export async function closeAbandoned(
+  nowMs: number,
+  file = reminderFile(),
+): Promise<Reminder[]> {
+  return mutate(file, async () => {
+    const rows = await loadTable(file);
+    const abandoned = rows.filter(
+      (row) =>
+        isOpen(row) &&
+        reminderPhase(row, nowMs, file === commandFile()) === "abandoned",
+    );
+    if (abandoned.length === 0) return [];
+    for (const row of abandoned) row.error = REMINDER_ABANDONED;
+    await saveTable(file, rows);
+    return abandoned.map((row) => structuredClone(row));
   });
 }
 

@@ -9,6 +9,10 @@
 // не запустился или умер, не сказав факта, тик пишет delivered=false с причиной по коду
 // выхода — и на этом всё, второго захода у строки нет.
 //
+// Тик живёт в процессе агента и умирает вместе с ним. Строку, которую взял упавший агент,
+// следующий тик закрывает причиной, когда срок жизни срабатывания истёк, и зовёт ребёнка с
+// Alert владельцу. Текст напоминания при этом заново не уходит (specs/ReminderLifecycle.tla).
+//
 // Пульс тика — mtime файла data/reminders.tick: он обновляется после удачного взятия, и по
 // нему `iva doctor` и remind list говорят, жив ли диспетчер.
 import { statSync, writeFileSync } from "node:fs";
@@ -19,6 +23,7 @@ import {
   commandFile,
   commandTimeoutMs,
   reminderFile,
+  closeAbandoned,
   fireDue,
   list,
   recordDelivery,
@@ -34,6 +39,8 @@ import {
 
 /** Строк за тик; остальное заберёт следующий тик. */
 export const REMINDER_CLAIM_LIMIT = 5;
+/** Срок ребёнка с Alert о брошенной строке: одной отправке в Telegram его хватает с запасом. */
+const ALERT_TIMEOUT_MS = 120_000;
 /** Тик старше этого — планировщик не жив. */
 export const REMINDER_TICK_STALE_MS = 3 * 60_000;
 
@@ -242,6 +249,37 @@ async function fireRow(
   return "filled";
 }
 
+/** Alert о брошенном срабатывании: ребёнок только шлёт, причина уже в строке. */
+async function alertAbandoned(
+  row: Reminder,
+  command: boolean,
+  { root, nodeBin, runJob, log }: TickWiring,
+): Promise<null> {
+  const result = await fireOnce(
+    {
+      name: `reminder-${row.id}-abandoned`,
+      argv: command
+        ? [
+            "scripts/reminders/command.ts",
+            row.id,
+            String(row.firedAt),
+            "abandoned",
+          ]
+        : ["scripts/reminders/fire.ts", row.id, "abandoned"],
+      root,
+      nodeBin,
+      timeoutMs: ALERT_TIMEOUT_MS,
+      log,
+    },
+    runJob,
+  );
+  if (!result.ok)
+    log(
+      `reminders: ${row.id} abandoned, alert not sent: ${fireFailure(result)}`,
+    );
+  return null;
+}
+
 /**
  * Один тик. Никогда не бросает наружу: это обработчик расписания, как и runScheduledJob —
  * сбой самого тика не должен ронять ход планировщика.
@@ -273,18 +311,32 @@ export async function runReminderTick(
     log(`reminders: sweep failed: ${message(error)}`);
   }
 
-  if (rows.length === 0) return { claimed: 0, spawned: 0, filled: 0, swept };
+  // После взятия и уборки: закрытая сейчас строка доживает до следующего тика, и ребёнок
+  // с Alert успевает её прочитать.
+  let abandoned: Reminder[] = [];
+  try {
+    abandoned = await closeAbandoned(nowMs, file);
+  } catch (error) {
+    log(`reminders: closing abandoned rows failed: ${message(error)}`);
+  }
 
-  log(
-    `reminders: tick claimed ${rows.length}: ${rows.map((row) => row.id).join(", ")}`,
-  );
+  if (rows.length > 0)
+    log(
+      `reminders: tick claimed ${rows.length}: ${rows.map((row) => row.id).join(", ")}`,
+    );
+  if (abandoned.length > 0)
+    log(
+      `reminders: tick closed ${abandoned.length} abandoned: ${abandoned.map((row) => row.id).join(", ")}`,
+    );
 
   let spawned = 0;
   let filled = 0;
+  const command = options.command ?? false;
 
-  const completion = Promise.allSettled(
-    rows.map((row) => fireRow(row, file, options.command ?? false, wiring)),
-  ).then((outcomes) => {
+  const completion = Promise.allSettled([
+    ...rows.map((row) => fireRow(row, file, command, wiring)),
+    ...abandoned.map((row) => alertAbandoned(row, command, wiring)),
+  ]).then((outcomes) => {
     outcomes.forEach((outcome, index) => {
       if (outcome.status === "fulfilled") {
         if (outcome.value === "spawned") spawned += 1;

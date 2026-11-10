@@ -68,6 +68,8 @@ export async function runCommandFire(
     timeoutMs?: number;
     firedAt?: number;
     send?: typeof sendTelegramHtml;
+    /** Тик закрыл запуск без исхода: команда не выполняется, владельцу уходит Alert. */
+    abandoned?: boolean;
   } = {},
 ): Promise<number> {
   const file = commandFile();
@@ -78,6 +80,28 @@ export async function runCommandFire(
     (options.firedAt !== undefined && row.firedAt !== options.firedAt)
   )
     return 2;
+  const key = `schedule-${id}`;
+  const alert = (essence: string, what: string) =>
+    alertOnce(dataDir(), key, essence, async () => {
+      const chat = ownerChat(process.env);
+      if (!chat) return false;
+      return (
+        await (options.send ?? sendTelegramHtml)(
+          process.env.TELEGRAM_BOT_TOKEN ?? "",
+          chat,
+          await redactNotice(
+            `Задача «${(await redactNotice(row.text)).replace(/\s+/gu, " ").slice(0, 60)}» ${what}. Журнал: list`,
+          ),
+        )
+      ).ok;
+    });
+  if (options.abandoned) {
+    const sent = await alert(
+      "abandoned",
+      "осталась без исхода: запуск оборвался, вероятно, при перезапуске Ивы",
+    );
+    return sent === "failed" ? 1 : 0;
+  }
   const result = await runCommand(
     row.text,
     options.root ?? process.cwd(),
@@ -116,22 +140,12 @@ export async function runCommandFire(
     if (error instanceof ReminderNotFoundError) return 0;
     throw error;
   }
-  const key = `schedule-${id}`;
   if (result.ok) alertResolved(dataDir(), key);
   else
-    await alertOnce(dataDir(), key, result.error ?? "error", async () => {
-      const chat = ownerChat(process.env);
-      if (!chat) return false;
-      return (
-        await (options.send ?? sendTelegramHtml)(
-          process.env.TELEGRAM_BOT_TOKEN ?? "",
-          chat,
-          await redactNotice(
-            `Задача «${(await redactNotice(row.text)).replace(/\s+/gu, " ").slice(0, 60)}» не выполнилась: ${result.error?.startsWith("timeout") ? `не уложилась в ${commandTimeoutMs(row) / 60_000} мин` : "завершилась с ошибкой"}. Журнал: list`,
-          ),
-        )
-      ).ok;
-    });
+    await alert(
+      result.error ?? "error",
+      `не выполнилась: ${result.error?.startsWith("timeout") ? `не уложилась в ${commandTimeoutMs(row) / 60_000} мин` : "завершилась с ошибкой"}`,
+    );
   if (!(await list(file)).some((candidate) => candidate.id === id))
     await clearCommandAlert(id);
   return 0;
@@ -140,5 +154,6 @@ if (isEntrypoint(import.meta.url))
   process.exit(
     await runCommandFire(process.argv[2] ?? "", {
       firedAt: Number(process.argv[3]),
+      abandoned: process.argv[4] === "abandoned",
     }),
   );

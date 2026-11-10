@@ -156,7 +156,11 @@ test("text claim expires at the existing run-status stale boundary", async () =>
   });
   await store.fireDue(now, 5);
   await store.reschedule("r-expire", { nowMs: now });
+  assert.deepEqual(await store.closeAbandoned(now + RUN_STALE_MS - 1), []);
   assert.deepEqual(await store.fireDue(now + RUN_STALE_MS - 1, 5), []);
+  // За границей срабатывание без исхода закрывает тик; до этого строку заново не берут.
+  assert.deepEqual(await store.fireDue(now + RUN_STALE_MS, 5), []);
+  assert.equal((await store.closeAbandoned(now + RUN_STALE_MS)).length, 1);
   assert.equal((await store.fireDue(now + RUN_STALE_MS, 5)).length, 1);
 });
 
@@ -177,8 +181,13 @@ test("a live text session pulse extends overlap protection beyond its initial st
   await store.reschedule("r-long", { nowMs: now });
   t.mock.timers.setTime(now + RUN_STALE_MS - 1);
   setChatStatus("123:", { status: "running", sessionId: "live-text" });
+  assert.deepEqual(await store.closeAbandoned(now + RUN_STALE_MS + 1), []);
   assert.deepEqual(await store.fireDue(now + RUN_STALE_MS + 1, 5), []);
   assert.equal((await store.list())[0].firedAt, now);
+  assert.equal(
+    (await store.closeAbandoned(now + 2 * RUN_STALE_MS - 1)).length,
+    1,
+  );
   assert.equal((await store.fireDue(now + 2 * RUN_STALE_MS - 1, 5)).length, 1);
 });
 
