@@ -19,3 +19,4 @@ check ResetIntent-confirm-recovery ConfirmOnce
 check ResetIntent-confirm-window ConfirmOnce
 check ResetIntent-interleave ExactCut
 check ResetIntent-agent-outlives ExactCut
+check ResetIntent-session-completion ExactCut

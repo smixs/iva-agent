@@ -1896,7 +1896,7 @@ test("/new resets this private conversation and reports completion", async () =>
     assert.deepEqual(resets, [
       [
         "7:",
-        { sessionId: "session-r" },
+        { sessionId: "session-r", chatKey: "7:" },
         { clearQueue: true, discardThroughUpdateId: 1020 },
       ],
     ]);

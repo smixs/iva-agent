@@ -19,6 +19,11 @@
 \* запросов: если после приёма запроса чат уже сбросили, он ничего не делает (AgentStale,
 \* шаг AgentDone). Восстановление заканчивается независимо от прежнего resolveSession.
 \*
+\* Remote выбирает address или sessionId; RecRemote использует address. sessionId хранит
+\* поколение при приёме и сбрасывает только его. Оба вида отмечают завершение для чата;
+\* SessionCompletion = FALSE воспроизводит ограду только по адресным завершениям.
+\* Старый address -> новый sessionId -> доставка -> старый AgentDone достижим.
+\*
 \* Чего не описывает: время (отсрочка 30 с и 5 мин — шаг Expire; срок доставки, ожидание
 \* running); групповые чаты (там очередь не чистится и намерения нет); черновик ответа и правку
 \* сообщения «сбрасываю…» (ответ владельцу — счётчики); ошибки чтения каталога намерений и файла
@@ -75,6 +80,7 @@ CONSTANTS
   ConfirmWindow,  \* свидетель: перезапуск между «Диалог сброшен» и записью offset
   RecInterleave,  \* проход сверки идёт, пока главный цикл разбирает следующий апдейт
   RecReread,      \* мутант: сверка исполняет сброс, не перечитав намерение с диска
+  SessionCompletion, \* мутант: завершения по sessionId не отмечаются для чата
   AgentStale      \* мутант: запоздалый сброс не смотрит, что чат уже сбросили после приёма
 
 Ids == 1..N
@@ -106,7 +112,7 @@ VARIABLES
   escalations,\* призрак: эскалаций за жизнь процесса
   failsUsed,
   restarts,
-  pending,    \* агент: принятые и не законченные запросы сброса <<кто, u, номер приёма>>
+  pending,    \* агент: принятые и не законченные запросы сброса <<кто, u, номер приёма, вид цели, фиксированное поколение>>
   acceptSeq,  \* агент: номер последнего принятого запроса
   doneSeq     \* агент: номер последнего законченного запроса сброса этого чата
 
@@ -215,7 +221,7 @@ Persist ==
 Remote ==
   /\ main = "remote"
   /\ \/ /\ acceptSeq' = acceptSeq + 1
-        /\ pending' = Append(pending, <<"main", cur, acceptSeq + 1>>)
+        /\ \E kind \in {"address", "sessionId"} : pending' = Append(pending, <<"main", cur, acceptSeq + 1, kind, gen>>)
         /\ main' = "await" /\ mainWaits' = acceptSeq + 1
         /\ UNCHANGED <<gen, resetGen, wiped, off, fails, backoff, failsUsed, answered, cur,
                        doneSeq, recWaits>>
@@ -236,15 +242,18 @@ RemoveAt(seq, i) ==
 \* Агент закончил запрос: адрес разрешён в этот момент, поэтому сброс бьёт по сессии, которая
 \* сейчас владеет чатом, — в том числе по той, куда новый Bridge уже доставил сообщение после
 \* отсечки. AgentStale: если после приёма запроса чат уже сбросили (doneSeq больше номера
-\* приёма), запоздалый запрос ничего не делает.
+\* приёма), запоздалый адресный запрос ничего не делает. Запрос по sessionId держит поколение
+\* при приёме и никогда не следует за заменой; его завершение тоже отмечается для чата.
 AgentDone ==
   /\ \E i \in 1..Len(pending) :
        /\ pending' = RemoveAt(pending, i)
-       /\ IF AgentStale /\ pending[i][3] < doneSeq
-            THEN UNCHANGED <<gen, resetGen, wiped, doneSeq>>
-            ELSE /\ ResetSession(pending[i][2])
-                 /\ doneSeq' = (IF doneSeq < pending[i][3]
-                                  THEN pending[i][3] ELSE doneSeq)
+       /\ IF (pending[i][4] = "address" /\ AgentStale /\ pending[i][3] < doneSeq)
+                 \/ (pending[i][4] = "sessionId" /\ pending[i][5] # gen)
+            THEN UNCHANGED <<gen, resetGen, wiped>>
+            ELSE ResetSession(pending[i][2])
+       /\ doneSeq' = IF pending[i][4] = "address" \/ SessionCompletion
+                         THEN (IF doneSeq < pending[i][3] THEN pending[i][3] ELSE doneSeq)
+                         ELSE doneSeq
        /\ IF (main = "await") /\ (pending[i][3] = mainWaits)
             THEN /\ main' = (IF ClearFirst THEN "clear" ELSE "complete")
                  /\ mainWaits' = 0
@@ -332,7 +341,7 @@ RecFails ==
 RecRemote ==
   /\ rec = "remote"
   /\ \/ /\ acceptSeq' = acceptSeq + 1
-        /\ pending' = Append(pending, <<"recovery", recU, acceptSeq + 1>>)
+        /\ pending' = Append(pending, <<"recovery", recU, acceptSeq + 1, "address", gen>>)
         /\ rec' = "await" /\ recWaits' = acceptSeq + 1
         /\ UNCHANGED <<gen, resetGen, wiped, fails, backoff, escalated, escalations,
                        failsUsed, doneSeq, mainWaits>>
@@ -420,6 +429,8 @@ TypeOK ==
   /\ mainWaits <= acceptSeq /\ recWaits <= acceptSeq
   /\ \A i \in 1..Len(pending) : /\ pending[i][1] \in {"main", "recovery"}
                                  /\ pending[i][3] <= acceptSeq
+                                 /\ pending[i][4] \in {"address", "sessionId"}
+                                 /\ pending[i][5] <= gen
 
 \* (1) После /new очередь чата очищена ровно по записанный update_id: сообщение до /new не
 \* попадает в новую сессию, сообщение после /new не теряется, не идёт в старую сессию и не

@@ -7,7 +7,7 @@ export type TelegramSessionAddress = {
   conversationId?: string;
 };
 export type TelegramResetTarget =
-  | { sessionId: string; address?: never }
+  | { sessionId: string; address?: never; chatKey?: string }
   | { sessionId?: never; address: TelegramSessionAddress };
 
 type TelegramMessage = {
@@ -30,7 +30,7 @@ type FetchResponse = {
 };
 type FetchImpl = (url: string, init: RequestInit) => Promise<FetchResponse>;
 
-function storedSession(status: Status): TelegramResetTarget | null {
+function storedSession(status: Status): { sessionId: string } | null {
   const sessionId = status?.sessionId;
   return typeof sessionId === "string" && sessionId.length > 0
     ? { sessionId }
@@ -101,7 +101,15 @@ export function resetTargetForControl(
   }
 
   const stored = storedSession(status);
-  if (stored) return stored;
+  if (stored) {
+    const address = addressForMessage(message);
+    return address
+      ? {
+          ...stored,
+          chatKey: `${address.chatId}:${address.messageThreadId ?? ""}`,
+        }
+      : stored;
+  }
   if (message.chat?.type !== "private") return null;
   const address = addressForMessage(message);
   return address ? { address } : null;

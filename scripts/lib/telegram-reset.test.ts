@@ -8,7 +8,10 @@ import {
   resetTargetForControl,
   telegramAddressFromChatKey,
 } from "./telegram-reset.ts";
-import { handleTelegramResetRequest } from "#lib/telegram-reset-route.ts";
+import {
+  handleTelegramResetRequest,
+  parseTelegramResetTarget,
+} from "#lib/telegram-reset-route.ts";
 
 type FetchCall = { url: string; init: RequestInit };
 type ResetOperations = Pick<
@@ -46,6 +49,7 @@ test("stored session wins for groups and forum topics", () => {
     resetTargetForControl(update, { sessionId: "session-42" }, "777"),
     {
       sessionId: "session-42",
+      chatKey: "-1001:77",
     },
   );
 });
@@ -150,7 +154,7 @@ test("reset client sends the exact target and accepts duplicate reset", async ()
   const result = await requestTelegramReset({
     url: "http://127.0.0.1/eve/v1/telegram/reset",
     secret: "secret",
-    target: { sessionId: "session-55" },
+    target: { sessionId: "session-55", chatKey: "123:7" },
     fetchImpl: async (url, init) => {
       calls.push({ url, init });
       return Response.json({ ok: true, status: "no_active_session" });
@@ -166,7 +170,10 @@ test("reset client sends the exact target and accepts duplicate reset", async ()
   const requestBody = calls[0]?.init.body;
   if (typeof requestBody !== "string")
     throw new Error("expected string request body");
-  assert.deepEqual(JSON.parse(requestBody), { sessionId: "session-55" });
+  assert.deepEqual(JSON.parse(requestBody), {
+    sessionId: "session-55",
+    chatKey: "123:7",
+  });
 });
 
 test("reset client rejects HTTP and malformed success responses", async () => {
@@ -439,6 +446,11 @@ test("reset route rejects auth, malformed targets and conflicting targets", asyn
     request('{"sessionId":"s"}', "bad"),
     request("{ not json"),
     request("{}"),
+    request('{"sessionId":"s","chatKey":null}'),
+    request('{"sessionId":"s","chatKey":"1:0"}'),
+    request('{"sessionId":"s","chatKey":"1:9007199254740992"}'),
+    request('{"sessionId":"s","chatKey":"1::2"}'),
+    request('{"address":{"chatId":"1"},"chatKey":"1:"}'),
     request('{"sessionId":""}'),
     request('{"address":{"chatId":"junk"}}'),
     request('{"sessionId":"s","address":{"chatId":"1"}}'),
@@ -454,4 +466,37 @@ test("reset route rejects auth, malformed targets and conflicting targets", asyn
     assert.equal(response.status, index === 0 ? 401 : 400);
   }
   assert.equal(called, false);
+});
+
+test("reset route parses valid chat keys and rejects malformed metadata (seed 47004)", () => {
+  fc.assert(
+    fc.property(
+      fc.integer({ min: -1_000_000, max: 1_000_000 }),
+      fc.option(fc.integer({ min: 1, max: Number.MAX_SAFE_INTEGER }), {
+        nil: undefined,
+      }),
+      (id, thread) => {
+        const target = { sessionId: "fixed", chatKey: `${id}:${thread ?? ""}` };
+        assert.deepEqual(parseTelegramResetTarget(target), target);
+      },
+    ),
+    { seed: 47004, numRuns: 500 },
+  );
+  fc.assert(
+    fc.property(
+      fc
+        .anything()
+        .filter(
+          (key) =>
+            typeof key !== "string" || !/^-?\d+:(?:[1-9]\d*)?$/u.test(key),
+        ),
+      (chatKey) => {
+        assert.equal(
+          parseTelegramResetTarget({ sessionId: "fixed", chatKey }),
+          null,
+        );
+      },
+    ),
+    { seed: 47005, numRuns: 500 },
+  );
 });
