@@ -20,7 +20,7 @@
 // blind — the next boot's migration retries it exactly as it would any other stale period.
 //
 // recordInputs/recordOutputs: false — this file's mere presence implicitly enables eve's
-// authored-telemetry path (see eve/docs/guides/instrumentation.md) and disables the
+// authored-telemetry path (the instrumentation guide at https://eve.dev/docs) and disables the
 // zero-config local dev tracer; since no OTel exporter is registered below, telemetry is
 // otherwise inert, but a stray default of `true` would still turn on payload capture we
 // never asked for. Keep `eve dev` startup unaffected — verified by `timeout 30 npx eve dev`.

@@ -75,24 +75,23 @@ builds the tree. Four shapes, in descending order of preference:
 - **A shared module in `packages/`**, where both sides need the same code while loading.
   Neither tree owns it, so both may import it: `timezone`, `data-dir`, `vault-dir`,
   `context-window` and `opencode-protocol` are `file:packages/<name>` dependencies
-  (`@iva/<name>`), `secret-redaction`, `alert-state` and `claude-command` are reached by
-  relative path. `agent/lib/timezone.ts` and `scripts/lib/timezone.ts` both re-export
-  `packages/timezone`, so the IANA-zone predicate the synchronous `writeUnits()` needs
-  exists once; `scripts/lib/timezone.test.ts` still runs both entry points on one table.
+  (`@iva/<name>`); `secret-redaction`, `alert-state`, `claude-command`, `notification-chat`
+  (the chat Iva writes to on her own), `reasoning-levels` (the canonical reasoning
+  vocabulary), `guards`, `vault-walk` and `codex-auth` (the Codex OAuth constants and the
+  token file: its path, its read and its atomic 0600 write) are reached by relative path.
+  The IANA-zone predicate the synchronous `writeUnits()` needs exists once, in
+  `packages/timezone`; `scripts/lib/timezone.test.ts` still runs both routes to it, the
+  package name and the relative path, on one table.
 - **Two self-contained halves pinned by a test**, where both sides genuinely need the same
   small thing while loading: the probe-flag name (`scripts/lib/health-probe.ts` writes it,
-  `agent/lib/eve-health.ts` reads it), the retired systemd unit names
-  (`scripts/lib/legacy-memory-units.ts` and `agent/lib/schedule-migration.ts`), the chat
-  Iva writes to on her own (`notification-chat.ts` in both `lib/` folders), the canonical
-  reasoning vocabulary, and the Codex OAuth constants plus the token file (its path, its
-  atomic 0600 write and the read the setup wizard needs) — `iva login` and the wizard must
-  run without the authored tree, so `scripts/lib/codex-oauth.ts` keeps the sign-in flows
-  while `agent/lib/codex-auth.ts` owns refreshing the token and signing requests with it.
-  Each pair is pinned by a test that imports both halves
-  (`scripts/lib/{reasoning-levels,health-probe,codex-auth-seam}.test.ts`,
-  `agent/lib/schedule-migration.test.ts`, `scripts/notification-chat-contract.test.ts`), the
-  way `usage` shares only its journal path and `scripts/lib/usage.test.ts` round-trips it. A
-  pair without such a test is drift waiting to happen; add the test before adding the pair.
+  `agent/lib/eve-health.ts` reads it) and the Codex subscription — `iva login` and the
+  wizard must run without the authored tree, so `scripts/lib/codex-oauth.ts` keeps the
+  sign-in flows while `agent/lib/codex-auth.ts` owns refreshing the token and signing
+  requests with it, and what the two share lives in `packages/codex-auth`. Each pair is
+  pinned by a test that imports both halves
+  (`scripts/lib/{health-probe,codex-auth-seam}.test.ts`), the way `usage` shares only its
+  journal path and `scripts/lib/usage.test.ts` round-trips it. A pair without such a test is
+  drift waiting to happen; add the test before adding the pair.
 
   The newest pair is the model provider: `agent/lib/model-provider.ts` holds the names the
   runtime accepts, each provider's model variable, its default model and the rule that turns
@@ -110,10 +109,10 @@ update` and the `/menu` screens load without the authored tree, so they cannot i
 
 ## 4. Evals
 
-Iva has no product-level skill evals: there is no `evals/` directory. The `#evals/*` import
-alias in `package.json` and the `evals/**/*.ts` include in `tsconfig.json` point at it and
-resolve to nothing. eve ships a native evals module (`eve/evals`, with `/expect`, `/loaders`
-and `/reporters`) — adopt it before adding product-level skill evals.
+Iva has no product-level skill evals: there is no `evals/` directory, and nothing in
+`package.json` or `tsconfig.json` points at one. eve ships a native evals module
+(`eve/evals`, with `/expect`, `/loaders` and `/reporters`) — adopt it before adding
+product-level skill evals.
 
 ## 5. Discovery guardrails are not part of the release check
 

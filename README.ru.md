@@ -155,7 +155,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/smixs/iva-agent/main/bootstr
 - `iva update` ставит только выпуски (метки `vX.Y.Z`) — так по умолчанию.
 - В `main` только выпуски; всё принятое сначала попадает в ветку `beta`.
 - `iva beta` включает бета-обновления: вершина ветки `beta`; `iva stable` выключает их и возвращает на `main` (отката нет — догонит следующий выпуск). Потом `iva update`.
-- Любая установка, включая 0.4.8, переходит на бету одной командой: `curl -fsSL https://raw.githubusercontent.com/smixs/iva-agent/beta/beta.sh | bash`. Новая установка сразу на бете: `curl -fsSL https://raw.githubusercontent.com/smixs/iva-agent/beta/install.sh | IVA_BETA=1 bash`.
+- Новая установка сразу на бете: `curl -fsSL https://raw.githubusercontent.com/smixs/iva-agent/beta/install.sh | IVA_BETA=1 bash`.
 - То же в Telegram: `/menu` → 🛠 Обслуживание → 🧪 Обновления. `iva version` показывает, что включено.
 
 ### Первая минута
@@ -246,7 +246,7 @@ cd ~/iva && bash install.sh
 
 ## На чём построено
 
-Агента запускает [eve](https://eve.dev/docs/introduction) 0.51.1-iva.5, агентный фреймворк Vercel; поисковый индекс живёт на SQLite, встроенном в Node 24, - без отдельной базы. Ива выросла из [agent-second-brain](https://github.com/smixs/agent-second-brain) и [autograph](https://github.com/smixs/autograph) - эта история рассказана в [docs/ru/memory.md](docs/ru/memory.md).
+Агента запускает [eve](https://eve.dev/docs/introduction) 0.51.1-iva.6, агентный фреймворк Vercel; поисковый индекс живёт на SQLite, встроенном в Node 24, - без отдельной базы. Ива выросла из [agent-second-brain](https://github.com/smixs/agent-second-brain) и [autograph](https://github.com/smixs/autograph) - эта история рассказана в [docs/ru/memory.md](docs/ru/memory.md).
 
 ## Спасибо
 

@@ -222,7 +222,7 @@ The installer command does the same thing over an existing installation: it hand
 
 ### Update says my version is too old
 
-Symptoms: `iva update` — in the terminal or in the chat — answers `Your Iva (0.3.x) is too old to update itself` and stops. Cause: every release names the oldest updater able to install it (`update-compat.json`, field `minUpdater`), and the installed CLI is older than that. It stops before touching anything: the installation keeps running the version it ran before, and no unit, version or data was written.
+Symptoms: `iva update` — in the terminal or in the chat — answers `Your Iva (<version>) is too old to update itself` and stops. Cause: every release names the oldest updater able to install it (`update-compat.json`, field `minUpdater` — 0.5.0 today), and the installed CLI is older than that. It stops before touching anything: the installation keeps running the version it ran before, and no unit, version or data was written.
 
 Reinstall from the current tree — one command, and it is the only way out:
 
@@ -242,7 +242,6 @@ systemctl --user start iva-brain.service           # backup now: creates the pri
 ```
 
 `iva doctor` only reports a missing vault origin — the repo creation and push happen in the nightly Brain pass; the second command runs it immediately instead of waiting for 05:00.
-On an install that has not been updated since the rename the unit is still called `iva-memory-doctor.service` — `iva doctor` moves it to `iva-brain.service`.
 
 ### agent-browser fails on Ubuntu 24.04
 

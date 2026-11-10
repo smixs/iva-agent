@@ -63,7 +63,7 @@
 и принимает `iva trace show`, что даёт список сбоев Insight и что берёт `iva diagnose --turn`.
 Голый `turn_N` называет новейший ход с этим номером.
 
-Колбэки (кнопки `/menu`, прежняя `iva_cancel`) получают ключ `tg:<chatId>:cb:<callbackId>`, и
+Колбэки (кнопки `/menu`) получают ключ `tg:<chatId>:cb:<callbackId>`, и
 **делает его только мост**: до `runTelegramInbound` колбэк не доходит, поэтому такие
 строки `bridge.*` остаются сиротами - ни `turn.bound`, ни `inbound.*` у них не будет.
 Нативный стоп черновика (`stopped_message_generation`) получает ключ `tg:<chatId>:stop:<update_id>` на входе; `stop.*` хранит сверенную пару сессии и хода.
