@@ -1,14 +1,9 @@
 import { isUtf8 } from "node:buffer";
 import { randomUUID } from "node:crypto";
-import {
-  closeSync,
-  openSync,
-  readSync,
-  readdirSync,
-  renameSync,
-} from "node:fs";
+import { closeSync, openSync, readSync, renameSync } from "node:fs";
 import { rmSync, statSync, writeSync } from "node:fs";
-import { join, relative } from "node:path";
+import { relative } from "node:path";
+import { vaultMarkdownFiles } from "../../packages/vault-walk/index.ts";
 
 // Чистка старых раздутых vault: давний баг удваивал сложенный `description` при каждой
 // перезаписи, и файлы вырастали до сотен мегабайт. Файл целиком в память не читается:
@@ -20,16 +15,6 @@ const LINE_CAP = 1 << 16;
 const BLOCK_SMALL = 4096;
 const FM_MAX_LINES = 10_000;
 const DESCRIPTION_CAP = 500;
-const IGNORED = new Set([
-  ".obsidian",
-  "attachments",
-  ".git",
-  ".graph",
-  ".claude",
-  ".trash",
-  "backup",
-  "archive",
-]);
 
 /** Порт collapse_repeated_description и cap_description v0.4.8. Длины — в символах (code
  * points), как len() в Python: половины только у строки длиннее 40, период только у
@@ -223,18 +208,6 @@ function cleanVaultFile(
   }
 }
 
-/** Markdown vault без служебных каталогов; общий обход чистки и графа. */
-export function markdownFiles(dir: string): string[] {
-  return readdirSync(dir, { withFileTypes: true })
-    .filter((entry) => !IGNORED.has(entry.name))
-    .flatMap((entry) => {
-      const path = join(dir, entry.name);
-      if (entry.isDirectory()) return markdownFiles(path);
-      return entry.isFile() && entry.name.endsWith(".md") ? [path] : [];
-    })
-    .sort();
-}
-
 type CleanupSummary = { cleaned: number; saved: number; failures: string[] };
 
 export function cleanupVault(
@@ -244,7 +217,11 @@ export function cleanupVault(
 ): CleanupSummary {
   let [cleaned, saved] = [0, 0];
   const failures: string[] = [];
-  for (const file of markdownFiles(root))
+  // Нечитаемый каталог останавливает чистку: молча пропустить часть vault нельзя.
+  const files = vaultMarkdownFiles(root, (_dir, error) => {
+    throw error;
+  });
+  for (const file of files)
     try {
       const result = cleanVaultFile(file, apply);
       if (!result) continue;

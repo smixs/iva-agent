@@ -8,7 +8,6 @@
 // Текст карточки берём из agent/lib/card-index.ts — там же его берут BM25-колонки
 // memory_search: в hybrid обе половины обязаны индексировать ОДНО и то же.
 import {
-  readdirSync,
   readFileSync,
   mkdirSync,
   renameSync,
@@ -25,20 +24,13 @@ import {
 } from "../../agent/lib/embeddings.ts";
 import { embedText } from "../../agent/lib/card-index.ts";
 import { vaultDirOrExit } from "../lib/vault-boundary.ts";
+import { vaultMarkdownFiles } from "../../packages/vault-walk/index.ts";
 
 let vaultCache: string | null = null;
 // Лениво: неверная настройка вольта всплывает на первом использовании, где её ловит
 // граница процесса — одна строка причины и код 1, а не стек на импорте модуля.
 const VAULT = (): string => (vaultCache ??= vaultDirOrExit());
 const SCOPE = ["cards", "summaries", "weekly", "monthly", "yearly"];
-const IGNORE = new Set([
-  ".git",
-  "node_modules",
-  ".graph",
-  ".index",
-  ".trash",
-  "attachments",
-]);
 
 if (!hasEmbeddingKey()) {
   console.error(
@@ -47,30 +39,19 @@ if (!hasEmbeddingKey()) {
   process.exit(0);
 }
 
-function walk(dir: string, out: string[]): void {
-  let entries: import("node:fs").Dirent[];
-  try {
-    entries = readdirSync(dir, { withFileTypes: true });
-  } catch (error) {
-    // Ночь проверяет свой вывод на необработанный ENOENT, поэтому причина идёт без
-    // префикса "Error:" и без стека.
-    const detail = error instanceof Error ? error.message : String(error);
-    console.error(`embed-index: не смог прочитать каталог (${dir}): ${detail}`);
-    return;
-  }
-  for (const e of entries) {
-    const full = join(dir, e.name);
-    if (e.isDirectory()) {
-      if (!IGNORE.has(e.name)) walk(full, out);
-    } else if (e.name.endsWith(".md")) out.push(full);
-  }
+// Ночь проверяет свой вывод на необработанный ENOENT, поэтому причина идёт без префикса
+// "Error:" и без стека.
+function unreadable(dir: string, error: unknown): void {
+  const detail = error instanceof Error ? error.message : String(error);
+  console.error(`embed-index: не смог прочитать каталог (${dir}): ${detail}`);
 }
 
 const files: string[] = [];
 for (const d of SCOPE) {
   const abs = join(VAULT(), d);
   try {
-    if (statSync(abs).isDirectory()) walk(abs, files);
+    if (statSync(abs).isDirectory())
+      files.push(...vaultMarkdownFiles(abs, unreadable));
   } catch {
     /* нет директории */
   }

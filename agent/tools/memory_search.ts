@@ -1,6 +1,6 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
-import { readdir, readFile, stat } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { readFileSync, statSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join, relative, resolve, sep } from "node:path";
@@ -10,6 +10,7 @@ import { cardIndex, cardTitle } from "../lib/card-index.js";
 import { resolveVaultDir } from "@iva/vault-dir";
 import { vaultDirErrorText } from "../lib/vault-error.ts";
 import { isRecord } from "../../packages/guards/index.ts";
+import { vaultMarkdownFiles } from "../../packages/vault-walk/index.ts";
 
 // node:sqlite — встроенный модуль (Node 24+). В ESM нет глобального require, поэтому
 // поднимаем его через createRequire; грузим лениво внутри bm25Search (с fallback, если нет).
@@ -18,19 +19,9 @@ const nodeRequire = createRequire(import.meta.url);
 // Поиск по долговременной памяти (vault). Заменяет «сырой grep» из MAP-протокола:
 // BM25-ранжирование через встроенный node:sqlite FTS5 (ноль внешних зависимостей, ноль
 // нативной сборки) + бесплатный graph-реранк по готовому vault/.graph/vault-graph.json
-// (его пишет autograph graph.py каждую ночь). Деградирует мягко: любой сбой движка →
+// (его пишет ночной Brain, scripts/memory/graph.ts). Деградирует мягко: любой сбой движка →
 // подстрочный fallback, ход НЕ падает.
 
-const IGNORE_DIRS = new Set([
-  ".git",
-  "node_modules",
-  ".next",
-  "dist",
-  ".cache",
-  ".graph",
-  ".index",
-  ".trash",
-]);
 const DEFAULT_DIRS = ["cards", "summaries", "weekly", "monthly", "yearly"];
 const MAX_SNIPPET = 240;
 
@@ -47,24 +38,6 @@ interface Doc {
   status: string;
   confidence: string;
   source: string;
-}
-
-async function walk(dir: string, out: string[]): Promise<void> {
-  let entries;
-  try {
-    entries = await readdir(dir, { withFileTypes: true });
-  } catch {
-    return;
-  }
-  for (const entry of entries) {
-    const full = join(dir, entry.name);
-    if (entry.isDirectory()) {
-      if (IGNORE_DIRS.has(entry.name)) continue;
-      await walk(full, out);
-    } else if (entry.isFile() && entry.name.endsWith(".md")) {
-      out.push(full);
-    }
-  }
 }
 
 // Разобранная карточка вместе со СНИМКОМ файла, по которому её узнают в следующий раз.
@@ -104,7 +77,8 @@ export async function loadDocs(scopeDirs: string[]): Promise<LoadedDocs> {
   const files: string[] = [];
   for (const abs of roots) {
     try {
-      if ((await stat(abs)).isDirectory()) await walk(abs, files);
+      if ((await stat(abs)).isDirectory())
+        files.push(...vaultMarkdownFiles(abs));
     } catch {
       /* нет такой директории — пропускаем */
     }

@@ -1,13 +1,8 @@
-import {
-  lstatSync,
-  readdirSync,
-  readFileSync,
-  realpathSync,
-  statSync,
-} from "node:fs";
+import { lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, join, relative, sep } from "node:path";
 import { parseFrontmatterOrSkip } from "./frontmatter.ts";
 import { resolveTimeZone } from "../../packages/timezone/index.ts";
+import { vaultMarkdownFiles } from "../../packages/vault-walk/index.ts";
 
 // Ссылки [[…]], которые ведут в никуда. Модель пишет их с опечаткой в слаге, с выдуманной
 // транслитерацией или на карточку, которой никогда не создавали, — и это не косметика:
@@ -16,18 +11,6 @@ import { resolveTimeZone } from "../../packages/timezone/index.ts";
 //
 // Резолв один на запись и на ночной граф: scripts/memory/graph.ts строит рёбра этим же
 // индексом (vaultLinks), поэтому ссылка, принятая на записи, ночью не становится битой.
-
-const IGNORE_DIRS = new Set([
-  ".obsidian",
-  "attachments",
-  ".git",
-  ".graph",
-  ".claude",
-  ".trash",
-  "backup",
-  "archive",
-  "__pycache__",
-]);
 
 // Вложения: заметка может законно кончаться на суффикс вложения (voice.ogg.md), поэтому
 // исключение работает только ПОСЛЕ неудачного резолва.
@@ -57,31 +40,6 @@ interface LinkIndex {
   ambiguousStem: Set<string>;
   uniqueTitle: Map<string, string>;
   ambiguousTitle: Set<string>;
-}
-
-/** Все .md под корнем vault'а, кроме IGNORE_DIRS, как rel-пути через «/». */
-function walkVault(vaultDir: string): string[] {
-  const results: string[] = [];
-  const visit = (dir: string): void => {
-    let entries;
-    try {
-      entries = readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return; // нечитаемый каталог — как будто его нет, проверка не падает на нём
-    }
-    for (const entry of entries) {
-      if (entry.isDirectory()) {
-        if (IGNORE_DIRS.has(entry.name)) continue;
-        visit(join(dir, entry.name));
-      } else if (entry.isFile() && entry.name.endsWith(".md")) {
-        results.push(
-          relative(vaultDir, join(dir, entry.name)).split(sep).join("/"),
-        );
-      }
-    }
-  };
-  visit(vaultDir);
-  return results;
 }
 
 /** Ключ ссылки по H1: NFC, один пробел, нижний регистр. */
@@ -136,8 +94,9 @@ function buildLinkIndex(
   };
   // Ключ везде — путь БЕЗ .md: иначе своя же карточка попадает в индекс дважды, её stem
   // становится неоднозначным, и ссылка файла на самого себя читается как битая.
-  const paths = walkVault(vaultDir).map((rel) =>
-    rel.endsWith(".md") ? rel.slice(0, -3) : rel,
+  // Нечитаемый каталог обход пропускает: проверка ссылок на нём не падает.
+  const paths = vaultMarkdownFiles(vaultDir).map((file) =>
+    relative(vaultDir, file).split(sep).join("/").slice(0, -3),
   );
   const seen = new Set(paths);
   for (const extra of extraPaths) {
