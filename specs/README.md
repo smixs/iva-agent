@@ -513,3 +513,53 @@ Id строки используется один раз на трассу; уб
 Модель проверяет атомарные записи и порядок событий. Реальные миллисекунды,
 матрица `goalActor`, транспорт Telegram, права файлов, текст заданий и соответствие
 фактическому коду G1 проверяются при реализации и общей приёмке.
+
+## ChatRecord
+
+`ChatRecord.tla` models the chat record, the file `data/run-status.d/<chat>.json`, as
+one state machine. Two processes write it under one lock with compare-and-set: the
+agent (Channel, draft, hooks) and the Bridge; a Reminder turn writes from its own
+process. A restart of the agent forgets every process memory and keeps the file;
+recovery before the start may mark the record or fail. The Bridge can crash and
+come back.
+
+A chat is in one of eight states. Busy: `accepted` (a message is accepted, the
+turn has not started), `turn`, `compacting`. `stale` is a busy record without a
+write for the stale interval, or marked by recovery; the Bridge no longer waits
+for it and the reaper frees it. Free: `free`, and three marked free states read by
+precedence — `retiring` (the session leaves after its turn), `retry-offered`
+(the reaper offered a retry), `awaiting-owner` (a question to the owner is open).
+`chatState` in `agent/lib/run-status.ts` is the same function in the code, and
+`rowRules` there holds the row invariants: which turn fields each state owns.
+
+Checked invariants:
+
+1. `OneState`: every reachable record satisfies exactly one of eight
+   independent state predicates.
+2. `TurnFieldsOnlyWhenBusy`: `ingress`, `session`, `turn` and `compacting` are
+   filled only while the record is busy; a compaction has a session and no turn;
+   a turn id needs a session.
+3. `ReleasedByOwnerOrReaper`: a busy record becomes free through its owner (the
+   turn by session and turn, the session by itself, an accepted message by its
+   ingress id), through the reaper after the deadline, or through a reset.
+4. `FreeAfterRestart`: after any restart the chat becomes free in finite time.
+   Fairness: every started step ends, time passes, the Bridge comes back.
+
+Mutants that must fail: a turn's terminal write that compares the session
+without the turn (`ReleasedByOwnerOrReaper`); the reaper that frees a live
+record (`ReleasedByOwnerOrReaper`); a release that leaves `compacting` on a
+free chat (`TurnFieldsOnlyWhenBusy`, and `OneState` in a second
+configuration); the reaper switched off (`FreeAfterRestart`).
+
+Run `sh specs/chat-record-check.sh`. `scripts/chat-record.test.ts` replays
+each counterexample on the real writers and names the invariant in the test
+title.
+
+Outside the model: the queued sign (`queued*`), the Stop mark, the turn
+question and latency stamps, which do not decide the state; the Bridge queue
+and its in-flight phases (`QueueDrain.tla`); the two awaits inside one session
+retirement and the choice of the reset target; the file lock (`FileLock.tla`);
+wall-clock values. The model assumes that eve handles the events of one session
+in order, so a session-level release never overlaps a turn of that session.
+`IdleCompaction`, `RestartRecovery`, `DraftStop`, `DeferredRestart` and
+`TurnLifecycle` keep their own scenarios over the same record.

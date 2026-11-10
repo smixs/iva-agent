@@ -4,7 +4,7 @@
 \* under one lock with compare-and-set; a restart forgets every process memory and
 \* keeps the file. 0 denotes an absent field.
 \*
-\* Record fields -> agent/lib/run-status.ts (chatRecordSchema). Marks kept here:
+\* Record fields -> agent/lib/run-status.ts (fieldChecks, rowRules). Marks kept here:
 \* stale (updatedAt older than RUN_STALE_MS, or 0 after recovery), reset (resetAt),
 \* retry (restartRetryData), retire (retireAfterTurn), pending (pendingInput*).
 \*
