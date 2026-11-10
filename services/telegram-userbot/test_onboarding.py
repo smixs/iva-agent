@@ -371,6 +371,23 @@ class RestartTests(LoginCase):
         self.assertEqual(self.proxy.telegram.checks, 0)
         self.assertFalse((self.proxy.dir / MARKER_NAME).exists())
 
+    def test_read_ends_a_login_the_process_did_not_live_to_tell_ReadEndsLogin(self):
+        # The path TLC prints for UserbotLogin-read-keeps-marker.cfg, with the restart that
+        # cut the process between Telegram's yes and the phase.
+        async def steps():
+            await self.to_password()
+            self.proxy.telegram.tg = "authorized"  # sign_in went through; the process died
+            self.proxy.boot()
+            self.assertEqual(await self.proxy.login.health(), {"state": "ready", "login": "authorized"})
+            self.assertFalse((self.proxy.dir / MARKER_NAME).exists())
+            self.assertEqual(await self.proxy.call("start"), "Telegram уже подключён — новый QR не нужен.")
+            self.proxy.telegram.tg = "none"  # signed out from another device
+            self.assertEqual(await self.proxy.call("status"), "idle: вход не начат")
+            self.proxy.boot()
+            self.assertIs(await self.proxy.phase(), Phase.IDLE)
+
+        self.run_steps(steps())
+
     def test_restart_without_a_login_stays_idle(self):
         async def steps():
             self.proxy.boot()
@@ -412,6 +429,18 @@ class SessionTests(LoginCase):
         self.run_steps(steps())
         self.sent.assert_awaited_once()
 
+    def test_right_password_without_the_session_file_is_not_told_connected_SuccessIsTheRead(self):
+        # The path TLC prints for UserbotLogin-success-unread.cfg.
+        async def steps():
+            await self.to_password()
+            self.proxy.session.unlink()
+            reply = await self.proxy.call("password", RIGHT)
+            self.assertTrue(reply.startswith("error: Telegram впустил аккаунт"), reply)
+            self.assertEqual(await self.proxy.login.health(), {"state": "unauthorized", "login": "error"})
+
+        self.run_steps(steps())
+        self.assert_no_secret()
+
     def test_sign_out_from_another_device_reads_idle(self):
         async def steps():
             self.proxy.telegram.scans = ["authorized"]
@@ -428,16 +457,16 @@ class ModelWalk(LoginCase):
     """Random walks over the actions of the model; each step is checked against its invariants."""
 
     STEPS = ("start", "start", "wrong", "wrong", "right", "empty", "flood", "time", "restart",
-             "restart", "session_lost", "signed_out", "status")
+             "restart", "session_lost", "signed_out", "accepted", "status")
 
     def walk(self, seed):
         rng = random.Random(seed)
         proxy = Proxy(self)
         telegram = proxy.telegram
-        cut = False
+        cut = seen = False
 
         async def steps():
-            nonlocal cut
+            nonlocal cut, seen
             for _ in range(40):
                 step = rng.choice(self.STEPS)
                 before, checks, known_wait = proxy.login._phase, telegram.checks, (
@@ -449,8 +478,14 @@ class ModelWalk(LoginCase):
                     )
                     reply = await proxy.call("start")
                     cut = cut and "Отправляю" not in reply
+                    seen = seen and "Отправляю" not in reply
                 elif step in ("wrong", "right", "empty"):
-                    await proxy.call("password", {"wrong": WRONG, "right": RIGHT, "empty": ""}[step])
+                    reply = await proxy.call(
+                        "password", {"wrong": WRONG, "right": RIGHT, "empty": ""}[step]
+                    )
+                    # 7. SuccessIsTheRead
+                    if reply == "Готово — аккаунт подключён.":
+                        self.assertIs(await proxy.phase(), Phase.AUTHORIZED, step)
                     if before is Phase.PASSWORD_NEEDED and telegram.tg == "password":
                         # 1. WrongPasswordKeepsAsking
                         self.assertIs(proxy.login._phase, Phase.PASSWORD_NEEDED, step)
@@ -467,10 +502,14 @@ class ModelWalk(LoginCase):
                     proxy.session.unlink(missing_ok=True)
                 elif step == "signed_out" and telegram.tg == "authorized":
                     telegram.tg = "none"
+                elif step == "accepted" and telegram.tg == "password":
+                    telegram.tg = "authorized"  # Telegram said yes; the process is not told
                 else:
                     await proxy.call("status")
                 phase = await proxy.phase()
                 proxy.said.append(str(await proxy.login.health()))
+                if phase is Phase.AUTHORIZED:  # the read ended the login, cut or not
+                    seen, cut = True, False
                 # 2. NoSilentIdle
                 if cut:
                     self.assertIn(phase, (Phase.INTERRUPTED, Phase.AUTHORIZED, Phase.ERROR), step)
@@ -481,6 +520,9 @@ class ModelWalk(LoginCase):
                 stored = proxy.login._phase
                 self.assertTrue(marked or stored not in IN_PROGRESS, step)
                 self.assertTrue(not marked or stored in IN_PROGRESS or stored is Phase.INTERRUPTED, step)
+                # 6. ReadEndsLogin
+                if seen:
+                    self.assertFalse(marked or stored is Phase.INTERRUPTED, step)
             # 4. NoSecretLeaves
             self.assert_no_secret(proxy)
 
@@ -491,6 +533,34 @@ class ModelWalk(LoginCase):
         for seed in range(base, base + 300):
             with self.subTest(seed=seed):
                 self.walk(seed)
+
+
+class ToolArgumentTests(LoginCase):
+    def test_password_that_is_not_a_string_is_not_quoted_back_NoSecretLeaves(self):
+        try:
+            from mcp.server.fastmcp import FastMCP
+        except ImportError:
+            self.skipTest("mcp is not installed here")
+        number = 900_000_000 + len(SECRET)  # a digit password the model sent as a number
+
+        async def steps():
+            await self.to_password()
+            mcp = FastMCP("test")
+            onboarding.register_onboarding_tools(mcp, self.proxy.login)
+            tool = next(t for t in await mcp.list_tools() if t.name == "qr_login_password")
+            self.assertEqual(tool.inputSchema["properties"]["password"]["type"], "string")
+            replies = []
+            for value in (number, [RIGHT], {"password": WRONG}):
+                content, _ = await mcp.call_tool("qr_login_password", {"password": value})
+                replies.append(content[0].text)
+            return replies
+
+        replies = self.run_steps(steps())
+        self.assertEqual(replies[0], "Пароль не подошёл. Статус прежний, password_needed — пришли пароль ещё раз.")
+        for reply in replies:
+            self.assertNotIn(str(number), reply)
+            self.assertNotIn(SECRET, reply)
+        self.assertEqual(self.proxy.telegram.checks, 3)
 
 
 class TelethonNamesTests(unittest.TestCase):

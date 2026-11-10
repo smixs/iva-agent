@@ -171,9 +171,13 @@ class Login:
         """Telegram's answer first, the phase in memory otherwise."""
         if await self._client.is_user_authorized():
             # AuthorizedHasSession
-            if self._session_file.is_file():
-                return Phase.AUTHORIZED, _DETAIL[Phase.AUTHORIZED]
-            return Phase.ERROR, _SESSION_LOST
+            if not self._session_file.is_file():
+                return Phase.ERROR, _SESSION_LOST
+            if self._phase is not Phase.AUTHORIZED:
+                # ReadEndsLogin: the process that let the account in may have died before
+                # it said so; the read ends that login and takes the marker away.
+                self._set(Phase.AUTHORIZED)
+            return Phase.AUTHORIZED, _DETAIL[Phase.AUTHORIZED]
         if self._phase is Phase.AUTHORIZED:  # signed out from another device
             return Phase.IDLE, _DETAIL[Phase.IDLE]
         wait = self._retry_at - self._clock()
@@ -268,6 +272,10 @@ class Login:
                 self._fail("проверка пароля не удалась", exc)
                 return f"Не удалось войти: {self._detail}"
             self._set(Phase.AUTHORIZED)
+            # SuccessIsTheRead: "connected" only when the read says so.
+            phase, detail = await self._read()
+            if phase is not Phase.AUTHORIZED:
+                return f"{phase.value}: {detail}"
             return "Готово — аккаунт подключён."
 
     async def connected(self) -> str:
@@ -279,14 +287,23 @@ class Login:
 
 
 def register_onboarding_tools(mcp, login: Login) -> None:
+    from typing import Annotated
+
     from mcp.types import ToolAnnotations
+    from pydantic import BeforeValidator
+
+    # NoSecretLeaves: a password that is not a string (the model sent 123456 as a number)
+    # becomes one before the schema check, whose refusal would quote it as `input_value`.
+    # `password` is named secret in agent/connections/telegram-userbot.ts for Trace.
+    async def qr_login_password(password: Annotated[str, BeforeValidator(str)]) -> str:
+        return await login.password(password)
 
     read_only = ToolAnnotations(readOnlyHint=True)
     phases = " | ".join(phase.value for phase in Phase)
     for name, fn, description in (
         ("qr_login_start", login.start, login.start.__doc__),
         ("qr_login_status", login.status, f"Проверить статус QR-логина: {phases}."),
-        ("qr_login_password", login.password, login.password.__doc__),
+        ("qr_login_password", qr_login_password, login.password.__doc__),
         ("login_status", login.connected, login.connected.__doc__),
     ):
         mcp.add_tool(fn, name=name, description=description, annotations=read_only)
