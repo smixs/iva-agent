@@ -1131,7 +1131,7 @@ test("a userbot Alert that throws is one output line and the update goes on", as
   assert.deepEqual(said, ["could not tell you in Telegram about the userbot"]);
 });
 
-test("the flip restarts the plugin units that were running, and only those", async (t) => {
+test("PluginMode DisabledIsStopped, ProcessesNeedTrust: the flip restarts the units of the plugins that are on, and stops the units of the ones it switched off", async (t) => {
   const home = mkdtempSync(join(tmpdir(), "iva-plugin-restart-"));
   t.after(() => rmSync(home, { recursive: true, force: true }));
   const data = layoutFor(home).data;
@@ -1233,6 +1233,7 @@ test("the flip restarts the plugin units that were running, and only those", asy
 
   const restarted: string[][] = [];
   const asked: string[] = [];
+  const stopped: string[][] = [];
   const runtime = {
     UNIT_DIR: unitDir,
     systemd: {
@@ -1245,6 +1246,9 @@ test("the flip restarts the plugin units that were running, and only those", asy
       restart(units: readonly string[]) {
         restarted.push([...units]);
       },
+      disableNow(units: readonly string[]) {
+        stopped.push([...units]);
+      },
     },
   } as unknown as Parameters<typeof restartPluginUnits>[0];
   const said: string[] = [];
@@ -1253,11 +1257,19 @@ test("the flip restarts the plugin units that were running, and only those", asy
 
   // Только то, что живо, доверено и лежит на диске.
   assert.deepEqual(restarted, [["iva-mcp-trace-viewer.service"]]);
-  assert.deepEqual(asked, [
+  // Юнит плагина, который не включён и не доверен, работать не должен: обновление
+  // останавливает его, а не оставляет на старом коде до следующей команды `iva plugin`.
+  assert.deepEqual(stopped, [["iva-mcp-untrusted-srv.service"]]);
+  assert.deepEqual([...asked].sort(), [
     "iva-mcp-trace-viewer.service",
+    "iva-mcp-untrusted-srv.service",
     "iva-plugin-trace-web.service",
   ]);
   assert.match(said.join("\n"), /restarted 1 plugin unit\(s\)/u);
+  assert.match(
+    said.join("\n"),
+    /stopped 1 plugin unit\(s\) of the plugins that are switched off/u,
+  );
 
   // Отказ рестарта — строка в журнал, а не провал уже прошедшего апдейта.
   const broken = {
@@ -1266,6 +1278,9 @@ test("the flip restarts the plugin units that were running, and only those", asy
       query,
       isActive: () => true,
       restart() {
+        throw new Error("job failed");
+      },
+      disableNow() {
         throw new Error("job failed");
       },
     },

@@ -914,6 +914,13 @@ async function alertOwnerOnce(
  * Only what is running is restarted, and a unit that refuses is one line in the log: an
  * update that is otherwise finished must not fail over a plugin, and `iva doctor` says
  * which unit is down.
+ *
+ * A plugin the update switched off (settlePlugins, version-update.ts) has its units
+ * stopped here: otherwise its MCP proxy and services keep running the old version's code
+ * until the next `iva plugin` command (specs/PluginMode.tla, DisabledIsStopped). The same
+ * goes for any stored plugin that is not enabled and trusted - its units have no business
+ * running (ProcessesNeedTrust). The owner hears the name and the reason from the update's
+ * own notice (pluginsOffNotice), not from this line.
  */
 export async function restartPluginUnits(
   runtime: Pick<CliRuntime, "systemd" | "UNIT_DIR">,
@@ -924,13 +931,33 @@ export async function restartPluginUnits(
   if (!core) return;
   const { state, damaged } = await core.store.readPluginsStateSafe(dataDir);
   if (damaged) return;
+  const scope = canonicalPluginScope(dataDir);
   const live = runningPluginUnits({
-    scope: canonicalPluginScope(dataDir),
+    scope,
     entries: state.plugins.filter((entry) => entry.enabled && entry.trusted),
     unitDir: runtime.UNIT_DIR,
     manager: runtime.systemd.manager,
     systemd: runtime.systemd,
   });
+  const switchedOff = runningPluginUnits({
+    scope,
+    entries: state.plugins.filter((entry) => !(entry.enabled && entry.trusted)),
+    unitDir: runtime.UNIT_DIR,
+    manager: runtime.systemd.manager,
+    systemd: runtime.systemd,
+  });
+  if (switchedOff.length > 0) {
+    try {
+      runtime.systemd.disableNow(switchedOff);
+      log(
+        `stopped ${switchedOff.length} plugin unit(s) of the plugins that are switched off`,
+      );
+    } catch (error) {
+      log(
+        `some units of the switched-off plugins did not stop: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
   if (live.length === 0) return;
   try {
     runtime.systemd.restart(live);
