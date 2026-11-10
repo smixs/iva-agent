@@ -43,6 +43,12 @@ check PluginMode-turn-trusts TrustIsOwners
 check PluginMode-stale-undo EnableIsOwners
 check PluginMode-stale-undo TrustIsOwners EnableIsOwners
 check PluginMode-update-reenables UpdateGrantsNothing
+# The undo of a failed `iva plugin update` writes the whole entry it replaced: a trust given
+# while the build ran is taken back under running units, a revoked trust comes back, and so
+# do a switch-off and a removal.
+check PluginMode-update-undo-whole ProcessesNeedTrust
+check PluginMode-update-undo-whole TrustIsOwners "ProcessesNeedTrust EnableIsOwners"
+check PluginMode-update-undo-whole EnableIsOwners "ProcessesNeedTrust TrustIsOwners"
 # The open finding: the updater as it is today (scripts/lib/version-update.ts, settlePlugins).
 check PluginMode-update-off DisabledIsStopped
 exit "$failed"
