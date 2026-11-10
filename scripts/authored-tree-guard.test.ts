@@ -434,10 +434,6 @@ test("the guard resolves #-aliases through package.json instead of trusting the 
     targetOf("#lib/i18n.ts", "agent/agent.ts"),
     join(AUTHORED, "lib/i18n.ts"),
   );
-  assert.equal(
-    targetOf("#evals/smoke.ts", "agent/agent.ts"),
-    join(ROOT, "evals/smoke.ts"),
-  );
   assert.equal(targetOf("eve/channels", "agent/agent.ts"), null);
 });
 

@@ -6,8 +6,7 @@
     "iva": "bin/iva.mjs"
   },
   "imports": {
-    "#*": "./agent/*",
-    "#evals/*": "./evals/*"
+    "#*": "./agent/*"
   },
   "scripts": {
     "iva": "node bin/iva.mjs",
