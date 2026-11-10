@@ -65,7 +65,7 @@ test("eve source files match the git index", async () => {
 
 test("the eve copy holds no tests, documentation or dropped entry points (ADR-0027)", async () => {
   const dropped =
-    /(?:^|\/)(?:__snapshots__|__fixtures__)\/|\.test(?:-d)?\.tsx?$|^docs\/|^packages\/eve\/(?:test|extension-contracts)\/|^packages\/eve\/src\/(?:internal\/testing|react|vue|svelte|self-modification|public\/(?:next|nuxt|sveltekit|channels\/(?:slack|teams|discord|linear|twilio|chat-sdk|photon|linq)))\//u;
+    /(?:^|\/)(?:__snapshots__|__fixtures__)\/|\.test(?:-d)?\.tsx?$|^docs\/|^packages\/eve\/(?:test|extension-contracts)\/|^packages\/eve\/scripts\/vendor-compiled\/@agentclientprotocol\/|^packages\/eve\/src\/(?:setup\/integrations\/(?!shared\/prerequisite\.ts$)|(?:internal\/testing|react|vue|svelte|self-modification|acp|cli\/acp|cli\/commands\/agent-prompt|public\/(?:next|nuxt|sveltekit|channels\/(?:slack|teams|discord|linear|twilio|chat-sdk|photon|linq|github)))\/|setup\/(?:build|channel-add-conflicts|scaffold\/channels-catalog)\.ts$|cli\/commands\/(?:init(?:-(?:agent-workspace|confirm|recovery|repl|target))?|set|link|deploy|integration-[a-z]+|register-[a-z]+-commands|setup-answers|vercel-non-interactive|channel-add-conflicts)\.ts$)/u;
   const files = await listEveTreeFiles(SOURCE_ROOT, "source");
   assert.deepEqual(
     files.filter((file) => dropped.test(file)),
@@ -82,12 +82,40 @@ test("the eve copy holds no tests, documentation or dropped entry points (ADR-00
   );
   assert.deepEqual(
     Object.keys(manifest.exports).filter((entry) =>
-      /^\.\/(?:react|vue|svelte|next|nuxt|sveltekit|self-modification(?:\/.*)?|channels\/(?:slack|teams|discord|linear|twilio|chat-sdk|photon|linq))$/u.test(
+      /^\.\/(?:react|vue|svelte|next|nuxt|sveltekit|self-modification(?:\/.*)?|setup(?:\/.*)?|channels\/(?:slack|teams|discord|linear|twilio|chat-sdk|photon|linq|github))$/u.test(
         entry,
       ),
     ),
     [],
     "the eve package exports an entry point that ADR-0027 removed",
+  );
+});
+
+test("the installed eve CLI keeps the commands Iva runs and none that ADR-0027 removed", () => {
+  const help = spawnSync(
+    process.execPath,
+    [path.join(INSTALLED_ROOT, "bin/eve.js"), "--help"],
+    { encoding: "utf8" },
+  );
+  assert.equal(help.status, 0, help.stderr);
+  const commands = new Set(
+    [...help.stdout.matchAll(/^ {2}([a-z]+)\b/gmu)].map((match) => match[1]),
+  );
+  for (const kept of ["build", "start", "dev", "extension"])
+    assert.ok(commands.has(kept), `eve ${kept} is gone`);
+  assert.deepEqual(
+    [
+      "acp",
+      "add",
+      "deploy",
+      "init",
+      "integration",
+      "link",
+      "registry",
+      "set",
+    ].filter((removed) => commands.has(removed)),
+    [],
+    "the eve CLI registers a command that ADR-0027 removed",
   );
 });
 
