@@ -18,13 +18,9 @@ export const BACKLOG_DROP_MARKER_FILE = join(
 export type BacklogDropMarker = { schema: typeof MARKER_SCHEMA };
 export type MarkerState = "missing" | "present";
 export type StartupDecision =
-  | { action: "resume"; offset: number; delivered: number | null }
-  | { action: "write-marker-and-drop"; offset: null; delivered: null }
-  | {
-      action: "write-marker-and-resume";
-      offset: number;
-      delivered: number | null;
-    }
+  | { action: "resume"; offset: number }
+  | { action: "write-marker-and-drop"; offset: null }
+  | { action: "write-marker-and-resume"; offset: number }
   | { action: "ambiguous" };
 
 type ErrorLike = { code?: unknown; message?: unknown };
@@ -51,20 +47,12 @@ export function decideTelegramStartup(
 ): StartupDecision {
   if (offset.offset === null) {
     return marker === "missing"
-      ? { action: "write-marker-and-drop", offset: null, delivered: null }
+      ? { action: "write-marker-and-drop", offset: null }
       : { action: "ambiguous" };
   }
   return marker === "missing"
-    ? {
-        action: "write-marker-and-resume",
-        offset: offset.offset,
-        delivered: offset.delivered,
-      }
-    : {
-        action: "resume",
-        offset: offset.offset,
-        delivered: offset.delivered,
-      };
+    ? { action: "write-marker-and-resume", offset: offset.offset }
+    : { action: "resume", offset: offset.offset };
 }
 
 async function loadMarker(
@@ -101,8 +89,7 @@ export async function prepareTelegramStartup(
     createMarkerImpl?: (file: string, data: string) => Promise<void>;
   } = {},
 ): Promise<
-  | { firstRun: true; offset: null; delivered: null }
-  | { firstRun: false; offset: number; delivered: number | null }
+  { firstRun: true; offset: null } | { firstRun: false; offset: number }
 > {
   assertTelegramProcessLease(lease);
   const [offset, marker] = await Promise.all([
@@ -125,11 +112,7 @@ export async function prepareTelegramStartup(
     );
   }
   if (decision.action === "write-marker-and-drop") {
-    return { firstRun: true, offset: null, delivered: null };
+    return { firstRun: true, offset: null };
   }
-  return {
-    firstRun: false,
-    offset: decision.offset,
-    delivered: decision.delivered,
-  };
+  return { firstRun: false, offset: decision.offset };
 }
