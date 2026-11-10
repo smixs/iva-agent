@@ -57,8 +57,6 @@ function lifecycle(): SystemdLifecycle {
     writeUnits: () => [],
     activateUnits: () => undefined,
     removeUnits: () => [],
-    retireDeferredBrainUnits: () => [],
-    retireLegacyMemoryUnits: () => [],
     migrateEnv: () => false,
     restartServices: () => undefined,
   };

@@ -12,7 +12,6 @@ import {
   readdirSync,
   rmSync,
   statSync,
-  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -130,6 +129,16 @@ function snapshot(fx: Fixture): Record<string, string> {
   return files;
 }
 
+/** Every unit file of a release below the floor, by name. */
+function unitBodies(fx: Fixture): Record<string, string> {
+  return Object.fromEntries(
+    readdirSync(fx.unitDir)
+      .filter((name) => name.startsWith("iva-memory-"))
+      .sort()
+      .map((name) => [name, unit(fx, name)]),
+  );
+}
+
 function seedLegacyBrain(fx: Fixture): void {
   mkdirSync(fx.unitDir, { recursive: true });
   for (const name of ["iva-memory-doctor.service", "iva-memory-doctor.timer"])
@@ -235,7 +244,7 @@ test("writeUnits falls back to UTC for an invalid timezone and says so", () => {
 
 test("writeUnits canonicalises an alias timezone and keeps the default port", () => {
   withFixture("ASSISTANT_TIMEZONE=US/Pacific\n", (fx) => {
-    cli(fx).writeUnits({ deferBrainMigration: true });
+    cli(fx).writeUnits();
 
     const service = unit(fx, "iva.service");
     assert.match(service, /^Environment=TZ=America\/Los_Angeles$/m);
@@ -476,139 +485,33 @@ test("property: migrateEnv keeps every key and line, adds one IVA_PORT, and is i
   );
 });
 
-// ── legacy brain pair ──────────────────────────────────────────────────────
+// ── units of a release below the floor, restart ────────────────────────────
 
-test("the legacy brain pair is retired once the new timer is up", () => {
-  withFixture("", (fx) => {
-    seedLegacyBrain(fx);
+// UpdateFloor.NoSilentLoss: the iva-memory-* units are not this CLI's to rewrite, disable
+// or remove.
+test("NoSilentLoss: writeUnits and restartServices leave the units of a release below the floor as they were", () => {
+  for (const hasSystemd of [true, false])
+    withFixture("", (fx) => {
+      seedLegacyMemory(fx);
+      seedLegacyBrain(fx);
+      seedSchedules(fx);
+      const before = unitBodies(fx);
+      const systemd = cli(fx, { hasSystemd });
 
-    cli(fx).writeUnits();
+      systemd.writeUnits();
+      if (hasSystemd) systemd.restartServices();
 
-    assert.equal(
-      existsSync(join(fx.unitDir, "iva-memory-doctor.service")),
-      false,
-    );
-    assert.equal(
-      existsSync(join(fx.unitDir, "iva-memory-doctor.timer")),
-      false,
-    );
-    assert.ok(fx.calls.includes("enable --now iva-brain.timer"));
-    assert.ok(fx.calls.includes("disable --now iva-memory-doctor.timer"));
-    assert.deepEqual(fx.warnings, []);
-  });
-});
-
-test("a brain timer that fails to start keeps the legacy pair, repointed, and names the cause", () => {
-  withFixture("", (fx) => {
-    seedLegacyBrain(fx);
-
-    cli(fx, { failing: ["enable --now iva-brain.timer"] }).writeUnits();
-
-    assert.ok(
-      fx.warnings.some((w) =>
-        w.includes(
-          "iva-brain.timer did not come up: systemctl --user enable --now iva-brain.timer failed (exit 1)",
-        ),
-      ),
-      fx.warnings.join("\n"),
-    );
-    assert.equal(
-      unit(fx, "iva-memory-doctor.service"),
-      "ExecStart=/usr/bin/node __PROJECT__/scripts/memory/brain.ts\n",
-    );
-    assert.ok(
-      fx.reports.some((r) => r.startsWith("kept iva-memory-doctor.service")),
-    );
-    assert.equal(
-      fx.calls.includes("disable --now iva-memory-doctor.timer"),
-      false,
-    );
-  });
-});
-
-test("the legacy brain pair stays while the new pair is not written", () => {
-  withFixture("", (fx) => {
-    seedLegacyBrain(fx);
-
-    cli(fx).writeUnits({ skipUnits: ["iva-brain.timer"] });
-
-    assert.ok(
-      fx.warnings.some((w) => w.includes("iva-brain.timer not installed yet")),
-    );
-    assert.ok(existsSync(join(fx.unitDir, "iva-memory-doctor.timer")));
-    assert.equal(fx.calls.includes("enable --now iva-brain.timer"), false);
-  });
-});
-
-test("a deferred brain retirement skips activation; a failed disable keeps the units and says why", () => {
-  withFixture("", (fx) => {
-    seedLegacyBrain(fx);
-    const systemd = cli(fx, {
-      failing: ["disable --now iva-memory-doctor.service"],
+      assert.deepEqual(unitBodies(fx), before);
+      assert.deepEqual(
+        fx.calls.filter((call) => call.includes("iva-memory-")),
+        [],
+      );
+      assert.deepEqual(fx.warnings, []);
     });
-    systemd.writeUnits({ deferBrainMigration: true });
-
-    const kept = systemd.retireDeferredBrainUnits();
-
-    assert.deepEqual(kept, [
-      "iva-memory-doctor.service",
-      "iva-memory-doctor.timer",
-    ]);
-    assert.equal(fx.calls.includes("enable --now iva-brain.timer"), false);
-    assert.ok(
-      fx.warnings.some(
-        (w) =>
-          w.includes("legacy brain-unit cleanup incomplete") &&
-          w.includes("disable --now iva-memory-doctor.service failed (exit 1)"),
-      ),
-      fx.warnings.join("\n"),
-    );
-  });
 });
 
-test("a legacy unit that cannot be rewritten is kept and the failed repoint is named", () => {
+test("restartServices rewrites units, runs the hook and restarts", () => {
   withFixture("", (fx) => {
-    seedLegacyBrain(fx);
-    chmodSync(join(fx.unitDir, "iva-memory-doctor.service"), 0o444);
-
-    cli(fx, { failing: ["enable --now iva-brain.timer"] }).writeUnits();
-
-    assert.ok(
-      fx.warnings.some((w) =>
-        w.startsWith(
-          "could not repoint iva-memory-doctor.service at scripts/memory/brain.ts",
-        ),
-      ),
-      fx.warnings.join("\n"),
-    );
-    assert.equal(unit(fx, "iva-memory-doctor.service"), LEGACY_BRAIN_BODY);
-    assert.ok(existsSync(join(fx.unitDir, "iva-memory-doctor.timer")));
-  });
-});
-
-test("an unreadable or already repointed legacy unit is left as it is", () => {
-  withFixture("", (fx) => {
-    mkdirSync(join(fx.unitDir, "iva-memory-doctor.service"), {
-      recursive: true,
-    });
-    writeFileSync(join(fx.unitDir, "iva-memory-doctor.timer"), "[Timer]\n");
-
-    cli(fx).writeUnits({ skipUnits: ["iva-brain.service"] });
-
-    assert.equal(unit(fx, "iva-memory-doctor.timer"), "[Timer]\n");
-    assert.deepEqual(
-      fx.reports.filter((r) => r.startsWith("kept")),
-      [],
-    );
-  });
-});
-
-// ── legacy memory units, restart, activate, remove ─────────────────────────
-
-test("restartServices rewrites units, runs the hook, restarts, and retires memory timers", () => {
-  withFixture("", (fx) => {
-    seedLegacyMemory(fx);
-    seedSchedules(fx);
     const order: string[] = [];
 
     cli(fx).restartServices({
@@ -619,138 +522,24 @@ test("restartServices rewrites units, runs the hook, restarts, and retires memor
     assert.deepEqual(order, ["hook:true"]);
     assert.ok(fx.calls.includes("restart iva.service"));
     assert.ok(fx.calls.includes("restart iva-telegram-poll.service"));
-    assert.equal(existsSync(join(fx.unitDir, "iva-memory-daily.timer")), false);
   });
 });
 
-test("restartServices reports a failed restart with its cause and keeps the memory timers", () => {
+test("restartServices reports a failed restart with its cause", () => {
   withFixture("", (fx) => {
-    seedLegacyMemory(fx);
-    seedSchedules(fx);
-
     assert.throws(
       () => cli(fx, { failing: ["restart iva.service"] }).restartServices(),
       /systemctl --user restart iva\.service failed \(exit 1\)/,
     );
-    assert.ok(existsSync(join(fx.unitDir, "iva-memory-daily.timer")));
   });
 });
 
-test("restartServices survives a memory timer that will not disable and names the cause", () => {
+test("restartServices fails when the first service is not active after the restart", () => {
   withFixture("", (fx) => {
-    seedLegacyMemory(fx);
-    seedSchedules(fx);
-
-    cli(fx, {
-      failing: ["disable --now iva-memory-daily.timer"],
-    }).restartServices();
-
-    assert.ok(fx.calls.includes("restart iva.service"));
-    assert.ok(
-      fx.warnings.some(
-        (w) =>
-          w.includes("legacy memory-timer cleanup incomplete") &&
-          w.includes("disable --now iva-memory-daily.timer failed (exit 1)"),
-      ),
-      fx.warnings.join("\n"),
-    );
-  });
-});
-
-test("restartServices with deferred memory migration keeps the memory timers", () => {
-  withFixture("", (fx) => {
-    seedLegacyMemory(fx);
-    seedSchedules(fx);
-
-    cli(fx).restartServices({ deferMemoryMigration: true });
-
-    assert.ok(existsSync(join(fx.unitDir, "iva-memory-daily.timer")));
-  });
-});
-
-test("memory timers stay when the build carries the markers only outside JS", () => {
-  withFixture("", (fx) => {
-    seedLegacyMemory(fx);
-    seedSchedules(fx, "txt");
-
-    assert.deepEqual(cli(fx).retireLegacyMemoryUnits(), []);
-    assert.ok(existsSync(join(fx.unitDir, "iva-memory-daily.timer")));
-    assert.ok(
-      fx.warnings.some((w) => w.includes("doesn't contain the eve schedules")),
-    );
-  });
-});
-
-test("unreadable build files are skipped, not fatal, while the markers are found elsewhere", () => {
-  withFixture("", (fx) => {
-    seedLegacyMemory(fx);
-    seedSchedules(fx);
-    const server = join(fx.project, ".output/server");
-    symlinkSync(join(server, "gone.mjs"), join(server, "a-dangling.mjs"));
-    writeFileSync(join(server, "b-locked.mjs"), "locked");
-    chmodSync(join(server, "b-locked.mjs"), 0o000);
-
-    cli(fx).retireLegacyMemoryUnits();
-
-    assert.equal(existsSync(join(fx.unitDir, "iva-memory-daily.timer")), false);
-  });
-});
-
-test("a build tree that cannot be listed keeps the memory timers", () => {
-  withFixture("", (fx) => {
-    seedLegacyMemory(fx);
-    seedSchedules(fx);
-    const locked = join(fx.project, ".output/server/locked");
-    mkdirSync(locked);
-    chmodSync(locked, 0o000);
-    try {
-      assert.deepEqual(cli(fx).retireLegacyMemoryUnits(), []);
-    } finally {
-      chmodSync(locked, 0o700);
-    }
-
-    assert.ok(existsSync(join(fx.unitDir, "iva-memory-daily.timer")));
-    assert.ok(
-      fx.warnings.some((w) => w.includes("doesn't contain the eve schedules")),
-    );
-  });
-});
-
-test("retiring memory timers needs a live owner and fails loudly on a broken cleanup", () => {
-  withFixture("", (fx) => {
-    seedLegacyMemory(fx);
-    seedSchedules(fx);
-
     assert.throws(
-      () => cli(fx, { inactive: ["iva.service"] }).retireLegacyMemoryUnits(),
-      /no active committed service owner/,
+      () => cli(fx, { inactive: ["iva.service"] }).restartServices(),
+      /iva\.service did not become active after restart/,
     );
-    assert.throws(
-      () => cli(fx, { failing: ["daemon-reload"] }).retireLegacyMemoryUnits(),
-      /daemon-reload: systemctl --user daemon-reload failed \(exit 1\)/,
-    );
-    assert.ok(
-      fx.warnings.some((w) =>
-        w.includes("legacy memory-timer cleanup incomplete"),
-      ),
-    );
-  });
-});
-
-test("without systemd no legacy unit is touched", () => {
-  withFixture("", (fx) => {
-    seedLegacyMemory(fx);
-    seedLegacyBrain(fx);
-    seedSchedules(fx);
-    const systemd = cli(fx, { hasSystemd: false });
-
-    systemd.writeUnits();
-
-    assert.deepEqual(systemd.retireLegacyMemoryUnits(), []);
-    assert.deepEqual(systemd.retireDeferredBrainUnits(), []);
-    assert.ok(existsSync(join(fx.unitDir, "iva-memory-daily.timer")));
-    assert.ok(existsSync(join(fx.unitDir, "iva-memory-doctor.timer")));
-    assert.deepEqual(fx.calls, []);
   });
 });
 

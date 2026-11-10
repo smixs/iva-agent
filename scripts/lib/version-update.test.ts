@@ -1366,29 +1366,22 @@ test("a live-health fault rolls back to the Version that served", async (t) => {
   assert.equal(store.settled(), first.version);
 });
 
-test("a live-health rollback does not retire recovery writers", async (t) => {
+test("a live-health rollback resumes the old writers once", async (t) => {
   const iva = world(t);
   const first = updated(await iva.update());
   writeFileSync(join(iva.repo, "agent/agent.ts"), "export const agent = 2;\n");
   iva.release("0.3.15");
-  let retirements = 0;
   let recoveries = 0;
 
   const outcome = await iva.update({
     serving: () => Promise.resolve({ ok: false, log: "nothing answered" }),
-    retireCommittedWriters: () => {
-      retirements += 1;
-      return Promise.resolve();
-    },
     resumeOldWriters: () => {
       recoveries += 1;
-      assert.equal(retirements, 0);
       return Promise.resolve();
     },
   });
 
   assert.equal(outcome.status, "unhealthy");
-  assert.equal(retirements, 0);
   assert.equal(recoveries, 1);
   const store = createVersionStore(iva.home);
   assert.equal(store.currentName(), first.version);
@@ -1708,7 +1701,7 @@ test("a healthy service stays committed when post-health cleanup fails", async (
   );
 });
 
-test("writer retirement runs only after live health and service commit", async (t) => {
+test("adoption runs only after live health and service commit", async (t) => {
   const iva = world(t);
   const calls: string[] = [];
   const expected = `0.3.14-${iva.target.sha.slice(0, 12)}`;
@@ -1719,20 +1712,17 @@ test("writer retirement runs only after live health and service commit", async (
         calls.push("live-health");
         return Promise.resolve({ ok: true, log: "" });
       },
-      retireCommittedWriters: (root) => {
+      adopt: () => {
         const store = createVersionStore(iva.home);
-        assert.equal(root, store.layout.current);
         assert.equal(store.currentName(), expected);
         assert.equal(store.settled(), expected);
-        calls.push("writer-retirement");
-        return Promise.resolve();
+        calls.push("adopt");
       },
-      adopt: () => calls.push("adopt"),
     }),
   );
 
   assert.equal(outcome.version, expected);
-  assert.deepEqual(calls, ["live-health", "writer-retirement", "adopt"]);
+  assert.deepEqual(calls, ["live-health", "adopt"]);
 });
 
 test("old versions go before the Google CLI errand", async (t) => {
@@ -1779,8 +1769,6 @@ test("a failing cleanup step does not skip version garbage collection", async (t
   const outcome = updated(
     await iva.update({
       probe: healthyProbe,
-      retireCommittedWriters: () =>
-        Promise.reject(new Error("writer retirement failed")),
       adopt: () => {
         throw new Error("adoption failed");
       },
@@ -1795,33 +1783,6 @@ test("a failing cleanup step does not skip version garbage collection", async (t
   assert.equal(store.list().length, 2);
   assert.equal(store.cleanupPending(next), true);
   assert.equal(store.settled(), next);
-});
-
-test("writer-retirement fault leaves cleanup debt without rolling back", async (t) => {
-  const iva = world(t);
-  let attempts = 0;
-  let fail = true;
-  const retireCommittedWriters = () => {
-    attempts += 1;
-    if (fail) return Promise.reject(new Error("retirement failed"));
-    return Promise.resolve();
-  };
-
-  const outcome = updated(await iva.update({ retireCommittedWriters }));
-  const store = createVersionStore(iva.home);
-  assert.equal(attempts, 1);
-  assert.equal(store.currentName(), outcome.version);
-  assert.equal(store.settled(), outcome.version);
-  assert.equal(store.cleanupPending(outcome.version), true);
-
-  fail = false;
-  assert.deepEqual(await iva.update({ retireCommittedWriters }), {
-    status: "current",
-    version: outcome.version,
-  });
-  assert.equal(attempts, 2);
-  assert.equal(store.cleanupPending(outcome.version), false);
-  assert.equal(iva.restarts.length, 1);
 });
 
 test("a crash after service commit leaves cleanup debt for the next run", async (t) => {

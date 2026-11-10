@@ -51,8 +51,6 @@ function lifecycle(): ReturnType<typeof createCliSystemd> {
     writeUnits: () => [],
     activateUnits: () => undefined,
     removeUnits: () => [],
-    retireDeferredBrainUnits: () => [],
-    retireLegacyMemoryUnits: () => [],
     migrateEnv: () => false,
     restartServices: () => undefined,
   };

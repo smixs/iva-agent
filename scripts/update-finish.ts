@@ -53,10 +53,6 @@ import {
   STATE_DIRS,
 } from "./lib/version-store.ts";
 import {
-  LEGACY_BRAIN_UNITS,
-  LEGACY_MEMORY_UNITS,
-} from "./lib/legacy-memory-units.ts";
-import {
   commandRunner,
   customOverlay,
   finishVersionUpdate,
@@ -210,8 +206,6 @@ export function captureOptionalWriterState(
       runtime.BRAIN_TIMER,
       runtime.BRAIN_SERVICE,
       runtime.SVC_USERBOT,
-      ...LEGACY_BRAIN_UNITS,
-      ...LEGACY_MEMORY_UNITS,
     ]),
   ].map((unit) => {
     const loadState = unitLoadState(runtime, unit);
@@ -321,67 +315,21 @@ function restoreUnitState(
   restoreOptionalWriterState(runtime, [state]);
 }
 
-/** Restore captured writer semantics after writeUnits retires legacy names. */
-export function restoreMigratedWriterState(
+/** Restore captured writer semantics onto the units writeUnits just rewrote. */
+function restoreMigratedWriterState(
   runtime: WriterRuntime,
   states: readonly OptionalWriterState[],
-  { legacyMemoryOwnerProven = false } = {},
 ): void {
   restoreOptionalWriterState(
     runtime,
     states.filter((state) => state.unit === runtime.SVC_USERBOT),
   );
-  const brainTimers = new Set([
-    runtime.BRAIN_TIMER,
-    ...LEGACY_BRAIN_UNITS.filter((unit) => unit.endsWith(".timer")),
-  ]);
-  const brainServices = new Set([
-    runtime.BRAIN_SERVICE,
-    ...LEGACY_BRAIN_UNITS.filter((unit) => unit.endsWith(".service")),
-  ]);
-  restoreUnitState(runtime, {
-    unit: runtime.BRAIN_TIMER,
-    loadState: "loaded",
-    ...mergedState(states, brainTimers),
-  });
-  restoreUnitState(runtime, {
-    unit: runtime.BRAIN_SERVICE,
-    loadState: "loaded",
-    ...mergedState(states, brainServices),
-  });
-
-  const legacyMemory = states.filter(
-    (state) =>
-      LEGACY_MEMORY_UNITS.includes(state.unit) && present(state.loadState),
-  );
-  const remaining = new Map(
-    legacyMemory.map((state) => [
-      state.unit,
-      present(unitLoadState(runtime, state.unit)),
-    ]),
-  );
-  restoreOptionalWriterState(
-    runtime,
-    legacyMemory.filter((state) => remaining.get(state.unit)),
-  );
-  const hadLegacyMemorySchedule = legacyMemory.some(
-    (state) => state.active || state.enabled,
-  );
-  const completeLegacySchedule = legacyMemory.every((state) => {
-    if (!state.active && !state.enabled) return true;
-    if (!remaining.get(state.unit)) return false;
-    if (!state.unit.endsWith(".timer")) return true;
-    return remaining.get(state.unit.replace(/\.timer$/u, ".service")) === true;
-  });
-  const owner = runtime.SERVICES[0];
-  if (hadLegacyMemorySchedule && !completeLegacySchedule) {
-    if (!legacyMemoryOwnerProven)
-      throw new Error(
-        "legacy memory schedule owner was not proven by writeUnits",
-      );
-    if (!owner || !unitActive(runtime, owner))
-      throw new Error("legacy memory schedule has no active service owner");
-  }
+  for (const unit of [runtime.BRAIN_TIMER, runtime.BRAIN_SERVICE])
+    restoreUnitState(runtime, {
+      unit,
+      loadState: "loaded",
+      ...mergedState(states, new Set([unit])),
+    });
 }
 
 export function restoreWriterOwnership(
@@ -389,7 +337,6 @@ export function restoreWriterOwnership(
   states: readonly OptionalWriterState[],
   phase: {
     readonly unitMigrationStarted: boolean;
-    readonly legacyMemoryOwnerProven: boolean;
     readonly userbotReady: boolean;
   },
 ): void {
@@ -403,9 +350,7 @@ export function restoreWriterOwnership(
     restoreOptionalWriterState(runtime, states);
     return;
   }
-  restoreMigratedWriterState(runtime, states, {
-    legacyMemoryOwnerProven: phase.legacyMemoryOwnerProven,
-  });
+  restoreMigratedWriterState(runtime, states);
 }
 
 /** Build leftovers of a checkout: not tracked, not state, never worth keeping. */
@@ -974,7 +919,7 @@ export async function startCandidateServices(
   runtime: CliRuntime,
   services: Pick<
     ReturnType<typeof createCliSystemd>,
-    "restartServices" | "retireDeferredBrainUnits" | "writeUnits"
+    "restartServices" | "writeUnits"
   >,
   {
     states,
@@ -1009,8 +954,6 @@ export async function startCandidateServices(
       ...(capturedUserbot?.loadState === "not-found"
         ? { skipUnits: [runtime.SVC_USERBOT] }
         : {}),
-      deferBrainMigration: true,
-      deferMemoryMigration: true,
     });
     runtime.systemd.activate([runtime.UPDATE_TIMER]);
     // The code of every plugin proxy is in the version this flip just made
@@ -1024,14 +967,11 @@ export async function startCandidateServices(
       if (recovery.status === "failed") userbotOff = recovery.reason;
     }
   } finally {
-    if (states) {
+    if (states)
       restoreWriterOwnership(runtime, states, {
         unitMigrationStarted: migration.started,
-        legacyMemoryOwnerProven: false,
         userbotReady,
       });
-      if (migration.started) services.retireDeferredBrainUnits();
-    }
   }
   await tellAboutUserbot(alertUserbot, userbotOff, notify);
 }
@@ -1162,7 +1102,6 @@ export async function main(argv: readonly string[]): Promise<number> {
           if (stateReady && optionalWriterState)
             restoreWriterOwnership(runtime, optionalWriterState, {
               unitMigrationStarted: migration.started,
-              legacyMemoryOwnerProven: false,
               userbotReady: true,
             });
         }
@@ -1186,14 +1125,6 @@ export async function main(argv: readonly string[]): Promise<number> {
             return Promise.resolve();
           },
         });
-      },
-      retireCommittedWriters: async (root) => {
-        const { createCliRuntime } = await import("./cli/runtime.ts");
-        const { createCliSystemd } = await import("./cli/systemd.ts");
-        const runtime = createCliRuntime(root);
-        const services = createCliSystemd(runtime);
-        services.retireLegacyMemoryUnits();
-        await Promise.resolve();
       },
       adopt: () => {
         writeShim(home, log, notify);

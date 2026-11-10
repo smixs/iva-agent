@@ -22,7 +22,6 @@ import {
   type PluginUnitScope,
   resolvedPluginUnitName,
 } from "../lib/plugin-units.ts";
-import { LEGACY_BRAIN_UNITS } from "../lib/legacy-memory-units.ts";
 import {
   classifyAgentListeners,
   classifyLsofListeners,
@@ -1004,14 +1003,8 @@ function enableTimer(ctx: DoctorContext, timer: string): boolean {
 
 // A oneshot service can be inactive and still healthy; its persistent failed state is the
 // signal that the last nightly run broke. Query each one only if it is installed here.
-// The legacy pre-rename service counts too: a migration that had to keep it (see
-// removeLegacyBrainUnits) leaves it carrying the nightly vault care, and a failure there
-// costs exactly the same night as a failure of the new one.
 function checkNightlyServices(ctx: DoctorContext): void {
-  const nightlyServices = [
-    ctx.brainService,
-    ...LEGACY_BRAIN_UNITS.filter((unit) => unit.endsWith(".service")),
-  ].filter((unit) =>
+  const nightlyServices = [ctx.brainService].filter((unit) =>
     existsSync(unitPath(unit, ctx.unitDir, ctx.systemd.manager)),
   );
   for (const service of nightlyServices) {

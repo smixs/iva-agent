@@ -38,8 +38,6 @@ function lifecycle(
     writeUnits: () => [],
     activateUnits: () => undefined,
     removeUnits: () => [],
-    retireDeferredBrainUnits: () => [],
-    retireLegacyMemoryUnits: () => [],
     migrateEnv: () => false,
     restartServices: () => undefined,
     ...overrides,

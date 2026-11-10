@@ -12,7 +12,6 @@ import {
   quarantineUpdateState,
   restoreUpdateState,
   restoreUpdateStateOrNotify,
-  restoreMigratedWriterState,
   restoreOptionalWriterState,
   restoreWriterOwnership,
   stopWriterUnits,
@@ -32,10 +31,6 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  LEGACY_BRAIN_UNITS,
-  LEGACY_MEMORY_UNITS,
-} from "./lib/legacy-memory-units.ts";
 import { noticeTranslator, userbotOffAlert } from "./lib/notice-policy.ts";
 import fc from "fast-check";
 import { mcpProxyUnitBody, pluginServiceUnitBody } from "./lib/plugin-units.ts";
@@ -488,7 +483,6 @@ test("a userbot stop fault restores its captured active and enabled state", () =
   );
   restoreWriterOwnership(fake.runtime, before, {
     unitMigrationStarted: true,
-    legacyMemoryOwnerProven: false,
     userbotReady: true,
   });
 
@@ -519,7 +513,6 @@ test("a disabled userbot stays disabled and stopped after unit migration", () =>
 
   restoreWriterOwnership(fake.runtime, before, {
     unitMigrationStarted: true,
-    legacyMemoryOwnerProven: false,
     userbotReady: true,
   });
 
@@ -551,7 +544,6 @@ test("a previously missing userbot is never started during restoration", () => {
 
   restoreWriterOwnership(fake.runtime, before, {
     unitMigrationStarted: true,
-    legacyMemoryOwnerProven: false,
     userbotReady: true,
   });
 
@@ -561,25 +553,6 @@ test("a previously missing userbot is never started during restoration", () => {
     ),
     false,
   );
-});
-
-test("an enabled legacy timer stays stopped through migration and returns inactive", () => {
-  const legacyTimer = [...LEGACY_BRAIN_UNITS, ...LEGACY_MEMORY_UNITS].find(
-    (unit) => unit.endsWith(".timer"),
-  );
-  assert.ok(legacyTimer);
-  const fake = fakeRuntime({ active: [], enabled: [legacyTimer] });
-  const before = captureOptionalWriterState(fake.runtime);
-  fake.events.length = 0;
-
-  stopWriterUnits(fake.runtime, before);
-  assert.equal(fake.activeUnits.has(legacyTimer), false);
-  restoreOptionalWriterState(fake.runtime, before);
-
-  assert.equal(fake.enabledUnits.has(legacyTimer), true);
-  assert.equal(fake.activeUnits.has(legacyTimer), false);
-  assert.ok(fake.events[0]?.includes(legacyTimer));
-  assert.equal(fake.events.includes(`start ${legacyTimer}`), false);
 });
 
 test("Brain units regain their exact enabled and active state", () => {
@@ -644,179 +617,39 @@ test("a partial quiesce fault can restore the captured optional state", () => {
   assert.equal(fake.enabledUnits.has("iva-brain.service"), false);
 });
 
-test("legacy Brain state moves to the current semantic owner", () => {
-  const legacyTimer = LEGACY_BRAIN_UNITS.find((unit) =>
-    unit.endsWith(".timer"),
-  );
-  const legacyService = LEGACY_BRAIN_UNITS.find((unit) =>
-    unit.endsWith(".service"),
-  );
-  assert.ok(legacyTimer);
-  assert.ok(legacyService);
-  const fake = fakeRuntime({
-    active: [legacyService],
-    enabled: [legacyTimer],
-    presentUnits: ["iva-brain.timer", "iva-brain.service"],
-  });
-  const before = captureOptionalWriterState(fake.runtime);
-  stopWriterUnits(fake.runtime, before);
-  fake.enabledUnits.delete(legacyTimer);
-  fake.events.length = 0;
+// UpdateFloor.NoSilentLoss: units of a release below the floor are not this updater's to
+// stop, start, enable or remove. They stay exactly as the installation left them.
+test("NoSilentLoss: units of a release below the floor are neither read nor touched", () => {
+  const old = [
+    "iva-memory-doctor.timer",
+    "iva-memory-doctor.service",
+    "iva-memory-daily.timer",
+    "iva-memory-daily.service",
+  ];
+  const timers = old.filter((unit) => unit.endsWith(".timer"));
+  for (const unitMigrationStarted of [false, true]) {
+    const fake = fakeRuntime({
+      active: timers,
+      enabled: timers,
+      presentUnits: [...old, "iva-brain.timer", "iva-brain.service"],
+    });
+    const before = captureOptionalWriterState(fake.runtime);
+    stopWriterUnits(fake.runtime, before);
+    restoreWriterOwnership(fake.runtime, before, {
+      unitMigrationStarted,
+      userbotReady: true,
+    });
 
-  restoreMigratedWriterState(fake.runtime, before);
-
-  assert.equal(fake.enabledUnits.has("iva-brain.timer"), true);
-  assert.equal(fake.activeUnits.has("iva-brain.timer"), false);
-  assert.equal(fake.activeUnits.has("iva-brain.service"), true);
-  assert.equal(fake.enabledUnits.has("iva-brain.service"), false);
-  assert.equal(
-    fake.events.some((event) => event.includes(legacyTimer)),
-    false,
-  );
-  assert.equal(
-    fake.events.some((event) => event.includes(legacyService)),
-    false,
-  );
-});
-
-test("a migrated legacy memory timer keeps an active live service owner", () => {
-  const legacyTimer = LEGACY_MEMORY_UNITS.find((unit) =>
-    unit.endsWith(".timer"),
-  );
-  assert.ok(legacyTimer);
-  const fake = fakeRuntime({
-    active: ["iva.service"],
-    enabled: [legacyTimer],
-    presentUnits: [
-      legacyTimer.replace(/\.timer$/u, ".service"),
-      "iva-brain.timer",
-      "iva-brain.service",
-    ],
-  });
-  const before = captureOptionalWriterState(fake.runtime);
-  stopWriterUnits(fake.runtime, before);
-  fake.enabledUnits.delete(legacyTimer);
-  fake.knownUnits.delete(legacyTimer);
-  fake.knownUnits.delete(legacyTimer.replace(/\.timer$/u, ".service"));
-  fake.activeUnits.add("iva.service");
-  fake.events.length = 0;
-
-  restoreMigratedWriterState(fake.runtime, before, {
-    legacyMemoryOwnerProven: true,
-  });
-
-  assert.equal(fake.activeUnits.has("iva.service"), true);
-  assert.equal(fake.events.includes(`enable ${legacyTimer}`), false);
-  assert.equal(fake.events.includes(`start ${legacyTimer}`), false);
-  assert.equal(
-    fake.events.some((event) => event.startsWith(`stop ${legacyTimer}`)),
-    false,
-  );
-});
-
-test("a legacy memory timer retained by writeUnits regains its exact state", () => {
-  const legacyTimer = LEGACY_MEMORY_UNITS.find((unit) =>
-    unit.endsWith(".timer"),
-  );
-  assert.ok(legacyTimer);
-  const fake = fakeRuntime({
-    active: [],
-    enabled: [legacyTimer],
-    presentUnits: [
-      legacyTimer.replace(/\.timer$/u, ".service"),
-      "iva-brain.timer",
-      "iva-brain.service",
-    ],
-  });
-  const before = captureOptionalWriterState(fake.runtime);
-  stopWriterUnits(fake.runtime, before);
-  fake.enabledUnits.delete(legacyTimer);
-  fake.events.length = 0;
-
-  restoreMigratedWriterState(fake.runtime, before);
-
-  assert.equal(fake.enabledUnits.has(legacyTimer), true);
-  assert.equal(fake.activeUnits.has(legacyTimer), false);
-  assert.ok(fake.events.includes(`enable ${legacyTimer}`));
-  assert.equal(fake.activeUnits.has("iva.service"), false);
-});
-
-test("a migrated legacy memory schedule fails without its live owner", () => {
-  const legacyTimer = LEGACY_MEMORY_UNITS.find((unit) =>
-    unit.endsWith(".timer"),
-  );
-  assert.ok(legacyTimer);
-  const fake = fakeRuntime({
-    active: [],
-    enabled: [legacyTimer],
-    presentUnits: [
-      legacyTimer.replace(/\.timer$/u, ".service"),
-      "iva-brain.timer",
-      "iva-brain.service",
-    ],
-  });
-  const before = captureOptionalWriterState(fake.runtime);
-  stopWriterUnits(fake.runtime, before);
-  fake.enabledUnits.delete(legacyTimer);
-  fake.knownUnits.delete(legacyTimer);
-  fake.knownUnits.delete(legacyTimer.replace(/\.timer$/u, ".service"));
-
-  assert.throws(
-    () =>
-      restoreMigratedWriterState(fake.runtime, before, {
-        legacyMemoryOwnerProven: true,
-      }),
-    /no active service owner/u,
-  );
-});
-
-test("an active service alone does not prove a migrated memory owner", () => {
-  const legacyTimer = LEGACY_MEMORY_UNITS.find((unit) =>
-    unit.endsWith(".timer"),
-  );
-  assert.ok(legacyTimer);
-  const legacyService = legacyTimer.replace(/\.timer$/u, ".service");
-  const fake = fakeRuntime({
-    active: ["iva.service"],
-    enabled: [legacyTimer],
-    presentUnits: [legacyService, "iva-brain.timer", "iva-brain.service"],
-  });
-  const before = captureOptionalWriterState(fake.runtime);
-  stopWriterUnits(fake.runtime, before);
-  fake.enabledUnits.delete(legacyTimer);
-  fake.knownUnits.delete(legacyTimer);
-  fake.knownUnits.delete(legacyService);
-  fake.activeUnits.add("iva.service");
-
-  assert.throws(
-    () => restoreMigratedWriterState(fake.runtime, before),
-    /owner was not proven by writeUnits/u,
-  );
-});
-
-test("a unit-write fault restores the captured legacy Brain owner", () => {
-  const legacyTimer = LEGACY_BRAIN_UNITS.find((unit) =>
-    unit.endsWith(".timer"),
-  );
-  assert.ok(legacyTimer);
-  const fake = fakeRuntime({
-    active: [legacyTimer],
-    enabled: [legacyTimer],
-    unavailable: ["iva-brain.timer"],
-  });
-  const before = captureOptionalWriterState(fake.runtime);
-  stopWriterUnits(fake.runtime, before);
-
-  restoreWriterOwnership(fake.runtime, before, {
-    unitMigrationStarted: false,
-    legacyMemoryOwnerProven: false,
-    userbotReady: true,
-  });
-
-  assert.equal(fake.activeUnits.has(legacyTimer), true);
-  assert.equal(fake.enabledUnits.has(legacyTimer), true);
-  assert.equal(fake.activeUnits.has("iva-brain.timer"), false);
-  assert.equal(fake.enabledUnits.has("iva-brain.timer"), false);
+    assert.deepEqual(
+      fake.events.filter((event) => old.some((unit) => event.includes(unit))),
+      [],
+    );
+    for (const unit of old) assert.equal(fake.knownUnits.has(unit), true);
+    for (const unit of timers) {
+      assert.equal(fake.activeUnits.has(unit), true);
+      assert.equal(fake.enabledUnits.has(unit), true);
+    }
+  }
 });
 
 // ── Alert о выключенном плагине (ADR-0007 + ADR-0009) ────────────────────────────────────
