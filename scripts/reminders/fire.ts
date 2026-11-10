@@ -10,9 +10,18 @@ import { stepLimitNotice } from "#lib/model-response.ts";
 // (delivered/error) дописывается в ту же строку; если процесс упал, не сказав факта, тик
 // запишет delivered=false с причиной по коду выхода.
 //
+// Вызов `fire.ts <id> abandoned` хода не ведёт: тик закрыл срабатывание, оставшееся без исхода
+// (агент упал между взятием строки и фактом), и ребёнок шлёт владельцу Alert с причиной. Строка
+// перечитывается перед каждой попыткой транспорта, повтором после паузы тоже: опоздавший факт
+// доставки Alert снимает. Факт «Alert
+// отправлен» пишет дроссель Alert (alertOnce): тик зовёт ребёнка, пока факта нет. Текст
+// напоминания заново не отправляется: успел ли его отправить умерший ребёнок, таблица не знает
+// (specs/ReminderLifecycle.tla, OneAttemptPerCapture, NoFalseAlert, AbandonedAlerted).
+//
 // Живёт в scripts/, а не в agent/: выталкивание наружу идёт через Telegram и клиента eve
 // (scripts/authored-tree-guard.test.ts: agent/ не импортирует scripts/).
-// Коды выхода: 0 — срабатывание отработало; 2 — вызов без id или неизвестный id.
+// Коды выхода: 0 — срабатывание отработало, Alert ушёл или уже не нужен; 1 — Alert не ушёл;
+// 2 — вызов без id, с чужим режимом или неизвестный id.
 import { isEntrypoint } from "../lib/version-layout.ts";
 import { notificationChat } from "../../packages/notification-chat/index.ts";
 import {
@@ -28,12 +37,17 @@ import {
   takeOverTelegramChat,
 } from "#lib/telegram-turn-start.ts";
 import {
+  abandonedAlertKey,
   list,
+  owesAlert,
   recordDelivery,
   recordTurnSession,
   type Reminder,
   type ReminderChat,
 } from "#lib/reminder-store.ts";
+import { dataDir } from "#lib/data-dir.ts";
+import { alertOnce } from "../lib/notice-policy.ts";
+import { alertDue } from "../../packages/alert-state/index.ts";
 import { resolveTimeZone } from "../../packages/timezone/index.ts";
 import { formatZoned } from "#lib/zoned-time.ts";
 import { noticeTranslator } from "../lib/notice-policy.ts";
@@ -46,7 +60,9 @@ import {
 } from "../lib/reminder-turn.ts";
 import { sendTelegramHtml } from "../lib/telegram-send.ts";
 
-const USAGE = "usage: fire.ts <reminder id>";
+const USAGE = "usage: fire.ts <reminder id> [abandoned]";
+/** Сколько текста строки называет Alert: по нему владелец узнаёт напоминание. */
+const ALERT_EXCERPT = 200;
 
 export type ReminderFireDependencies = {
   readonly env?: NodeJS.ProcessEnv;
@@ -410,6 +426,78 @@ async function fireRow(row: Reminder, deps: Wiring): Promise<void> {
   await recordFact(row, sent, reason(outcome, sent), deps);
 }
 
+/**
+ * Alert о брошенном срабатывании: напоминание названо отрывком и сроком, причина и действие —
+ * словами. В таблицу ребёнок не пишет: причину в строку уже записал тик. Строка читается после
+ * всех приготовлений, прямо перед отправкой.
+ */
+async function alertAbandoned(id: string, deps: Wiring): Promise<number> {
+  const tr = await deps.translator(deps.env);
+  const row = await loadRow(id, deps);
+  if (typeof row === "number") return row;
+  if (!owesAlert(row)) {
+    deps.log(`reminders: ${row.id} has an outcome now, no alert`);
+    return 0;
+  }
+  const routed = route(row, deps);
+  if (!("target" in routed)) {
+    deps.log(
+      `reminders: ${row.id} abandoned, alert not sent: ${routed.reason}`,
+    );
+    return 1;
+  }
+  const flat = row.text.replace(/\s+/gu, " ").trim();
+  const excerpt =
+    flat.length > ALERT_EXCERPT ? `${flat.slice(0, ALERT_EXCERPT)}…` : flat;
+  const due = formatZoned(
+    row.firedAt ?? row.nextRunAtMs,
+    resolveTimeZone(deps.env.ASSISTANT_TIMEZONE),
+  );
+  const { target } = routed;
+  const { key, essence } = abandonedAlertKey(row, false);
+  // Перед каждой попыткой: факт, который лёг, пока транспорт ждал повтора, или Alert, который
+  // записал другой ребёнок, снимают эту отправку (NoFalseAlert).
+  let withdrawn = false;
+  const stillOwed = async (): Promise<boolean> => {
+    const now = await loadRow(id, deps);
+    if (typeof now === "number") return false;
+    withdrawn =
+      now.firedAt !== row.firedAt ||
+      !owesAlert(now) ||
+      !alertDue(dataDir(), key, essence);
+    return !withdrawn;
+  };
+  let refusal = "";
+  const outcome = await alertOnce(dataDir(), key, essence, async () => {
+    const result = await deps.send(
+      target.token,
+      target.chat,
+      tr(
+        `The reminder "${excerpt}" due ${due} may not have reached you: its firing was cut short, most likely by an Iva restart. If it is not above in this chat, it did not arrive.`,
+        `Напоминание «${excerpt}» на ${due} могло не дойти: срабатывание оборвалось, вероятно, при перезапуске Ивы. Если его нет выше в этом чате, оно не пришло.`,
+      ),
+      {
+        retryTransient: true,
+        threadId: target.threadId ?? undefined,
+        trace: { source: "reminder" },
+        beforeAttempt: stillOwed,
+      },
+    );
+    refusal = result.error;
+    return result.ok;
+  });
+  if (withdrawn) {
+    deps.log(`reminders: ${row.id} has an outcome now, no alert`);
+    return 0;
+  }
+  deps.log(
+    outcome === "failed"
+      ? `reminders: ${row.id} abandoned, alert not sent: ${refusal}`
+      : `reminders: ${row.id} abandoned, alert ${outcome}`,
+  );
+  return outcome === "failed" ? 1 : 0;
+}
+
 /** Строка срабатывания или код выхода: чужой id и нечитаемая таблица заканчивают ребёнка. */
 async function loadRow(id: string, deps: Wiring): Promise<Reminder | number> {
   let rows: readonly Reminder[];
@@ -432,12 +520,14 @@ async function loadRow(id: string, deps: Wiring): Promise<Reminder | number> {
 export async function runReminderFire(
   id: string,
   dependencies?: ReminderFireDependencies,
+  mode?: string,
 ): Promise<number> {
-  if (id.trim() === "") {
+  if (id.trim() === "" || (mode !== undefined && mode !== "abandoned")) {
     console.error(USAGE);
     return 2;
   }
   const deps: Wiring = { ...DEFAULTS, ...dependencies };
+  if (mode === "abandoned") return alertAbandoned(id, deps);
   const row = await loadRow(id, deps);
   if (typeof row === "number") return row;
   await fireRow(row, deps);
@@ -445,4 +535,6 @@ export async function runReminderFire(
 }
 
 if (isEntrypoint(import.meta.url))
-  process.exit(await runReminderFire(process.argv[2] ?? ""));
+  process.exit(
+    await runReminderFire(process.argv[2] ?? "", undefined, process.argv[3]),
+  );

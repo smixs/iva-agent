@@ -7,6 +7,11 @@
 // же переходом получает следующий срок от croner и остаётся pending — факт последнего
 // срабатывания при ней.
 //
+// Срабатывание без исхода (агент упал между взятием и фактом) закрывает тик: closeAbandoned
+// пишет причину, когда срок жизни срабатывания истёк. До этого строку не берут заново и не
+// убирают, и после — тоже, пока владельцу должен Alert о нём (alertOwed): долг живёт только в
+// этой строке. Жизненный цикл строки и его инварианты — specs/ReminderLifecycle.tla.
+//
 // Файл, записанный более новой версией Ивы, читается как явная ошибка: читать его наугад
 // значит молча испортить данные следующей записью. Файл версии 1 (режимы verbatim/agent,
 // аренда, счётчики провалов) переводится построчно: срок и текст сохраняются, режим и все
@@ -25,6 +30,7 @@ import {
 import { nextCronRunMs } from "./reminder-time.ts";
 import { listChatStatuses, RUN_STALE_MS } from "./run-status.ts";
 import { isRecord, isSafeInteger } from "../../packages/guards/index.ts";
+import { alertDue } from "../../packages/alert-state/index.ts";
 
 export const REMINDER_SCHEMA_VERSION = 2;
 /** Сколько держим сработавшую разовую строку: столько владелец видит факт в remind list. */
@@ -35,6 +41,17 @@ export class ReminderStoreError extends Error {}
 export class ReminderNotFoundError extends ReminderStoreError {}
 
 export type ReminderStatus = "pending" | "fired";
+/**
+ * Фаза последнего срабатывания строки — один вывод для тика, `iva doctor` и инструментов
+ * (specs/ReminderLifecycle.tla). waiting — ещё не срабатывала; running — взята, ребёнок идёт;
+ * delivered — текст дошёл; failed — не дошёл, причина в `error`; abandoned — ребёнка нет и
+ * факта нет: текст мог уйти, а мог и нет.
+ */
+export type ReminderPhase =
+  "waiting" | "running" | "delivered" | "failed" | "abandoned";
+/** Причина, которую тик пишет брошенному срабатыванию. */
+export const REMINDER_ABANDONED =
+  "abandoned: the firing ended without an outcome";
 /** `at` — один точный срок; `cron` — повторяющееся расписание (cron-выражение пользователя). */
 export type ReminderSchedule =
   { kind: "at"; atMs: number } | { kind: "cron"; expr: string; tz: string };
@@ -95,6 +112,10 @@ const ROW_KEYS = [
   "timeout_minutes",
   "running_timeout_minutes",
 ] as const;
+
+/** Срабатывание без исхода: ни факта, ни причины. Такую строку не берут и не убирают. */
+const isOpen = (row: Reminder): boolean =>
+  row.firedAt !== null && row.delivered === null && row.error === null;
 
 function fail(file: string, message: string): never {
   throw new ReminderStoreError(`${file}: ${message}`);
@@ -598,6 +619,9 @@ export async function remove(
 /**
  * Срабатывание: pending-строки со сроком не позже nowMs переходят в fired и получают
  * firedAt — один атомарный переход под локом, поэтому два тика не могут взять одну строку.
+ * Строка, чьё прошлое срабатывание ещё без исхода, ждёт: её ребёнок идёт либо её закроет тик.
+ * Строка, которая должна Alert о брошенном срабатывании, тоже ждёт: новый срок затёр бы
+ * firedAt и причину, и Alert о прошлом сроке не ушёл бы никогда (AlertBeforeDrop).
  * Повторяющаяся строка тем же переходом пересчитывается на следующий срок и остаётся
  * pending: её факт срабатывания (firedAt) уже проставлен, а доставку допишет ребёнок.
  *
@@ -628,7 +652,8 @@ export async function fireDue(
         (row) =>
           row.status === "pending" &&
           row.nextRunAtMs <= nowMs &&
-          !scheduleRunning(row, nowMs, file === commandFile()),
+          !isOpen(row) &&
+          !alertOwed(row, file),
       )
       .sort(byDeadline)
       .slice(0, limit);
@@ -763,7 +788,11 @@ function recordLog(
   );
 }
 
-/** Уборка: сработавшие разовые строки живут сутки — столько владелец видит факт. */
+/**
+ * Уборка: сработавшие разовые строки живут сутки — столько владелец видит факт. Строку без
+ * исхода уборка не трогает: сначала её закрывает closeAbandoned. Строку, которая должна Alert,
+ * тоже: долг ушёл бы вместе с ней (AlertBeforeDrop).
+ */
 export async function sweepFired(
   nowMs: number,
   keepMs: number = REMINDER_FIRED_KEEP_MS,
@@ -776,13 +805,70 @@ export async function sweepFired(
         !(
           row.status === "fired" &&
           row.firedAt !== null &&
-          row.firedAt <= nowMs - keepMs
+          row.firedAt <= nowMs - keepMs &&
+          !isOpen(row) &&
+          !alertOwed(row, file)
         ),
     );
     const swept = rows.length - kept.length;
     if (swept > 0) await saveTable(file, kept);
     return swept;
   });
+}
+
+/**
+ * Брошенные срабатывания получают причину одним переходом под локом, как взятие строки:
+ * второй раз строку не закроют. Срабатывание, чей ребёнок ещё идёт в этом процессе агента
+ * (`running`), срок жизни не закрывает: ход без присмотра чата пульса не шлёт. Текст строки
+ * заново не отправляется: таблица не знает, успел ли его отправить умерший ребёнок.
+ */
+export async function closeAbandoned(
+  nowMs: number,
+  file = reminderFile(),
+  running: (row: Reminder) => boolean = () => false,
+): Promise<Reminder[]> {
+  return mutate(file, async () => {
+    const rows = await loadTable(file);
+    const abandoned = rows.filter(
+      (row) =>
+        isOpen(row) &&
+        !running(row) &&
+        reminderPhase(row, nowMs, file === commandFile()) === "abandoned",
+    );
+    if (abandoned.length === 0) return [];
+    for (const row of abandoned) row.error = REMINDER_ABANDONED;
+    await saveTable(file, rows);
+    return abandoned.map((row) => structuredClone(row));
+  });
+}
+
+/** Тик закрыл срабатывание причиной, опоздавшего факта нет: владельцу должен Alert. */
+export const owesAlert = (row: Reminder): boolean =>
+  row.firedAt !== null &&
+  row.delivered === null &&
+  row.error === REMINDER_ABANDONED;
+
+/**
+ * Запись дросселя Alert (packages/alert-state), которая хранит факт «Alert о брошенном
+ * срабатывании отправлен». У напоминания существо — само срабатывание; у команды ключ общий с
+ * её прочими Alert, и недельный дроссель команд остаётся прежним.
+ */
+export const abandonedAlertKey = (
+  row: Reminder,
+  command: boolean,
+): { readonly key: string; readonly essence: string } =>
+  command
+    ? { key: `schedule-${row.id}`, essence: "abandoned" }
+    : { key: `reminder-${row.id}`, essence: `abandoned ${row.firedAt}` };
+
+/**
+ * Долг Alert не погашен: строка закрыта причиной, опоздавшего факта нет, и дроссель Alert не
+ * хранит факта отправки. Такую строку не берут заново и не убирают.
+ */
+export function alertOwed(row: Reminder, file: string): boolean {
+  if (!owesAlert(row)) return false;
+  const { key, essence } = abandonedAlertKey(row, file === commandFile());
+  return alertDue(dataDir(), key, essence);
 }
 
 /** Commands use the same table engine in a file older releases never open. */
@@ -822,11 +908,18 @@ export const commandLog = (id: string): string =>
 export const COMMAND_TIMEOUT_MS = 120_000;
 export const commandTimeoutMs = (row: Reminder) =>
   (row.running_timeout_minutes ?? row.timeout_minutes ?? 2) * 60_000;
-export const scheduleRunning = (
+/**
+ * Срок жизни срабатывания без исхода: у команды — её срок, у хода — RUN_STALE_MS от последнего
+ * пульса записи чата (её ведёт ребёнок, пока ход шлёт события) либо от самого срабатывания.
+ */
+export function reminderPhase(
   row: Reminder,
   now = Date.now(),
   command = false,
-): boolean => {
+): ReminderPhase {
+  if (row.firedAt === null) return "waiting";
+  if (row.delivered !== null) return row.delivered ? "delivered" : "failed";
+  if (row.error !== null) return "abandoned";
   const pulse =
     !command &&
     row.sessionId &&
@@ -835,12 +928,8 @@ export const scheduleRunning = (
         status.sessionId === row.sessionId && status.status === "running",
     )?.status.updatedAt;
   const span = command ? commandTimeoutMs(row) + 10_000 : RUN_STALE_MS;
-  return (
-    row.firedAt !== null &&
-    row.delivered === null &&
-    now < (pulse || row.firedAt) + span
-  );
-};
+  return now < (pulse || row.firedAt) + span ? "running" : "abandoned";
+}
 
 export async function clearCommandAlert(id: string): Promise<void> {
   const file = join(dataDir(), "alert-state.json");

@@ -116,10 +116,9 @@ test("R3 run_now/move and recurring ticks preserve the in-flight command fact", 
   const visible = (await schedule.execute(
     { action: "list" },
     {} as ToolContext,
-  )) as { schedules: { id: string; last_status: string }[] };
+  )) as { schedules: { id: string; phase: string }[] };
   assert.equal(
-    visible.schedules.find((candidate) => candidate.id === "c-probe")
-      ?.last_status,
+    visible.schedules.find((candidate) => candidate.id === "c-probe")?.phase,
     "running",
   );
   assert.equal(

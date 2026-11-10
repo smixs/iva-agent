@@ -19,7 +19,7 @@ import {
   recordFact,
   type JobFact,
 } from "./job-facts.ts";
-import type { Reminder } from "./reminder-store.ts";
+import { REMINDER_ABANDONED, type Reminder } from "./reminder-store.ts";
 import { tempDir } from "../../scripts/fixtures/temp-dir.ts";
 
 const NOW = Date.UTC(2026, 8, 13, 12, 0, 0);
@@ -330,4 +330,24 @@ test("снятое расписание не попадает в открыты�
     readReminders: () => Promise.resolve([]),
   });
   assert.equal(openFailuresMarkdown(failures), "");
+});
+
+test("брошенное срабатывание, закрытое тиком, — открытый провал; опоздавший факт его снимает", () => {
+  const abandoned = reminder({ delivered: null, error: REMINDER_ABANDONED });
+  assert.deepEqual(
+    openReminderFailures([abandoned], NOW).map((failure) => failure.reason),
+    [REMINDER_ABANDONED],
+  );
+  assert.deepEqual(
+    openReminderFailures([{ ...abandoned, delivered: true }], NOW),
+    [],
+  );
+  // «Факт не записан» — текст мог уйти: провалом, как и прежде, не считается.
+  assert.deepEqual(
+    openReminderFailures(
+      [reminder({ delivered: null, error: "delivery fact not recorded" })],
+      NOW,
+    ),
+    [],
+  );
 });

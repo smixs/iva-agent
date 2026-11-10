@@ -148,7 +148,7 @@ for (const action of ["run_now", "move"] as const)
         .object({
           ok: z.literal(true),
           message: z.string(),
-          schedule: z.object({ last_status: z.literal("running") }),
+          schedule: z.object({ phase: z.literal("running") }),
         })
         .parse(result);
       assert.match(

@@ -8,6 +8,14 @@ import fc from "fast-check";
 const dir = mkdtempSync(join(tmpdir(), "iva-schedule-store-"));
 process.env.ASSISTANT_DATA_DIR = dir;
 const store = await import("./reminder-store.ts");
+const { recordAlert } = await import("../../packages/alert-state/index.ts");
+/** Ребёнок с Alert о брошенном срабатывании отработал: дроссель хранит факт отправки. */
+async function alerted(id: string): Promise<void> {
+  const row = (await store.list()).find((candidate) => candidate.id === id);
+  assert.ok(row);
+  const { key, essence } = store.abandonedAlertKey(row, false);
+  assert.equal(recordAlert(dir, key, essence), true);
+}
 after(() => rmSync(dir, { recursive: true, force: true }));
 beforeEach(() => {
   rmSync(dir, { recursive: true, force: true });
@@ -156,7 +164,14 @@ test("text claim expires at the existing run-status stale boundary", async () =>
   });
   await store.fireDue(now, 5);
   await store.reschedule("r-expire", { nowMs: now });
+  assert.deepEqual(await store.closeAbandoned(now + RUN_STALE_MS - 1), []);
   assert.deepEqual(await store.fireDue(now + RUN_STALE_MS - 1, 5), []);
+  // За границей срабатывание без исхода закрывает тик; до этого строку заново не берут.
+  assert.deepEqual(await store.fireDue(now + RUN_STALE_MS, 5), []);
+  assert.equal((await store.closeAbandoned(now + RUN_STALE_MS)).length, 1);
+  // Закрытую строку не берут, пока Alert о брошенном срабатывании не ушёл (AlertBeforeDrop).
+  assert.deepEqual(await store.fireDue(now + RUN_STALE_MS, 5), []);
+  await alerted("r-expire");
   assert.equal((await store.fireDue(now + RUN_STALE_MS, 5)).length, 1);
 });
 
@@ -177,8 +192,15 @@ test("a live text session pulse extends overlap protection beyond its initial st
   await store.reschedule("r-long", { nowMs: now });
   t.mock.timers.setTime(now + RUN_STALE_MS - 1);
   setChatStatus("123:", { status: "running", sessionId: "live-text" });
+  assert.deepEqual(await store.closeAbandoned(now + RUN_STALE_MS + 1), []);
   assert.deepEqual(await store.fireDue(now + RUN_STALE_MS + 1, 5), []);
   assert.equal((await store.list())[0].firedAt, now);
+  assert.equal(
+    (await store.closeAbandoned(now + 2 * RUN_STALE_MS - 1)).length,
+    1,
+  );
+  assert.deepEqual(await store.fireDue(now + 2 * RUN_STALE_MS - 1, 5), []);
+  await alerted("r-long");
   assert.equal((await store.fireDue(now + 2 * RUN_STALE_MS - 1, 5)).length, 1);
 });
 

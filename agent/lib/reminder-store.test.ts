@@ -178,6 +178,7 @@ test("повторяющаяся строка сама уезжает на сл�
 
   // Тот же срок второй раз не берётся: следующий тик пуст.
   assert.deepEqual(await fireDue(stored.nextRunAtMs - 1, 10), []);
+  await recordDelivery("cron", { firedAt: now, delivered: true, error: null });
   const nextFire = await fireDue(stored.nextRunAtMs, 10);
   assert.deepEqual(
     nextFire.map((r) => r.id),
@@ -369,11 +370,17 @@ test("результат старого срока не переписывает
 test("сработавшая разовая строка живёт сутки и убирается тиком", async () => {
   const now = Date.now();
   await seed([
-    row({ id: "old", status: "fired", firedAt: now - REMINDER_FIRED_KEEP_MS }),
+    row({
+      id: "old",
+      status: "fired",
+      firedAt: now - REMINDER_FIRED_KEEP_MS,
+      delivered: true,
+    }),
     row({
       id: "fresh",
       status: "fired",
       firedAt: now - REMINDER_FIRED_KEEP_MS + 1,
+      delivered: true,
     }),
     row({ id: "cron", nextRunAtMs: now + 1000 }),
   ]);

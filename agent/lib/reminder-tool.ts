@@ -1,6 +1,11 @@
 // Общее для действий тула напоминаний: строка напоминания для модели и признак того, что
 // диспетчер жив. Читает таблицу и пульс тика, ничего не решает сам.
-import type { Reminder, ReminderChat } from "./reminder-store.ts";
+import {
+  reminderPhase,
+  type Reminder,
+  type ReminderChat,
+  type ReminderPhase,
+} from "./reminder-store.ts";
 import { readTickPulse, REMINDER_TICK_STALE_MS } from "./reminder-tick.ts";
 import { formatZoned } from "./zoned-time.ts";
 
@@ -11,6 +16,8 @@ export interface ReminderView {
   readonly cron?: string;
   readonly next_run_at: string;
   readonly timezone: string;
+  /** Фаза последнего срабатывания словом; следующий срок — в next_run_at. */
+  readonly phase: ReminderPhase;
   /** Когда сработало в последний раз; null — ещё не срабатывало. */
   readonly fired_at: string | null;
   /** Дошёл ли текст до чата: true/false, null — факта ещё нет. */
@@ -43,7 +50,11 @@ export function chatOfTurn(ctx: {
   };
 }
 
-export function describeReminder(row: Reminder, tz: string): ReminderView {
+export function describeReminder(
+  row: Reminder,
+  tz: string,
+  command = false,
+): ReminderView {
   return {
     id: row.id,
     text: row.text,
@@ -51,6 +62,7 @@ export function describeReminder(row: Reminder, tz: string): ReminderView {
     ...(row.schedule.kind === "cron" ? { cron: row.schedule.expr } : {}),
     next_run_at: formatZoned(row.nextRunAtMs, tz),
     timezone: tz,
+    phase: reminderPhase(row, Date.now(), command),
     fired_at: row.firedAt === null ? null : formatZoned(row.firedAt, tz),
     delivered: row.delivered,
     error: row.error,

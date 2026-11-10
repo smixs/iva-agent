@@ -164,6 +164,7 @@ test("the authored tree has only its explicit shared-package edges", () => {
       "agent/lib/plugin-reader.ts -> ../../packages/guards/index.ts",
       "agent/lib/plugin-store.ts -> ../../packages/guards/index.ts",
       "agent/lib/reminder-store.ts -> ../../packages/guards/index.ts",
+      "agent/lib/reminder-tick.ts -> ../../packages/alert-state/index.ts",
       "agent/lib/reminder-time.ts -> ../../packages/timezone/index.ts",
       "agent/lib/security-gate.ts -> ../../packages/secret-redaction/index.ts",
       "agent/lib/telegram-acceptance.ts -> ../../packages/guards/index.ts",
