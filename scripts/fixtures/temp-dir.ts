@@ -8,8 +8,16 @@ import { join } from "node:path";
 
 const dirs: string[] = [];
 
+// Отказ удаления одного каталога (недоступный потомок) называется и не прерывает уборку
+// остальных.
 process.on("exit", () => {
-  for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
+  for (const dir of dirs) {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch (error) {
+      console.error(`tempDir: ${dir} is left behind: ${String(error)}`);
+    }
+  }
 });
 
 export function tempDir(prefix: string): string {
