@@ -198,9 +198,14 @@ Iva carries eve 0.51.1 sources from vercel/eve in `eve/`, with our changes under
 ## What's New
 
 <details>
-<summary><b>v0.5.10 · 10.11.2026 — expand the latest releases</b></summary>
+<summary><b>v0.5.11 · 10.11.2026 — expand the latest releases</b></summary>
 
 ### 10.11.2026
+
+#### v0.5.11
+
+- 📊 **Lighter, more exact widgets**: Iva starts from Telegram's native unstyled card: a heading, a list, a table and buttons look like ordinary messages and weigh under a kilobyte. New patterns: a helper's steps with marks, rings, sparklines and receipts; a card fills the bubble to the edge, and a log grows upward.
+- 🔧 **Widgets go through the main Bot API address**: Bot API 10.4 is out, and Iva no longer uses the beta address.
 
 #### v0.5.10
 

@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [0.5.11] - 2026-11-10
+
+- 📊 **Виджеты легче и точнее**: Ива начинает с родной карточки Telegram без стилей: заголовок, список, таблица и кнопки выглядят как обычные сообщения и весят меньше килобайта. Появились шаги работы помощника с отметками, кольца, графики-искры и чеки; карточка занимает пузырь до края, а журнал растёт вверх. The widgets skill starts from native unstyled cards and adds steppers, rings, sparklines, receipts, the resize anchor and the profile's full list of unsupported features and limits.
+- 🔧 **Виджеты уходят через основной адрес Bot API**: Bot API 10.4 вышел, бета-адрес Ива больше не использует. `sendWidget` goes to `api.telegram.org`; the beta address is gone.
+
 ## [0.5.10] - 2026-11-10
 
 - 🧠 **Fable 5.2 на экране модели Claude**: первая кнопка в `/model` → Claude и в мастере установки теперь Fable 5.2, она же модель Claude по умолчанию, и `CLAUDE_MODEL=fable` означает её. Нужен Claude Code CLI 2.1.290 или новее; Fable 5.1 остаётся доступной строкой `CLAUDE_MODEL=claude-fable-5-1` в `.env`. Fable 5.2 takes the place of Fable 5.1 on the Claude model screen and as the default Claude model; it needs Claude Code CLI 2.1.290 or newer, and Fable 5.1 stays available through `.env`.

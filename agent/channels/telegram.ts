@@ -31,7 +31,7 @@ import {
   TELEGRAM_RICH_REPLIES,
   type RichReplies,
 } from "../lib/telegram-rich-replies.js";
-import { TELEGRAM_WIDGETS, WIDGET_API_BASE } from "../lib/telegram-widget.ts";
+import { TELEGRAM_WIDGETS } from "../lib/telegram-widget.ts";
 // Inbound-пайплайн — единственный вход внутрь: allowlist, решение о диспатче,
 // запись в Vault, медиа со зрением и транскрипцией, inbound-Gate и контекст хода.
 // Канал приносит ему эффекты и сам про разбор входящего ничего не знает.
@@ -217,8 +217,8 @@ export function outboxTransport(
   return transport;
 }
 
-// sendWidget (Bot API 10.4) живёт пока только в beta Bot API, а request() eve ходит в
-// общий адрес, поэтому вызов свой, как у send_file. Отказ — подпись текстом (шов Outbox).
+// sendWidget (Bot API 10.4) идёт своим вызовом, как send_file. Отказ — подпись текстом
+// (шов Outbox).
 async function sendWidget(
   token: string,
   tg: Pick<TelegramHandle, "chatId" | "messageThreadId">,
@@ -227,7 +227,7 @@ async function sendWidget(
   silent: boolean,
 ): Promise<OutboxAck> {
   try {
-    const res = await fetch(`${WIDGET_API_BASE}/bot${token}/sendWidget`, {
+    const res = await fetch(`https://api.telegram.org/bot${token}/sendWidget`, {
       method: "POST",
       signal: AbortSignal.timeout(30_000),
       headers: { "Content-Type": "application/json" },
