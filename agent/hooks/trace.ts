@@ -11,6 +11,8 @@ import {
 } from "../lib/trace.js";
 import { parentTurnId, subagentTurnId } from "../lib/usage.js";
 import { isRecord } from "../../packages/guards/index.ts";
+import { REDACTED } from "../../packages/secret-redaction/index.ts";
+import { SECRET_ARGUMENTS as USERBOT_SECRET_ARGUMENTS } from "../connections/telegram-userbot.ts";
 
 // Журнал хода, часть eve: ОДИН хук на подстановочное событие `*` пишет каждый шаг модели,
 // каждый вызов тула и каждый терминальный исход в data/trace/YYYY-MM-DD.jsonl (ADR-0010).
@@ -58,6 +60,21 @@ const CONTENT_FIELDS = [
   "input",
   "details",
 ] as const;
+
+// Аргументы, которые инструмент сам назвал секретом рядом со своим описанием. Вызов
+// пишется с меткой на месте значения при любом тумблере: имя аргумента и факт вызова
+// остаются, значение на диск не идёт.
+const SECRET_ARGUMENTS: ReadonlySet<string> = new Set(USERBOT_SECRET_ARGUMENTS);
+
+function withoutSecrets(input: unknown): unknown {
+  if (!isRecord(input)) return input;
+  return Object.fromEntries(
+    Object.entries(input).map(([key, value]) => [
+      key,
+      SECRET_ARGUMENTS.has(key) ? REDACTED : value,
+    ]),
+  );
+}
 
 type StreamEvent = { readonly type: string; readonly data?: unknown };
 type ReplayContext = {
@@ -462,7 +479,7 @@ function project(data: Record<string, unknown>): {
     // может значить «сводка» при выключенном тумблере и «всё целиком» при включённом.
     out.actions = data.actions.map(actionSummary);
     content.args = data.actions.map((action: unknown) =>
-      isRecord(action) ? action.input : action,
+      isRecord(action) ? withoutSecrets(action.input) : action,
     );
   }
   if (Array.isArray(data.parts)) out.parts = data.parts.length;

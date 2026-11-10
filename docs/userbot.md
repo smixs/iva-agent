@@ -34,13 +34,21 @@ for you, in chat:
 2. It renders a QR and sends it as an image into your chat. Scan it in the Telegram app of the
    account you're connecting: **Settings → Devices → Link Desktop Device**.
 3. If you have 2FA, it asks for your password (change it afterward if you'd rather it not pass
-   through chat). Done — the session persists on the server, so this is one-time.
+   through chat). A mistyped password is asked for again — no new QR; if Telegram names a wait
+   after several attempts, the agent tells you how long. Done — the session persists on the
+   server, so this is one-time. If the proxy restarts in the middle of the login, the agent
+   says so and starts it again from the QR.
 
 > [!WARNING]
 > Whatever you type in the chat is stored verbatim in that day's `daily/` log, `api_hash` and
 > 2FA password included, and it passes through the model like any other message. After
 > connecting, delete those lines from the daily file — and if you sent a 2FA password, change
 > it. There is no separate secure channel for this yet.
+>
+> Iva itself writes the password nowhere else: the call that passes it to the proxy goes to
+> Trace with `<redacted>` in its place, and the proxy repeats it neither in a reply nor in
+> the service journal. eve's session history (`.eve/.workflow-data`) keeps that call beside
+> your message, as it keeps the whole conversation.
 
 ## Manual commands (optional — the agent runs these for you)
 
@@ -55,8 +63,11 @@ iva userbot off      # stop and disable the proxy
 The health state is one of `off`, `starting`, `unreachable`, `unauthorized` or
 `ready`. CLI and Telegram use the same 1.5-second probe. It checks the existing
 proxy's `/healthz` route, which reads authorization from the default account's live
-Telethon client and never opens another session. Diagnostics expose only fixed
-state/reason values; bearer tokens and transport errors are not returned. CLI status and diagnostics also check that the version's Python interpreter can import the proxy dependencies; this import check never opens a Telegram session.
+Telethon client and never opens another session. While the state is `unauthorized`, the
+proxy also names the login phase — `idle`, `starting`, `waiting`, `password_needed`,
+`expired`, `error` or `interrupted` (`ready` goes with `authorized`); `iva userbot status`
+prints it and `/menu` → Userbot says what to do next. Diagnostics expose only fixed
+state/reason/login values; bearer tokens and transport errors are not returned. CLI status and diagnostics also check that the version's Python interpreter can import the proxy dependencies; this import check never opens a Telegram session.
 
 Updates prepare a previously running userbot before bringing it back; `iva restart` does so only when the running proxy does not answer, because re-syncing a ready venv needs the network. Preparation uses the same executable `uv` to create the version's venv and sync `requirements.lock` with hashes. A non-login PATH is supported through the installer's standard `~/.local/bin/uv` location. The proxy is stopped before dependencies change, imports are checked, and the existing authenticated health route must answer within a minute (the proxy connects to Telegram before it listens). `unauthorized` means the proxy is available for QR login, not that Telegram is logged in.
 

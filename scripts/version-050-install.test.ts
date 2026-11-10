@@ -178,7 +178,8 @@ for (const version of ["0.5.0", "0.5.0-beta.1", "0.5.1"]) {
           root: dir,
           envPath: join(home, ".env"),
           dataDir: join(home, "data"),
-          probeUserbotHealth: () => Promise.resolve({ state: "off" }),
+          probeUserbotHealth: () =>
+            Promise.resolve({ state: "off", reason: "service_off" }),
         },
         flows: { get: () => null, screen: () => Promise.resolve() },
         getLang: () => "en",

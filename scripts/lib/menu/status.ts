@@ -11,13 +11,16 @@ import { catalogProvider } from "../model-catalog.ts";
 import { modelSummary, compactNumber } from "../model-summary.ts";
 import { SEARCH_CATALOG } from "../search-catalog.ts";
 import { readEntries, summarize } from "../usage.ts";
-import { probeUserbotHealth } from "../userbot-health.ts";
+import {
+  probeUserbotHealth,
+  userbotStateLabel,
+  type UserbotHealth,
+} from "../userbot-health.ts";
 import { button, escapeRichText } from "../telegram-buttons.ts";
 
 type Env = Record<string, string | undefined>;
 type VersionPackage = { version?: unknown };
 type StatusState = { chatId: unknown; userId: unknown; screen: string };
-type Health = { state?: string };
 type MenuContext = {
   deps: {
     root: string;
@@ -26,7 +29,7 @@ type MenuContext = {
     probeUserbotHealth?: (options: {
       root: string;
       port: string;
-    }) => Promise<Health>;
+    }) => Promise<UserbotHealth>;
   };
   flows: {
     get: (chatId: unknown, userId: unknown) => StatusState | null;
@@ -108,21 +111,11 @@ function fastFields(env: Env, ctx: MenuContext) {
 
 function buildView(
   d: ReturnType<typeof fastFields>,
-  health: Health | null,
+  health: UserbotHealth | null,
   ctx: MenuContext,
 ) {
   const T = ctx.tr;
-  const labels = {
-    off: T("off", "выкл"),
-    starting: T("starting", "запускается"),
-    unreachable: T("unreachable", "недоступен"),
-    unauthorized: T("login required", "нужен вход"),
-    ready: T("ready", "готов"),
-  };
-  const ub =
-    health === null
-      ? "…"
-      : labels[health.state as keyof typeof labels] || labels.unreachable;
+  const ub = health === null ? "…" : userbotStateLabel(T, health.state);
   const cell = (value: string) => escapeRichText(value);
   const table = [
     `| ${T("Field", "Параметр")} | ${T("Value", "Значение")} |`,
@@ -157,7 +150,7 @@ export default {
     // всё ещё текущий (пользователь не ушёл в другой раздел / не закрыл меню).
     const probe = ctx.deps.probeUserbotHealth || probeUserbotHealth;
     probe({ root: ctx.deps.root, port: env.TELEGRAM_MCP_PORT || "8724" })
-      .then((result: Health) => {
+      .then((result) => {
         if (ctx.flows.get(st.chatId, st.userId) === st && st.screen === "st") {
           const v = buildView(d, result, ctx);
           return ctx.flows.screen(st, v.text);

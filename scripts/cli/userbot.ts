@@ -392,6 +392,7 @@ export function createUserbotCommands(
     }
     const health = await diagnosticHealth();
     log(`${SVC_USERBOT}: ${health.state}`);
+    if (health.login) log(`вход: ${health.login}`);
     log(
       `venv: ${fileSystem.exists(VENV_PY) ? "собран" : "нет — будет собран при setup"}`,
     );
