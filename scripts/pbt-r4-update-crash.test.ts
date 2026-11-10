@@ -453,3 +453,20 @@ await test("зелёное: чужой шим не перезаписывает�
   );
   assert.match(execFileSync("cat", [shim], { encoding: "utf8" }), /foreign/u);
 });
+
+// specs/UpdateFloor.tla, NoSilentLoss: сборки до 0.3.15 держали стор воркфлоу в корне
+// установки. Git его не отслеживал никогда, и вывод чекаута оставляет его как есть.
+await test("NoSilentLoss: вывод чекаута не трогает .workflow-data в корне", () => {
+  const home = makeHome();
+  mkdirSync(join(home, ".workflow-data"));
+  writeFileSync(join(home, ".workflow-data", "run.json"), '{"run":1}\n');
+
+  const removed = retireCheckout(home);
+
+  assert.ok(removed.includes("node_modules"), JSON.stringify(removed));
+  assert.deepEqual(leftovers(home), [".workflow-data"]);
+  assert.equal(
+    readFileSync(join(home, ".workflow-data", "run.json"), "utf8"),
+    '{"run":1}\n',
+  );
+});

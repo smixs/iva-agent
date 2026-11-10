@@ -48,7 +48,6 @@ import {
 import {
   adoptUpdateLock,
   layoutFor,
-  LEGACY_STATE_DIRS,
   parseVersionName,
   readJson,
   STATE_DIRS,
@@ -568,7 +567,7 @@ function topLevel(path: string): string {
 
 /** Never removed, whatever git says about them. */
 const KEEP = new Set([
-  ...[...STATE_DIRS, ...LEGACY_STATE_DIRS].map(topLevel),
+  ...STATE_DIRS.map(topLevel),
   ...".env current repo versions".split(" "),
 ]);
 

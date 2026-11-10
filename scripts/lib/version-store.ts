@@ -41,8 +41,6 @@ const LEFTOVER = [FLIP_PREFIX, ".probe-"];
 const VERSION_ORDER = new Intl.Collator("en", { numeric: true }).compare;
 /** What a version borrows from the installation; the rest of `.eve` is a build cache. */
 export const STATE_DIRS = ["data", "vault", ".eve/.workflow-data"];
-/** Where older builds kept the workflow store: linked where one is, never created. */
-export const LEGACY_STATE_DIRS = [".workflow-data"];
 /** The active version plus one to roll back to; a build takes the rollback slot. Disks on these boxes are small. */
 export const KEEP = 2;
 
@@ -665,14 +663,6 @@ export function createVersionStore(
       name,
       stateAt(name, stateHome),
     ]);
-    for (const name of LEGACY_STATE_DIRS) {
-      // Cleared even where nothing replaces it, or a link from an earlier pass
-      // survives into a probe aimed at live state. Asked of the install, never
-      // the scratch: a box without a legacy store never grows one.
-      rmSync(join(dir, name), { recursive: true, force: true });
-      if (existsSync(join(home, name)))
-        links.push([name, join(stateHome, name)]);
-    }
     for (const [, target] of links) mkdirSync(target, { recursive: true });
     // The .env is the installation's in both modes: a probe under a configuration
     // nobody runs proves nothing, and `iva config` writes through to the real file.

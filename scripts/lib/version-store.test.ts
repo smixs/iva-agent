@@ -1054,30 +1054,24 @@ test("state directories are shared into a version instead of copied", (t) => {
   assert.equal(readFileSync(join(dir, "data/state.json"), "utf8"), "{}");
 });
 
-test("the workflow store older installs kept is shared where it exists, never created", (t) => {
+// specs/UpdateFloor.tla, NoSilentLoss: builds before 0.3.15 kept the workflow store at the root.
+test("NoSilentLoss: a workflow store at the installation root is neither linked nor touched", (t) => {
   const root = home(t);
   const store = createVersionStore(root);
-  const fresh = store.stage("0.3.15-bbbbbbbbbbbb");
-  store.linkState(fresh);
-  // A box installed after the move never had one, and an empty directory that
-  // only means "this install is old" is not something to hand a new one.
-  assert.equal(existsSync(join(root, ".workflow-data")), false);
-  assert.equal(existsSync(join(fresh, ".workflow-data")), false);
-
   mkdirSync(join(root, ".workflow-data"), { recursive: true });
   writeFileSync(join(root, ".workflow-data/run.json"), '{"run":1}\n');
-  const legacy = store.stage("0.3.16-cccccccccccc");
-  store.linkState(legacy);
-  assert.equal(
-    readFileSync(join(legacy, ".workflow-data/run.json"), "utf8"),
-    '{"run":1}\n',
-  );
-  // And a probe reaches scratch through it, not the store the service is using.
+  const dir = store.stage("0.3.16-cccccccccccc");
+  store.linkState(dir);
   const scratch = store.sandboxState("0.3.16-cccccccccccc");
   t.after(() => rmSync(scratch, { recursive: true, force: true }));
-  writeFileSync(join(legacy, ".workflow-data/probe.json"), "{}");
-  assert.equal(existsSync(join(scratch, ".workflow-data/probe.json")), true);
-  assert.equal(existsSync(join(root, ".workflow-data/probe.json")), false);
+
+  assert.equal(existsSync(join(dir, ".workflow-data")), false);
+  assert.equal(existsSync(join(scratch, ".workflow-data")), false);
+  assert.deepEqual(readdirSync(join(root, ".workflow-data")), ["run.json"]);
+  assert.equal(
+    readFileSync(join(root, ".workflow-data/run.json"), "utf8"),
+    '{"run":1}\n',
+  );
 });
 
 test("a version being probed writes to scratch state, not the installation's", (t) => {
