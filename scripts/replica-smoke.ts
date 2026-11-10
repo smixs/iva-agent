@@ -2,7 +2,7 @@
 // Проверяет то, что юнит-тесты не видят: прод-билд eve, старт сервера, первый реальный
 // ответ через провайдера и restart/resume сессии. Ни .env, ни Telegram-токена, ни живого
 // vault — только временная директория и закрытый allowlist переменных окружения.
-// Запуск: npm run replica (в CI — шаг после build). По мотивам stabilization-форка
+// Запуск: npm run replica, локально после npm run build. По мотивам stabilization-форка
 // mamysh/iva (PR #7), переписано под upstream.
 import {
   mkdtemp,
