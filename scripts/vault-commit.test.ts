@@ -883,6 +883,65 @@ test("BrainOversize: a file over 90 MB stays out of every commit and the index; 
   assert.equal(statusAll(vault), "");
 });
 
+// Второй писатель растит файл после lstat: перед `git add` (git читает большой файл) и
+// перед `git commit` (коммит берёт блоб индекса, а не рабочее дерево ещё раз).
+for (const moment of ["add", "commit"]) {
+  test(`BrainOversize BigNeverCommitted: a file grown to 91 MB just before git ${moment} stays out of the commit`, async (t) => {
+    const vault = makeVault(t);
+    const grows = join(vault, "cards/notes/grows.bin");
+    const small = join(vault, "cards/notes/note.md");
+    writeFileSync(grows, "small\n");
+    writeFileSync(small, "before\n");
+    sh(["add", "."], vault);
+    sh(["commit", "-qm", "seed"], vault);
+    writeFileSync(grows, "small but changed\n");
+    writeFileSync(small, "after\n");
+    const bin = mkdtempSync(join(tmpdir(), "iva-grow-git-"));
+    const fake = join(bin, "git");
+    writeFileSync(
+      fake,
+      `#!/bin/sh\nif [ "$1" = ${moment} ] && [ ! -f ${JSON.stringify(`${bin}/grown`)} ]; then\n` +
+        `  touch ${JSON.stringify(`${bin}/grown`)}; truncate -s 91M ${JSON.stringify(grows)}\nfi\n` +
+        `exec /usr/bin/git "$@"\n`,
+    );
+    chmodSync(fake, 0o755);
+    const path = process.env.PATH;
+    process.env.PATH = `${bin}:${path ?? ""}`;
+    t.after(() => {
+      process.env.PATH = path;
+      rmSync(bin, { recursive: true, force: true });
+    });
+
+    const { value: outcome, logged } = await journal(() =>
+      tool.seam.commitVaultSweep("night", vault),
+    );
+    process.env.PATH = path;
+
+    assert.ok(existsSync(join(bin, "grown")), "the second writer ran");
+    // Перед add git читает большой файл: блоб снят с индекса, в HEAD прежняя версия. Перед
+    // commit в индексе уже маленький блоб: он и уходит, большой файл остаётся на диске.
+    const read = moment === "add";
+    assert.deepEqual(outcome, {
+      ok: true,
+      committed: true,
+      ...(read ? { oversize: ["cards/notes/grows.bin"] } : {}),
+    });
+    if (read) assert.match(logged, /больше 90 МБ.*grows\.bin/u);
+    assert.equal(sh(["show", "HEAD:cards/notes/note.md"], vault), "after");
+    assert.equal(
+      sh(["show", "HEAD:cards/notes/grows.bin"], vault),
+      read ? "small" : "small but changed",
+    );
+    assert.equal(statusAll(vault), "M cards/notes/grows.bin");
+    // Следующая ночь видит большой файл до add и называет его.
+    assert.deepEqual(await tool.seam.commitVaultSweep("night", vault), {
+      ok: true,
+      committed: false,
+      oversize: ["cards/notes/grows.bin"],
+    });
+  });
+}
+
 test("отслеживаемый литеральный путь под ignored каталогом продолжает историю (#257)", async (t) => {
   const vault = makeVault(t);
   const path = "cards/notes/отчёт-*.md";
