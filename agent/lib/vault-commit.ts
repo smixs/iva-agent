@@ -24,9 +24,11 @@ import {
   copyFileSync,
   lstatSync,
   mkdtempSync,
+  readFileSync,
   realpathSync,
   rmSync,
   statSync,
+  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import {
@@ -71,6 +73,18 @@ const INTENT_TO_ADD = 0x2000_0000;
 /** Пустой блоб: с ним в индексе лежит и `add -N`, и честно застейдженный пустой файл. */
 const EMPTY_BLOB = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391";
 const ZERO_OBJECT = "0".repeat(40);
+/** Сколько раз снимок HEAD пересобирается, если другой писатель сдвинул HEAD между снимком и
+ * записью: за это время успевает пройти соседский коммит. */
+const HEAD_MOVES = 3;
+/** Дерево совпало с деревом снимка: так же, как `git commit` отвечал «нечего коммитить», а
+ * commitFitting считает это не отказом, а отсутствием правки. */
+const NOTHING_TO_COMMIT_RUN: GitRun = {
+  code: 1,
+  err: "nothing to commit",
+  out: "",
+  timeout: false,
+};
+const OK_RUN: GitRun = { code: 0, err: "", out: "", timeout: false };
 
 /** Что наследуется от процесса: git ищет себя и конфиг владельца. Белый список, а не чёрный
  * список запрещённых GIT_*: чужой `GIT_DIR` (его оставляет после себя git-хук или
@@ -137,12 +151,13 @@ function gitOnce(
   timeout: number,
   input?: string,
   index?: string,
+  program = "git",
 ): Promise<GitRun> {
   const env = gitEnv();
   if (index !== undefined) env.GIT_INDEX_FILE = index;
   return new Promise((done) => {
     const child = execFile(
-      "git",
+      program,
       [...args],
       { cwd, env, timeout, windowsHide: true },
       (error, stdout, stderr) => {
@@ -161,12 +176,14 @@ function gitOnce(
 }
 
 /** Один повтор той же команды; поднятия общие для всех вызовов git этого процесса.
- * `index` - свой файл индекса (`GIT_INDEX_FILE`) вместо общего индекса vault. */
+ * `index` - свой файл индекса (`GIT_INDEX_FILE`) вместо общего индекса vault, `program` -
+ * исполняемый файл вместо git (хук vault: его звал `git commit`, и таймаут у него тот же). */
 async function git(
   args: readonly string[],
   cwd: string,
   input?: string,
   index?: string,
+  program = "git",
 ): Promise<GitRun> {
   const file = nightSettingsFile();
   const { values } = readNightSettings(file);
@@ -178,7 +195,7 @@ async function git(
     values.maxGitTimeoutMs,
     Math.max(values.gitTimeoutMs, state.timeout),
   );
-  const first = await gitOnce(args, cwd, timeout, input, index);
+  const first = await gitOnce(args, cwd, timeout, input, index, program);
   if (!first.timeout) return first;
   if (
     timeout >= values.maxGitTimeoutMs ||
@@ -206,7 +223,7 @@ async function git(
     vaultGitNotices.push(failed);
     console.error(`${LOG_PREFIX} ${failed[1]}`);
   }
-  const retried = await gitOnce(args, cwd, retryTimeout, input, index);
+  const retried = await gitOnce(args, cwd, retryTimeout, input, index, program);
   if (
     retried.timeout &&
     (retryTimeout >= values.maxGitTimeoutMs ||
@@ -290,12 +307,87 @@ async function withIndexRetry(
   return result;
 }
 
+/** Хук vault: его звал `git commit`, а `write-tree` и `commit-tree` не зовут. Файл берётся там
+ * же, где его ищет git (и `core.hooksPath` тоже), и исполняется с тем же временным индексом,
+ * какой видел хук при `git commit`. Нет файла или он не исполняемый - не отказ: у большинства
+ * vault хуков нет. */
+async function runHook(
+  vault: string,
+  hooks: string,
+  index: string,
+  name: string,
+  args: readonly string[] = [],
+): Promise<GitRun> {
+  const file = join(hooks, name);
+  try {
+    if ((statSync(file).mode & 0o111) === 0) return OK_RUN;
+  } catch {
+    return OK_RUN;
+  }
+  return await git(args, vault, undefined, index, file);
+}
+
+/** Сообщение через `prepare-commit-msg` и `commit-msg`: хук может его переписать или отказать.
+ * `-m` даёт этим хукам источник `message`, как и `git commit -m`; текст возвращается тот,
+ * что остался в файле после хуков. */
+async function messageWithHooks(
+  vault: string,
+  hooks: string,
+  index: string,
+  file: string,
+  message: string,
+): Promise<{ run: GitRun; text: string }> {
+  try {
+    writeFileSync(file, `${message.replace(/\s+$/u, "")}\n`);
+  } catch (error) {
+    return {
+      run: { code: 1, err: String(error), out: "", timeout: false },
+      text: message,
+    };
+  }
+  for (const [name, args] of [
+    ["prepare-commit-msg", [file, "message"]],
+    ["commit-msg", [file]],
+  ] as const) {
+    const denied = await runHook(vault, hooks, index, name, args);
+    if (denied.code !== 0) return { run: denied, text: message };
+  }
+  try {
+    return { run: OK_RUN, text: readFileSync(file, "utf8") };
+  } catch (error) {
+    return {
+      run: { code: 1, err: String(error), out: "", timeout: false },
+      text: message,
+    };
+  }
+}
+
+/** Коммит-объект от готового дерева и родителя; от Ивы, если в vault нет identity владельца. */
+async function commitTree(
+  vault: string,
+  tree: string,
+  parent: string,
+  message: string,
+): Promise<GitRun> {
+  const args = ["commit-tree", tree, ...(parent ? ["-p", parent] : [])];
+  const made = await git(args, vault, message);
+  if (made.code === 0 || !IDENTITY_MISSING.test(detail(made))) return made;
+  // await: временный индекс удаляет finally, а git ещё не начал его читать.
+  return await git([...IVA_IDENTITY, ...args], vault, message);
+}
+
 /** Коммит ровно тех блобов, что лежат в индексе по нашим путям; от Ивы, если в vault нет
  * identity владельца. `commit -- <пути>` перечитал бы рабочее дерево, и файл, выросший после
  * проверки размера, ушёл бы в коммит; коммит без путей забрал бы весь индекс, а он общий с
- * владельцем. Поэтому свой индекс: дерево HEAD и наши записи общего индекса. Он копия общего,
- * сброшенная к HEAD (`read-tree --reset` держит stat-данные совпавших записей): из пустого
- * коммит, обновляя индекс, перечитал бы каждый файл vault. */
+ * владельцем. Поэтому свой индекс: дерево HEAD и наши записи общего индекса.
+ *
+ * Дерево собирается снимком HEAD, а HEAD переводится сравнением с этим снимком:
+ * `write-tree` -> `commit-tree -p <снимок>` -> `update-ref HEAD <новый> <снимок>`. Обычный
+ * `git commit` берёт родителем уже новый HEAD, поэтому чужой коммит соседнего файла между
+ * снимком и записью возвращался к старому блобу и уходил в следующий push
+ * (`specs/VaultCommit.tla`). HEAD сдвинулся, пока индекс собирался, - снимок пересобирается
+ * от нового (до HEAD_MOVES раз), дальше обычная ошибка записи. Пустой репозиторий: первая
+ * ветка создаётся тем же `update-ref` с нулевым старым значением. */
 async function commitWith(
   vault: string,
   message: string,
@@ -306,10 +398,14 @@ async function commitWith(
   const dir = mkdtempSync(join(tmpdir(), "iva-vault-index-"));
   const index = join(dir, "index");
   try {
-    const head = await git(
-      ["rev-parse", "-q", "--verify", "HEAD^{tree}"],
+    const places = await git(
+      ["rev-parse", "--git-path", "hooks", "--git-path", "COMMIT_EDITMSG"],
       vault,
     );
+    if (places.code !== 0) return places;
+    const [hooks, messageFile] = places.out
+      .split("\n")
+      .map((path) => resolve(vault, path.trim()));
     const shared = await git(["rev-parse", "--git-path", "index"], vault);
     if (shared.code !== 0) return shared;
     try {
@@ -317,56 +413,94 @@ async function commitWith(
     } catch (error) {
       return { code: 1, err: String(error), out: "", timeout: false };
     }
-    const read = await git(
-      [
-        "read-tree",
-        ...(head.code === 0 ? ["--reset", head.out.trim()] : ["--empty"]),
-      ],
-      vault,
-      undefined,
-      index,
-    );
-    if (read.code !== 0) return read;
-    // Как `commit -- <пути>`: всё, что HEAD держит под нашими путями, сменяется записями общего
-    // индекса (путь-каталог - его файлами); нет записи - это удаление. Блоб больше порога не
-    // идёт, его прежняя версия остаётся.
-    const held = await git(
-      ["ls-files", "-z", "--", ...paths],
-      vault,
-      undefined,
-      index,
-    );
-    if (held.code !== 0) return held;
-    const payload = [
-      ...held.out
-        .split("\0")
-        .filter((path) => path && !oversize.has(path))
-        .map((path) => `0 ${ZERO_OBJECT}\t${path}\0`),
-      ...[...staged]
-        .filter(([path]) => !oversize.has(path))
-        .map(([, blob]) => `${blob.record}\0`),
-    ].join("");
-    const put = await git(
-      ["update-index", "-z", "--index-info"],
-      vault,
-      payload,
-      index,
-    );
-    if (put.code !== 0) return put;
-    const plain = await git(
-      ["commit", "-q", "-m", message],
-      vault,
-      undefined,
-      index,
-    );
-    if (plain.code === 0 || !IDENTITY_MISSING.test(detail(plain))) return plain;
-    // await: временный индекс удаляет finally, а git ещё не начал его читать.
-    return await git(
-      [...IVA_IDENTITY, "commit", "-q", "-m", message],
-      vault,
-      undefined,
-      index,
-    );
+    let text = message;
+    for (let attempt = 1; ; attempt += 1) {
+      const head = await git(["rev-parse", "-q", "--verify", "HEAD"], vault);
+      const snapshot = head.code === 0 ? head.out.trim() : "";
+      const parent = snapshot
+        ? await git(
+            ["rev-parse", "-q", "--verify", `${snapshot}^{tree}`],
+            vault,
+          )
+        : undefined;
+      if (parent !== undefined && parent.code !== 0) return parent;
+      const read = await git(
+        ["read-tree", ...(snapshot ? ["--reset", snapshot] : ["--empty"])],
+        vault,
+        undefined,
+        index,
+      );
+      if (read.code !== 0) return read;
+      // Как `commit -- <пути>`: всё, что HEAD держит под нашими путями, сменяется записями
+      // общего индекса (путь-каталог - его файлами); нет записи - это удаление. Блоб больше
+      // порога не идёт, его прежняя версия остаётся.
+      const held = await git(
+        ["ls-files", "-z", "--", ...paths],
+        vault,
+        undefined,
+        index,
+      );
+      if (held.code !== 0) return held;
+      const payload = [
+        ...held.out
+          .split("\0")
+          .filter((path) => path && !oversize.has(path))
+          .map((path) => `0 ${ZERO_OBJECT}\t${path}\0`),
+        ...[...staged]
+          .filter(([path]) => !oversize.has(path))
+          .map(([, blob]) => `${blob.record}\0`),
+      ].join("");
+      const put = await git(
+        ["update-index", "-z", "--index-info"],
+        vault,
+        payload,
+        index,
+      );
+      if (put.code !== 0) return put;
+      if (attempt === 1) {
+        const denied = await runHook(vault, hooks, index, "pre-commit");
+        if (denied.code !== 0) return denied;
+      }
+      const tree = await git(["write-tree"], vault, undefined, index);
+      if (tree.code !== 0) return tree;
+      if (parent !== undefined && parent.out.trim() === tree.out.trim())
+        return NOTHING_TO_COMMIT_RUN;
+      if (attempt === 1) {
+        const checked = await messageWithHooks(
+          vault,
+          hooks,
+          index,
+          messageFile,
+          message,
+        );
+        if (checked.run.code !== 0) return checked.run;
+        text = checked.text;
+      }
+      const made = await commitTree(vault, tree.out.trim(), snapshot, text);
+      if (made.code !== 0) return made;
+      // update-ref со старым значением: HEAD, сдвинутый чужим коммитом, не переписываем и
+      // чужой коммит не откатываем. reflog называет коммит так же, как это делал git.
+      const moved = await git(
+        [
+          "update-ref",
+          "-m",
+          `commit${snapshot ? "" : " (initial)"}: ${text.split("\n")[0]}`,
+          "HEAD",
+          made.out.trim(),
+          snapshot || ZERO_OBJECT,
+        ],
+        vault,
+      );
+      if (moved.code === 0) {
+        // Отказ post-commit коммит не отменяет: так же и у `git commit`.
+        await runHook(vault, hooks, index, "post-commit");
+        return moved;
+      }
+      // Таймаут - не сдвиг HEAD: git убили до или после записи, и второй круг заново
+      // выяснять это незачем (повтор того же вызова уже сделал git() сам).
+      if (moved.timeout) return moved;
+      if (attempt >= HEAD_MOVES) return moved;
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
