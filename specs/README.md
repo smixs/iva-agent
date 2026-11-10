@@ -60,6 +60,53 @@ and a third contender in the restore window. Run `sh specs/update-lock-check.sh`
 Actual milliseconds, process liveness and crashes during displacement are covered
 by executable tests and the accepted residual windows in `docs/tech-debt.md` §18.
 
+## UpdateRun
+
+`UpdateRun.tla` models one update run as the steps of `scripts/update-finish.ts` and `scripts/lib/version-update.ts`: the journal written before the first stop, the stop of every writer, the quarantine of session state, migrations and the vault cleanup, the flip of `current`, the candidate's start with the units handed back from the snapshot, the answer on the installation's port, the settle of `active.json` and the final cleanup. The process can be killed between any two steps (`Kill`) and started again (`Retry`): with the journal on disk a retry continues at the phase written there and takes the unit snapshot and the quarantine paths from it, without it (the code before the repair) a retry snapshots the stopped units as "how it was". The lock is `UpdateLock.tla` and exact unit restoration is `LaunchdUnit.tla` (`RestoreExact` assumes the snapshot survived, which is what this model is about); neither is repeated here.
+
+Checked invariants, by the numbering of the task that produced them:
+
+1. `AnswersAtRest`: after any break and retry either the previous or the new version answers.
+2. `UnitsReturn`: a unit that ran before the update runs after it — on success, on a rollback and on a break with a retry — or the owner was told why it stays off (a userbot whose environment cannot be rebuilt).
+3. `SessionsAccounted`: session state is either back in place or moved to a path that is written down.
+4. `PinnedAnswered`: `active.json` names only a version that answered.
+
+`update-run-check.sh` checks the green configuration and one witness per invariant:
+
+- `UpdateRun-memory-units.cfg`: the snapshot of the units lives in the memory of the process (the code before the repair) — `UnitsReturn`; the same run loses the quarantine paths.
+- `UpdateRun-retry-forgets.cfg`: the journal is written and the retry does not read it — `UnitsReturn`.
+- `UpdateRun-unrecorded-trash.cfg`: the quarantine moves state and writes no path — `SessionsAccounted`.
+- `UpdateRun-settle-first.cfg`: `active.json` is written before the candidate answered — `PinnedAnswered`.
+- `UpdateRun-rollback.cfg`: the candidate does not come up and the userbot's environment cannot be rebuilt — no error: the units that ran come back, and the userbot stays off with a reason.
+
+Outside the model: the lock itself and the takeover of an abandoned one (`UpdateLock.tla`); what "a unit runs" means on systemd and launchd and how `restore` sets exactly what was captured (`LaunchdUnit.tla`); building and probing the candidate, which happens before the move and touches no shared state; the removal of old versions and of the retired checkout after the answer. `scripts/update-run-kill.test.ts` runs the real updater in a hermetic installation, kills it with `SIGKILL` from inside the step it interrupts (the fake `systemctl`, a migration and the vault cleanup of the candidate), starts it again and checks the units, the quarantine and the version. The fix ships in the release that carries it and runs in the new half of the update, so it acts from the update that installs 0.5.12 on: `update-finish` of the version being installed is the process that writes the journal, and the retry after a break runs the same version's file again. A run started by the CLI of 0.5.0–0.5.11 leaves no journal for the versions before 0.5.12 and is covered by the executable test alone.
+
+## UpdateJob
+
+`UpdateJob.tla` models the update job of the menu: the tap writes the job, the updater flips `current`, starts the candidate, settles `active.json` and writes its outcome, and can be killed between any two of those. The Bridge — the process the restart brings up — watches the job and says the final: from the run's journal (`UpdateRun.tla`; the "settled" phase is written after the answer and after the settle), from the four sources for a run started by a version without a journal (the `current` symlink with `active.json` and the failure list, an update from 0.5.0 to 0.5.11), or, when the deadline runs out, with "did not finish".
+
+Checked invariants:
+
+1. `FinalOnlyWhenPinned`: "✅ old → new" appears only when the new version is pinned and answered.
+2. `NoEndlessWatch`: every job gets a final within a bounded time and the watch never outlives it.
+3. `ShownOnce`: the final is shown once.
+
+`update-job-check.sh` checks the green configuration, `UpdateJob-no-journal.cfg` (a run started by a version without a journal: the four sources, no error), and two witnesses: `UpdateJob-symlink-only.cfg` draws the final from the `current` symlink alone — `FinalOnlyWhenPinned`; `UpdateJob-shown-twice.cfg` lets the job file outlive the final — `ShownOnce`.
+
+Outside the model: the liveness of the Bridge itself (systemd restarts it), delivery to Telegram and its retries (`reporter.complete`), the exact wording of the screen, and the TTL in milliseconds, which is the model's `Deadline` in ticks. `scripts/poller/update-reconcile.test.ts` covers the journal verdict, the "did not finish" screen and the unproved move on the real Bridge code.
+
+## UpdateBranch
+
+`UpdateBranch.tla` models the Update branch of ADR-0018: the owner's choice written into the install repository and the mirror every update reads its branch from, a break between the two writes, a rollback that fails, and a read that reconciles. The record is the installation's own repository; the mirror is its cache, and reading reconciles the cache with the record.
+
+Checked invariants:
+
+1. `OneRecord`: the branch read for the update is the owner's choice.
+2. `AgreeAfterRead`: after a read the install repository and the mirror agree — a divergence does not outlive the next read.
+3. `NotBelow`: an update never moves the installation to an older release (ADR-0018).
+
+`update-branch-check.sh` checks `UpdateBranch.cfg`, `UpdateBranch-partial.cfg` (a failed rollback that the next read repairs: no error), and witnesses: `UpdateBranch-one-sided.cfg` (a write to the installation only, no repair at read — `OneRecord` and `AgreeAfterRead`) and `UpdateBranch-back.cfg` (`NotBelow`). Outside the model: the network and the availability of the branch (`BranchUnavailableError`), tag selection, and that one `git config` write is atomic while two are not — that window is the model. `scripts/lib/update-channel.test.ts` covers the reconciliation on the real reader.
+
 ## UpdateFloor
 
 `UpdateFloor.tla` models one installation and a tree that names the oldest release an update is taken from (`minUpdater` in `update-compat.json`). The updater already on disk is one of three classes: from 0.3.30 it reads the marker before its first write; 0.3.15 to 0.3.29 unpack the new tree and hand off to its new half without knowing the marker; 0.3.7 to 0.3.14 build a candidate of the new tree beside the checkout, where `npm ci` is the first code of the new tree to run. An update aims at the newest release, or at the step release while `repair.sh` has the Update branch pinned to it: the last release that takes an update from every release below the floor. Once the new tree serves, it meets one file that only releases below the floor wrote and one that a release at the floor or above wrote, and two forms the step release reads but turns over only lazily, when its Bridge starts or a chat first writes: "kept" the new code reads itself (the reminder table of schema 1), "turned" it refuses by name, so repair runs the step release's own conversion of it before the next update (the queue of strings, the shared `run-status.json`). The step is a tag on origin: its branch exists only for the update repair runs, so no other update aims at it.
@@ -181,11 +228,11 @@ Checked invariants:
 4. `UpdateGrantsNothing`: an update of Iva enables nothing and trusts nothing.
 5. `EnableIsOwners`: a plugin is on by the owner's action only; neither a turn nor the undo of another command's build switches it on.
 
-Mutants must fail: `PluginMode-enabled-only.cfg` (the unit plan looks at `enabled` alone, `ProcessesNeedTrust`), `PluginMode-disable-keeps-units.cfg` (`disable` writes the state without reconciling the units, `DisabledIsStopped`), `PluginMode-turn-trusts.cfg` (`iva plugin trust` passes inside a model turn, `TrustIsOwners`), `PluginMode-update-reenables.cfg` (the update switches a plugin back on, `UpdateGrantsNothing`).
+Mutants must fail: `PluginMode-enabled-only.cfg` (the unit plan looks at `enabled` alone, `ProcessesNeedTrust`), `PluginMode-disable-keeps-units.cfg` (`disable` writes the state without reconciling the units, `DisabledIsStopped`), `PluginMode-turn-trusts.cfg` (`iva plugin trust` passes inside a model turn, `TrustIsOwners`), `PluginMode-update-reenables.cfg` (the update switches a plugin back on, `UpdateGrantsNothing`), `PluginMode-update-off.cfg` (`settlePlugins` in `scripts/lib/version-update.ts` switches the entry off and the run reconciles no units, `DisabledIsStopped`).
 
 Witnesses of the code before the repair must fail too. `PluginMode-undo-keeps-units.cfg`: the undo of an `enable` that did not build wrote "disabled" and left the units running (`DisabledIsStopped`). `PluginMode-stale-undo.cfg`: the undo wrote the entry it had read before the build, so a plugin switched off, untrusted or removed while the build ran came back (`EnableIsOwners`, and `TrustIsOwners` once the first is left out). `PluginMode-update-undo-whole.cfg`: the undo of a failed `iva plugin update` wrote back the whole entry it replaced, so a trust given while the build ran was taken away under running units (`ProcessesNeedTrust`), a revoked trust came back without a new tap (`TrustIsOwners`) and so did a switch-off or a removal (`EnableIsOwners`). Each has a test in `scripts/cli/plugin.test.ts` that carries the invariant in its name.
 
-`PluginMode-update-off.cfg` is an open finding, not a mutant: it is the updater as it works today. `settlePlugins` (`scripts/lib/version-update.ts`) switches off a plugin whose code no longer builds and reconciles no units, so `DisabledIsStopped` breaks until the next `iva plugin` command. The clean configuration leaves that action out and speaks about the `iva plugin` commands.
+`UpdateOff` is the update that switches off a plugin whose code no longer builds, and `UpdateOffStops` is the repair it got in this work: `scripts/update-finish.ts:restartPluginUnits` reads the entries back after the update, stops the units of the entries that are no longer `full` and restarts the units of the entries that are, so the switch-off reaches the processes. The clean configuration has `UpdateOff = TRUE` and `UpdateOffStops = TRUE`; `PluginMode-update-off.cfg` keeps `UpdateOffStops = FALSE` and is the updater before the repair.
 
 Outside the model: a crash between the write and the unit reconcile (the next `iva plugin` command reconciles again), a unit that systemd refuses to stop, a plugin of skills alone (a model turn installs it itself), `sync` (it writes and reconciles under one lock and builds nothing), the units after the undo of `update` (they follow switches the undo leaves as they are, and keep running the process `update` restarted onto the new code until the next command), a `plugins.json` edited by hand or by a model past the CLI (the honest caveat of ADR-0009), and the connection files inside a built version.
 

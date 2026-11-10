@@ -60,6 +60,7 @@ import {
   versionName,
   writeJson,
 } from "./version-store.ts";
+import { markUpdateRun } from "./update-run-journal.ts";
 
 export type CommandResult = { readonly code: number; readonly output: string };
 export type Runner = (
@@ -777,8 +778,13 @@ async function migrateAndFlip(
       log,
     });
     await cleanVault(run);
+    // Журнал хода пишется на диск до переезда и после каждого шага: процесс умирает
+    // вместе с версией, а повтор и Bridge читают фазу оттуда (specs/UpdateRun.tla).
+    markUpdateRun(store.layout.data, name, "migrated");
     if (store.currentName() !== name) store.activate(name);
+    markUpdateRun(store.layout.data, name, "flipped");
     await startCandidate(store.layout.current);
+    markUpdateRun(store.layout.data, name, "started");
     return migrations;
   } catch (error) {
     // Every recoverable fault restores the Version that served before this run.
@@ -827,6 +833,9 @@ async function goBack(
         run.log(`the restart onto ${rollback} failed: ${String(error)}`),
       );
     store.settle(rollback);
+    markUpdateRun(store.layout.data, name, "rolledback", {
+      outcome: { status: "unhealthy", before: rollback, after: rollback },
+    });
   }
   notify(
     `${name} did not answer on port ${port} after the restart; ` +
@@ -869,6 +878,15 @@ async function serveAndFinish(
     return await goBack(run, { tree, rollback, port, log: live.log });
   // Served: whatever this code did to the installation before, it does not now.
   store.recordLive(name, true);
+  // Фаза «кандидат закреплён и отвечал» пишется здесь, а не в конце хода: процесс,
+  // который её пишет, умирает вместе со старой версией, и всё, что после, - уборка.
+  markUpdateRun(store.layout.data, name, "settled", {
+    outcome: {
+      status: "updated",
+      ...(rollback ? { before: rollback } : {}),
+      after: name,
+    },
+  });
   // Service state commits before every optional cleanup. A crash or cleanup
   // fault leaves explicit debt, never a healthy update reported as unfinished.
   store.settle(name, {

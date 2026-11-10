@@ -44,7 +44,9 @@
 \*                  время сборки плагин не возвращается. Юниты не сверяет.
 \*   Reconcile      plugin-cli-trust.ts:reconcileUnits -> scripts/lib/plugin-units.ts:pluginUnitPlan
 \*                  (юниты только режиму full) и reconcilePluginUnits (лишние сняты)
-\*   UpdateOff      scripts/lib/version-update.ts:settlePlugins -> plugin-build.ts:disableCodePlugin
+\*   UpdateOff      scripts/lib/version-update.ts:settlePlugins -> plugin-build.ts:disableCodePlugin,
+\*                  затем юниты выключенного плагина снимает update-finish.ts:restartPluginUnits
+\*                  (сверка по записи: работает только то, что в режиме full)
 \*
 \* Мутанты (свидетели), каждый нарушает свой инвариант:
 \*   PlanNeedsTrust = FALSE   план юнитов смотрит только на enabled
@@ -54,11 +56,7 @@
 \*   UndoRereads = FALSE      откат пишет запись, прочитанную ДО сборки (код до ремонта)
 \*   UpdateUndoKeeps = FALSE  откат `update` возвращает прежнюю запись целиком (код до ремонта)
 \*   UpdateReenables = TRUE   обновление включает плагин, который снова собрался
-\*
-\* Открытая находка, не мутант: UpdateOffStops = FALSE — так обновлятор работает сегодня.
-\* settlePlugins выключает плагин с несобравшимся кодом и юниты не сверяет; конфигурация
-\* PluginMode-update-off.cfg показывает нарушение DisabledIsStopped. В зелёной конфигурации
-\* этого действия нет (UpdateOff = FALSE): она говорит о командах `iva plugin`.
+\*   UpdateOffStops = FALSE   обновление выключает запись и юниты не сверяет (код до ремонта)
 EXTENDS Naturals
 
 CONSTANTS

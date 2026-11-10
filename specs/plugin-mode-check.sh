@@ -1,8 +1,9 @@
 #!/bin/sh
-# PluginMode.tla under TLC: the model of the code is clean, every mutant and every witness of
-# the code before the repair breaks its own invariant first, and the open finding of the
-# updater still shows. Third argument: invariants left out of that run, for a mutant that
-# breaks two rules at one depth. Any TLC failure or another verdict is a non-zero exit.
+# PluginMode.tla under TLC: the model of the code is clean, and every mutant and every
+# witness of the code before the repair breaks its own invariant first - including the
+# update that switches a plugin off without reconciling its units. Third argument:
+# invariants left out of that run, for a mutant that breaks two rules at one depth. Any TLC
+# failure or another verdict is a non-zero exit.
 set -u
 cd "$(dirname "$0")" || exit 2
 . ./tlc-result.sh || exit 2
@@ -49,6 +50,7 @@ check PluginMode-update-reenables UpdateGrantsNothing
 check PluginMode-update-undo-whole ProcessesNeedTrust
 check PluginMode-update-undo-whole TrustIsOwners "ProcessesNeedTrust EnableIsOwners"
 check PluginMode-update-undo-whole EnableIsOwners "ProcessesNeedTrust TrustIsOwners"
-# The open finding: the updater as it is today (scripts/lib/version-update.ts, settlePlugins).
+# The updater before the repair: settlePlugins switches the plugin off, its units keep running
+# (scripts/lib/version-update.ts; update-finish.ts:restartPluginUnits).
 check PluginMode-update-off DisabledIsStopped
 exit "$failed"

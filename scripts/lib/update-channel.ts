@@ -117,6 +117,28 @@ export async function resolveUpdateTarget({
   };
 }
 
+/**
+ * Одна запись решает, какую версию ставит обновление (specs/UpdateBranch.tla): выбор
+ * владельца живёт в репозитории установки, зеркало - его кэш, из которого обновление
+ * берёт ветку. Оборванная или неудавшаяся запись `iva beta`/`iva stable` оставляла кэш на
+ * прежней ветке, и установка получала не то, что выбрал владелец; поэтому чтение сверяет
+ * кэш с записью и чинит расхождение.
+ */
+export async function syncUpdateBranch(
+  git: Git,
+  record: Git,
+): Promise<"same" | "repaired" | "no-record"> {
+  const read = async (at: Git): Promise<string> => {
+    const result = await at("config", "--local", "--get", UPDATE_BRANCH_CONFIG);
+    return result.code === 0 ? output(result) : "";
+  };
+  const wanted = await read(record);
+  if (!wanted) return "no-record"; // Ничего не выбрано: ветка остаётся той, что в кэше.
+  if ((await read(git)) === wanted) return "same";
+  await persistUpdateBranch(git, wanted);
+  return "repaired";
+}
+
 export async function persistUpdateBranch(
   git: Git,
   branch: string,
@@ -233,15 +255,26 @@ function betaRepos(root: string): string[] {
   return [...repos].filter(isRepo);
 }
 
-/** Бета для показа (iva version, status, меню): Update branch `beta`. */
-export function betaOf(root: string): boolean {
-  const repo = gitRootFor(classifyRoot(root));
-  const branch =
+/** Ветка из репозитория: пусто - ключа нет. */
+function branchAt(repo: string): string {
+  return (
     spawnSync(
       "git",
       ["-C", repo, "config", "--local", "--get", UPDATE_BRANCH_CONFIG],
       { encoding: "utf8" },
-    ).stdout?.trim() ?? "";
+    ).stdout?.trim() ?? ""
+  );
+}
+
+/**
+ * Бета для показа (iva version, status, меню): Update branch `beta`. Отвечает запись
+ * владельца - тот же репозиторий установки, из которого обновление берёт ветку
+ * (specs/UpdateBranch.tla, OneRecord); кэш зеркала спрашивается, только если в записи
+ * ключа нет.
+ */
+export function betaOf(root: string): boolean {
+  const install = classifyRoot(root);
+  const branch = branchAt(install.home) || branchAt(gitRootFor(install));
   return branch === BETA_BRANCH;
 }
 

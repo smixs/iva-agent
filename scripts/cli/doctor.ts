@@ -40,6 +40,7 @@ import {
   type UpdateLock,
 } from "../lib/version-store.ts";
 import { hasEmbeddingSource } from "../lib/memory-mode.ts";
+import { readUpdateRun } from "../lib/update-run-journal.ts";
 import { ambiguousEnvLines } from "../lib/env-file.ts";
 // `import type` стирается при компиляции, значения authored tree грузятся динамически
 // внутри вызова: `iva doctor` работает и на установке, где agent/ нет
@@ -716,7 +717,12 @@ function checkVersionState(
   if (active) {
     try {
       if (store.settled() !== active) {
-        ctx.warn(`update to ${active} never finished — run: iva update`);
+        // Журнал хода называет шаг, на котором обновление оборвалось (UpdateRun.tla):
+        // его читают повтор, Bridge и эта строка одной функцией.
+        const run = readUpdateRun(store.layout.data);
+        const step =
+          run && run.version === active ? ` at its ${run.phase} step` : "";
+        ctx.warn(`update to ${active} never finished${step} — run: iva update`);
       }
     } catch {
       // Corrupt state is reported by the version cleanup below, which reads

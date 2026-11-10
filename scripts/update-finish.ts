@@ -35,12 +35,21 @@ import {
 import { throughLink } from "./lib/link-target.ts";
 import { belowFloor } from "./lib/update-check.ts";
 import {
+  moveQuarantine,
+  quarantineDestination,
   quarantinePath,
   rewriteRunStatusesForUpdate,
   sessionStateTargets,
 } from "./lib/wf-store.ts";
 import {
+  beginUpdateRun,
+  closeUpdateRun,
+  markUpdateRun,
+  resumableUpdateRun,
+} from "./lib/update-run-journal.ts";
+import {
   adoptUpdateLock,
+  createVersionStore,
   layoutFor,
   readJson,
   STATE_DIRS,
@@ -73,17 +82,53 @@ type WriterRuntime = Pick<
 export type UpdateQuarantine = {
   readonly path: string;
   readonly trash: string;
+  /** Исходный путь до `throughLink`: по нему видно, надо ли завести каталог заново. */
+  readonly link?: string;
 };
 
-/** Retire open session state as one reversible update step. */
+/** Карантинная метка одного хода: по ней повтор узнаёт карантин, который уже сделан. */
+export function quarantineStamp(): string {
+  return new Date().toISOString().replace(/[:.]/gu, "-");
+}
+
+/**
+ * Куда уйдёт состояние сессий, если его унести сейчас: только адреса, без движения.
+ * Пишется в журнал хода до остановки служб (specs/UpdateRun.tla): путь карантина,
+ * названный только в памяти убитого процесса, не переживает обрыв.
+ */
+export function planUpdateState(
+  root: string,
+  dataDir: string,
+  stamp = quarantineStamp(),
+): UpdateQuarantine[] {
+  return sessionStateTargets(root, dataDir).flatMap((target) => {
+    const plan = quarantineDestination(target, stamp);
+    return plan ? [plan] : [];
+  });
+}
+
+/**
+ * Retire open session state as one reversible update step. `planned` - адреса, уже
+ * записанные в журнал хода: уносится ровно то, что названо, а повтор после обрыва не
+ * заводит второй карантин поверх первого.
+ */
 export function quarantineUpdateState(
   root: string,
   dataDir: string,
   notify: Say,
-  stamp = new Date().toISOString().replace(/[:.]/gu, "-"),
+  stamp = quarantineStamp(),
+  planned?: readonly UpdateQuarantine[],
 ): UpdateQuarantine[] {
   const quarantined: UpdateQuarantine[] = [];
   try {
+    if (planned) {
+      // Уже унесённое не двигается второй раз: moveQuarantine молчит, если пути нет.
+      for (const entry of planned) {
+        moveQuarantine(entry);
+        quarantined.push(entry);
+      }
+      return quarantined;
+    }
     for (const target of sessionStateTargets(root, dataDir)) {
       const path = throughLink(target);
       const trash = quarantinePath(target, stamp);
@@ -869,6 +914,13 @@ async function alertOwnerOnce(
  * Only what is running is restarted, and a unit that refuses is one line in the log: an
  * update that is otherwise finished must not fail over a plugin, and `iva doctor` says
  * which unit is down.
+ *
+ * A plugin the update switched off (settlePlugins, version-update.ts) has its units
+ * stopped here: otherwise its MCP proxy and services keep running the old version's code
+ * until the next `iva plugin` command (specs/PluginMode.tla, DisabledIsStopped). The same
+ * goes for any stored plugin that is not enabled and trusted - its units have no business
+ * running (ProcessesNeedTrust). The owner hears the name and the reason from the update's
+ * own notice (pluginsOffNotice), not from this line.
  */
 export async function restartPluginUnits(
   runtime: Pick<CliRuntime, "systemd" | "UNIT_DIR">,
@@ -879,13 +931,33 @@ export async function restartPluginUnits(
   if (!core) return;
   const { state, damaged } = await core.store.readPluginsStateSafe(dataDir);
   if (damaged) return;
+  const scope = canonicalPluginScope(dataDir);
   const live = runningPluginUnits({
-    scope: canonicalPluginScope(dataDir),
+    scope,
     entries: state.plugins.filter((entry) => entry.enabled && entry.trusted),
     unitDir: runtime.UNIT_DIR,
     manager: runtime.systemd.manager,
     systemd: runtime.systemd,
   });
+  const switchedOff = runningPluginUnits({
+    scope,
+    entries: state.plugins.filter((entry) => !(entry.enabled && entry.trusted)),
+    unitDir: runtime.UNIT_DIR,
+    manager: runtime.systemd.manager,
+    systemd: runtime.systemd,
+  });
+  if (switchedOff.length > 0) {
+    try {
+      runtime.systemd.disableNow(switchedOff);
+      log(
+        `stopped ${switchedOff.length} plugin unit(s) of the plugins that are switched off`,
+      );
+    } catch (error) {
+      log(
+        `some units of the switched-off plugins did not stop: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
   if (live.length === 0) return;
   try {
     runtime.systemd.restart(live);
@@ -969,6 +1041,15 @@ export async function startCandidateServices(
   await tellAboutUserbot(alertUserbot, userbotOff, notify);
 }
 
+/** Версия, которая работает сейчас; чужой или битый симлинк - это «не знаю». */
+function currentVersionName(home: string): string | null {
+  try {
+    return createVersionStore(home).currentName();
+  } catch {
+    return null;
+  }
+}
+
 /** An outcome reported before the lock is adopted: nothing was touched. */
 function refuse(message: string): number {
   const outcome: UpdateOutcome = { status: "failed", message };
@@ -1036,13 +1117,36 @@ export async function main(argv: readonly string[]): Promise<number> {
         // itself is the old writer root and must remain usable until activation.
         const writerRoot = existsSync(layout.current) ? layout.current : home;
         const runtime = createCliRuntime(writerRoot);
-        optionalWriterState = captureOptionalWriterState(runtime);
+        // A run killed after the stop left the units down: a fresh snapshot would read
+        // them as "was stopped" and never bring them back (specs/UpdateRun.tla,
+        // UnitsReturn). The snapshot and the quarantine paths of the run on disk are the
+        // ones taken before the stop, and they are what this attempt uses.
+        const resumed = resumableUpdateRun(layout.data, name);
+        const stamp = quarantineStamp();
+        optionalWriterState = resumed?.units
+          ? [...resumed.units]
+          : captureOptionalWriterState(runtime);
+        const planned = resumed?.quarantine.length
+          ? [...resumed.quarantine]
+          : planUpdateState(writerRoot, layout.data, stamp);
+        beginUpdateRun(layout.data, {
+          version: name,
+          from: currentVersionName(home),
+          units: optionalWriterState,
+          quarantine: planned,
+        });
         stopWriterUnits(runtime, optionalWriterState);
+        markUpdateRun(layout.data, name, "stopped");
         quarantinedState = quarantineUpdateState(
           writerRoot,
           layout.data,
           notify,
+          stamp,
+          planned,
         );
+        markUpdateRun(layout.data, name, "quarantined", {
+          quarantine: quarantinedState,
+        });
         rewriteRunStatusesForUpdate(layout.data);
         await Promise.resolve();
       },
@@ -1128,6 +1232,21 @@ export async function main(argv: readonly string[]): Promise<number> {
     (reason) => alertOwnerAboutUserbot(layout, reason, notify),
     notify,
   );
+  // Итог хода - в тот же журнал, из которого его читают повтор, `iva doctor` и Bridge.
+  // Пишется до отчёта вызывающему: отчёт умирает вместе с процессом, журнал остаётся.
+  closeUpdateRun(layout.data, name, {
+    status:
+      outcome.status === "updated" || outcome.status === "current"
+        ? outcome.status
+        : outcome.status === "unhealthy"
+          ? "unhealthy"
+          : "failed",
+    ...("previous" in outcome && outcome.previous
+      ? { before: outcome.previous }
+      : {}),
+    ...("version" in outcome ? { after: outcome.version } : {}),
+    ...("message" in outcome ? { message: outcome.message } : {}),
+  });
   const report = process.env.IVA_UPDATE_OUTCOME;
   if (report) writeFileSync(report, JSON.stringify(outcome));
   else console.log(JSON.stringify(outcome));

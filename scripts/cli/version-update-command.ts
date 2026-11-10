@@ -18,6 +18,7 @@ import {
   betaChannel,
   BranchUnavailableError,
   resolveReleaseTarget,
+  syncUpdateBranch,
 } from "../lib/update-channel.ts";
 import {
   gitAt,
@@ -237,6 +238,12 @@ function releaseUpdate(home: string) {
   let aim: ReleaseAim | undefined;
   return {
     target: async (repo: string) => {
+      // Зеркало - кэш записи владельца: расхождение, оставленное оборванной записью
+      // `iva beta`/`iva stable`, чинится до чтения ветки (specs/UpdateBranch.tla).
+      await syncUpdateBranch(
+        (...args: string[]) => gitAt(repo, args),
+        (...args: string[]) => gitAt(home, args),
+      );
       aim = await resolveTarget(repo, await installedCommit(home));
       return aim;
     },
