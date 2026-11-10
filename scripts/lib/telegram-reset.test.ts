@@ -26,6 +26,14 @@ function session(id: string, reasons: unknown[]): Session {
   } as Session;
 }
 
+function deferred() {
+  let resolve = () => {};
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
 test("stored session wins for groups and forum topics", () => {
   const update = {
     message: {
@@ -260,6 +268,153 @@ test("reset route returns no_active_session for an unowned address", async () =>
     ok: true,
     status: "no_active_session",
   });
+});
+
+test("ResetIntent ExactCut: finishing an older reset cannot forget a newer completed reset", async (t) => {
+  const firstReset = deferred();
+  const firstEntered = deferred();
+  const lateResolve = deferred();
+  const lateEntered = deferred();
+  t.after(() => {
+    firstReset.resolve();
+    lateResolve.resolve();
+  });
+  let current = { id: "old", messages: [100] };
+  let resolves = 0;
+  const operations: ResetOperations = {
+    attachSession: () => {
+      throw new Error("unexpected attach");
+    },
+    resolveSession: async () => {
+      const index = ++resolves;
+      if (index === 2) {
+        lateEntered.resolve();
+        await lateResolve.promise;
+      }
+      // A Session handle owns a fixed id even if its reset completes later.
+      const stored = current;
+      return {
+        id: stored.id,
+        reset: async () => {
+          if (index === 1) {
+            firstEntered.resolve();
+            await firstReset.promise;
+          }
+          stored.messages.length = 0;
+          return { status: "reset", previousSessionId: stored.id };
+        },
+      } as Session;
+    },
+  };
+  const request = () =>
+    handleTelegramResetRequest(
+      new Request("http://local/reset", {
+        method: "POST",
+        headers: { "X-Telegram-Bot-Api-Secret-Token": "secret" },
+        body: JSON.stringify({ address: { chatId: "7001" } }),
+      }),
+      operations,
+      "secret",
+    );
+
+  const first = request();
+  await firstEntered.promise;
+  const late = request();
+  await lateEntered.promise;
+  await request();
+  current = { id: "new", messages: [102] };
+  firstReset.resolve();
+  await first;
+  assert.deepEqual(current.messages, [102]);
+  lateResolve.resolve();
+  const response = await late;
+  assert.deepEqual(
+    current.messages,
+    [102],
+    "ExactCut keeps the delivered message",
+  );
+  assert.deepEqual(await response.json(), {
+    ok: true,
+    status: "no_active_session",
+  });
+});
+
+test("reset route keeps pending requests to different addresses independent", async (t) => {
+  const gate = deferred();
+  const entered = deferred();
+  t.after(() => gate.resolve());
+  const reasons: unknown[] = [];
+  const operations: ResetOperations = {
+    attachSession: () => {
+      throw new Error("unexpected attach");
+    },
+    resolveSession: async (address) => {
+      if (address === "7002::") {
+        entered.resolve();
+        await gate.promise;
+      }
+      return session(address, reasons);
+    },
+  };
+  const request = (chatId: string) =>
+    handleTelegramResetRequest(
+      new Request("http://local/reset", {
+        method: "POST",
+        headers: { "X-Telegram-Bot-Api-Secret-Token": "secret" },
+        body: JSON.stringify({ address: { chatId } }),
+      }),
+      operations,
+      "secret",
+    );
+  const waiting = request("7002");
+  await entered.promise;
+  await request("7003");
+  gate.resolve();
+  assert.equal(
+    ((await (await waiting).json()) as { status: string }).status,
+    "reset",
+  );
+  assert.equal(reasons.length, 2);
+});
+
+test("ResetIntent ExactCut: a late reset by sessionId keeps the session created after address recovery", async (t) => {
+  const gate = deferred();
+  const entered = deferred();
+  t.after(() => gate.resolve());
+  const old = { id: "fixed-old", messages: [100] };
+  const current = { id: "fixed-new", messages: [102] };
+  const operations: ResetOperations = {
+    attachSession: (id) => {
+      assert.equal(id, old.id);
+      return {
+        id,
+        reset: async () => {
+          entered.resolve();
+          await gate.promise;
+          old.messages.length = 0;
+          return { status: "reset", previousSessionId: id };
+        },
+      } as Session;
+    },
+    resolveSession: async () => session(old.id, []),
+  };
+  const request = (target: unknown) =>
+    handleTelegramResetRequest(
+      new Request("http://local/reset", {
+        method: "POST",
+        headers: { "X-Telegram-Bot-Api-Secret-Token": "secret" },
+        body: JSON.stringify(target),
+      }),
+      operations,
+      "secret",
+    );
+  const waiting = request({ sessionId: old.id });
+  await entered.promise;
+  await request({ address: { chatId: "7004" } });
+  gate.resolve();
+  await waiting;
+  assert.deepEqual(old.messages, []);
+  assert.deepEqual(current.messages, [102]);
 });
 
 test("reset route rejects auth, malformed targets and conflicting targets", async () => {
