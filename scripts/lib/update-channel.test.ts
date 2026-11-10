@@ -6,6 +6,7 @@ import {
   DEFAULT_UPDATE_BRANCH,
   persistUpdateBranch,
   resolveUpdateTarget,
+  syncUpdateBranch,
   UPDATE_BRANCH_CONFIG,
   type Git,
   type GitResult,
@@ -279,4 +280,58 @@ void test("persistUpdateBranch writes local config and surfaces git errors", asy
     );
     git.assertComplete();
   });
+});
+
+// ── одна запись на два репозитория (specs/UpdateBranch.tla) ─────────────────
+// `iva beta` пишет выбор владельца в репозиторий установки и в зеркало. Между записями
+// процесс может умереть, а откат неудавшейся записи - не пройти; тогда зеркало, из
+// которого обновление берёт ветку, остаётся на прежней. Чтение чинит кэш по записи
+// владельца, поэтому обновление ставит ту версию, которую выбрали.
+
+const branchGit = (initial: string) => {
+  let value = initial;
+  const writes: string[] = [];
+  const git: Git = async (...args: string[]): Promise<GitResult> => {
+    if (args[0] === "config" && args[1] === "--local") {
+      if (args[2] === "--get") {
+        return value
+          ? { code: 0, stdout: `${value}\n` }
+          : { code: 1, stdout: "" };
+      }
+      value = args[3] ?? "";
+      writes.push(value);
+      return { code: 0 };
+    }
+    return { code: 1, stdout: `unexpected git call: ${args.join(" ")}` };
+  };
+  return {
+    git,
+    writes,
+    get value() {
+      return value;
+    },
+  };
+};
+
+void test("UpdateBranch OneRecord, AgreeAfterRead: a mirror left on the old branch is repaired from the owner's record", async () => {
+  const record = branchGit("beta");
+  const mirror = branchGit("main");
+
+  assert.equal(await syncUpdateBranch(mirror.git, record.git), "repaired");
+  assert.equal(mirror.value, "beta", "the cache follows the record");
+  assert.deepEqual(mirror.writes, ["beta"]);
+  assert.deepEqual(record.writes, [], "a read never writes the owner's record");
+
+  // Second read: nothing left to repair.
+  assert.equal(await syncUpdateBranch(mirror.git, record.git), "same");
+  assert.deepEqual(mirror.writes, ["beta"]);
+});
+
+void test("UpdateBranch OneRecord: an installation with no record leaves the cache alone", async () => {
+  const record = branchGit("");
+  const mirror = branchGit("main");
+
+  assert.equal(await syncUpdateBranch(mirror.git, record.git), "no-record");
+  assert.equal(mirror.value, "main");
+  assert.deepEqual(mirror.writes, []);
 });
