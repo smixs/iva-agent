@@ -24,6 +24,7 @@ import { fileURLToPath } from "node:url";
 import type { ToolContext } from "eve/tools";
 import { settled } from "./fixtures/tool-result.ts";
 import { unresolvedLinkTargets } from "../agent/lib/vault-links.ts";
+import { tempDir } from "./fixtures/temp-dir.ts";
 
 const REPO = fileURLToPath(new URL("..", import.meta.url));
 const VAULT = mkdtempSync(join(tmpdir(), "iva-links-"));
@@ -136,8 +137,7 @@ test("вложение: существующий файл с любым расш
 test("вложение: отсутствующий файл, выход за корень и симлинк — битые", () => {
   const dir = join(VAULT, "attachments", "2026-09-23");
   mkdirSync(dir, { recursive: true });
-  const outside = mkdtempSync(join(tmpdir(), "iva-links-out-"));
-  process.on("exit", () => rmSync(outside, { recursive: true, force: true }));
+  const outside = tempDir("iva-links-out-");
   writeFileSync(join(outside, "secret.custombin"), "x");
   symlinkSync(join(outside, "secret.custombin"), join(dir, "link.custombin"));
   symlinkSync(outside, join(dir, "linked-dir"));
@@ -320,10 +320,7 @@ test("write_file: summaries/ закрыт", async () => {
 });
 
 test("write_file: файл вне вольта не проверяется", async () => {
-  const outside = join(
-    mkdtempSync(join(tmpdir(), "iva-links-out-")),
-    "note.md",
-  );
+  const outside = join(tempDir("iva-links-out-"), "note.md");
   const result = await callFile(outside, "ссылка [[никуда-не-ведёт]]\n");
   assert.equal(result.ok, true, result.error);
   assert.equal(existsSync(outside), true);

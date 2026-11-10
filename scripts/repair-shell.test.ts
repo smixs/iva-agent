@@ -8,6 +8,7 @@ import {
   realpathSync,
   readFileSync,
   rmSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -258,6 +259,18 @@ test("repair starts the update from the version on disk when current is lost", (
   writeFileSync(
     join(install, "versions/0.4.2-bbbbbbbbbbbb/bin/iva.mjs"),
     "// newest version\n",
+  );
+  // Свежесть версии ремонт судит по времени файла; часы ядра Linux идут шагом в несколько
+  // миллисекунд, и два файла, записанные подряд, получают одно время.
+  utimesSync(
+    join(install, "versions/0.4.1-aaaaaaaaaaaa/bin/iva.mjs"),
+    new Date("2026-01-01T00:00:00Z"),
+    new Date("2026-01-01T00:00:00Z"),
+  );
+  utimesSync(
+    join(install, "versions/0.4.2-bbbbbbbbbbbb/bin/iva.mjs"),
+    new Date("2026-01-02T00:00:00Z"),
+    new Date("2026-01-02T00:00:00Z"),
   );
 
   const output = run();

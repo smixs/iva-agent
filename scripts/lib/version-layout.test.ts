@@ -198,6 +198,7 @@ test("a foreign link moved into a claim by an interrupted run goes back on the p
   mkdirSync(join(home, ".local/bin"), { recursive: true });
   const outside = join(dirname(home), `${basename(home)}-cmd`);
   mkdirSync(outside, { recursive: true });
+  t.after(() => rmSync(outside, { recursive: true, force: true }));
   writeFileSync(join(outside, "foreign"), "#!/bin/sh\n");
   const dead = execFileSync(process.execPath, ["-p", "process.pid"], {
     encoding: "utf8",

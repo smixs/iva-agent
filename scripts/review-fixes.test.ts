@@ -8,7 +8,6 @@ import assert from "node:assert/strict";
 import {
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   statSync,
   symlinkSync,
@@ -16,11 +15,11 @@ import {
   writeFileSync,
   chmodSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ToolContext } from "eve/tools";
 import { quarantineDir } from "./lib/wf-store.ts";
 import { settled } from "./fixtures/tool-result.ts";
+import { tempDir } from "./fixtures/temp-dir.ts";
 
 // TS — только динамическим импортом: resolve-хук (.js→.ts) не действует на статические
 // импорты, слинкованные до его регистрации.
@@ -76,7 +75,7 @@ test("replace_body: SUPERSEDE переписывает body, сохраняя н
 });
 
 test("card-лок: запоздавший release вытесненного держателя не снимает лок преемника", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "cardlock-"));
+  const dir = tempDir("cardlock-");
   const file = join(dir, "x.md");
   const staleRelease = await cardLock(file);
   // Имитация staleness-отбора: лок «протух», преемник его отобрал и держит свой.
@@ -90,7 +89,7 @@ test("card-лок: запоздавший release вытесненного де�
 });
 
 test("json-лок работает в ещё не созданном каталоге данных (свежая установка)", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "fresh-"));
+  const dir = tempDir("fresh-");
   const lock = join(dir, "data", "tasks.json.lock"); // data/ не существует
   const token = await jsonLock(lock);
   assert.ok(existsSync(lock));
@@ -98,7 +97,7 @@ test("json-лок работает в ещё не созданном катал�
 });
 
 test("карантин закрывает права старого world-readable стора", () => {
-  const root = mkdtempSync(join(tmpdir(), "wfq-"));
+  const root = tempDir("wfq-");
   const dir = join(root, ".workflow-data");
   mkdirSync(dir);
   chmodSync(dir, 0o755); // стор из эпохи до UMask-фикса
@@ -112,7 +111,7 @@ test("карантин закрывает права старого world-readab
 });
 
 test("write_file: симлинк-алиас на cards/ не обходит гард перезаписи", async () => {
-  const vault = mkdtempSync(join(tmpdir(), "vault-"));
+  const vault = tempDir("vault-");
   const cards = join(vault, "cards", "contacts");
   mkdirSync(cards, { recursive: true });
   writeFileSync(join(cards, "ivan.md"), "ORIGINAL CARD");

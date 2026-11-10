@@ -1,15 +1,15 @@
 /* eslint-disable @typescript-eslint/no-floating-promises, @typescript-eslint/require-await -- Node's test runner owns registrations and test doubles return promises. */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fastForwardOffset, loadOffset, saveOffset } from "./poller/offset.ts";
+import { tempDir } from "./fixtures/temp-dir.ts";
 
 type Call = unknown[];
 
 test("corrupt JSON fails closed before getUpdates(-1)", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "iva-offset-corrupt-test-"));
+  const dir = tempDir("iva-offset-corrupt-test-");
   const file = join(dir, "telegram-offset.json");
   writeFileSync(file, "{broken");
   let getUpdatesCalls = 0;
@@ -30,7 +30,7 @@ test("corrupt JSON fails closed before getUpdates(-1)", async () => {
 });
 
 test("ENOENT is the only first-run path and fast-forwards to the Telegram tail", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "iva-offset-first-run-test-"));
+  const dir = tempDir("iva-offset-first-run-test-");
   const file = join(dir, "telegram-offset.json");
   assert.deepEqual(await loadOffset({ file }), {
     offset: null,
@@ -78,7 +78,7 @@ test("first-run fast-forward propagates Telegram and response-shape failures", a
 });
 
 test("saveOffset propagates the canonical durable-write failure", async () => {
-  const dataDir = mkdtempSync(join(tmpdir(), "iva-offset-write-error-test-"));
+  const dataDir = tempDir("iva-offset-write-error-test-");
   const file = join(dataDir, "telegram-offset-test.json");
   const calls: Call[] = [];
   await assert.rejects(
@@ -95,7 +95,7 @@ test("saveOffset propagates the canonical durable-write failure", async () => {
 });
 
 test("saveOffset delegates one private replacement to the canonical primitive", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "iva-offset-save-test-"));
+  const dir = tempDir("iva-offset-save-test-");
   const file = join(dir, "telegram-offset.json");
   const calls: Call[] = [];
   const { writeFileAtomic } = await import("#lib/fs-atomic.ts");

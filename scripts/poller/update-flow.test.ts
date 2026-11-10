@@ -16,8 +16,9 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
+import { tempDir } from "../fixtures/temp-dir.ts";
 
-const dataDir = mkdtempSync(join(tmpdir(), "iva-update-flow-"));
+const dataDir = tempDir("iva-update-flow-");
 process.env.ASSISTANT_DATA_DIR = dataDir;
 process.env.AGENT_LANGUAGE = "en";
 process.env.TELEGRAM_BOT_TOKEN = "token";

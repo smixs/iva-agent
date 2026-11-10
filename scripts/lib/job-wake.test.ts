@@ -23,12 +23,13 @@ import {
   type Translate,
   type WakeTurnResult,
 } from "./job-wake.ts";
+import { tempDir } from "../fixtures/temp-dir.ts";
 
 const NOW = Date.UTC(2026, 8, 13, 12, 0, 0);
 const tr: Translate = (_en, ru) => ru;
 
 function file(): string {
-  return jobFactsFile(mkdtempSync(join(tmpdir(), "t20-wake-")));
+  return jobFactsFile(tempDir("t20-wake-"));
 }
 
 function fact(overrides: Partial<JobFact> = {}): JobFact {

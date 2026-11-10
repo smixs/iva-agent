@@ -1,22 +1,16 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import {
-  cpSync,
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
+import { cpSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { tempDir } from "./fixtures/temp-dir.ts";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
 // The script retires state beside itself, so each run gets its own copy of it.
 function app(): string {
-  const root = mkdtempSync(join(tmpdir(), "iva-recover-"));
+  const root = tempDir("iva-recover-");
   for (const file of [
     "scripts/recover-interrupted-turns.ts",
     "scripts/lib/data-dir.ts",

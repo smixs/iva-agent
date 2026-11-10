@@ -1,8 +1,7 @@
 /* eslint-disable @typescript-eslint/no-floating-promises, @typescript-eslint/require-await -- Node's test runner owns registrations. */
 // Дневной сторож (T20 п.4): одно сообщение в сутки, когда провалы есть, а агент молчит.
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -16,6 +15,7 @@ import {
   watchdogMessage,
   watchdogStateFile,
 } from "./job-watchdog.ts";
+import { tempDir } from "../fixtures/temp-dir.ts";
 
 const NOW = Date.UTC(2026, 8, 13, 12, 0, 0);
 const HOUR = 60 * 60 * 1000;
@@ -37,7 +37,7 @@ function fact(overrides: Partial<JobFact> = {}): JobFact {
 }
 
 function dir(): string {
-  return mkdtempSync(join(tmpdir(), "t20-watchdog-"));
+  return tempDir("t20-watchdog-");
 }
 
 test("провал есть, ходов нет — одно сообщение с числом и doctor", () => {

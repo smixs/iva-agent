@@ -21,7 +21,8 @@ function withFlock(t: { after: (fn: () => void) => void }, body: string) {
   mkdirSync(join(dir, "bin"));
   writeFileSync(
     join(dir, "bin", "flock"),
-    `#!/bin/sh\necho "$@" > "${join(dir, "args")}"\n${body}\n`,
+    // printf, а не echo: у dash (sh на Linux) `echo -n …` съедает сам флаг.
+    `#!/bin/sh\nprintf '%s\\n' "$*" > "${join(dir, "args")}"\n${body}\n`,
     { mode: 0o755 },
   );
   const env: NodeJS.ProcessEnv = { ...process.env, PATH: join(dir, "bin") };

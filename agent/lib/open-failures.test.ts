@@ -2,9 +2,7 @@
 // «Незакрытые провалы» (T20 п.3, ADR-0020): закрытие успехом и ack, окно суток у напоминаний,
 // напоминания рядом с расписаниями, пустой блок.
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { writeFileSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -22,6 +20,7 @@ import {
   type JobFact,
 } from "./job-facts.ts";
 import type { Reminder } from "./reminder-store.ts";
+import { tempDir } from "../../scripts/fixtures/temp-dir.ts";
 
 const NOW = Date.UTC(2026, 8, 13, 12, 0, 0);
 const HOUR = 60 * 60 * 1000;
@@ -117,7 +116,7 @@ test("провал задания старше суток без успеха и
     openFailuresFrom([old], [], NOW).map((entry) => entry.name),
     ["memory-night"],
   );
-  const dir = mkdtempSync(join(tmpdir(), "iva-open-failures-old-"));
+  const dir = tempDir("iva-open-failures-old-");
   await recordFact(jobFactsFile(dir), old, NOW);
   const fromDisk = await openFailures({
     dir,
@@ -207,7 +206,7 @@ test("блок для промпта: пусто — пустая строка, 
 });
 
 test("openFailures читает факты с диска и напоминания из источника", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "t20-open-"));
+  const dir = tempDir("t20-open-");
   await recordFact(
     jobFactsFile(dir),
     fact({ ok: false, error: "exited 2" }),
@@ -225,7 +224,7 @@ test("openFailures читает факты с диска и напоминани
 });
 
 test("битая таблица фактов приходит в ход текстом, а не исключением", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "t20-broken-"));
+  const dir = tempDir("t20-broken-");
   writeFileSync(jobFactsFile(dir), "{");
   const previous = process.env.ASSISTANT_DATA_DIR;
   process.env.ASSISTANT_DATA_DIR = dir;
@@ -246,7 +245,7 @@ test("битая таблица фактов приходит в ход текс
 test("динамическая инструкция 40-open-failures несёт блок в ход", async () => {
   // Проводка до хода: инструкция читает таблицу из ASSISTANT_DATA_DIR и отдаёт блок
   // сама, без аргументов. Напоминаний в каталоге нет — провал расписания приходит один.
-  const dir = mkdtempSync(join(tmpdir(), "t20-instruction-"));
+  const dir = tempDir("t20-instruction-");
   const now = Date.now();
   await recordFact(
     jobFactsFile(dir),
@@ -305,7 +304,7 @@ test("21 провал: хвост блока называет data/jobs.json, а
 // Ремонт (Sol P2): снятые расписания (memory-daily, -weekly, -monthly, -yearly) остаются в
 // jobs.json, но провалом не считаются нигде: ни в инструкции хода, ни у сторожа, ни в doctor.
 test("снятое расписание не попадает в открытые провалы и в инструкцию хода", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "t20-open-retired-"));
+  const dir = tempDir("t20-open-retired-");
   for (const name of [
     "memory-daily",
     "memory-weekly",

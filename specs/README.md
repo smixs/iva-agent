@@ -308,6 +308,7 @@ PATH=/opt/homebrew/opt/openjdk@25/bin:$PATH JAVA_TOOL_OPTIONS=-Xmx3g sh specs/he
 Load <20 перед каждым cfg, workers 1..4, heap по умолчанию 3 GiB; BFS
 seed 20261013/fingerprint 1. Simulation отделена от полного перебора.
 Trap удаляет metadir/states; LOG_DIR сохраняет журналы и results.tsv.
+Срок на конфигурацию — `TLC_TIMEOUT`, по умолчанию 1800 с: на стенде WSL2 (8 потоков, 7,8 ГБ, TLC 1.7.4, Java 21) самая долгая, `HelperRun-v72-run`, идёт 699 с, весь скрипт — 859 с (замер 10.11.2026).
 Ожидаемый invariant отказ требует exit12 и точное имя; temporal отказ — exit13
 и единственное свойство конфигурации. Инфраструктурная ошибка не убивает мутант.
 Всего 48 конфигураций: 24 HelperRun (10 зелёных, 12 разных мутантов,
