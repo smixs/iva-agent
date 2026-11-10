@@ -2,8 +2,8 @@
 /* eslint-disable @typescript-eslint/prefer-promise-reject-errors -- regression cases preserve non-Error boundary failures */
 import test, { after, type TestContext } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
-import { spawn } from "node:child_process";
+import { existsSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import { execFileSync, spawn } from "node:child_process";
 import {
   mkdtemp,
   open,
@@ -14,7 +14,9 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import fc from "fast-check";
+import { tempDir } from "../fixtures/temp-dir.ts";
 import {
   TELEGRAM_MESSAGE_ENVELOPE_KEYS,
   TELEGRAM_MESSAGE_TEXT_KEYS,
@@ -43,6 +45,8 @@ import {
   type TelegramQueueUpdate,
 } from "./telegram-queue.ts";
 
+const ROOT = fileURLToPath(new URL("../../", import.meta.url));
+
 type InFlightGate = {
   state: string;
   [key: string]: unknown;
@@ -63,6 +67,11 @@ type DrainOptions = {
   inFlight?: Map<string, InFlightGate>;
   pins?: Map<string, readonly number[]>;
   statusImpl?: () => unknown;
+  legacyAllowedUserIds?: ReadonlySet<string>;
+  quarantineImpl?: (
+    records: Parameters<typeof quarantineQueueRecords>[1],
+  ) => Promise<unknown>;
+  resetPendingImpl?: (chatKey: string) => boolean;
   now?: () => number;
   gateWaitMs?: number;
   rotationState?: { afterKey: string | null };
@@ -140,6 +149,25 @@ async function queueFile(t: TestContext): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), "iva-telegram-queue-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
   return join(dir, "telegram-queue.json");
+}
+
+/** The queue module of a shipped release as it was, on this tree's node_modules. */
+async function shippedQueue(tag: string) {
+  const root = tempDir("iva-telegram-queue-shipped-");
+  execFileSync("tar", ["-xf", "-", "-C", root], {
+    input: execFileSync(
+      "git",
+      ["archive", tag, "scripts", "agent", "packages", "package.json"],
+      { cwd: ROOT, maxBuffer: 32 * 1024 * 1024 },
+    ),
+  });
+  symlinkSync(join(ROOT, "node_modules"), join(root, "node_modules"));
+  return (await import(
+    pathToFileURL(join(root, "scripts/lib/telegram-queue.ts")).href
+  )) as Pick<
+    typeof import("./telegram-queue.ts"),
+    "loadQueueFile" | "materializeQueueItem"
+  > & { migrateQueueFile: (file: string) => Promise<unknown> };
 }
 
 async function waitForFile(file: string, timeoutMs = 2_000): Promise<void> {
@@ -345,39 +373,96 @@ void test("PROPERTY NoSilentLoss: any document without a queue version keeps its
   );
 });
 
-void test("NoSilentLoss: an item converted from a string is copied whole to the record quarantine", async (t) => {
-  const file = await queueFile(t);
-  const good = createQueueItem(privateUpdate(11, "keep me"), 1);
-  const converted = {
-    version: 1,
-    updateId: -77,
-    legacyText: "text an older Iva converted",
-    migratedFrom: "string",
-  };
-  await writeFile(
-    file,
-    JSON.stringify({ version: 1, queues: { "42:": [converted, good] } }),
-  );
-  const logs: unknown[][] = [];
-  const loaded = await loadQueueFile(file, {
-    strict: true,
-    logImpl: (...parts) => logs.push(parts),
+// specs/UpdateFloor.tla: SupportedIsServed. Releases 0.5.0 to 0.5.11 rewrote a queue of
+// strings as items with `legacyText`: that file is a supported release's, and it is read
+// and delivered as that release did it.
+for (const tag of ["v0.5.0", "v0.5.11"]) {
+  void test(`SupportedIsServed: the queue the shipped ${tag} writer leaves is read, kept through the next write and delivered`, async (t) => {
+    const shipped = await shippedQueue(tag);
+    const file = await queueFile(t);
+    await writeFile(
+      file,
+      JSON.stringify({ "42:": ["keep this request"], "7:": ["a stranger"] }),
+    );
+    await shipped.migrateQueueFile(file);
+    const written = await readFile(file, "utf8");
+    assert.ok(written.includes('"legacyText":"keep this request"'), written);
+    const theirs = (await shipped.loadQueueFile(file, { strict: true }))
+      .document;
+
+    const logs: unknown[][] = [];
+    const ours = (
+      await loadQueueFile(file, {
+        strict: true,
+        logImpl: (...parts) => logs.push(parts),
+      })
+    ).document;
+    assert.deepEqual(ours, theirs);
+    assert.equal(queueCount(ours), 2);
+    assert.deepEqual(logs, []);
+    assert.equal(await readFile(file, "utf8"), written);
+    assert.deepEqual(await readdir(dirname(file)), ["telegram-queue.json"]);
+
+    const allowed = new Set(["42"]);
+    for (const key of ["42:", "7:"])
+      assert.deepEqual(
+        materializeQueueItem(key, queueHead(ours, key)!, {
+          legacyAllowedUserIds: allowed,
+        }),
+        shipped.materializeQueueItem(key, queueHead(theirs, key)!, {
+          legacyAllowedUserIds: allowed,
+        }),
+        key,
+      );
+
+    // The next write keeps the request in the working file, ahead of the new one.
+    await enqueueQueueFile(file, "42:", privateUpdate(200, "a new request"));
+    const after = (await loadQueueFile(file, { strict: true })).document;
+    assert.deepEqual(
+      after.queues["42:"].map(
+        (item) => item.legacyText ?? item.update?.message?.text,
+      ),
+      ["keep this request", "a new request"],
+    );
+    assert.deepEqual(after.queues["7:"], theirs.queues["7:"]);
+    assert.deepEqual(await readdir(dirname(file)), ["telegram-queue.json"]);
+
+    let document: TelegramQueueDocument = {
+      version: TELEGRAM_QUEUE_VERSION,
+      queues: { "42:": ours.queues["42:"] },
+    };
+    const delivered: TelegramQueueUpdate[] = [];
+    assert.equal(
+      await drainReadyQueueHeads({
+        loadImpl: async () => document,
+        runningImpl: () => false,
+        statusImpl: () => null,
+        legacyAllowedUserIds: allowed,
+        deliverImpl: async (update) => {
+          delivered.push(update);
+          return "handled";
+        },
+        acknowledgeImpl: async (key, ids) => {
+          document = removeQueueItems(document, key, ids).document;
+        },
+        quarantineImpl: () => assert.fail("the owner's request is delivered"),
+        settleUntil: new Map(),
+        inFlight: new Map(),
+        pins: new Map(),
+      }),
+      0,
+    );
+    assert.deepEqual(
+      delivered.map((update) => [
+        update.message?.chat?.id,
+        update.message?.from?.id,
+        update.message?.text,
+      ]),
+      [[42, 42, "keep this request"]],
+    );
+    assert.equal(queueCount(document), 0);
   });
-  assert.deepEqual(loaded.document.queues, { "42:": [good] });
-  const copies = (await readdir(dirname(file))).filter((name) =>
-    name.startsWith("telegram-queue.json.damaged-"),
-  );
-  assert.equal(copies.length, 1);
-  assert.equal(logs.length, 1);
-  assert.deepEqual(
-    (
-      JSON.parse(await readFile(join(dirname(file), copies[0]), "utf8")) as {
-        record: unknown;
-      }
-    ).record,
-    converted,
-  );
-});
+}
 
 for (const seed of [18102026, 18102027]) {
   void test(`PROPERTY: newer queue versions preserve arbitrary bytes (seed=${seed})`, async (t) => {
@@ -1179,7 +1264,10 @@ void test("queued media and quoted metadata replay from the durable update witho
   await enqueueQueueFile(file, "1:", update);
   const { document } = await loadQueueFile(file, { strict: true });
 
-  assert.deepEqual(materializeQueueItem(queueHead(document, "1:")!), update);
+  assert.deepEqual(
+    materializeQueueItem("1:", queueHead(document, "1:")!),
+    update,
+  );
 });
 
 void test("busy routing is fail-closed and keeps addressed private, group and topic updates", () => {
@@ -1808,4 +1896,122 @@ void test("POISON malformed pending acknowledgement is preserved and main queue 
     );
   }
   assert.equal(logs.length, 3);
+});
+
+void test("POISON an unreplayable queue head is quarantined before ack and next head runs", async (t) => {
+  const file = await queueFile(t);
+  // What 0.5.0 to 0.5.11 left of a group text: no sender to deliver it as.
+  const bad = {
+    version: TELEGRAM_QUEUE_ITEM_VERSION,
+    updateId: -77,
+    legacyText: "private legacy",
+    migratedFrom: "string",
+  };
+  let document: TelegramQueueDocument = {
+    version: TELEGRAM_QUEUE_VERSION,
+    queues: { "-100:": [bad] },
+  };
+  document = enqueueItem(
+    document,
+    "-100:",
+    createQueueItem(
+      {
+        ...privateUpdate(12, "next"),
+        message: {
+          ...privateUpdate(12, "next").message,
+          chat: { id: -100, type: "group" },
+        },
+      },
+      2,
+    ),
+  ).document;
+  const events: string[] = [];
+  const logs: unknown[][] = [];
+  const options = {
+    loadImpl: async () => document,
+    runningImpl: () => false,
+    statusImpl: () => null,
+    deliverImpl: async () => {
+      events.push("deliver");
+      return "handled" as const;
+    },
+    acknowledgeImpl: async (key: string, ids: readonly number[]) => {
+      events.push("ack");
+      document = removeQueueItems(document, key, ids).document;
+    },
+    quarantineImpl: async (
+      records: Parameters<typeof quarantineQueueRecords>[1],
+    ) => {
+      events.push("copy");
+      return quarantineQueueRecords(file, records, {
+        logImpl: (...parts) => logs.push(parts),
+      });
+    },
+    settleUntil: new Map<string, number>(),
+    inFlight: new Map<string, InFlightGate>(),
+    pins: new Map(),
+    resetPendingImpl: () => false,
+  };
+  // A failed copy keeps this head while another chat is delivered in the same pass.
+  const failures: unknown[][] = [];
+  t.mock.method(console, "log", (...parts: unknown[]) => failures.push(parts));
+  for (const code of ["EACCES", "ENOSPC"]) {
+    document = enqueueItem(
+      document,
+      "1:",
+      createQueueItem(privateUpdate(13, "other chat"), 3),
+    ).document;
+    assert.equal(
+      await drainReadyQueueHeads({
+        ...options,
+        quarantineImpl: async () => {
+          throw Object.assign(new Error("private copy failure"), { code });
+        },
+      }),
+      2,
+    );
+    assert.deepEqual(events, ["deliver", "ack"]);
+    assert.equal(queueCount(document), 2);
+    assert.deepEqual(queueHead(document, "-100:"), bad);
+    const line = JSON.stringify(failures.at(-1));
+    assert.match(line, new RegExp(code));
+    assert.ok(!line.includes("private"));
+    events.length = 0;
+  }
+  assert.equal(failures.length, 2);
+  await assert.rejects(
+    drainReadyQueueHeads({
+      ...options,
+      acknowledgeImpl: async () => {
+        events.push("ack-failed");
+        throw new Error("ack failed");
+      },
+    }),
+    /ack failed/,
+  );
+  assert.equal(queueCount(document), 2);
+  assert.equal(await drainReadyQueueHeads(options), 1);
+  assert.deepEqual(events, ["copy", "ack-failed", "copy", "ack"]);
+  assert.equal(await drainReadyQueueHeads(options), 0);
+  assert.deepEqual(events, [
+    "copy",
+    "ack-failed",
+    "copy",
+    "ack",
+    "deliver",
+    "ack",
+  ]);
+  assert.equal(logs.length, 1);
+  const copies = (await readdir(dirname(file))).filter((name) =>
+    name.includes(".damaged-"),
+  );
+  assert.equal(copies.length, 1);
+  assert.deepEqual(
+    (
+      JSON.parse(await readFile(join(dirname(file), copies[0]), "utf8")) as {
+        record: unknown;
+      }
+    ).record,
+    bad,
+  );
 });
