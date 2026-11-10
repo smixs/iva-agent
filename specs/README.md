@@ -79,12 +79,14 @@ Checked invariants, by the numbering of the task that produced them:
 2. `UnitsReturn`: a unit that ran before the update runs after it — on success, on a rollback and on a break with a retry — or the owner was told why it stays off (a userbot whose environment cannot be rebuilt).
 3. `SessionsAccounted`: session state is either back in place or moved to a path that is written down.
 4. `PinnedAnswered`: `active.json` names only a version that answered.
+5. `FinalOnlyWhenPinned`: the journal publishes `settled` only after `active.json` names the candidate. These are separate disk writes; UpdateJob can observe either boundary.
 
 `update-run-check.sh` checks the green configuration and one witness per invariant:
 
 - `UpdateRun-memory-units.cfg`: the snapshot of the units lives in the memory of the process (the code before the repair) — `UnitsReturn`; the same run loses the quarantine paths.
 - `UpdateRun-retry-forgets.cfg`: the journal is written and the retry does not read it — `UnitsReturn`.
 - `UpdateRun-unrecorded-trash.cfg`: the quarantine moves state and writes no path — `SessionsAccounted`.
+- `UpdateRun-journal-first.cfg`: the journal publishes `settled` before `active.json` — `FinalOnlyWhenPinned` (R1). `scripts/update-pin.test.ts` exercises the same boundary through the real UpdateJob consumer.
 - `UpdateRun-settle-first.cfg`: `active.json` is written before the candidate answered — `PinnedAnswered`.
 - `UpdateRun-rollback.cfg`: the candidate does not come up and the userbot's environment cannot be rebuilt — no error: the units that ran come back, and the userbot stays off with a reason.
 

@@ -26,6 +26,8 @@ check() { # config expected
   fi
 }
 check UpdateRun none
+# R1: journal settled before active.json lets UpdateJob announce an unpinned version.
+check UpdateRun-journal-first FinalOnlyWhenPinned
 # Откат кандидата: юниты возвращаются, юзербот остаётся выключен с названной причиной.
 check UpdateRun-rollback none
 # Снимок юнитов только в памяти (код до ремонта) — краснеет (2).

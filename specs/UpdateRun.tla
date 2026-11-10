@@ -11,6 +11,7 @@
      start       startCandidateServices: службы кандидата, юниты возвращены по снимку
      serve       проба порта установки: кандидат ответил (store.recordLive)
      settle      store.settle: active.json называет кандидата
+     journal     markUpdateRun: settled становится виден UpdateJob
      cleanup     gc версий, шим, Google CLI; журнал закрыт
 
    Обрыв — убийство процесса между любыми двумя шагами (Kill). Повтор (Retry) читает
@@ -26,6 +27,7 @@
      (3) SessionsAccounted состояние из карантина либо возвращено, либо снято осознанно,
                            и путь к нему записан
      (4) PinnedAnswered    active.json называет только версию, которая отвечала
+     (5) FinalOnlyWhenPinned журнал settled/done публикуется после закрепления
 
    Мутанты (свидетели):
      JournalUnits = FALSE       снимок юнитов живёт только в памяти процесса (код до ремонта):
@@ -33,6 +35,7 @@
      RetryReadsJournal = FALSE  журнал пишется, повтор его не читает -> (2)
      JournalTrash = FALSE       карантин без записанного пути -> (3)
      SettleAfterServe = FALSE   active.json до ответа кандидата -> (4)
+     JournalAfterPin = FALSE    журнал settled до active.json -> (5)
 
    Конфигурации, которые держат зелёное поведение на обоих исходах хода:
      CandidateAnswers = FALSE   кандидат не поднялся: откат, юниты возвращаются
@@ -52,11 +55,12 @@ CONSTANTS
   RetryReadsJournal,  \* TRUE - повтор берёт снимок и пути из журнала
   SettleAfterServe,   \* TRUE - active.json пишется только после ответа кандидата
   CandidateAnswers,   \* TRUE - кандидат поднимается и отвечает на порту установки
+  JournalAfterPin,    \* TRUE - settled in the journal follows active.json
   UserbotRebuilds     \* TRUE - окружение юзербота собирается (uv на месте)
 
 Units == {"timer", "userbot"}
 Steps == {"prepare", "stop", "quarantine", "migrate", "flip", "start", "serve",
-          "settle", "cleanup"}
+          "settle", "pin", "journal", "cleanup"}
 
 VARIABLES
   run,       \* "idle" | "running" | "killed"
@@ -175,12 +179,20 @@ Back ==
 
 \* active.json называет кандидата. В коде - после ответа; мутант делает это до него.
 Settle ==
-  /\ step = "settle" \/ (step = "serve" /\ ~SettleAfterServe)
+  /\ step \in {"settle", "pin"} \/ (step = "serve" /\ ~SettleAfterServe)
+  /\ step # "settle" \/ JournalAfterPin
   /\ ~SettleAfterServe \/ answered = current
   /\ pinned' = current
-  /\ step' = IF step = "settle" THEN "cleanup" ELSE step
-  /\ journal' = IF JournalUnits /\ step = "settle" THEN "settled" ELSE journal
-  /\ UNCHANGED <<run, current, answered, units, base, sessions, trash, told, ever, was>>
+  /\ step' = IF step = "settle" THEN "journal"
+             ELSE IF step = "pin" THEN "cleanup" ELSE step
+  /\ UNCHANGED <<run, current, answered, units, base, sessions, trash, told, ever, was, journal>>
+
+\* Consumer UpdateJob can observe this disk write independently of active.json.
+JournalSettle ==
+  /\ step = "journal" \/ (step = "settle" /\ ~JournalAfterPin)
+  /\ journal' = IF JournalUnits THEN "settled" ELSE journal
+  /\ step' = IF step = "journal" THEN "cleanup" ELSE "pin"
+  /\ UNCHANGED <<run, current, answered, pinned, units, base, sessions, trash, told, ever, was>>
 
 \* Уборка после ответа: gc версий, шим, Google CLI. Юниты уже возвращены.
 Cleanup ==
@@ -217,11 +229,11 @@ Retry ==
 
 Next ==
   \/ Begin \/ StopWriters \/ Quarantine \/ Migrate \/ Flip \/ Start \/ Serve \/ Back
-  \/ Settle \/ Cleanup \/ Kill \/ Retry
+  \/ Settle \/ JournalSettle \/ Cleanup \/ Kill \/ Retry
 
 Spec == Init /\ [][Next]_vars /\ WF_vars(Retry) /\ WF_vars(StopWriters)
         /\ WF_vars(Quarantine) /\ WF_vars(Migrate) /\ WF_vars(Flip) /\ WF_vars(Start)
-        /\ WF_vars(Serve) /\ WF_vars(Back) /\ WF_vars(Settle) /\ WF_vars(Cleanup)
+        /\ WF_vars(Serve) /\ WF_vars(Back) /\ WF_vars(Settle) /\ WF_vars(JournalSettle) /\ WF_vars(Cleanup)
 
 TypeOK ==
   /\ run \in {"idle", "running", "killed"}
@@ -254,6 +266,9 @@ SessionsAccounted ==
 
 \* (4) active.json называет только ту версию, которая отвечала.
 PinnedAnswered == pinned \in ever
+
+\* UpdateJob may announce success only after the version is pinned.
+FinalOnlyWhenPinned == journal \in {"settled", "done"} => pinned = current
 
 \* (2) и (1) вместе на обрыве: повтор доходит до покоя и снова отвечает.
 AnswersAgain == (run = "killed") ~> (answered # "none")
