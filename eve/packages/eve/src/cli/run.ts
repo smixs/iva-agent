@@ -19,11 +19,6 @@ import { registerRegistryCommands } from "#cli/commands/register-registry-comman
 import { runInteractiveDevelopmentUi } from "#cli/dev/run-interactive-ui.js";
 import { resolveDevUiMode, resolveTuiDisplayOptions } from "#cli/dev/ui-options.js";
 import {
-  registerAcpCommand,
-  type ResolveVerifiedRemoteDevelopmentClient,
-  type RunAcpServer,
-} from "#cli/acp/command.js";
-import {
   FORCED_EXIT_BACKSTOP_MS,
   installShutdownSignal,
   waitForShutdownSignal,
@@ -73,8 +68,6 @@ interface CliRuntimeDependencies {
     readonly serverUrl: string;
   }): Promise<boolean>;
   buildHost: BuildHost;
-  resolveVerifiedRemoteDevelopmentClient: ResolveVerifiedRemoteDevelopmentClient;
-  runAcpServer: RunAcpServer;
   printApplicationInfo(
     logger: CliLogger,
     appRoot: string,
@@ -321,15 +314,6 @@ function createCliProgram(
     });
 
   registerRuntimeInvokeCommand({ applicationContext, logger, program, runtime });
-
-  registerAcpCommand({
-    applicationContext,
-    eveVersion: packageVersion,
-    program,
-    resolveVerifiedRemoteDevelopmentClient: runtime.resolveVerifiedRemoteDevelopmentClient,
-    runAcpServer: runtime.runAcpServer,
-    startHost: runtime.startHost,
-  });
 
   agentCommand(program.command("dev"), applicationContext, (command) => {
     const options = command.opts<DevelopmentCliOptions>();
