@@ -485,7 +485,9 @@ function updateChatStatus(
   const file = statusFileOf(chatKey);
   const lock = acquireChatLock(file);
   try {
-    // Первый write лениво мигрирует этот ключ из legacy whole-map.
+    // Запись читается из своего per-chat файла; общий `run-status.json` выпусков ниже
+    // границы сюда не попадает: его переводит в per-chat записи ступенька обновления
+    // (`repair.sh:step_converts`), до того как эта версия начнёт работать.
     const prev: RawRecord = readPerChat(chatKey) ?? {};
     if (
       expected &&
