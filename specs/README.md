@@ -513,3 +513,35 @@ Id строки используется один раз на трассу; уб
 Модель проверяет атомарные записи и порядок событий. Реальные миллисекунды,
 матрица `goalActor`, транспорт Telegram, права файлов, текст заданий и соответствие
 фактическому коду G1 проверяются при реализации и общей приёмке.
+
+## ReminderLifecycle
+
+`ReminderLifecycle.tla` models one row of `data/reminders.json` through its firings: a Reminder (`Kind = "at"`) or a Routine (`Kind = "cron"`). Four processes share the row: the minute tick inside the agent (`agent/lib/reminder-tick.ts`, three table transactions in order: `fireDue`, `sweepFired`, `closeAbandoned`), the fire child (`scripts/reminders/fire.ts`), the Alert child (the same script called with `abandoned`) and the tick's in-memory continuation, which dies with the agent. The agent may crash and restart at any step; a child may die at any step, also together with the agent. The liveness window of a firing (`reminderPhase` says `running` until it passes) is one `Expire` step that may happen while the child is still alive. `firing` stands for `firedAt`, the identity every `recordDelivery` compares before it writes.
+
+The decision the model carries: a firing left with neither a fact nor a reason is closed by the tick with a reason, and the owner gets one Alert. The row text is not sent again, because the table cannot tell whether the dead child had already sent it.
+
+Checked properties:
+
+1. `ExactlyOnceOrReason`: a firing that is over went out exactly once or carries its reason.
+2. `BoundedOutcome`: no tick walks past an open firing whose window has passed. `EveryFiringConcludes` (liveness, weak fairness on the tick, the restart and the clock): every taken row gets its outcome, across crashes and restarts too.
+3. `FactOfThisFiring`: the fact in the row is the fact of the firing the row shows; a late result of an older firing is dropped.
+4. `OncePerDue`: one due, one firing.
+5. `NoDuplicate`: the text of one firing reaches the chat at most once.
+6. `AlertOnce`: one abandoned firing, at most one Alert.
+
+| Config                            | Mutation                                                | Fails                  |
+| --------------------------------- | ------------------------------------------------------- | ---------------------- |
+| `ReminderLifecycle-nopickup`      | the tick does not close abandoned firings (code before) | `BoundedOutcome`       |
+| `ReminderLifecycle-nopickup-live` | the same, checked as liveness                           | `EveryFiringConcludes` |
+| `ReminderLifecycle-resend`        | the Alert child sends the row text as is                | `NoDuplicate`          |
+| `ReminderLifecycle-stale`         | a result is written without comparing `firedAt`         | `FactOfThisFiring`     |
+| `ReminderLifecycle-recapture`     | taking the row leaves it on the same due                | `OncePerDue`           |
+| `ReminderLifecycle-sweepopen`     | the sweep removes a row that has no outcome             | `ExactlyOnceOrReason`  |
+
+`ReminderLifecycle.cfg` checks a Reminder and `ReminderLifecycle-routine.cfg` a Routine with two dues, both with two crashes. The conformance tests in `scripts/reminders/lifecycle.test.ts` carry the invariant names and replay the counterexamples on the real store, tick and child.
+
+Outside the model: `move` and `run_now` (`ScheduleTool`), the turn itself (`TurnLifecycle`, `ReminderSilence`), the per-tick claim limit, a damaged table, a Telegram answer that lies about delivery, and the Alert throttle of scheduled commands. An Alert lost to a crash between the closing write and the handover to the child is accepted: the reason stays in the row, where `remind list` and `iva doctor` show it.
+
+```sh
+specs/reminder-lifecycle-check.sh
+```
