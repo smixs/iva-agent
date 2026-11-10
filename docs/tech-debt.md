@@ -248,3 +248,12 @@ the absent/matching `body_hash` cases regain the old behavior until upgraded aga
 ## 20. Accepted empty-response limit
 
 After three recoverable empty responses, a fourth ends the eve turn with `turn.failed`; background turns retain their owner-facing outcome (#338), and the owner can start another attempt from the parked chat turn. See [ADR-0023](adr/0023-eve-is-ours-to-change.md).
+
+## 21. What the chat record, the reset and the reminder row still leave open
+
+Four findings of the lean work, named but not repaired, each with the place that would change. Frequency × harm of each is in the task reports (`.scratch/work/lean-beta/v1-report.md` §6, `v2-report.md` §10).
+
+- A `/new` during a reminder turn aims at the reminder's session: `scripts/lib/telegram-reset.ts:34-39,103` takes `sessionId` of the record, so the owner's dialog is not reset. Reproduced by functions, not by a live turn.
+- A turn cut short while its chat still holds the queue: the reaper skips the record while the delivery phase holds the key (`scripts/poller/queue.ts:1077`), and the next message takes the stale record, so the owner gets no "turn broke, retry" message. Needs a model of `QueueDrain` before a repair.
+- The Alert about a firing whose outcome was never recorded waits up to the stale interval, thirty minutes today (`agent/lib/reminder-store.ts:930`, `agent/lib/run-status.ts:241-242`). The start time of the agent would give a minute; it needs a live check that the tick module outlives a turn, or a turn longer than a minute would get a false Alert.
+- The texts of the reminder Alerts are Russian only (`scripts/reminders/command.ts:100-106`), as the command Alerts were before.
