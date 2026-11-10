@@ -37,11 +37,6 @@ from pathlib import Path
 SESSION_NAME = "telegram-userbot.session"
 
 
-async def _health_payload(client) -> dict[str, str]:
-    """Report authorization from the proxy's existing Telethon client."""
-    return {"state": "ready" if await client.is_user_authorized() else "unauthorized"}
-
-
 def _fail(msg: str) -> None:
     print(f"telegram-userbot: {msg}", file=sys.stderr)
     sys.exit(1)
@@ -207,9 +202,10 @@ def main() -> None:
 
     # Register onboarding tools AFTER pruning so QR login always works — you must be
     # able to connect the account even under read-only exposure.
-    from onboarding import register_onboarding_tools
+    from onboarding import Login, register_onboarding_tools
 
-    register_onboarding_tools(mcp, clients["default"])
+    login = Login(clients["default"], session_path)
+    register_onboarding_tools(mcp, login)
 
     # Enforce the anti-ban safety guide as server behavior (FloodWait compliance,
     # pacing, circuit-breaker) by wrapping the client's outbound methods in place.
@@ -241,7 +237,7 @@ def main() -> None:
             return await call_next(request)
 
     async def health(_request):
-        return JSONResponse(await _health_payload(clients["default"]))
+        return JSONResponse(await login.health())
 
     async def amain() -> None:
         from tool_contracts import install_tool_contracts

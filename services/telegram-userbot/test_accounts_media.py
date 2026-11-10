@@ -198,7 +198,7 @@ class AccountsMediaTest(unittest.IsolatedAsyncioTestCase):
                         await asyncio.sleep(0.05)
                     else:
                         self.fail("proxy did not start")
-                    self.assertEqual(response.json(), {"state": "unauthorized"})
+                    self.assertEqual(response.json(), {"state": "unauthorized", "login": "idle"})
                     denied = await http.get(f"http://127.0.0.1:{port}/healthz")
                     self.assertEqual(denied.status_code, 401)
                 async with streamablehttp_client(f"http://127.0.0.1:{port}/mcp", headers=headers) as (read, write, _):
