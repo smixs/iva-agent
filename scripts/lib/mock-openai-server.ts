@@ -1,4 +1,4 @@
-// Mock OpenAI-совместимый провайдер для replica-смоука (scripts/replica-smoke.ts).
+// Общий HTTP-провайдер для герметичных смоуков и тестов.
 // Поднимает локальный http-сервер с единственным эндпоинтом POST /v1/chat/completions
 // и отвечает по сценарию, завязанному на текст последнего user-сообщения, — так смоук
 // проверяет полный путь build → eve → провайдер без сети и настоящей модели.
@@ -8,7 +8,7 @@ import { createServer, type IncomingMessage } from "node:http";
 import { text as consumeText } from "node:stream/consumers";
 import { isRecord } from "../../packages/guards/index.ts";
 
-const MODEL = "iva-replica";
+const MODEL = "iva-smoke";
 
 function stringifyContentPart(value: unknown): string {
   if (value == null) return "";
@@ -63,7 +63,7 @@ function chooseResponse(body: unknown): string {
 
 function completionJson(text: string) {
   return {
-    id: "chatcmpl-replica",
+    id: "chatcmpl-smoke",
     object: "chat.completion",
     created: 1,
     model: MODEL,
@@ -80,7 +80,7 @@ function completionJson(text: string) {
 
 function streamChunks(text: string) {
   const base = {
-    id: "chatcmpl-replica",
+    id: "chatcmpl-smoke",
     object: "chat.completion.chunk",
     created: 1,
     model: MODEL,
@@ -109,18 +109,38 @@ async function readBody(req: IncomingMessage): Promise<string> {
   return consumeText(req);
 }
 
+export type MockStep =
+  | { kind: "text"; text: string }
+  | { kind: "tool"; name: string; arguments: string; id?: string }
+  | { kind: "overloaded"; times?: number }
+  | { kind: "empty" }
+  | { kind: "disconnect" };
+
+export type MockRequest = { method: string; path: string; raw: string };
+
 export type MockOpenAiServer = {
   baseUrl: string;
   requests: unknown[];
+  wireRequests: MockRequest[];
+  enqueue(...steps: MockStep[]): void;
   close(): Promise<void>;
 };
 
 /** Стартует mock-провайдер на 127.0.0.1:0; handle: { baseUrl, requests, close }. */
-export async function startMockOpenAiServer(): Promise<MockOpenAiServer> {
+export async function startMockOpenAiServer(
+  steps: MockStep[] = [],
+  record?: (request: MockRequest) => void,
+): Promise<MockOpenAiServer> {
+  const scenario = steps.map((step) => ({ ...step }));
   const requests: unknown[] = [];
+  const wireRequests: MockRequest[] = [];
   // Node does not consume the request handler's promise; response completion is handled inside it.
   // eslint-disable-next-line @typescript-eslint/no-misused-promises
   const server = createServer(async (req, res) => {
+    const raw = await readBody(req);
+    const recorded = { method: req.method ?? "", path: req.url ?? "", raw };
+    wireRequests.push(recorded);
+    record?.(recorded);
     if (req.method !== "POST" || req.url !== "/v1/chat/completions") {
       res.writeHead(404, { "content-type": "application/json" });
       res.end(
@@ -132,26 +152,72 @@ export async function startMockOpenAiServer(): Promise<MockOpenAiServer> {
     }
     let body: unknown;
     try {
-      body = JSON.parse(await readBody(req)) as unknown;
+      body = JSON.parse(raw) as unknown;
     } catch {
       res.writeHead(400, { "content-type": "application/json" });
       res.end(JSON.stringify({ error: { message: "invalid JSON body" } }));
       return;
     }
     requests.push(body);
-    const text = chooseResponse(body);
+    const step = scenario[0];
+    if (step?.kind === "overloaded" && (step.times ?? 1) > 1)
+      step.times = (step.times ?? 1) - 1;
+    else scenario.shift();
+    if (step?.kind === "overloaded") {
+      res.writeHead(429, {
+        "content-type": "application/json",
+        "retry-after": "0",
+      });
+      res.end(
+        JSON.stringify({
+          error: { message: "overloaded", type: "overloaded_error" },
+        }),
+      );
+      return;
+    }
+    const text =
+      step?.kind === "text" ? step.text : step ? "" : chooseResponse(body);
+    const tool =
+      step?.kind === "tool"
+        ? {
+            id: step.id ?? "smoke-call",
+            type: "function",
+            function: { name: step.name, arguments: step.arguments },
+          }
+        : undefined;
     if (isRecord(body) && body.stream) {
       res.writeHead(200, {
         "content-type": "text/event-stream",
         "cache-control": "no-cache",
         connection: "keep-alive",
       });
-      for (const chunk of streamChunks(text))
+      if (step?.kind === "disconnect") {
+        res.write(`data: ${JSON.stringify(streamChunks("partial")[0])}\n\n`);
+        setImmediate(() => res.destroy());
+        return;
+      }
+      const chunks = streamChunks(text);
+      if (tool) {
+        Object.assign(chunks[0].choices[0].delta, {
+          tool_calls: [{ index: 0, ...tool }],
+        });
+        chunks[1].choices[0].finish_reason = "tool_calls";
+      }
+      for (const chunk of chunks)
         res.write(`data: ${JSON.stringify(chunk)}\n\n`);
       res.end("data: [DONE]\n\n");
     } else {
       res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify(completionJson(text)));
+      const completion = completionJson(text);
+      if (tool) {
+        Object.assign(completion.choices[0].message, { tool_calls: [tool] });
+        completion.choices[0].finish_reason = "tool_calls";
+      }
+      if (step?.kind === "disconnect") {
+        res.destroy();
+        return;
+      }
+      res.end(JSON.stringify(completion));
     }
   });
   await new Promise<void>((resolve, reject) => {
@@ -166,8 +232,13 @@ export async function startMockOpenAiServer(): Promise<MockOpenAiServer> {
   return {
     baseUrl: `http://127.0.0.1:${port}/v1`,
     requests,
+    wireRequests,
+    enqueue: (...steps) => {
+      scenario.push(...steps.map((step) => ({ ...step })));
+    },
     close: () =>
       new Promise<void>((resolve) => {
+        server.closeAllConnections();
         server.close(() => resolve());
       }),
   };

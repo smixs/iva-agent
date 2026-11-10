@@ -1,5 +1,5 @@
 // Одноразовое приложение Ивы для смоуков: те же деревья, что у рантайма, сборка и старт eve.
-// Общий код replica (mock-провайдер) и live-turn (настоящий провайдер).
+// Общая раскладка герметичных смоуков и live-turn.
 import { spawn } from "node:child_process";
 import { cp, mkdir, symlink } from "node:fs/promises";
 import { createServer } from "node:net";
@@ -115,10 +115,13 @@ export async function stopEve(child: EveProcess | null): Promise<void> {
   }
   // Окно graceful stop у самого eve — 5с; даём заметно больше, чтобы SIGKILL
   // не обрубал запись состояния .workflow-data на полпути.
-  const timer = new Promise<"timeout">((resolve) =>
-    setTimeout(resolve, 15000, "timeout"),
-  );
-  if ((await Promise.race([gone, timer])) === "timeout") {
+  let timeout: NodeJS.Timeout | undefined;
+  const timer = new Promise<"timeout">((resolve) => {
+    timeout = setTimeout(resolve, 15000, "timeout");
+  });
+  const result = await Promise.race([gone, timer]);
+  clearTimeout(timeout);
+  if (result === "timeout") {
     try {
       process.kill(-(child.pid as number), "SIGKILL");
     } catch (error) {

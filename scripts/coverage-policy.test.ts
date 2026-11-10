@@ -67,11 +67,6 @@ const BLIND_SPOT: ReadonlyArray<{
     path: "scripts/cli/plugin-cli-trust.ts",
     why: "прицеп plugin CLI; trust-юниты в его тестах",
   },
-  // Отдельные процессы: выполняются только на живой установке.
-  {
-    path: "scripts/replica-smoke.ts",
-    why: "ручной стенд; e2e идет через capture/analyze",
-  },
 ];
 
 const EXPECTED_COVERAGE_COMMAND =
@@ -90,7 +85,11 @@ function productionTypeScriptFiles(): string[] {
     })) {
       const relativePath = posix.join(relativeDirectory, entry.name);
       if (entry.isDirectory()) {
-        if (relativePath !== "scripts/fixtures") visit(relativePath);
+        if (
+          relativePath !== "scripts/fixtures" &&
+          relativePath !== "scripts/smoke"
+        )
+          visit(relativePath);
       } else if (
         entry.isFile() &&
         entry.name.endsWith(".ts") &&
