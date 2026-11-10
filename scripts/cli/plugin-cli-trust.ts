@@ -290,6 +290,28 @@ export function createPluginTrustCommands(context: PluginCliContext) {
     }
   }
 
+  /**
+   * Вернуть один тумблер после сборки, которая не прошла. Запись берётся из состояния,
+   * прочитанного под этим же замком: пока шла сборка, плагин могли выключить, лишить
+   * доверия или снять, и запись, прочитанная до сборки, вернула бы всё это обратно.
+   * Юниты сверяются, как после любой записи (`specs/PluginMode.tla`: `UndoRereads`,
+   * `UndoStops`).
+   */
+  async function undo(
+    data: string,
+    name: string,
+    back: { readonly enabled: false } | { readonly trusted: false },
+  ): Promise<void> {
+    await locked(data, async () => {
+      const state = await readPluginsState(data);
+      const now = findPlugin(state, name);
+      if (!now) return;
+      const next = upsertPlugin(state, { ...now, ...back });
+      await writePluginsState(data, next);
+      await reconcileUnits(data, next);
+    });
+  }
+
   async function setTrusted(trusted: boolean): Promise<void> {
     const data = dataDirAbs();
     const { entry, report, changed } = await locked(data, async () => {
@@ -326,12 +348,7 @@ export function createPluginTrustCommands(context: PluginCliContext) {
       const { failure } = await buildCode(entry.name, trusted);
       if (failure !== null) {
         if (trusted) {
-          await locked(data, async () => {
-            const state = await readPluginsState(data);
-            const back = upsertPlugin(state, { ...entry, trusted: false });
-            await writePluginsState(data, back);
-            await reconcileUnits(data, back);
-          });
+          await undo(data, entry.name, { trusted: false });
           throw new Error(`${entry.name} stays untrusted: ${failure}`);
         }
         warn(failure);
@@ -381,13 +398,7 @@ export function createPluginTrustCommands(context: PluginCliContext) {
       const { failure } = await buildCode(entry.name, enabled);
       if (failure !== null) {
         if (enabled) {
-          await locked(data, async () => {
-            const state = await readPluginsState(data);
-            await writePluginsState(
-              data,
-              upsertPlugin(state, { ...entry, enabled: false }),
-            );
-          });
+          await undo(data, entry.name, { enabled: false });
           throw new Error(`${entry.name} stays disabled: ${failure}`);
         }
         warn(failure);
