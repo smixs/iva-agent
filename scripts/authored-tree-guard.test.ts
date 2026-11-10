@@ -144,10 +144,8 @@ test("the authored tree has only its explicit shared-package edges", () => {
   assert.deepEqual(
     escapes(),
     [
-      "agent/instructions/05-language.ts -> @iva/data-dir",
       "agent/instructions/20-core.ts -> @iva/vault-dir",
       "agent/instructions/25-persona.ts -> @iva/vault-dir",
-      "agent/instructions/now.ts -> @iva/data-dir",
       "agent/instructions/now.ts -> @iva/timezone",
       "agent/lib/claude-cli.ts -> ../../packages/claude-command/index.ts",
       "agent/lib/claude-cli.ts -> ../../packages/reasoning-levels/index.ts",
