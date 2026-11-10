@@ -27,55 +27,20 @@ const status = (await import(
   `${pathToFileURL(modulePath).href}?test=${Date.now()}`
 )) as typeof import("./run-status.ts");
 
-test("legacy whole-map is read and each touched key migrates independently", () => {
-  const legacy = join(dataDir, "run-status.json");
-  writeFileSync(
-    legacy,
-    JSON.stringify({
-      "legacy-a:": { status: "running", sessionId: "a" },
-      "legacy-b:7": { status: "running", sessionId: "b" },
-    }),
-  );
+// specs/UpdateFloor.tla: NoSilentLoss. Releases before 0.3.10 kept every chat in one file.
+test("NoSilentLoss: the shared run-status.json is neither read nor touched", () => {
+  const shared = join(dataDir, "run-status.json");
+  const bytes = JSON.stringify({
+    "shared-a:": { status: "running", sessionId: "a" },
+    "shared-b:7": { status: "running", sessionId: "b" },
+  });
+  writeFileSync(shared, bytes);
 
-  assert.equal(status.getChatStatus("legacy-a:")?.sessionId, "a");
-  status.setChatStatus("legacy-a:", { status: "idle", sessionId: null });
-
-  // The untouched key remains available from the legacy file.
-  assert.equal(status.getChatStatus("legacy-b:7")?.sessionId, "b");
-  // Once migrated, the per-chat file wins over stale legacy bytes.
-  writeFileSync(
-    legacy,
-    JSON.stringify({
-      "legacy-a:": { status: "running", sessionId: "stale" },
-      "legacy-b:7": { status: "running", sessionId: "b" },
-    }),
-  );
-  assert.equal(status.getChatStatus("legacy-a:")?.status, "idle");
-  assert.equal(status.getChatStatus("legacy-a:")?.sessionId, undefined);
-});
-
-test("the first normal rewrite removes the retired routing field", () => {
-  const legacy = join(dataDir, "run-status.json");
-  const key = "legacy-routing:";
-  writeFileSync(
-    legacy,
-    JSON.stringify({
-      [key]: {
-        status: "running",
-        sessionId: "session-current",
-        [status.RETIRED_SESSION_ROUTING_FIELD]: "retired-value",
-      },
-    }),
-  );
-
-  const rewritten = status.setChatStatus(key, { status: "idle" });
-
-  assert.equal(rewritten[status.RETIRED_SESSION_ROUTING_FIELD], undefined);
-  assert.equal(
-    status.getChatStatus(key)?.[status.RETIRED_SESSION_ROUTING_FIELD],
-    undefined,
-  );
-  assert.equal(rewritten.sessionId, "session-current");
+  assert.equal(status.getChatStatus("shared-a:"), null);
+  status.setChatStatus("shared-a:", { status: "idle" });
+  assert.equal(status.getChatStatus("shared-a:")?.status, "idle");
+  assert.equal(status.getChatStatus("shared-b:7"), null);
+  assert.equal(readFileSync(shared, "utf8"), bytes);
 });
 
 test("distinct chats survive bounded concurrent writers", async () => {

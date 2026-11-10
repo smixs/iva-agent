@@ -965,22 +965,6 @@ test("ordinary queue load quarantines corrupt bytes and continues", async () => 
   assert.equal(readFileSync(join(dataDir, backups[0]), "utf8"), corrupt);
 });
 
-test("reset tombstone retires the legacy routing field", async () => {
-  const legacyField = "continuationToken";
-  status.setChatStatus("7091451031:", {
-    status: "running",
-    sessionId: "session-old",
-    [legacyField]: "legacy-value",
-  });
-  await completeScopedResetState("7091451031:", {
-    clearQueue: true,
-  });
-
-  const tombstone = status.getChatStatus("7091451031:");
-  assert.equal(tombstone.status, "idle");
-  assert.equal(Object.hasOwn(tombstone, legacyField), false);
-});
-
 test("a durable reset intent reconstructs its Telegram address", async () => {
   const key = "429888768:";
   await persistPrivateResetIntent(key);

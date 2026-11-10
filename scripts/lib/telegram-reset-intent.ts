@@ -9,11 +9,8 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { telegramAddressFromChatKey } from "./telegram-reset.ts";
 
 export const TELEGRAM_RESET_INTENT_VERSION = 1;
-// Поле нужно только для отката на 0.3.x. Удалить после стабилизации 0.4.x.
-const RETIRED_ROUTING_FIELD = "continuationToken";
 
 export interface TelegramResetIntent {
   version: typeof TELEGRAM_RESET_INTENT_VERSION;
@@ -45,14 +42,6 @@ function intentPath(directory: string, chatKey: string) {
     directory,
     `${Buffer.from(chatKey, "utf8").toString("base64url")}.json`,
   );
-}
-
-function rollbackRoutingValue(chatKey: string): string {
-  const address = telegramAddressFromChatKey(chatKey);
-  if (address === null) {
-    throw new Error(`invalid Telegram reset intent chat key: ${chatKey}`);
-  }
-  return `${address.chatId}:${address.messageThreadId ?? ""}:`;
 }
 
 function normalizeIntent(value: unknown, source: string): TelegramResetIntent {
@@ -115,16 +104,11 @@ export async function persistTelegramResetIntent(
     },
     "new reset request",
   );
-  const diskIntent = {
-    ...intent,
-    // Older rollback code requires this inert field to parse the same v1 file.
-    [RETIRED_ROUTING_FIELD]: rollbackRoutingValue(chatKey),
-  };
   await ensureIntentDirectory(directory);
   const target = intentPath(directory, chatKey);
   const tmp = `${target}.tmp-${process.pid}-${nonce()}`;
   try {
-    await writeFile(tmp, JSON.stringify(diskIntent), {
+    await writeFile(tmp, JSON.stringify(intent), {
       encoding: "utf8",
       flag: "wx",
       mode: 0o600,

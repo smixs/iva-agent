@@ -21,7 +21,6 @@ import {
   takeOverTelegramChat,
   type TurnHeartbeat,
 } from "./telegram-turn-start.ts";
-import { RETIRED_SESSION_ROUTING_FIELD } from "./run-status.ts";
 
 // Старт хода — единственное место, где ключ апдейта сшивается с turnId (ADR-0010).
 // Каталог данных временный: писатель журнала резолвит его на каждой записи.
@@ -74,7 +73,6 @@ function statusStore(initial: Status = {}, now: () => number = Date.now) {
       generation: previousGeneration + 1,
       updatedAt: options.touch === false ? value.updatedAt : now(),
     };
-    delete value[RETIRED_SESSION_ROUTING_FIELD];
     for (const key of Object.keys(value))
       if (value[key] === null) delete value[key];
     return value;
@@ -657,50 +655,6 @@ void test("a message the inbound pipeline drops takes its queued sign with it", 
     true,
   );
   assert.equal(store.get().sessionId, "session-A");
-});
-
-void test("turn start retires a legacy routing field on both claim paths", async () => {
-  const claimed = statusStore({
-    status: "idle",
-    [RETIRED_SESSION_ROUTING_FIELD]: "legacy",
-  });
-  assert.equal(
-    await publishTelegramTurnStarted({
-      draftId: 42,
-      chatKey: "7091451031:",
-      sessionId: "session-1",
-      turnId: "turn-1",
-      getStatusImpl: claimed.get,
-      setStatusIfImpl: claimed.cas,
-    }),
-    true,
-  );
-  assert.equal(claimed.get()[RETIRED_SESSION_ROUTING_FIELD], undefined);
-  assert.equal(claimed.get().sessionId, "session-1");
-
-  const adopted = statusStore({
-    status: "idle",
-    [RETIRED_SESSION_ROUTING_FIELD]: "legacy",
-  });
-  await publishTelegramEarlyStatus({
-    chatKey: "-1001:77",
-    ingressId: "ingress-1",
-    getStatusImpl: adopted.get,
-    setStatusIfImpl: adopted.cas,
-  });
-  assert.equal(
-    await publishTelegramTurnStarted({
-      draftId: 42,
-      chatKey: "-1001:77",
-      sessionId: "session-2",
-      turnId: "turn-2",
-      getStatusImpl: adopted.get,
-      setStatusIfImpl: adopted.cas,
-    }),
-    true,
-  );
-  assert.equal(adopted.get()[RETIRED_SESSION_ROUTING_FIELD], undefined);
-  assert.equal(adopted.get().sessionId, "session-2");
 });
 
 void test("a live turn's heartbeat moves updatedAt and is throttled between events", () => {

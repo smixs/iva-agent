@@ -34,7 +34,6 @@ void test("reset intent persists, loads, clears, and tolerates missing paths", a
   });
   assert.deepEqual(await loadTelegramResetIntents(directory), [intent]);
 
-  const retiredField = "continuationToken";
   assert.deepEqual(
     JSON.parse(
       await readFile(
@@ -47,7 +46,6 @@ void test("reset intent persists, loads, clears, and tolerates missing paths", a
       chatKey: "42:",
       requestedAt: 1234,
       discardThroughUpdateId: 88,
-      [retiredField]: "42::",
     },
   );
 
@@ -69,6 +67,7 @@ void test("reset intent loader skips invalid records", async (t) => {
   assert.match(errors[0], /cannot load Telegram reset intent .*bad\.json/u);
 });
 
+// Releases through 0.5.11 wrote this field into every intent.
 void test("reset intent loader accepts and strips the retired routing field", async (t) => {
   const directory = await intentDirectory(t);
   const chatKey = "7:";
