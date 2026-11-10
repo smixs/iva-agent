@@ -3,6 +3,7 @@ import { chatKeyOf, getChatStatus, setChatStatusIf } from "./run-status.ts";
 import { scanOutbound } from "./security-gate.ts";
 import { traceOutboundGate, traceWithScope } from "./trace.ts";
 import { parseTelegramDelivery } from "./telegram-delivery.ts";
+import { splitWidgets } from "./telegram-widget.ts";
 import { tr } from "./i18n.ts";
 
 export const DRAFT_INTERVAL_MS = 1_000;
@@ -56,6 +57,19 @@ export function draftText(text: string, complete: boolean): string {
       ) + 1,
     );
   text = parseTelegramDelivery(text).text;
+  // The final-delivery parser also drops unclosed widget bodies and clamps captions.
+  // Do this before the tail cut, which must never reopen a widget as a code fence.
+  text = splitWidgets(text)
+    .map((part) =>
+      part.kind === "text"
+        ? part.text
+        : part.caption || tr("Widget…", "Виджет…"),
+    )
+    .join("\n\n");
+  const tailStart = text.lastIndexOf("\n") + 1;
+  const tail = text.slice(tailStart);
+  if (tail.length > 3 && "```tg-widget".startsWith(tail))
+    text = text.slice(0, tailStart);
   text = text
     .replace(/<tg-button(?=[\s>])[^>]*>([\s\S]*?)<\/tg-button>/gi, "[$1]")
     .replace(/<\/?tg-button-row\b[^>]*>/gi, "");
