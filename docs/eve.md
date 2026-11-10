@@ -3,13 +3,28 @@
 Iva carries eve sources in `eve/`, imported from [vercel/eve](https://github.com/vercel/eve)
 at commit `eb5949a622801b35a2a6f78bb58d9eef27273cac` (eve 0.51.1).
 The copy contains the eve package, its catalog dependency and build inputs. It
-carries no upstream tests and no package documentation, and it drops the entry
-points Iva never loads: the React, Vue, Svelte, Next, Nuxt and SvelteKit adapters,
-the self-modification extension, and the Slack, Teams, Discord, Linear, Twilio,
-Chat SDK, Photon and Linq channels (ADR-0027). The eve documentation lives at
-https://eve.dev/docs. Iva's changes are ordinary commits in this directory, held
-by tests on the boundary with Iva. Taking a newer upstream commit is a separate
-decision (ADR-0023).
+carries no upstream tests, no package documentation and none of the code Iva never
+loads (ADR-0027); the table below lists the entry points and commands that went.
+The eve documentation lives at https://eve.dev/docs. Iva's changes are ordinary
+commits in this directory, held by tests on the boundary with Iva. Taking a newer
+upstream commit is a separate decision (ADR-0023).
+
+| Removed                                                                                                                                                                                                      | What it was                                                                             |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------- |
+| `eve/react`, `eve/vue`, `eve/svelte`                                                                                                                                                                         | client hooks for web front ends                                                         |
+| `eve/next`, `eve/nuxt`, `eve/sveltekit`                                                                                                                                                                      | host-framework adapters                                                                 |
+| `eve/self-modification`, `eve/self-modification/agent`, `eve/self-modification/sandbox`                                                                                                                      | the built-in self-modification extension                                                |
+| `eve/channels/slack`, `eve/channels/teams`, `eve/channels/discord`, `eve/channels/linear`, `eve/channels/twilio`, `eve/channels/chat-sdk`, `eve/channels/photon`, `eve/channels/linq`, `eve/channels/github` | channels other than Telegram, the eve channel and MCP                                   |
+| `eve/setup`, `eve/setup/scaffold`                                                                                                                                                                            | the setup flows of the removed commands                                                 |
+| `eve acp`                                                                                                                                                                                                    | the ACP server over stdio                                                               |
+| `eve init`, `eve set`, `eve integration`, `eve add`, `eve registry`, `eve link`, `eve deploy`                                                                                                                | project creation, model settings, integrations, eve catalog items and Vercel deployment |
+
+The copy keeps `eve build`, `eve start`, `eve dev` with its terminal UI (and `/add`
+inside it), `eve extension`, `eve invoke`, `eve logs`, `eve traces`, `eve info`,
+`eve channels` and `eve eval`, and every other entry point. A plugin or a tool in
+`data/custom` that imports a removed entry point does not build on this copy: an
+`iva update` switches such a plugin off and names it to the owner, and
+`iva plugin add`, `update` or `enable` refuses it (ADR-0027, "Цена").
 
 Edit the source in `eve/packages/eve/src/`, run the Iva boundary tests that name
 the changed behaviour, and commit the source. Maintainers use Node 24 or newer and
@@ -65,24 +80,32 @@ The copy has no test suite of its own. A change to eve is checked from Iva's sid
   behaviour (`scripts/eve-*.test.ts`, ADR-0023), then by the gate of its task
   level.
 - A change meant to leave Iva's behaviour alone (a removal, a build edit) is
-  compared with the previous archive. Every file that stays in the archive is
-  byte-identical to the previous one, apart from `package.json`, `BUILD.json`,
-  `README.md`, `bin/eve.js` and `dist/src/compiled/.vendor-stamp.json`. After
-  `npm run build`, the eve modules in `.output/server` (the `//#region` markers)
-  are the same set with the same content; only the version string differs.
-  `npm run build` gives one of two outputs for the same tree: they differ in the
-  numeric suffixes of colliding names inside ten vendored modules. Compare
-  outputs of the same kind and rebuild when the kinds differ.
-- `npm run build`, `node node_modules/eve/bin/eve.js --help` and
-  `node node_modules/eve/bin/eve.js start --help` exit 0.
-- `scripts/eve-copy.test.ts` pins what the copy no longer carries.
+  compared with Iva's build before the change. Keep a copy of `.output` from
+  `npm run build` on the old archive, install the new one, build again and run
+  `node scripts/eve-bundle-equal.ts <old>/.output/server .output/server`. It exits
+  0 and prints `EQUAL` when the eve modules (the `//#region` markers, and the
+  workflow bundle carried as base64) are the same set and each module matches the
+  old one up to the names of its bindings: literals, operators, property names
+  and statement order are the same, names pair one to one, a chunk's imports and
+  exports match as sets, and the eve archive version is the one literal allowed
+  to differ. Any other difference rolls the removal back.
+- `npm run build`, `node bin/iva.mjs version`,
+  `node node_modules/eve/bin/eve.js --help` and
+  `node node_modules/eve/bin/eve.js start --help` exit 0, and the eve boundary
+  tests (`scripts/eve-copy.test.ts`, `scripts/eve-release.test.ts`,
+  `scripts/eve-archive-update.test.ts`, `scripts/lib/plugin-build-eve.test.ts`)
+  pass with `EVE_LOCAL_ARCHIVE` set to the archive path as installed.
+- `scripts/eve-copy.test.ts` pins what the copy no longer carries and the CLI
+  commands Iva runs.
 
-eve is built as one rolldown program. Removing a source file can reorder imports
-and rename local variables or colliding top-level names in files that stay, so a
-removal that changes a remaining file is rolled back even when the code reads the
-same. The evals, the ACP server, the terminal UI, the GitHub channel, the unused
-CLI commands and the vendored dependencies of the removed channels stay in the
-copy for this reason.
+eve is built as one rolldown program. Removing a source file reorders imports and
+renames local variables or colliding top-level names in files that stay, which
+is why the comparison is up to names and not byte for byte. Three parts stay
+because removing them changes the program itself: the terminal UI of `eve dev`
+with the setup flows it opens and `compiled/shadcn-registry` (Iva runs
+`eve dev`); the evals, whose removal drops CommonJS helpers from the shared
+`_virtual/_rolldown/runtime.js`; and the vendored dependencies of the removed
+channels, whose removal renames the shared `compiled/_chunks/node` chunks.
 
 The sources retain the [Apache-2.0 license](../eve/LICENSE) and
 [NOTICE](../eve/NOTICE), including the Iva modifications. Both files are also
