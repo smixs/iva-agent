@@ -9,7 +9,7 @@ import { COLLECT_QUIET_MS } from "../lib/telegram-collect.ts";
 import { alreadyDelivered } from "../lib/offset-store.ts";
 import {
   invalidTelegramUpdatesDiagnostic,
-  migrateQueueFile,
+  loadQueueFile,
   parseTelegramUpdates,
   type TelegramQueueUpdate,
   type TelegramUpdateBatchItem,
@@ -348,17 +348,10 @@ export async function main({
   const watched = await reconcileUpdateJobs({ launchImpl: launchSelfUpdate });
   if (watched.length > 0)
     log(`watching ${watched.length} unfinished update job(s)`);
-  // Upgrade the old {chatKey: string[]} queue atomically before polling. A failed
-  // migration stops the bridge, so Telegram retains new updates until the old bytes
-  // are safely represented as versioned FIFO items.
-  await migrateQueueFile(QUEUE_FILE, {
-    strict: true,
-    onLegacyQuarantine: (path) =>
-      log(
-        `legacy Telegram group messages moved to ${path}; sender identity was unavailable`,
-      ),
-  });
-  await migrateQueueFile(TELEGRAM_INBOX_FILE, { strict: true });
+  // Both files are read before polling. One that cannot be read stops the bridge, so
+  // Telegram retains new updates and the bytes on disk stay as they are.
+  await loadQueueFile(QUEUE_FILE, { strict: true });
+  await loadQueueFile(TELEGRAM_INBOX_FILE, { strict: true });
   const reconciledResets = await reconcileResetIntentsSafely();
   if (reconciledResets > 0) {
     log(

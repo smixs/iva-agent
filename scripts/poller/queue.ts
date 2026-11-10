@@ -262,7 +262,7 @@ export async function clearChatQueue(
         : typeof item.enqueuedAt === "number" &&
           item.enqueuedAt >= (resetRequestedAt as number),
     );
-    if (retained.length === current.length && !loaded.migrated) return;
+    if (retained.length === current.length) return;
     const queues = Object.fromEntries(Object.entries(loaded.document.queues));
     if (retained.length > 0) queues[chatKey] = retained;
     else delete queues[chatKey];

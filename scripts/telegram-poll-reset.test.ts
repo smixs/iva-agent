@@ -31,12 +31,17 @@ type QueueItem = {
   updateId: number;
   enqueuedAt?: number;
   update?: QueueUpdate;
-  legacyText?: string;
 };
 type QueueDocument = {
   version: number;
   queues: Record<string, QueueItem[]>;
 };
+const queued = (updateId: number, text: string): QueueItem => ({
+  version: 1,
+  updateId,
+  enqueuedAt: 1,
+  update: { update_id: updateId, message: { text } },
+});
 type ResetIntent = {
   chatKey: string;
   discardThroughUpdateId?: number;
@@ -180,8 +185,11 @@ test("private reset clears only the target chat status and queue", async () => {
   writeFileSync(
     join(dataDir, "telegram-queue.json"),
     JSON.stringify({
-      "chat-a:": ["discard me"],
-      "chat-b:7": ["keep me"],
+      version: 1,
+      queues: {
+        "chat-a:": [queued(1, "discard me")],
+        "chat-b:7": [queued(2, "keep me")],
+      },
     }),
   );
 
@@ -202,7 +210,7 @@ test("private reset clears only the target chat status and queue", async () => {
   ) as unknown as QueueDocument;
   assert.equal(queue.version, 1);
   assert.deepEqual(Object.keys(queue.queues), ["chat-b:7"]);
-  assert.equal(queue.queues["chat-b:7"][0].legacyText, "keep me");
+  assert.deepEqual(queue.queues["chat-b:7"], [queued(2, "keep me")]);
 });
 
 test("group reset preserves the shared topic queue", async () => {
@@ -895,14 +903,17 @@ test("a corrupt reset intent does not block a valid chat", async (t) => {
 test("queue rename failure keeps the previous whole queue byte-for-byte", async () => {
   const queueFile = join(dataDir, "telegram-queue.json");
   const original = JSON.stringify({
-    "chat-d:": ["keep this"],
-    "chat-e:": ["keep this too"],
+    version: 1,
+    queues: {
+      "chat-d:": [queued(1, "keep this")],
+      "chat-e:": [queued(2, "keep this too")],
+    },
   });
   writeFileSync(queueFile, original);
 
   await assert.rejects(
     writeQueueAtomic(
-      { "chat-d:": ["replacement"] },
+      { version: 1, queues: { "chat-d:": [queued(3, "replacement")] } },
       {
         nonce: "fault-injection",
         renameImpl: async () => {

@@ -4,8 +4,6 @@ import {
   queueCount,
   queueHead,
   queueKeys,
-  quarantineQueueRecords,
-  type DamagedQueueRecord,
   shouldQueueBusyUpdate,
   TELEGRAM_QUEUE_FATAL_DURABILITY,
 } from "../lib/telegram-queue.ts";
@@ -14,7 +12,6 @@ import type {
   TelegramQueueMessage,
   TelegramQueueUpdate,
 } from "../lib/telegram-queue.ts";
-import { join } from "node:path";
 import { joinUpdates, queueBatchLength } from "../lib/telegram-collect.ts";
 import {
   getChatStatus,
@@ -368,9 +365,7 @@ function queueBatch(
     pins.set(key, pin);
   }
   const batch = replayable.slice(0, count);
-  const copies = batch
-    .slice(1)
-    .flatMap((item) => materializeQueueItem(key, item) ?? []);
+  const copies = batch.slice(1).map((item) => materializeQueueItem(item));
   const update = joinUpdates([head, ...copies]);
   const updateId = pin[pin.length - 1];
   return {
@@ -398,7 +393,6 @@ export async function drainReadyQueueHeads({
       timeoutMs,
     }),
   acknowledgeImpl = acknowledgeTelegramQueueItems,
-  legacyAllowedUserIds = ALLOWED,
   now = Date.now,
   settleUntil = queueSettleUntil,
   inFlight = queueInFlight,
@@ -408,10 +402,6 @@ export async function drainReadyQueueHeads({
   deliveryTimeoutMs = QUEUE_DELIVERY_TIMEOUT_MS,
   gateWaitMs = RUN_STALE_MS,
   resetPendingImpl = hasPrivateResetIntent,
-  quarantineImpl = (records: readonly DamagedQueueRecord[]) =>
-    quarantineQueueRecords(join(DATA_DIR, "telegram-queue.json"), records, {
-      logImpl: log,
-    }),
 }: {
   loadImpl?: () => MaybePromise<TelegramQueueDocument>;
   runningImpl?: (key: string) => boolean;
@@ -421,7 +411,6 @@ export async function drainReadyQueueHeads({
     key: string,
     updateIds: readonly number[],
   ) => MaybePromise<unknown>;
-  legacyAllowedUserIds?: ReadonlySet<string>;
   now?: () => number;
   settleUntil?: Map<string, number>;
   inFlight?: Map<string, QueuePhase>;
@@ -431,9 +420,6 @@ export async function drainReadyQueueHeads({
   deliveryTimeoutMs?: number;
   gateWaitMs?: number;
   resetPendingImpl?: (chatKey: string) => boolean;
-  quarantineImpl?: (
-    records: readonly DamagedQueueRecord[],
-  ) => MaybePromise<unknown>;
 } = {}) {
   const snapshot = await loadImpl();
   const keys = [...new Set([...queueKeys(snapshot), ...inFlight.keys()])];
@@ -480,25 +466,7 @@ export async function drainReadyQueueHeads({
     const item = queueHead(snapshot, key);
     if (!item) continue;
     if (running || (settleUntil.get(key) ?? 0) > now()) continue;
-    const head = materializeQueueItem(key, item, { legacyAllowedUserIds });
-    if (!head) {
-      try {
-        await quarantineImpl([
-          {
-            chatKey: key,
-            index: 0,
-            reason: "unreplayable queue head",
-            record: item,
-          },
-        ]);
-      } catch (error) {
-        log("queue head quarantine failed:", key, errorCode(error));
-        continue;
-      }
-      await acknowledgeImpl(key, [item.updateId]);
-      pins.delete(key);
-      continue;
-    }
+    const head = materializeQueueItem(item);
     const { updateIds, update } = queueBatch(snapshot, key, head, pins);
     const timeoutMs = Math.max(
       1,
