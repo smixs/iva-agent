@@ -24,6 +24,7 @@ import { fileURLToPath } from "node:url";
 import type { ToolContext } from "eve/tools";
 import { settled } from "./fixtures/tool-result.ts";
 import { unresolvedLinkTargets } from "../agent/lib/vault-links.ts";
+import { buildVaultGraph } from "./memory/graph.ts";
 
 const REPO = fileURLToPath(new URL("..", import.meta.url));
 const VAULT = mkdtempSync(join(tmpdir(), "iva-links-"));
@@ -227,6 +228,62 @@ test("родитель роллапа: не просрочен — норма, �
     ["weekly/2026-W38"],
     "чужая неделя родителем не считается",
   );
+});
+
+// Запись и ночной граф читают один индекс: ссылка, принятая на записи, в графе не битая, а
+// отклонённая — битая. Каждая строка — свой класс входа; до общего индекса шесть из них
+// расходились (суффикс пути, двойник stem, регистр, `vault/`, медиа, родитель роллапа).
+test("ночной граф и запись выносят ссылке один вердикт", (t) => {
+  const vault = mkdtempSync(join(tmpdir(), "iva-links-graph-"));
+  t.after(() => rmSync(vault, { recursive: true, force: true }));
+  const put = (rel: string, text: string) => {
+    mkdirSync(join(vault, rel, ".."), { recursive: true });
+    writeFileSync(join(vault, rel), text);
+  };
+  put("a/projects/foo.md", "# Foo Project\n");
+  put("x/dup.md", "# Dup one\n");
+  put("y/dup.md", "# Dup two\n");
+  put("Notes/Case.md", "# Case note\n");
+  put("attachments/pic.png", "png");
+  put("attachments/doc.docx", "docx");
+  const accepted = [
+    "projects/foo",
+    "Case",
+    "vault/Notes/Case",
+    "Notes/Case.md",
+    "pic.png",
+    "attachments/pic.png",
+    "attachments/doc.docx",
+    "Foo Project",
+    "foo project",
+    "weekly/2026-W46",
+  ];
+  const rejected = ["dup", "case", "missing"];
+  const source = "summaries/daily/2026-11-10";
+  const today = Date.UTC(2026, 10, 10);
+  put(
+    `${source}.md`,
+    `# Day\n\n${[...accepted, ...rejected].map((link) => `[[${link}]]`).join("\n")}\n`,
+  );
+
+  assert.deepEqual(
+    unresolvedLinkTargets([...accepted, ...rejected], {
+      vaultDir: vault,
+      source,
+      today,
+    }),
+    rejected,
+  );
+  const graph = buildVaultGraph(vault, today);
+  assert.deepEqual(
+    graph.broken,
+    rejected.map((target) => ({ source, target })),
+  );
+  assert.deepEqual(graph.nodes[source].outgoing, [
+    "a/projects/foo",
+    "Notes/Case",
+  ]);
+  assert.deepEqual(graph.nodes["Notes/Case"].incoming, [source]);
 });
 
 // ─── write_card: битые ссылки — отказ, поиск Card по имени ──────────────────
