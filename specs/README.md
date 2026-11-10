@@ -516,14 +516,15 @@ Id строки используется один раз на трассу; уб
 
 ## ReminderLifecycle
 
-`ReminderLifecycle.tla` models one row of `data/reminders.json` through its firings: a Reminder (`Kind = "at"`) or a Routine (`Kind = "cron"`). The processes that share the row: the minute tick inside the agent (`agent/lib/reminder-tick.ts`, in order: `fireDue`, `sweepFired`, `closeAbandoned`, then the owed Alerts), the fire child (`scripts/reminders/fire.ts`), the Alert children (the same script called with `abandoned`, two slots per firing, so that a child which outlived the agent can meet a new one) and the tick's in-memory continuations, which die with the agent. The agent may crash and restart at any step; a child may die at any step and may also outlive the agent. The liveness window of a firing (`reminderPhase` says `running` until it passes) is one `Expire` step that may happen while the child is still alive. `firing` stands for `firedAt`, the identity every `recordDelivery` compares before it writes. Sending is two steps: Telegram accepts the message, then the sender gets the answer; a lost answer makes the transport (`scripts/lib/telegram-send.ts`) send the same message again, and the turn never runs again.
+`ReminderLifecycle.tla` models one row of `data/reminders.json` through its firings: a Reminder (`Kind = "at"`) or a Routine (`Kind = "cron"`). The processes that share the row: the minute tick inside the agent (`agent/lib/reminder-tick.ts`, in order: `fireDue`, `sweepFired`, `closeAbandoned`, then the owed Alerts), the fire child (`scripts/reminders/fire.ts`), the Alert children (the same script called with `abandoned`, two slots per firing, so that a child which outlived the agent can meet a new one) and the tick's in-memory continuations, which die with the agent. The agent may crash and restart at any step; a child may die at any step and may also outlive the agent. The liveness window of a firing (`reminderPhase` says `running` until it passes) is one `Expire` step that may happen while the child is still alive. `firing` stands for `firedAt`, the identity every `recordDelivery` compares before it writes. Sending is two steps: Telegram accepts the message, then the sender gets the answer; a lost answer or a transient refusal makes the transport (`scripts/lib/telegram-send.ts`) wait and send the same message again, and the turn never runs again.
 
 The decisions the model carries:
 
 1. A firing left with neither a fact nor a reason is closed by the tick with a reason, and the owner gets an Alert. The row text is not sent again, because the table cannot tell whether the dead child had already sent it.
 2. A firing whose child this agent still runs (`TickMemory`) is not closed by the window: a turn without the chat watch sends no pulse. After a restart the agent knows no children, and the window applies.
-3. The Alert is owed while the row is closed with `REMINDER_ABANDONED`, has no late fact, and the Alert throttle (`packages/alert-state`) holds no fact "Alert sent" for this firing. Every tick pass hands an owed Alert to a child, unless a child this agent runs already has it. A crash erases no debt.
-4. Delivery at the transport is at least once: a lost reminder is worse than a doubled one. One capture is one delivery attempt; the text, or the Alert, goes out again only when Telegram accepted it and the answer was lost, or when its sender died or was forgotten before it recorded the fact.
+3. The Alert is owed while the row is closed with `REMINDER_ABANDONED`, has no late fact, and the Alert throttle (`packages/alert-state`) holds no fact "Alert sent" for this firing. Every tick pass hands an owed Alert to a child, unless a child this agent runs already has it. A crash erases no debt, and neither does the table: while the row owes its Alert, `fireDue` does not take it again and `sweepFired` does not remove it. A Routine fires its next due after the Alert about the previous one.
+4. The Alert child reads the row and the Alert fact before every attempt of the transport, the repeats after a backoff included (`beforeAttempt`): a fact that landed while the transport waited stops the Alert.
+5. Delivery at the transport is at least once: a lost reminder is worse than a doubled one. One capture is one delivery attempt; the text, or the Alert, goes out again only when Telegram accepted it and the answer was lost, or when its sender died or was forgotten before it recorded the fact.
 
 Checked properties:
 
@@ -533,8 +534,9 @@ Checked properties:
 4. `OncePerDue`: one due, one firing.
 5. `OneAttemptPerCapture`: the text of one firing reaches the chat once, and again only after a lost answer.
 6. `AlertOnce`: one abandoned firing, one Alert; a repeat only when a sender lost track of an Alert it had sent (lost answer, death after Telegram accepted, or an agent crash under a running sender).
-7. `NoFalseAlert`: no Alert child lets an Alert through for a firing whose fact the row already holds or whose child this agent still runs.
-8. `AbandonedAlerted` (liveness): the Alert about an abandoned firing goes out after any crash, unless the row leaves first (swept a day later, a late fact, the next firing of a Routine).
+7. `NoFalseAlert`: no attempt of an Alert child, first or repeated, goes out for a firing whose fact the row already holds or whose child this agent still runs.
+8. `AlertBeforeDrop`: an abandoned firing does not leave the row before its Alert: neither the next firing of a Routine nor the sweep takes away a firing that still owes it.
+9. `AbandonedAlerted` (liveness): the Alert about an abandoned firing goes out after any crash, unless a late fact of that firing lands first.
 
 | Config                            | Mutation                                                | Fails                  |
 | --------------------------------- | ------------------------------------------------------- | ---------------------- |
@@ -548,10 +550,13 @@ Checked properties:
 | `ReminderLifecycle-alertblind`    | the Alert child does not read the row before sending    | `NoFalseAlert`         |
 | `ReminderLifecycle-nofact`        | the fact "Alert sent" is never recorded                 | `AlertOnce`            |
 | `ReminderLifecycle-forget`        | the Alert goes out only in the pass that closed the row | `AbandonedAlerted`     |
+| `ReminderLifecycle-sweepfirst`    | the sweep removes a row that still owes its Alert       | `AlertBeforeDrop`      |
+| `ReminderLifecycle-takefirst`     | a Routine is taken again while it owes its Alert        | `AlertBeforeDrop`      |
+| `ReminderLifecycle-retryblind`    | a repeat of the transport goes without the check        | `NoFalseAlert`         |
 
 `ReminderLifecycle.cfg` checks a Reminder with two crashes and `ReminderLifecycle-routine.cfg` a Routine with two dues and one crash (two crashes give 759 429 states and ten minutes); both allow one transport or sender fault (`MaxFaults`). The conformance tests in `scripts/reminders/lifecycle.test.ts` carry the property names and replay the counterexamples on the real store, tick, child and transport.
 
-Outside the model: `move` and `run_now` (`ScheduleTool`), the turn itself (`TurnLifecycle`, `ReminderSilence`), the per-tick claim limit, a damaged table, a Telegram answer that lies about delivery, the weekly throttle of command Alerts, and the milliseconds between the Alert child's read of the row and its send: a fact that lands there is the same case as a text that went out before its fact was written, and the Alert says so ("if it is not above in this chat, it did not arrive").
+Outside the model: `move` and `run_now` (`ScheduleTool`), the turn itself (`TurnLifecycle`, `ReminderSilence`), the per-tick claim limit, a damaged table, a Telegram answer that lies about delivery, the weekly throttle of command Alerts, and the milliseconds between the Alert child's check and the attempt it lets through: a fact that lands there is the same case as a text that went out before its fact was written, and the Alert says so ("if it is not above in this chat, it did not arrive").
 
 ```sh
 specs/reminder-lifecycle-check.sh

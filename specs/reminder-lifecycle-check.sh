@@ -24,3 +24,6 @@ check ReminderLifecycle-closelive NoFalseAlert
 check ReminderLifecycle-alertblind NoFalseAlert
 check ReminderLifecycle-nofact AlertOnce
 check ReminderLifecycle-forget AbandonedAlerted
+check ReminderLifecycle-sweepfirst AlertBeforeDrop
+check ReminderLifecycle-takefirst AlertBeforeDrop
+check ReminderLifecycle-retryblind NoFalseAlert
