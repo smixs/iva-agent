@@ -177,6 +177,7 @@ test("the authored tree has only its explicit shared-package edges", () => {
       "agent/lib/vault-daily.ts -> ../../packages/timezone/index.ts",
       "agent/lib/vault-daily.ts -> @iva/vault-dir",
       "agent/lib/vault-error.ts -> @iva/vault-dir",
+      "agent/lib/vault-file-search.ts -> ../../packages/vault-walk/index.ts",
       "agent/lib/vault-file-search.ts -> @iva/vault-dir",
       "agent/lib/vault-links.ts -> ../../packages/timezone/index.ts",
       "agent/lib/vault-links.ts -> ../../packages/vault-walk/index.ts",

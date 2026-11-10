@@ -6,7 +6,7 @@ import { join } from "node:path";
 // с grep тоже (agent/lib/vault-file-search.ts). Всё остальное — содержимое человека, и обход
 // его видит; кому в названный каталог человека заходить нельзя (чистке — в archive, индексу
 // ссылок — в attachments и backup), называет его сам.
-const TECHNICAL_DIRS: ReadonlySet<string> = new Set([
+export const TECHNICAL_DIRS: ReadonlySet<string> = new Set([
   ".git",
   ".obsidian",
   ".claude",

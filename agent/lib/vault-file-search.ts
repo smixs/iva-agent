@@ -2,14 +2,7 @@ import { existsSync } from "node:fs";
 import { readdir, realpath, stat } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { resolveVaultDir } from "@iva/vault-dir";
-
-const IGNORE_DIRS = new Set([
-  ".git",
-  "node_modules",
-  ".next",
-  "dist",
-  ".cache",
-]);
+import { TECHNICAL_DIRS } from "../../packages/vault-walk/index.ts";
 
 export function globToRegExp(pattern: string): RegExp {
   const normalized = pattern.split(sep).join("/");
@@ -111,7 +104,7 @@ async function* walk(
 }
 
 function skippedDir(name: string): boolean {
-  return IGNORE_DIRS.has(name) || name.includes(".trash-");
+  return TECHNICAL_DIRS.has(name) || name.includes(".trash-");
 }
 
 // Файлы по одному, пока граница не достигнута: работа потребителя между ними (чтение grep)

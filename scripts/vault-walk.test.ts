@@ -219,3 +219,15 @@ test("ссылка [[topic]] при копии в cards/backup/topic.md: при�
     [],
   );
 });
+
+test("glob и grep пропускают те же технические каталоги, что и обход vault, и видят каталоги человека", async (t) => {
+  const root = vault(t, [
+    "cards/a.md",
+    ...[...TECHNICAL, ...HUMAN].map((dir) => `cards/${dir}/x.md`),
+  ]);
+  const { walkFiles } = await import("../agent/lib/vault-file-search.ts");
+  assert.deepEqual(
+    (await walkFiles(root)).map((file) => relative(root, file)).sort(),
+    ["cards/a.md", ...HUMAN.map((dir) => `cards/${dir}/x.md`)].sort(),
+  );
+});
