@@ -12,7 +12,7 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { CATALOG, catalogProvider } from "./lib/model-catalog.ts";
-import { notificationChat } from "./lib/notification-chat.ts";
+import { notificationChat } from "../packages/notification-chat/index.ts";
 import { redactNotice } from "./lib/notice.ts";
 import {
   alertOnce,

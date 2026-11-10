@@ -10,7 +10,7 @@ import {
 } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { notificationChat } from "./notification-chat.ts";
+import { notificationChat } from "../../packages/notification-chat/index.ts";
 import { button, escapeRichText, screenPayload } from "./telegram-buttons.ts";
 import { resolveReleaseTarget, type GitResult } from "./update-channel.ts";
 

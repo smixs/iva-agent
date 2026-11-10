@@ -14,7 +14,7 @@ import { stepLimitNotice } from "#lib/model-response.ts";
 // (scripts/authored-tree-guard.test.ts: agent/ не импортирует scripts/).
 // Коды выхода: 0 — срабатывание отработало; 2 — вызов без id или неизвестный id.
 import { isEntrypoint } from "../lib/version-layout.ts";
-import { notificationChat } from "../lib/notification-chat.ts";
+import { notificationChat } from "../../packages/notification-chat/index.ts";
 import {
   RUN_STALE_MS,
   chatKeyOf,

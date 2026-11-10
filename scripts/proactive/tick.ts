@@ -42,7 +42,7 @@ import {
   type ReminderTurn,
   type ReminderTurnKind,
 } from "../lib/reminder-turn.ts";
-import { ownerChat } from "../lib/notification-chat.ts";
+import { ownerChat } from "../../packages/notification-chat/index.ts";
 import { insightFailureLines, listTurnFailures } from "../lib/turn-failures.ts";
 import { listTurnRepeats } from "../lib/turn-repeats.ts";
 import { readEntries, summarize, type UsageRecord } from "../lib/usage.ts";

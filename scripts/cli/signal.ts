@@ -7,7 +7,7 @@
 // Signal — отказ: зациклившийся плагин не заваливает таблицу напоминаний. Импорты authored
 // tree — ленивые (scripts/authored-tree-guard.test.ts).
 import { randomBytes } from "node:crypto";
-import { ownerChat } from "../lib/notification-chat.ts";
+import { ownerChat } from "../../packages/notification-chat/index.ts";
 import type { createCliRuntime } from "./runtime.ts";
 
 type CliRuntime = ReturnType<typeof createCliRuntime>;

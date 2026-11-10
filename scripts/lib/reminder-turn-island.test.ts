@@ -26,7 +26,7 @@ const ISLAND_FILES = [
   "scripts/lib/notice-policy.ts",
   "scripts/lib/env-file.ts",
   "scripts/lib/link-target.ts",
-  "scripts/lib/notification-chat.ts",
+  "packages/notification-chat/index.ts",
   "scripts/cli/remind.ts",
 ];
 

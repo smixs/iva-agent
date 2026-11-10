@@ -3,7 +3,7 @@
 // отправляет код (не агент): сторож существует ровно для случая, когда агент не отвечает.
 import { dataDir } from "#lib/data-dir.ts";
 import { runJobWatchdog } from "../lib/job-watchdog.ts";
-import { notificationChat } from "../lib/notification-chat.ts";
+import { notificationChat } from "../../packages/notification-chat/index.ts";
 import { noticeTranslator } from "../lib/notice-policy.ts";
 import { sendTelegramHtml } from "../lib/telegram-send.ts";
 
