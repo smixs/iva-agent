@@ -26,7 +26,6 @@ interface CollectorEntry {
   chars: number;
   firstAt: number;
   lastAt: number;
-  forced: boolean;
 }
 
 export interface TelegramCollector {
@@ -213,7 +212,6 @@ export function collectorOffer(
     chars: 0,
     firstAt: now,
     lastAt: now,
-    forced: false,
   };
   entry.updates.push(update);
   entry.chars += messageChars(update.message);
@@ -237,7 +235,6 @@ export function collectorTakeExpired(
   const ready: TelegramCollectUpdate[] = [];
   for (const [key, entry] of collector.entries) {
     if (
-      !entry.forced &&
       now - entry.lastAt < entryQuietMs(collector, entry) &&
       now - entry.firstAt < collector.maxAgeMs
     ) {
@@ -247,22 +244,6 @@ export function collectorTakeExpired(
     ready.push(mergeParts(entry.updates));
   }
   return ready;
-}
-
-export function collectorRestore(
-  collector: TelegramCollector,
-  update: TelegramCollectUpdate,
-) {
-  const key = collectorKeyFor(update);
-  if (key === null) return false;
-  collector.entries.set(key, {
-    updates: [update],
-    chars: messageChars(update.message),
-    firstAt: 0,
-    lastAt: 0,
-    forced: true,
-  });
-  return true;
 }
 
 export function collectorPending(collector: TelegramCollector) {
