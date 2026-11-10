@@ -79,6 +79,9 @@ function addKey(
   unique.set(key, id);
 }
 
+/** Каталоги человека, которых нет в индексе ссылок. */
+const LINK_SKIP = ["attachments", "backup"];
+
 function buildLinkIndex(
   vaultDir: string,
   extraPaths: readonly string[],
@@ -95,10 +98,11 @@ function buildLinkIndex(
   // Ключ везде — путь БЕЗ .md: иначе своя же карточка попадает в индекс дважды, её stem
   // становится неоднозначным, и ссылка файла на самого себя читается как битая.
   // Нечитаемый каталог обход пропускает: проверка ссылок на нём не падает. Карточки в
-  // archive и backup — цели ссылок, как и остальные; attachments в индекс не идёт: цель
-  // `attachments/…` принимается проверкой файла на диске.
-  const paths = vaultMarkdownFiles(vaultDir, { skip: ["attachments"] }).map(
-    (file) => relative(vaultDir, file).split(sep).join("/").slice(0, -3),
+  // archive — цели ссылок, как и остальные. attachments в индекс не идёт: цель
+  // `attachments/…` принимается проверкой файла на диске. backup не идёт тоже: копия
+  // карточки сделала бы короткую ссылку `[[topic]]` неоднозначной, то есть битой.
+  const paths = vaultMarkdownFiles(vaultDir, { skip: LINK_SKIP }).map((file) =>
+    relative(vaultDir, file).split(sep).join("/").slice(0, -3),
   );
   const seen = new Set(paths);
   for (const extra of extraPaths) {
