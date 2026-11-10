@@ -1130,11 +1130,7 @@ function checkReminderFailures(
     // а доктор — и пакет diagnose, зовущий его, — не переносит данные владельца.
     const file = store.reminderFile();
     const rows = existsSync(file)
-      ? store.parseReminderTable(
-          file,
-          JSON.parse(readFileSync(file, "utf8")),
-          ctx.now(),
-        )
+      ? store.parseReminderTable(file, JSON.parse(readFileSync(file, "utf8")))
       : [];
     const failed = rows.filter(
       (row) =>

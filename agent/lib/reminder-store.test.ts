@@ -398,82 +398,6 @@ test("schemaVersion новее кода — явная ошибка", async () =
   assert.deepEqual(files(), ["reminders.json"]);
 });
 
-test("файл версии 1 переводится: срок и текст живут, режимы и аренда отброшены", async () => {
-  const now = Date.now();
-  await seed(
-    [
-      {
-        id: "old-one-shot",
-        text: "старое разовое",
-        mode: "agent",
-        schedule: { kind: "at", atMs: now + 60_000 },
-        nextRunAtMs: now + 60_000,
-        lastRunAtMs: null,
-        lastStatus: null,
-        lastError: null,
-        deliver: { chatId: "42" },
-        leaseUntilMs: null,
-        deliveredKey: null,
-      },
-      {
-        id: "old-cron",
-        text: "старое повторяющееся",
-        mode: "verbatim",
-        schedule: { kind: "cron", expr: "0 8 * * *", tz: "UTC" },
-        nextRunAtMs: now + 120_000,
-        lastRunAtMs: now - 60_000,
-        lastStatus: "failed",
-        lastError: "400 chat not found",
-        deliver: { chatId: "42" },
-        leaseUntilMs: null,
-        deliveredKey: "k",
-      },
-      {
-        id: "old-fired",
-        text: "уже пыталось сработать",
-        mode: "verbatim",
-        schedule: { kind: "at", atMs: now - 60_000 },
-        nextRunAtMs: now - 60_000,
-        lastRunAtMs: now - 60_000,
-        lastStatus: "failed",
-        lastError: "boom",
-        deliver: { chatId: "42" },
-        leaseUntilMs: null,
-        deliveredKey: null,
-      },
-    ],
-    1,
-  );
-
-  const rows = await list();
-  assert.deepEqual(
-    rows.map((r) => r.id),
-    ["old-fired", "old-one-shot", "old-cron"],
-  );
-  const fired = rows.find((r) => r.id === "old-fired");
-  assert.ok(fired);
-  assert.equal(
-    fired.status,
-    "fired",
-    "разовое уже сработало — второй раз нельзя",
-  );
-  assert.equal(fired.delivered, false);
-  assert.equal(fired.error, "boom");
-  const cron = rows.find((r) => r.id === "old-cron");
-  assert.ok(cron);
-  assert.equal(cron.status, "pending", "повторяющееся ждёт свой срок");
-  assert.equal(cron.delivered, false);
-  assert.equal(cron.error, "400 chat not found");
-  assert.equal(cron.createdAt > 0, true);
-  // После первой мутации файл уже версии 2.
-  await recordDelivery("old-cron", {
-    firedAt: cron.firedAt,
-    delivered: false,
-    error: "wake",
-  });
-  assert.equal(table().schemaVersion, REMINDER_SCHEMA_VERSION);
-});
-
 test("add отвергает мусор и не трогает файл", async () => {
   const now = 13_000_000;
   await seed([row({ id: "base", nextRunAtMs: now })]);
@@ -584,7 +508,9 @@ test("жизненный цикл, права файла и remove", async () =>
   assert.equal(statSync(reminderFile()).mode & 0o777, 0o600);
 });
 
-test("миграция v1: не срабатывавшее мигрирует без факта, не провалом", async () => {
+// UpdateFloor.NoSilentLoss: таблицу схемы 1 писала Iva старше 0.4.1. Ни чтение, ни запись её
+// не разбирают: отказ называет файл, байты остаются, в карантин ничего не уходит.
+test("NoSilentLoss: таблица схемы 1 — отказ с именем файла, файл не тронут", async () => {
   const now = Date.now();
   await seed(
     [
@@ -601,18 +527,27 @@ test("миграция v1: не срабатывавшее мигрирует б
     ],
     1,
   );
+  const before = readFileSync(reminderFile(), "utf8");
+  const refusal = (error: unknown): boolean => {
+    assert.ok(error instanceof Error);
+    assert.ok(
+      error.message.startsWith(
+        `${reminderFile()}: schemaVersion 1 was written by Iva older than 0.4.1`,
+      ),
+      error.message,
+    );
+    return true;
+  };
 
-  const rows = await list();
-  const found = rows.find((r) => r.id === "never-ran");
-  assert.ok(found);
-  assert.equal(found.status, "pending");
-  assert.equal(found.firedAt, null);
-  assert.equal(
-    found.delivered,
-    null,
-    "несрабатывавшее — нет факта доставки, а не провал",
+  await assert.rejects(list(), refusal);
+  await assert.rejects(remove("never-ran"), refusal);
+  await assert.rejects(fireDue(now + 600_000, 10), refusal);
+
+  assert.equal(readFileSync(reminderFile(), "utf8"), before);
+  assert.deepEqual(
+    files().filter((name) => name.includes(".damaged-")),
+    [],
   );
-  assert.equal(found.error, null);
 });
 
 test("POISON reminders quarantine invalid and duplicate rows once before the next write", async (t) => {

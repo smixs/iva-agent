@@ -169,11 +169,7 @@ async function remindersSection(
   } catch {
     return "- reminders.json is not valid JSON";
   }
-  let parseReminderTable: (
-    file: string,
-    raw: unknown,
-    nowMs: number,
-  ) => Reminder[];
+  let parseReminderTable: (file: string, raw: unknown) => Reminder[];
   try {
     parseReminderTable = (await import("../../agent/lib/reminder-store.ts"))
       .parseReminderTable;
@@ -182,7 +178,7 @@ async function remindersSection(
   }
   let rows: Reminder[];
   try {
-    rows = parseReminderTable(file, raw, nowMs);
+    rows = parseReminderTable(file, raw);
   } catch (error) {
     // Причина отказа несёт JSON строки: в пакет идёт только класс ошибки.
     const name = error instanceof Error ? error.constructor.name : "unknown";
