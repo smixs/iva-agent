@@ -247,8 +247,14 @@ function spawnNight(
         if (key) point(key + ":after");
         return result;
       };
+      // Коммит vault: до ремонта это был "git commit -m", теперь write-tree -> commit-tree ->
+      // update-ref, и HEAD двигает только последний (agent/lib/vault-commit.ts).
+      const isCommit = (file, args) =>
+        file === "git" &&
+        (args.includes("commit") ||
+          (args.includes("update-ref") && args.includes("HEAD")));
       cp.execFile = (file, args, options, callback) => {
-        if (file !== "git" || !args.includes("commit"))
+        if (!isCommit(file, args))
           return exec(file, args, options, callback);
         const key = count("commit:" + args[args.indexOf("-m") + 1]);
         point(key + ":before");
