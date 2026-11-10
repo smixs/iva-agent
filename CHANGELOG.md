@@ -13,6 +13,10 @@
 - 🔌 **Неудачная сборка плагина откатывает только свой тумблер**: если `iva plugin enable` или `trust` не собрались, Ива возвращает ровно этот тумблер у записи, какой она стала за время сборки, и гасит процессы выключенного плагина. Раньше откат мог вернуть доверие или включение, снятые за это время, и оставлял работать MCP-серверы выключенного плагина. The undo of a failed `enable` or `trust` flips its own switch on the current entry and stops the units of a disabled plugin.
 - 🩹 **Ход не роняет Иву, если Claude CLI вышел раньше записи**: когда Claude CLI завершался до того, как Ива передала ему запрос, падал весь процесс Ивы; теперь это ошибка одного хода, то же у проверки входа `claude auth status`. A Claude CLI that exits before Iva finishes writing to it fails the turn, not the process.
 
+## [0.5.12] - 2026-11-10
+
+- 🧩 **Код виджета скрыт в живом черновике**: Ива больше не показывает сырой код виджета в черновике ответа, пока он печатается. Iva no longer shows raw widget code in the reply draft while it is being typed.
+
 ## [0.5.11] - 2026-11-10
 
 - 📊 **Виджеты легче и точнее**: Ива начинает с родной карточки Telegram без стилей: заголовок, список, таблица и кнопки выглядят как обычные сообщения и весят меньше килобайта. Появились шаги работы помощника с отметками, кольца, графики-искры и чеки; карточка занимает пузырь до края, а журнал растёт вверх. The widgets skill starts from native unstyled cards and adds steppers, rings, sparklines, receipts, the resize anchor and the profile's full list of unsupported features and limits.

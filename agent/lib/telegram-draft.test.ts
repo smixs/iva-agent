@@ -26,6 +26,98 @@ const runStatus =
 
 type Call = { method: string; body: Record<string, unknown> };
 
+const widgetHtml =
+  "<style>.card { color: red; }</style><div>Данные</div>" +
+  "<script>document.body.textContent = 'widget';</script>";
+const widgetBlock = (caption = "", html = widgetHtml) =>
+  [`\`\`\`tg-widget${caption ? ` ${caption}` : ""}`, html, "```"].join("\n");
+
+await test("draft widget: closed blocks show their delivery caption or a short placeholder", () => {
+  for (const complete of [false, true]) {
+    assert.equal(
+      status.draftText(
+        `До.\n${widgetBlock("День: 4 встречи")}\nПосле. `,
+        complete,
+      ),
+      "До.\n\nДень: 4 встречи\n\nПосле.",
+    );
+    assert.equal(status.draftText(`${widgetBlock()}\n`, complete), "Widget…");
+    assert.equal(
+      status.draftText(`${widgetBlock("я".repeat(2000))}\n`, complete),
+      `${"я".repeat(1023)}…`,
+    );
+  }
+});
+
+await test("draft widget: unclosed blocks keep the caption and hide unfinished HTML", () => {
+  for (const complete of [false, true]) {
+    assert.equal(
+      status.draftText(
+        `До.\n\`\`\`tg-widget Сон 7 ч\n${widgetHtml} `,
+        complete,
+      ),
+      "До.\n\nСон 7 ч",
+    );
+    assert.equal(
+      status.draftText(`\`\`\`tg-widget\n${widgetHtml} `, complete),
+      "Widget…",
+    );
+  }
+});
+
+await test("draft widget: partial opening fences stay hidden", () => {
+  const opener = "```tg-widget";
+  for (let length = 1; length < opener.length; length++) {
+    const prefix = `До.\n${opener.slice(0, length)}`;
+    assert.equal(status.draftText(prefix, false), "До.", `prefix ${length}`);
+    if (length > 3)
+      assert.equal(status.draftText(prefix, true), "До.", `complete ${length}`);
+  }
+});
+
+await test("draft widget: strip long code before the 3500-character tail cut", () => {
+  const block = widgetBlock("Сводка", widgetHtml.repeat(100));
+  for (const complete of [false, true]) {
+    assert.equal(
+      status.draftText(`До.\n${block}\nПосле. `, complete),
+      "До.\n\nСводка\n\nПосле.",
+    );
+    const before = "начало ".repeat(600);
+    const after = "конец ".repeat(20);
+    const visible = `${before.trim()}\n\nСводка\n\n${after.trim()}`;
+    assert.equal(
+      status.draftText(`${before}\n${block}\n${after}`, complete),
+      `…${visible.slice(-3500)}`,
+    );
+  }
+});
+
+await test("draft widget: every stream prefix hides HTML, JS and CSS in every widget", () => {
+  for (const caption of ["", "День: 4 встречи"]) {
+    const reply = `До.\n${widgetBlock(caption)}\nМежду.\n${widgetBlock("Второй")}\nПосле. `;
+    for (let length = 0; length <= reply.length; length++) {
+      for (const complete of [false, true]) {
+        const draft = status.draftText(reply.slice(0, length), complete);
+        assert.doesNotMatch(
+          draft,
+          /<style|<script|<div|color: red|document\.body|tg-widget/iu,
+          `prefix ${length}, complete ${complete}: ${draft}`,
+        );
+      }
+    }
+  }
+});
+
+await test("draft widget: buttons keep their labels and ordinary code fences survive", () => {
+  const reply = `До.\n${widgetBlock("Сводка")}\n<tg-button-row><tg-button data="yes">Да</tg-button></tg-button-row> `;
+  for (const complete of [false, true])
+    assert.equal(status.draftText(reply, complete), "До.\n\nСводка\n\n[Да]");
+  assert.equal(
+    status.draftText("```ts\nconst x = 1;\n```", true),
+    "```ts\nconst x = 1;\n```",
+  );
+});
+
 function handle(
   reply: (
     call: Call,
