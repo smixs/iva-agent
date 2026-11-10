@@ -30,7 +30,7 @@ import {
   rebaseBuildOutput,
   type MaterializedCustomLayer,
 } from "./lib/custom-layer.ts";
-import { resolveDataDir } from "./lib/data-dir.ts";
+import { resolveDataDir } from "../packages/data-dir/index.ts";
 import { classifyRoot, isEntrypoint } from "./lib/version-layout.ts";
 import { vaultDirOrExit } from "./lib/vault-boundary.ts";
 

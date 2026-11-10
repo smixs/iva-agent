@@ -7,7 +7,7 @@
 import { closeSync, fstatSync, openSync, readSync } from "node:fs";
 import { join } from "node:path";
 import type { UsageRecord } from "#lib/usage.ts";
-import { resolveDataDir } from "./data-dir.ts";
+import { resolveDataDir } from "../../packages/data-dir/index.ts";
 import { REMINDER_TURN_KINDS } from "./reminder-turn.ts";
 import { resolveTimeZone } from "../../packages/timezone/index.ts";
 

@@ -35,7 +35,7 @@ import {
   CANONICAL_REASONING_EFFORTS,
   FALLBACK_REASONING_EFFORTS,
 } from "../../packages/reasoning-levels/index.ts";
-import { resolveDataDir } from "./data-dir.ts";
+import { resolveDataDir } from "../../packages/data-dir/index.ts";
 
 // Мастер setup спрашивает «вход уже есть?» и печатает план подписки — на инсталле, где
 // авторского дерева может не быть. Битый файл читается как «входа нет».

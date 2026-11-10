@@ -4,7 +4,7 @@ import { isEntrypoint, upstreamQuery } from "./lib/version-layout.ts";
 import { noticeLang } from "./lib/notice-policy.ts";
 import { acquireUpdateLock } from "./lib/version-store.ts";
 import { betaChannel, BranchUnavailableError } from "./lib/update-channel.ts";
-import { resolveDataDir } from "./lib/data-dir.ts";
+import { resolveDataDir } from "../packages/data-dir/index.ts";
 import {
   gitAt,
   inspectUpstream,

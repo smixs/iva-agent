@@ -13,7 +13,7 @@ import { runLaunchd } from "../launchd.ts";
 import { execFile } from "node:child_process";
 import { join } from "node:path";
 import { readEnvValues, upsertEnv } from "../env-file.ts";
-import { resolveDataDir } from "../data-dir.ts";
+import { resolveDataDir } from "../../../packages/data-dir/index.ts";
 import { probeUserbotHealth } from "../userbot-health.ts";
 import { button, menuBackLine } from "../telegram-buttons.ts";
 

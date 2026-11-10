@@ -3,7 +3,7 @@ import { runLaunchd } from "./launchd.ts";
 import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { resolveDataDir } from "./data-dir.ts";
+import { resolveDataDir } from "../../packages/data-dir/index.ts";
 
 export const USERBOT_HEALTH_TIMEOUT_MS = 1500;
 export const USERBOT_SERVICE = "iva-telegram-userbot.service";

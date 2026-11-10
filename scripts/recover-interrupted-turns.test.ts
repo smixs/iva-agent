@@ -13,7 +13,6 @@ function app(): string {
   const root = tempDir("iva-recover-");
   for (const file of [
     "scripts/recover-interrupted-turns.ts",
-    "scripts/lib/data-dir.ts",
     "scripts/lib/link-target.ts",
     "scripts/lib/wf-store.ts",
     "agent/lib/run-status.ts",

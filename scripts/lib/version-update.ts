@@ -19,7 +19,7 @@ import {
   isInstructionSlotPath,
   isLivePath,
 } from "./authored-paths.ts";
-import { resolveDataDir } from "./data-dir.ts";
+import { resolveDataDir } from "../../packages/data-dir/index.ts";
 import { gitAt, updaterCompat } from "./update-check.ts";
 import { loadVaultPair } from "./vault-pair.ts";
 import {

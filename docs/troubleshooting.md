@@ -117,7 +117,7 @@ iva version
 iva status
 node --env-file-if-exists=.env scripts/custom-recovery.ts status
 iva_data_dir=$(node --env-file-if-exists=.env --input-type=module -e '
-  import { resolveDataDir } from "./scripts/lib/data-dir.ts";
+  import { resolveDataDir } from "./packages/data-dir/index.ts";
   console.log(resolveDataDir(process.cwd()));
 ')
 if [ -d "$iva_data_dir/custom/agent" ]; then

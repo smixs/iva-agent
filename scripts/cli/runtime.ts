@@ -5,7 +5,7 @@ import { basename, dirname, join } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { parseEnv } from "node:util";
 import { formatEnvLine, writeEnvAtomicSync } from "../lib/env-file.ts";
-import { resolveDataDir } from "../lib/data-dir.ts";
+import { resolveDataDir } from "../../packages/data-dir/index.ts";
 import { createSystemdControl } from "../lib/systemd-control.ts";
 import { real } from "../lib/version-layout.ts";
 import { parseVersionName } from "../lib/version-store.ts";
