@@ -133,9 +133,6 @@ const EXCLUDED_FILE_PATTERNS = [
   /\.integration\.test\.ts$/,
   /\.scenario\.test\.ts$/,
   /\.e2e\.test\.ts$/,
-  // On-demand web-template generator, not shipped runtime. Mirrors the
-  // src/setup/build.ts entry in tsconfig.build.json's exclude.
-  /\/setup\/build\.ts$/,
 ];
 
 // Subtrees of `src/` that are pure test infrastructure. Mirrors the

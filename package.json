@@ -41,7 +41,7 @@
     "@modelcontextprotocol/sdk": "1.30.0",
     "ai": "^7.0.82",
     "croner": "10.0.1",
-    "eve": "https://github.com/smixs/iva-agent/releases/download/eve-0.51.1-iva.6/eve-0.51.1-iva.6.tgz",
+    "eve": "https://github.com/smixs/iva-agent/releases/download/eve-0.51.1-iva.7/eve-0.51.1-iva.7.tgz",
     "just-bash": "^3.0.0",
     "zod": "4.5.4",
     "@iva/opencode-protocol": "file:packages/opencode-protocol"

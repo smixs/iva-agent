@@ -290,29 +290,12 @@
       "import": "./dist/src/public/channels/mcp.js",
       "default": "./dist/src/public/channels/mcp.js"
     },
-    "./channels/github": {
-      "types": "./dist/src/public/channels/github/index.d.ts",
-      "import": "./dist/src/public/channels/github/index.js",
-      "default": "./dist/src/public/channels/github/index.js"
-    },
     "./channels/telegram": {
       "types": "./dist/src/public/channels/telegram/index.d.ts",
       "import": "./dist/src/public/channels/telegram/index.js",
       "default": "./dist/src/public/channels/telegram/index.js"
     },
-    "./package.json": "./package.json",
-    "./setup/scaffold": {
-      "eve-source": "./src/setup/scaffold/index.ts",
-      "types": "./dist/src/setup/scaffold/index.d.ts",
-      "import": "./dist/src/setup/scaffold/index.js",
-      "default": "./dist/src/setup/scaffold/index.js"
-    },
-    "./setup": {
-      "eve-source": "./src/setup/index.ts",
-      "types": "./dist/src/setup/index.d.ts",
-      "import": "./dist/src/setup/index.js",
-      "default": "./dist/src/setup/index.js"
-    }
+    "./package.json": "./package.json"
   },
   "publishConfig": {
     "access": "public"
@@ -326,16 +309,13 @@
     "check:bin-runtime-dependencies": "node ./scripts/check-bin-runtime-dependencies.mjs",
     "dev": "pnpm run build:compiled && node ./scripts/copy-runtime-assets.mjs && tsc -p tsconfig.dev.json --watch --preserveWatchOutput",
     "prepack": "pnpm run build && node ../../scripts/copy-package-license.mjs .",
-    "typecheck": "pnpm run check:web-template && pnpm run build:compiled && tsc -p tsconfig.json --noEmit",
-    "generate:web-template": "node src/setup/build.ts --write",
-    "check:web-template": "node src/setup/build.ts --check"
+    "typecheck": "pnpm run build:compiled && tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "nitro": "3.0.260610-beta",
     "undici": "8.9.0"
   },
   "devDependencies": {
-    "@agentclientprotocol/sdk": "1.3.0",
     "@ai-sdk/anthropic": "catalog:",
     "@ai-sdk/code-mode": "1.0.39",
     "@ai-sdk/google": "catalog:",

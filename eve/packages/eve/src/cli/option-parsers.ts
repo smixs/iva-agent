@@ -1,7 +1,5 @@
 import { InvalidArgumentError } from "#compiled/commander/index.js";
 import { LOG_DISPLAY_MODES, parseLogDisplayMode } from "#cli/dev/tui/log-display-mode.js";
-import { ALL_REASONING_LEVELS } from "#setup/boxes/model-capabilities.js";
-import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
 import type {
   AssistantResponseStatsMode,
   LogDisplayMode,
@@ -67,30 +65,4 @@ export function parseContextSizeOption(value: string): number {
   }
 
   return size;
-}
-
-const REASONING_VALUES: readonly AgentReasoningDefinition[] = [
-  "provider-default",
-  ...ALL_REASONING_LEVELS,
-];
-
-/** Parses an authored model reasoning effort. */
-export function parseAgentNamesOption(value: string): string[] {
-  const names = value.split(",").map((name) => name.trim());
-  if (names.length === 0 || names.some((name) => name === "")) {
-    throw new InvalidArgumentError(
-      "--agents requires a comma-separated list of at least one agent name.",
-    );
-  }
-  return names;
-}
-
-export function parseReasoningOption(value: string): AgentReasoningDefinition {
-  if (!REASONING_VALUES.some((candidate) => candidate === value)) {
-    throw new InvalidArgumentError(
-      `Expected one of ${REASONING_VALUES.join(", ")}, received "${value}".`,
-    );
-  }
-
-  return value as AgentReasoningDefinition;
 }
