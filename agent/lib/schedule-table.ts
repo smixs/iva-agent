@@ -32,6 +32,8 @@ export const REMINDER_TICK_CRON = "* * * * *";
 // запись статуса и факт в jobs.json есть, поэтому isLiveSchedule признаёт его отдельно.
 export const PROACTIVE_TICK_CRON = "0,30 * * * *";
 export const PROACTIVE_SCHEDULE = "proactive";
+// Срок тика Watch и Brief: столько же держится его бронь.
+export const PROACTIVE_TIMEOUT_MS = 30 * 60_000;
 
 export type ScheduleName = keyof typeof SCHEDULE_CRON;
 

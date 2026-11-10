@@ -10,6 +10,7 @@ import { resolvePaths } from "../lib/schedule-paths.js";
 import { JOB_STOP_GRACE_MS, runScheduledJob } from "../lib/schedule-runner.js";
 import {
   PROACTIVE_SCHEDULE,
+  PROACTIVE_TIMEOUT_MS,
   PROACTIVE_TICK_CRON,
 } from "../lib/schedule-table.js";
 
@@ -26,7 +27,7 @@ export default defineSchedule({
         statusPath,
         factsPath,
         guardMs: 0,
-        timeoutMs: 30 * 60_000,
+        timeoutMs: PROACTIVE_TIMEOUT_MS,
         killGraceMs: JOB_STOP_GRACE_MS,
         wake: false,
         factOnSuccess: "after-failure",

@@ -8,12 +8,8 @@
 // сбой называется каждый день до починки (ADR-0020), пока строка жива в jobs.json (ротация 7
 // дней). Повторам в коде здесь места нет: открытый провал — это состояние, а не событие.
 import { dataDir } from "./data-dir.ts";
-import {
-  jobFactsFile,
-  latestFact,
-  readFactsSync,
-  type JobFact,
-} from "./job-facts.ts";
+import { jobFactsFile, readFactsSync, type JobFact } from "./job-facts.ts";
+import { jobState } from "./job-state.ts";
 import { list, owesAlert, type Reminder } from "./reminder-store.ts";
 import { isLiveSchedule } from "./schedule-table.ts";
 
@@ -37,7 +33,7 @@ export function openJobFailures(facts: readonly JobFact[]): OpenFailure[] {
   );
   const failures: OpenFailure[] = [];
   for (const name of names) {
-    const latest = latestFact(facts, name);
+    const latest = jobState(name, { facts }).last;
     if (!latest || latest.ok || latest.acked) continue;
     failures.push({
       source: "job",

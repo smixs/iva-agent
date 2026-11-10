@@ -82,6 +82,7 @@ export const persistPrivateResetIntent = queue.persistPrivateResetIntent;
 export const loadPrivateResetIntents = queue.loadPrivateResetIntents;
 export const clearPrivateResetIntent = queue.clearPrivateResetIntent;
 export const hasPrivateResetIntent = queue.hasPrivateResetIntent;
+export const privateResetIntentPhase = queue.privateResetIntentPhase;
 export const releaseScopedSession = queue.releaseScopedSession;
 export const performScopedReset = queue.performScopedReset;
 export { reconcileScopedResetIntents, reapStaleRuns, retireSettledSessions };

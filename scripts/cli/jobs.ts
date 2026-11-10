@@ -7,6 +7,9 @@
 // .memory.lock, что ночь (путь из agent/lib/schedule-paths.ts), код ставит в хвост сырого дня
 // ту же отметку конца, что ставит скилл, коммитит vault и стирает попытки дня. Отказ коммита —
 // код 1 и попытки на месте: повтор команды доводит коммит.
+//
+// `iva jobs status` — состояние каждого Job по записи (agent/lib/job-state.ts): бронь в
+// data/rollup-status.json и последний факт в data/jobs.json. Только чтение.
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { resolveVaultDir } from "../../packages/vault-dir/index.ts";
@@ -15,7 +18,8 @@ import { resolveTimeZone } from "../../packages/timezone/index.ts";
 // `import type` стирается при компиляции: таблица фактов живёт в authored tree, а
 // `iva jobs` обязан грузиться и там, где agent/ нет (scripts/authored-tree-guard.test.ts),
 // поэтому значения берутся динамическим импортом внутри команды.
-import type { ackFacts } from "#lib/job-facts.ts";
+import type { ackFacts, JobFact } from "#lib/job-facts.ts";
+import type { JobState } from "#lib/job-state.ts";
 import type { commitVaultWrite } from "#lib/vault-commit.ts";
 import type { underMemoryLock } from "../lib/memory-lock.ts";
 import type { createCliRuntime } from "./runtime.ts";
@@ -33,7 +37,26 @@ type JobsDependencies = {
 };
 
 const USAGE =
-  "usage: iva jobs ack <name> | iva jobs skip memory-night <YYYY-MM-DD>";
+  "usage: iva jobs ack <name> | iva jobs skip memory-night <YYYY-MM-DD> | iva jobs status";
+
+const iso = (at: number) => new Date(at).toISOString();
+
+function lastLine(last: JobFact | null): string {
+  if (last === null) return "no fact";
+  if (last.ok) return `last ok at ${iso(last.finishedAt)}`;
+  const reason = last.error ?? "no reason";
+  return `last ${last.acked ? "closed failure" : "failure"} (${reason}) at ${iso(last.finishedAt)}`;
+}
+
+/** Строка `iva jobs status`: имя, состояние брони, последний факт. */
+export function jobStatusLine(name: string, job: JobState): string {
+  const reservation = job.reservation;
+  const held =
+    reservation.kind === "none"
+      ? ""
+      : ` since ${iso(reservation.since)}${reservation.kind === "owned" ? ` (pid ${reservation.ownerPid})` : ""}`;
+  return `${name}: ${job.state}${held}; ${lastLine(job.last)}`;
+}
 
 function localDate(now: Date, timeZone: string): string {
   return new Intl.DateTimeFormat("en-CA", {
@@ -136,8 +159,34 @@ export function createJobsCommand(
     ok(`closed ${date} without processing; the night leaves it alone`);
   }
 
+  async function status(): Promise<void> {
+    const { jobFactsFile, readFactsSync } = await import("#lib/job-facts.ts");
+    const { jobState } = await import("#lib/job-state.ts");
+    const { DEFAULT_TIMEOUT_MS, readStatus } =
+      await import("#lib/schedule-runner.ts");
+    const { PROACTIVE_SCHEDULE, PROACTIVE_TIMEOUT_MS, SCHEDULE_CRON } =
+      await import("#lib/schedule-table.ts");
+    const dir = dataDirAbs(await readEnv(ENV_PATH));
+    const entries = readStatus(join(dir, "rollup-status.json"));
+    const facts = readFactsSync(jobFactsFile(dir));
+    const now = (dependencies.now ?? (() => new Date()))().getTime();
+    for (const name of [...Object.keys(SCHEDULE_CRON), PROACTIVE_SCHEDULE]) {
+      const job = jobState(name, {
+        entry: entries[name],
+        facts,
+        now,
+        deadlineMs:
+          name === PROACTIVE_SCHEDULE
+            ? PROACTIVE_TIMEOUT_MS
+            : DEFAULT_TIMEOUT_MS,
+      });
+      ok(jobStatusLine(name, job));
+    }
+  }
+
   return async function cmdJobs(args: readonly string[]): Promise<void> {
     const [subcommand, name, date] = args;
+    if (subcommand === "status" && name === undefined) return await status();
     if (subcommand === "ack" && name) return await ack(name);
     if (subcommand === "skip" && name === "memory-night" && date)
       return await skipDay(date);

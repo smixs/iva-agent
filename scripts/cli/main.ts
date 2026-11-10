@@ -117,6 +117,7 @@ ${C.b}Commands:${C.x}
   ${C.c}iva trace${C.x} <cmd>      the turn journal: tail|show [<session>/<turn>|last]|open
   ${C.c}iva notify${C.x} <text>    send one Telegram message verbatim
   ${C.c}iva jobs ack${C.x} <name>  close an open schedule failure
+  ${C.c}iva jobs status${C.x}  state of each schedule: reservation and last fact
   ${C.c}iva jobs skip memory-night${C.x} <date>  close a night-memory day without processing it
   ${C.c}iva remind${C.x} <text>    let the agent judge one Reminder, then send it to Telegram
   ${C.c}iva proactive${C.x} show|on|off|set <key> <value>  Watch, Brief and Insight settings

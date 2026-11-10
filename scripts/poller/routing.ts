@@ -48,6 +48,7 @@ import { pacedDeliver, type DeliverOptions } from "./deliver.ts";
 import {
   acknowledgeTelegramQueueItems,
   acknowledgeQueued,
+  chatResetInFlight,
   clearFailedDirectIngress,
   enqueueTelegramQueueUpdate,
   hasPrivateResetIntent,
@@ -436,6 +437,7 @@ export async function drainReadyQueueHeads({
     quarantineQueueRecords(join(DATA_DIR, "telegram-queue.json"), records, {
       logImpl: log,
     }),
+  resetBusyImpl = chatResetInFlight,
 }: {
   loadImpl?: () => MaybePromise<TelegramQueueDocument>;
   runningImpl?: (key: string) => boolean;
@@ -458,6 +460,7 @@ export async function drainReadyQueueHeads({
   quarantineImpl?: (
     records: readonly DamagedQueueRecord[],
   ) => MaybePromise<unknown>;
+  resetBusyImpl?: (chatKey: string) => boolean;
 } = {}) {
   const snapshot = await loadImpl();
   const keys = [...new Set([...queueKeys(snapshot), ...inFlight.keys()])];
@@ -477,7 +480,8 @@ export async function drainReadyQueueHeads({
       break;
     }
     // Remove this fence when vercel/eve#2876 is fixed in the installed eve.
-    if (resetPendingImpl(key)) continue;
+    // Сброс чата держит его очередь сброса: доставка ждёт своей следующей пачки.
+    if (resetPendingImpl(key) || resetBusyImpl(key)) continue;
     const currentStatus = statusImpl(key);
     const currentGeneration = statusGeneration(currentStatus);
     const running = runningImpl(key);

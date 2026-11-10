@@ -9,6 +9,10 @@ import {
   clearTelegramResetIntent,
   loadTelegramResetIntents,
   persistTelegramResetIntent,
+  RESET_INTENT_PHASES,
+  resetIntentFences,
+  resetIntentPhase,
+  resetIntentRetryPending,
 } from "./telegram-reset-intent.ts";
 
 async function intentDirectory(t: TestContext): Promise<string> {
@@ -108,4 +112,31 @@ void test("reset intent loader skips a filename that does not match the chat", a
   });
   assert.deepEqual(await loadTelegramResetIntents(directory), []);
   assert.match(errors[0], /filename does not match its chat key/u);
+});
+
+// Соответствие оператору Phase модели specs/ResetIntent.tla: каждая комбинация записи и памяти.
+void test("ResetIntent Phase: the phase of every record and memory combination matches the model", () => {
+  const model = (
+    recorded: boolean,
+    retryPending: boolean,
+    escalated: boolean,
+  ) =>
+    !recorded
+      ? retryPending
+        ? "blocked"
+        : "none"
+      : !retryPending
+        ? "recorded"
+        : escalated
+          ? "escalated"
+          : "waiting";
+  for (const recorded of [false, true])
+    for (const retryPending of [false, true])
+      for (const escalated of [false, true]) {
+        const phase = resetIntentPhase({ recorded, retryPending, escalated });
+        assert.equal(phase, model(recorded, retryPending, escalated));
+        assert.ok(RESET_INTENT_PHASES.includes(phase));
+        assert.equal(resetIntentFences(phase), recorded, "Fence is the record");
+        assert.equal(resetIntentRetryPending(phase), retryPending);
+      }
 });

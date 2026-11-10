@@ -54,11 +54,15 @@ import {
 import { downloadTelegramFile, edit, reply, sc, tg } from "./transport.ts";
 import { chatKey } from "./offset.ts";
 import {
-  hasPrivateResetIntent,
-  isPrivateResetRetryPending,
   performScopedReset,
+  privateResetIntentPhase,
   RESET_INTENT_ESCALATION_ATTEMPTS,
 } from "./queue.ts";
+import {
+  resetIntentFences,
+  resetIntentRetryPending,
+  type ResetIntentPhase,
+} from "../lib/telegram-reset-intent.ts";
 import { deliverDirectUpdate } from "./routing.ts";
 import { parseUpdateCallbackData } from "./update-callback.ts";
 import { handleUpdateCallback, handleUpdateCheck } from "./update-flow.ts";
@@ -136,8 +140,7 @@ export type ControlDeps = {
   // Куда уходит работа после ответа циклу: фон моста (по умолчанию) или двойник в тесте.
   scheduleImpl?: (key: string, task: () => Promise<void>) => boolean;
   performResetImpl?: PerformResetImpl;
-  resetRetryPendingImpl?: (chatKey: string) => boolean;
-  resetIntentPendingImpl?: (chatKey: string) => boolean;
+  resetPhaseImpl?: (chatKey: string) => ResetIntentPhase;
   // «Установить» на предложении плагина: забрать копию и запустить установщик.
   pluginTapImpl?: (tap: PluginTap) => Promise<PluginTapOutcome>;
   // «Я в курсе» под пунктом Watch: удалить сообщение с кнопкой; true — удалено.
@@ -621,8 +624,7 @@ const DEFAULT_CONTROL_IO: Omit<ControlIo, "cancelImpl"> = {
   replyImpl: replyTo,
   ackImpl: answerCallback,
   performResetImpl: performScopedReset,
-  resetRetryPendingImpl: isPrivateResetRetryPending,
-  resetIntentPendingImpl: hasPrivateResetIntent,
+  resetPhaseImpl: (chatKey) => privateResetIntentPhase(chatKey),
   scheduleImpl: scheduleBridgeTask,
   pluginTapImpl: (tap) => handlePluginProposalTap(tap),
   deleteImpl: deleteGotItMessage,
@@ -1435,13 +1437,19 @@ function privateResetKey(run: ResetRun): string | null {
 
 async function holdForPendingRetry(run: ResetRun): Promise<true | undefined> {
   const key = privateResetKey(run);
-  if (key === null || !run.io.resetRetryPendingImpl(key)) return undefined;
-  return answerPendingRetry(run, key);
+  if (key === null) return undefined;
+  const phase = run.io.resetPhaseImpl(key);
+  if (!resetIntentRetryPending(phase)) return undefined;
+  return answerPendingRetry(run, key, phase);
 }
 
-async function answerPendingRetry(run: ResetRun, key: string): Promise<true> {
+async function answerPendingRetry(
+  run: ResetRun,
+  key: string,
+  phase: ResetIntentPhase,
+): Promise<true> {
   // Telegram owns one global ordered offset. Advancing it without durable intent loses /new.
-  if (!run.io.resetIntentPendingImpl(key))
+  if (phase === "blocked")
     throw Object.assign(new Error(`reset retry backoff active for ${key}`), {
       resetPhase: "backoff",
     });
@@ -1577,7 +1585,8 @@ function resetFailureSettled(reset: ActiveReset, failure: ResetFailure) {
 
 function backoffIntentSaved(reset: ActiveReset, failure: ResetFailure) {
   return (
-    failure.phase === "backoff" && reset.io.resetIntentPendingImpl(reset.key)
+    failure.phase === "backoff" &&
+    resetIntentFences(reset.io.resetPhaseImpl(reset.key))
   );
 }
 

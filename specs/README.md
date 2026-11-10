@@ -736,3 +736,40 @@ The tests named `TurnLifecycle …` in `scripts/lib/reminder-turn.test.ts` and `
 ```sh
 specs/turn-lifecycle-check.sh
 ```
+
+## ResetIntent
+
+`ResetIntent.tla` models the reset intent of a private chat (`/new` and `/restart`) and was written after the code: `scripts/lib/telegram-reset-intent.ts` (the intent file with `discardThroughUpdateId`), `scripts/poller/queue.ts` (`performScopedReset`, `reconcileScopedResetIntents`, the Bridge memory read by `privateResetIntentPhase`) and `scripts/poller/control.ts` (`startReset`, `holdForPendingRetry`, `finishReset`). One private chat, updates `1..N` with `/new` among them, the chat queue and the intent file on disk, the Bridge memory (the record mirror that fences the queue, the backoff, the failure count, the delivered escalation), the agent session as a generation, the main loop that handles `/new` step by step, the reconciliation task with the chat reset queue (`chatResetTails`: the main path of a chat and its reconciliation never run at once, and the queue delivery of that chat waits while either holds it) and a Bridge restart between any two steps that empties the memory. The operator `Phase` is `resetIntentPhase`: `none`, `blocked`, `recorded`, `waiting`, `escalated`. Time is a step `Expire`; group chats, the edit of the pending message, `/restart`'s service restart, a second Bridge process and read errors at startup are outside the model.
+
+Checked invariants:
+
+1. `ExactCut`: after `/new` the chat queue is cleared exactly through the recorded `update_id`; a message before it never reaches the new session, a message after it is kept, goes to the new session and is not wiped by a late reset.
+2. `IntentUntilClean`: without the intent file no message before a reset `/new` is left in the queue.
+3. `ConfirmOnce`: the owner sees "conversation reset" at most once per `/new`; `EscalationOnce`: one escalation per process.
+4. `Finished` (liveness): every `/new` gets an answer, and the intent is removed after the session reset and the cleanup, or the owner is told to run `iva reset`.
+
+The base configuration has the reconciliation pass interleaving with the main loop (`RecInterleave = TRUE`): the scan of the intent directory may happen before a whole `/new` and its next message. What keeps `ExactCut` green is the chat reset queue and `RecTake`, the step that re-reads the intent from disk after taking the queue: without an intent file, or with a different `discardThroughUpdateId`, the reconciliation does nothing.
+
+Witnesses must fail: `-clear-first` (the intent is removed before the queue is cleared, `IntentUntilClean`), `-clear-all` (the queue is cleared through its last item, not the recorded `update_id`, `ExactCut`), `-confirm-recovery` (the reconciliation also confirms, `ConfirmOnce`). One accepted window fails and stays as a witness: `-confirm-window` (a restart between "conversation reset" and the saved offset: Telegram hands `/new` out again and the owner sees a second confirmation, `ConfirmOnce`). `-interleave` is a mutant of the fix, not a witness: the reconciliation takes the chat reset queue but does not re-read the intent (`RecReread = FALSE`), so its late remote reset wipes the session `/new` and the queue delivery already filled (`ExactCut`). Conformance tests named after the invariants: `scripts/telegram-poll-reset.test.ts` (`ResetIntent …`) and `scripts/lib/telegram-reset-intent.test.ts`.
+
+```sh
+specs/reset-intent-check.sh
+```
+
+## JobRun
+
+`JobRun.tla` models a Job — a scheduled run through `runScheduledJob` — and was written after the code: the reservation of a schedule name in `data/rollup-status.json` (`admitUnderLock`, `completeUnderLock`, `clearReservation` in `agent/lib/schedule-runner.ts`, read by `jobState` in `agent/lib/job-state.ts`), its fact in `data/jobs.json` (`recordJobFact`), the agent wake and the Job watchdog (`scripts/lib/job-watchdog.ts`). One name, Iva processes as slots that die and come back as a new incarnation, admission under the status lock as one step, the child, the fact under the schedule's fact policy (or a failed write that rejects the run's promise), completion and the `finally` cleanup that release only their own reservation, the reservation deadline (`timeoutMs`, `Deadline = FALSE` for none) and the watchdog's daily message. `PidReuse` gives a new incarnation the old pid, so `process.kill(pid, 0)` sees an old reservation alive; `SelfCheck` is the v5 fix that treats this process's pid with another `ownerStartedAt` as dead. The guard on the last success, seeding by the migration, the status lock's steal, flock around the child and the fact's text are outside the model. The fact policy is a constant: under `factOnSuccess: "after-failure"` (the half-hourly `proactive` tick, `agent/schedules/proactive.ts`) a successful run whose name has no failed fact on top writes no row at all — the run is left in the status (`lastFinishedAt`, `lastSuccessAt`), and `job-facts.ts` `recordFact` returns false; a failure is always written, and a success closes a failure.
+
+Checked invariants:
+
+1. `OneLive`: at most one live child per schedule name.
+2. `DeadFreed`: a reservation of a dead owner never blocks an admission.
+3. `FactKept`: a run that wrote its outcome to the status left a fact — unless the fact policy skipped it (a success with no failed fact on top, which the status records as a success), — or its promise was rejected with "fact not recorded".
+4. `NoForeignClear`: completion and cleanup never remove another run's reservation.
+5. `WatchOnce`: one watchdog message per day.
+
+`JobRun.cfg` (two processes, deadline, `after-failure`), `-nodeadline`, `-selfreuse` (one process that gets its pid back) and `-always` (the `always` fact policy) pass. Mutants must fail: `-foreign-clear` (`NoForeignClear`), `-over-live` (admission over a live reservation, `OneLive`), `-no-fact` (`FactKept`), `-sparse-nostatus` (a policy-skipped success reaches the status only as "finished", never as a success, `FactKept`), `-ignore-death` (`DeadFreed`), `-selfreuse-nocheck` (the code before v5, `DeadFreed`). Accepted windows stay as witnesses: `-pidreuse` (another process took the dead owner's pid: the reservation holds until its deadline, `DeadFreed`), `-grace` (the child lives up to `killGraceMs` past the deadline while a second run starts, `OneLive`; flock on `.memory.lock` serializes the night) and `-orphan` (the child outlives Iva; `KillMode=control-group` of `iva.service` rules it out on Linux, `OneLive`). Conformance tests: `agent/lib/job-state.test.ts` (`JobRun …`, with a differential property against the admission condition before v5).
+
+```sh
+specs/job-run-check.sh
+```
