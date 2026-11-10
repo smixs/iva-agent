@@ -485,7 +485,7 @@ test("a symlinked active marker is corrupt even when its target is valid", (t) =
   const marker = join(store.layout.data, "active.json");
   const target = join(root, "active-target.json");
   const bytes = Buffer.from(
-    '{"schema":"iva-active/v1","version":"0.3.14-aaaaaaaaaaaa"}\n',
+    '{"schema":"iva-active/v2","version":"0.3.14-aaaaaaaaaaaa","settledAt":"2026-01-01T00:00:00.000Z"}\n',
   );
   writeFileSync(target, bytes);
   symlinkSync(target, marker);
@@ -530,7 +530,7 @@ test("invalid UTF-8 is rejected before JSON schema validation", (t) => {
   const marker = join(store.layout.data, "active.json");
   const corrupt = Buffer.concat([
     Buffer.from(
-      '{"schema":"iva-active/v1","version":"0.3.14-aaaaaaaaaaaa","x":"',
+      '{"schema":"iva-active/v2","version":"0.3.14-aaaaaaaaaaaa","x":"',
     ),
     Buffer.from([0xff]),
     Buffer.from('"}\n'),
@@ -629,7 +629,7 @@ test("garbage collection preserves the settled rollback regardless of mtime", (t
   writeFileSync(
     join(store.layout.data, "active.json"),
     `${JSON.stringify({
-      schema: "iva-active/v1",
+      schema: "iva-active/v2",
       version: rollback,
       settledAt: "2026-01-01T00:00:00.000Z",
     })}\n`,
@@ -826,9 +826,13 @@ test("semantic-invalid v1 and v2 active markers fail closed", (t) => {
   const invalid = [
     {},
     { schema: "iva-active/v0", version: "0.3.14-aaaaaaaaaaaa" },
-    { schema: "iva-active/v1", version: "not-a-version" },
-    { schema: "iva-active/v1", version: "0.3.14-aaaaaaaaaaaa", settledAt: 1 },
-    { schema: "iva-active/v1", version: "0.3.14-aaaaaaaaaaaa", extra: true },
+    // specs/UpdateFloor.tla, NoSilentLoss: the marker of releases before 0.3.24.
+    { schema: "iva-active/v1", version: "0.3.14-aaaaaaaaaaaa" },
+    {
+      schema: "iva-active/v1",
+      version: "0.3.14-aaaaaaaaaaaa",
+      settledAt: "2026-08-16T00:00:00.000Z",
+    },
     { schema: "iva-active/v2", version: "0.3.14-aaaaaaaaaaaa" },
     {
       schema: "iva-active/v2",
@@ -845,12 +849,14 @@ test("semantic-invalid v1 and v2 active markers fail closed", (t) => {
   ];
 
   for (const value of invalid) {
-    writeFileSync(marker, `${JSON.stringify(value)}\n`);
+    const bytes = `${JSON.stringify(value)}\n`;
+    writeFileSync(marker, bytes);
     assert.throws(
       () => store.settled(),
       /active\.json.*corrupt|corrupt.*active\.json/u,
       JSON.stringify(value),
     );
+    assert.equal(readFileSync(marker, "utf8"), bytes);
   }
 });
 
@@ -883,18 +889,15 @@ test("valid active state survives JSON roundtrip", (t) => {
     fc.property(
       fc.constantFrom(...versions),
       fc.boolean(),
-      fc.boolean(),
-      (version, v2, cleanupPending) => {
+      (version, cleanupPending) => {
         const previous = versions.find((name) => name !== version);
-        const state = v2
-          ? {
-              schema: "iva-active/v2" as const,
-              version,
-              previous,
-              settledAt: "2026-08-16T00:00:00.000Z",
-              ...(cleanupPending ? { cleanupPending: true } : {}),
-            }
-          : { schema: "iva-active/v1" as const, version };
+        const state = {
+          schema: "iva-active/v2" as const,
+          version,
+          previous,
+          settledAt: "2026-08-16T00:00:00.000Z",
+          ...(cleanupPending ? { cleanupPending: true } : {}),
+        };
         writeFileSync(marker, `${JSON.stringify(state)}\n`);
         assert.deepEqual(readActiveState(marker), { kind: "valid", state });
       },
