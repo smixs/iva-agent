@@ -42,10 +42,13 @@ function fixture(t: TestContext) {
   };
   const first = commit("1.0.0", true);
   git(temp, "clone", "-q", "--mirror", remote, mirror);
-  const beta = (value: string) => git(mirror, "config", "iva.beta", value);
+  /** Beta updates: Update branch `beta`. */
+  const beta = () => git(mirror, "config", "iva.updateBranch", "beta");
+  /** The flag of beta builds before 0.5.0; nothing reads it. */
+  const flag = (value: string) => git(mirror, "config", "iva.beta", value);
   const target = (installed?: string) =>
     resolveReleaseTarget({ git: (...args) => gitAt(mirror, args), installed });
-  return { temp, remote, seed, mirror, first, commit, beta, target };
+  return { temp, remote, seed, mirror, first, commit, beta, flag, target };
 }
 
 /** Выпуск 1.0.0 на main, ветка beta на шаг впереди; зеркало снято после обеих. */
@@ -102,9 +105,9 @@ void test("beta: вершина ветки, а не метка", async (t) => {
   const fx = fixture(t);
   fx.commit("1.1.0", true);
   const tip = fx.commit("1.2.0-beta.1");
-  // Бета — ветка beta (ADR-0018); прежний флаг при main уводит на неё.
+  // Бета — ветка beta (ADR-0018).
   git(fx.seed, "push", "-q", "origin", "HEAD:refs/heads/beta");
-  fx.beta("true");
+  fx.beta();
   const target = await fx.target(fx.first);
   assert.equal(target.beta, true);
   assert.equal(target.targetHead, tip);
@@ -121,16 +124,37 @@ void test("меток нет вовсе: stable — отказ с советом
   await assert.rejects(resolveTarget(fx.mirror, fx.first), /iva beta/u);
 });
 
-void test("iva.beta — мусор: как stable и строка-предупреждение", async (t) => {
-  const fx = fixture(t);
-  fx.commit("1.1.0");
-  fx.beta("nightly");
-  const warnings: string[] = [];
-  t.mock.method(console, "warn", (line: string) => warnings.push(line));
-  const target = await fx.target(fx.first);
-  assert.equal(target.beta, false);
-  assert.equal(target.targetHead, fx.first);
-  assert.match(warnings.join("\n"), /iva\.beta.*nightly.*releases/u);
+// UpdateFloor.NoSilentLoss: флаг iva.beta писали бета-сборки до 0.5.0. Цель решает Update
+// branch; флаг не читается, не переписывается и ветку не меняет.
+void test("NoSilentLoss: флаг iva.beta при main, без ветки и при своей ветке — выпуск, флаг и ветка как были", async (t) => {
+  for (const value of ["true", "nightly"])
+    for (const branch of ["main", "", "dev"]) {
+      const fx = fx2(t);
+      git(fx.seed, "switch", "-q", "-c", "dev");
+      const devTag = fx.commit("1.5.0", true);
+      fx.commit("1.6.0-beta.1");
+      git(fx.seed, "switch", "-q", "main");
+      if (branch) git(fx.mirror, "config", "iva.updateBranch", branch);
+      fx.flag(value);
+      const config = () =>
+        ["iva.updateBranch", "iva.beta"].map(
+          (key) =>
+            spawnSync("git", ["-C", fx.mirror, "config", "--get", key], {
+              encoding: "utf8",
+            }).stdout,
+        );
+      const before = config();
+      const warnings: string[] = [];
+      t.mock.method(console, "warn", (line: string) => warnings.push(line));
+
+      const target = await fx.target(fx.first);
+
+      assert.equal(target.beta, false, `${value} ${branch}`);
+      assert.equal(target.targetHead, branch === "dev" ? devTag : fx.first);
+      assert.equal((await resolveTarget(fx.mirror, fx.first)).beta, false);
+      assert.deepEqual(config(), before);
+      assert.deepEqual(warnings, []);
+    }
 });
 
 void test("сеть при забирании меток: тот же отказ, что при сети, а не «уже последняя»; бета — как сейчас", async (t) => {
@@ -140,7 +164,7 @@ void test("сеть при забирании меток: тот же отказ
   rmSync(fx.remote, { recursive: true, force: true });
   await assert.rejects(fx.target(tip), /couldn't fetch|fatal/u);
   await assert.rejects(resolveTarget(fx.mirror, tip), /couldn't fetch|fatal/u);
-  fx.beta("true");
+  fx.beta();
   // Бета без сети (QA D2): отказ, а не коммит зеркала — HEAD зеркала может быть main.
   await assert.rejects(
     resolveTarget(fx.mirror, tip),
@@ -150,13 +174,12 @@ void test("сеть при забирании меток: тот же отказ
 
 void test("переключение beta → stable на установке новее метки: ничего не ставится до следующей метки", async (t) => {
   const fx = fixture(t);
-  fx.beta("true");
+  fx.beta();
   const installed = fx.commit("1.1.0-beta.1");
   git(fx.seed, "push", "-q", "origin", "HEAD:refs/heads/beta");
   assert.equal((await fx.target(installed)).targetHead, installed);
-  // iva stable: ветка main, флага нет.
+  // iva stable: ветка main.
   git(fx.mirror, "config", "iva.updateBranch", "main");
-  git(fx.mirror, "config", "--unset", "iva.beta");
   assert.equal((await fx.target(installed)).targetHead, installed);
   const next = fx.commit("1.1.0", true);
   assert.equal((await fx.target(installed)).targetHead, next);
@@ -166,19 +189,17 @@ void test("переключение beta → stable на установке но
   assert.equal(info.remoteVersion, "1.1.0");
 });
 
-void test("ветка обновления не main: выпуски и бета — её метки и её вершина", async (t) => {
+void test("ветка обновления не main: выпуск — её метка, а не метка main и не её вершина", async (t) => {
   const fx = fixture(t);
   git(fx.seed, "switch", "-q", "-c", "dev");
   const devTag = fx.commit("1.5.0", true);
-  const devTip = fx.commit("1.6.0-beta.1");
+  fx.commit("1.6.0-beta.1");
   git(fx.seed, "switch", "-q", "main");
   fx.commit("2.0.0", true);
   git(fx.mirror, "config", "iva.updateBranch", "dev");
   const stable = await fx.target(fx.first);
   assert.equal(stable.branch, "dev");
   assert.equal(stable.targetHead, devTag);
-  fx.beta("true");
-  assert.equal((await fx.target(fx.first)).targetHead, devTip);
 });
 
 // ADR-0018: выпуски в main, бета — ветка beta. iva beta / iva stable переводят и ветку.
@@ -206,23 +227,10 @@ void test("iva beta — вершина ветки beta; iva stable — выпу�
   assert.equal((await target(fx.first)).targetHead, fx.first);
 });
 
-// Круг 2. Прежний opt-in (iva.beta=true при ветке main) уходит на ветку beta, и ветка
-// переписывается один раз: main теперь только выпуски.
-void test("прежний opt-in: флаг при main — вершина beta, iva.updateBranch=beta", async (t) => {
-  const fx = fx2(t);
-  git(fx.mirror, "config", "iva.updateBranch", "main");
-  fx.beta("true");
-  const target = await fx.target(fx.first);
-  assert.equal(target.branch, "beta");
-  assert.equal(target.targetHead, fx.betaTip);
-  assert.equal(git(fx.mirror, "config", "--get", "iva.updateBranch"), "beta");
-});
-
 // Никакого автоматического отката: вершина беты — предок установленного, цель — он сам.
 void test("бета: вершина ветки старше установленного — цель установленный коммит", async (t) => {
   const fx = fx2(t);
-  git(fx.mirror, "config", "iva.updateBranch", "beta");
-  fx.beta("true");
+  fx.beta();
   const installed = fx.betaTip;
   git(fx.seed, "push", "-q", "-f", "origin", `${fx.first}:refs/heads/beta`);
   assert.equal((await fx.target(installed)).targetHead, installed);
@@ -249,15 +257,19 @@ void test("бета, у origin нет ветки beta: отказ, а не ве�
   );
 });
 
-void test("зеркало ~/iva/repo получает iva.beta установки так же, как iva.updateBranch", async (t) => {
+void test("зеркало ~/iva/repo получает iva.updateBranch установки; прежний флаг остаётся где был", async (t) => {
   const fx = fixture(t);
   const home = join(fx.temp, "home");
   git(fx.temp, "clone", "-q", fx.remote, home);
   git(home, "config", "iva.beta", "true");
-  git(home, "config", "iva.updateBranch", "main");
+  git(home, "config", "iva.updateBranch", "beta");
   const repo = await ensureMirror(home);
-  assert.equal(git(repo, "config", "--get", "iva.beta"), "true");
-  assert.equal(git(repo, "config", "--get", "iva.updateBranch"), "main");
+  assert.equal(git(repo, "config", "--get", "iva.updateBranch"), "beta");
+  assert.equal(
+    spawnSync("git", ["-C", repo, "config", "--get", "iva.beta"]).status,
+    1,
+  );
+  assert.equal(git(home, "config", "--get", "iva.beta"), "true");
 });
 
 void test("каталог версии беты `0.4.11-beta.1-<sha12>` разбирают и новый код, и v0.4.8", async (t) => {
@@ -336,20 +348,7 @@ void test("resolver failure table: a failed step refuses, never a target below t
       step: "check-ref-format",
       installed: fx.betaTip,
       expect: "other",
-      setup: () => {
-        git(fx.mirror, "config", "iva.updateBranch", "a..b");
-        fx.beta("true");
-      },
-    },
-    {
-      step: "config (migration)",
-      installed: fx.betaTip,
-      expect: "other",
-      setup: () => {
-        git(fx.mirror, "config", "iva.updateBranch", "main");
-        fx.beta("true");
-        writeFileSync(join(fx.mirror, "config.lock"), "");
-      },
+      setup: () => git(fx.mirror, "config", "iva.updateBranch", "a..b"),
     },
     // R4: merge-base упал (нет промежуточного объекта), а не ответил «не предок».
     {
@@ -360,16 +359,6 @@ void test("resolver failure table: a failed step refuses, never a target below t
         git(fx.seed, "push", "-q", "-f", "origin", `${older}:refs/heads/beta`),
       fail: /^merge-base --is-ancestor/u,
       code: 128,
-    },
-    // R4: прежний opt-in без активного коммита — отказ и ветка не переписана.
-    {
-      step: "migration before notBelow",
-      installed: "ab".repeat(20),
-      expect: "other",
-      setup: () => {
-        git(fx.mirror, "config", "iva.updateBranch", "main");
-        fx.beta("true");
-      },
     },
     // R4: origin отвечает, ветка есть, а fetch падает локально (FETCH_HEAD не пишется).
     {
