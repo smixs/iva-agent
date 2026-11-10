@@ -76,7 +76,7 @@ by executable tests and the accepted residual windows in `docs/tech-debt.md` §1
 - `Served`: at the floor and above the update ends on the new release.
 - `Repaired`: repair, killed once between its two updates or not, ends on the new release with the owner's branch back. `UpdateFloor-no-step.cfg` runs the installed updater straight at the newest release and it is refused for good.
 
-Outside the model: the updater of 0.3.0 to 0.3.6, which moves the checkout and replaces `node_modules` before any code of the new tree runs; a failed fetch or build, which is the updater's own rollback (`UpdateCrash.tla`); a kill in the middle of one update.
+Outside the model: the updater of 0.3.0 to 0.3.6, which moves the checkout and replaces `node_modules` before any code of the new tree runs; a failed fetch or build, which is the updater's own rollback; a kill in the middle of one update.
 
 ## RestartRecovery
 

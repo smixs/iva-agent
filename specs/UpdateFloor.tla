@@ -13,7 +13,7 @@
    only releases below the floor wrote and one that a release at the floor or above wrote.
    Outside the model: the updater of 0.3.0 to 0.3.6, which moves the checkout and
    replaces node_modules before any code of the new tree runs; a failed fetch or build
-   (the updater's own rollback, specs/UpdateCrash.tla); a kill in the middle of one
+   (the updater's own rollback); a kill in the middle of one
    update. *)
 CONSTANTS
   FinishChecks,   \* the new half refuses an installation below the floor
