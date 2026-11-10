@@ -25,6 +25,7 @@ check() { # config expected
 }
 check BrainOversize none
 check BrainOversize-no-threshold BigNeverCommitted
+check BrainOversize-check-before-add BigNeverCommitted
 check BrainOversize-silent SkippedIsTold
 check BrainOversize-abort OthersGo
 check BrainOversize-every-night OneAlertPerSet

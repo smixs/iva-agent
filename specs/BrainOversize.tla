@@ -9,11 +9,15 @@
 \*
 \* Действие модели -> код
 \*   Write(f, s)   владелец, агент или вложение пишут файл vault (рабочее дерево)
-\*   Commit        scripts/memory/brain.ts:commitOwnerChanges -> agent/lib/vault-commit.ts
-\*                 commitVaultSweep -> commitPaths: пути больше VAULT_BLOB_LIMIT_BYTES в
-\*                 git add и коммит не идут и возвращаются полем oversize; остальные
-\*                 коммитятся. Тот же commitPaths у дневных писателей и ночной подметки
+\*   Check         scripts/memory/brain.ts:commitOwnerChanges -> agent/lib/vault-commit.ts
+\*                 commitVaultSweep -> commitPaths: список путей и lstat; путь больше
+\*                 VAULT_BLOB_LIMIT_BYTES в git add не идёт (его блоб не пишется в базу
+\*                 объектов). Тот же commitPaths у дневных писателей и ночной подметки
 \*                 «до ночи» (scripts/memory/night.ts): порог один для всех коммитов vault.
+\*   Store         commitFitting: git add читает файлы — их размер в этот миг; stagedBlobs
+\*                 меряет блоб в индексе, больший порога снимается с индекса (restoreIndex);
+\*                 commitWith коммитит ровно эти блобы из своего индекса, рабочее дерево не
+\*                 перечитывает. Между Check и Store файл может вырасти: Write — любой миг.
 \*   Tell(ok)      brain.ts:alertOversize — набор пропущенных путей; есть — alertOnce с сутью
 \*                 «отсортированные имена» (packages/alert-state: та же суть молчит неделю,
 \*                 неотправленный Alert не записывается); пусто — alertResolved
@@ -26,12 +30,14 @@
 \*   Throttled = FALSE    Alert о том же наборе каждую ночь (OneAlertPerSet)
 \*   Unstages = TRUE      пропуск убирает из индекса уже взятый под git файл: следующий
 \*                        коммит удаляет его прежнюю версию из бэкапа (HistoryKept)
+\*   ChecksBlob = FALSE   решает только проверка до add: файл, выросший между lstat и
+\*                        чтением git, уходит в коммит (BigNeverCommitted)
 EXTENDS Naturals, FiniteSets
 
 CONSTANTS
   Files,       \* файлы vault, которые меняются
   MaxWrites,   \* сколько записей файлов
-  Threshold, Tells, SkipAborts, Throttled, Unstages
+  Threshold, Tells, SkipAborts, Throttled, Unstages, ChecksBlob
 
 Sizes == {"small", "big"}
 Version(f, s) == <<f, s>>
@@ -41,7 +47,9 @@ VARIABLES
   size,      \* размер файла в рабочем дереве
   changed,   \* файл изменён и не закоммичен
   history,   \* версии файлов, которые бэкап хранит (уходят push и остаются в его дереве)
-  phase,     \* Brain: idle | committed (между коммитом и Alert)
+  phase,     \* Brain: idle | checked (lstat прошёл, git ещё не читал) | committed (до Alert)
+  paths,     \* пути, которые взяла проверка
+  early,     \* пути, которые проверка до add оставила вне коммита
   skipped,   \* пути, которые последний коммит не взял по порогу
   told,      \* суть последнего отправленного Alert (набор имён); {} — нет записи
   failed,    \* последняя отправка Alert не удалась
@@ -49,13 +57,15 @@ VARIABLES
   stuck,     \* файлы до порога, которые последний коммит не взял
   writes
 
-vars == <<size, changed, history, phase, skipped, told, failed, repeated, stuck, writes>>
+vars == <<size, changed, history, phase, paths, early, skipped, told, failed, repeated, stuck,
+          writes>>
 
 Init ==
   /\ size = [f \in Files |-> "small"]
   /\ changed = [f \in Files |-> FALSE]
   /\ history = History0
   /\ phase = "idle"
+  /\ paths = {} /\ early = {}
   /\ skipped = {}
   /\ told = {}
   /\ failed = FALSE
@@ -68,15 +78,24 @@ Write(f, s) ==
   /\ size' = [size EXCEPT ![f] = s]
   /\ changed' = [changed EXCEPT ![f] = TRUE]
   /\ writes' = writes + 1
-  /\ UNCHANGED <<history, phase, skipped, told, failed, repeated, stuck>>
+  /\ UNCHANGED <<history, phase, paths, early, skipped, told, failed, repeated, stuck>>
 
-Commit ==
+Check ==
   /\ phase = "idle"
-  /\ LET dirty == {f \in Files : changed[f]}
-         over == IF Threshold THEN {f \in dirty : size[f] = "big"} ELSE {}
-         taken == IF SkipAborts /\ over # {} THEN {} ELSE dirty \ over
+  /\ paths' = {f \in Files : changed[f]}
+  /\ early' = IF Threshold THEN {f \in Files : changed[f] /\ size[f] = "big"} ELSE {}
+  /\ phase' = "checked"
+  /\ UNCHANGED <<size, changed, history, skipped, told, failed, repeated, stuck, writes>>
+
+\* Блоб — файл в миг чтения git; коммит берёт эти блобы, а не рабочее дерево ещё раз.
+Store ==
+  /\ phase = "checked"
+  /\ LET late == IF Threshold /\ ChecksBlob
+                    THEN {f \in paths \ early : size[f] = "big"} ELSE {}
+         over == early \cup late
+         taken == IF SkipAborts /\ over # {} THEN {} ELSE paths \ over
      IN /\ skipped' = over
-        /\ stuck' = (dirty \ over) \ taken
+        /\ stuck' = (paths \ over) \ taken
         /\ changed' = [f \in Files |-> changed[f] /\ f \notin taken]
         /\ history' =
              (IF Unstages /\ over # {}
@@ -84,6 +103,7 @@ Commit ==
                 ELSE history)
              \cup {Version(f, size[f]) : f \in taken}
   /\ phase' = "committed"
+  /\ paths' = {} /\ early' = {}
   /\ UNCHANGED <<size, told, failed, repeated, writes>>
 
 Tell(ok) ==
@@ -98,11 +118,11 @@ Tell(ok) ==
          ELSE /\ failed' = ~ok
               /\ told' = IF ok THEN skipped ELSE told
               /\ repeated' = (repeated \/ (ok /\ told = skipped))
-  /\ UNCHANGED <<size, changed, history, skipped, stuck, writes>>
+  /\ UNCHANGED <<size, changed, history, paths, early, skipped, stuck, writes>>
 
 Next ==
   \/ \E f \in Files, s \in Sizes : Write(f, s)
-  \/ Commit
+  \/ Check \/ Store
   \/ \E ok \in BOOLEAN : Tell(ok)
 
 Spec == Init /\ [][Next]_vars
@@ -110,7 +130,8 @@ Spec == Init /\ [][Next]_vars
 TypeOK ==
   /\ size \in [Files -> Sizes]
   /\ changed \in [Files -> BOOLEAN]
-  /\ phase \in {"idle", "committed"}
+  /\ phase \in {"idle", "checked", "committed"}
+  /\ paths \subseteq Files /\ early \subseteq paths
   /\ skipped \subseteq Files
   /\ told \subseteq Files
   /\ failed \in BOOLEAN /\ repeated \in BOOLEAN
