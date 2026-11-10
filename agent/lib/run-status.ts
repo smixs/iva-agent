@@ -30,9 +30,6 @@ type StatusRecord = {
 };
 type StatusPatch = Record<string, unknown>;
 
-// Поле нужно только для отката на 0.3.x. Удалить после стабилизации 0.4.x.
-export const RETIRED_SESSION_ROUTING_FIELD = "continuationToken";
-
 export type TelegramSessionRetirement = {
   replayMs: number;
   sessionId: string;
@@ -49,7 +46,6 @@ const errorCode = (error: unknown): string | undefined =>
 // Путь от cwd, как в usage.ts, а НЕ от import.meta.url: канал инлайнится в кэш
 // authored-modules eve, откуда «две папки вверх» указывают в node_modules/.cache.
 const DATA_DIR = dataDir();
-const LEGACY_STATUS_FILE = join(DATA_DIR, "run-status.json");
 const STATUS_DIR = join(DATA_DIR, "run-status.d");
 const positiveMs = (raw: string | undefined, fallback: number): number => {
   const value = Number(raw);
@@ -118,19 +114,6 @@ function isCorruptStatus(error: unknown): boolean {
   );
 }
 
-function readLegacy(chatKey: string): StatusRecord | null {
-  try {
-    const legacy = readObject(LEGACY_STATUS_FILE);
-    const value = legacy?.[chatKey];
-    return isRecord(value) ? value : null;
-  } catch (error) {
-    // Старый код считал битый whole-map пустым. Чтение остаётся совместимым,
-    // но новый код legacy-файл не переписывает и не рискует остальными чатами.
-    if (isCorruptStatus(error)) return null;
-    throw error;
-  }
-}
-
 function isRecord(value: unknown): value is StatusRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -150,10 +133,6 @@ function readPerChat(chatKey: string): StatusRecord | null {
     }
     return null;
   }
-}
-
-function readCurrent(chatKey: string): StatusRecord | null {
-  return readPerChat(chatKey) ?? readLegacy(chatKey);
 }
 
 // Статус хода — не публичные данные: и лок, и сам файл создаются под 0600.
@@ -177,7 +156,7 @@ function writeCurrent(file: string, value: StatusRecord): void {
 }
 
 export function getChatStatus(chatKey: string): StatusRecord | null {
-  return readCurrent(chatKey);
+  return readPerChat(chatKey);
 }
 
 // Снимок всех per-chat записей для фонового обслуживания мостом.
@@ -309,7 +288,7 @@ function updateChatStatus(
   const lock = acquireChatLock(file);
   try {
     // Первый write лениво мигрирует этот ключ из legacy whole-map.
-    const prev = readCurrent(chatKey) ?? {};
+    const prev = readPerChat(chatKey) ?? {};
     if (
       expected &&
       Object.entries(expected).some(
@@ -330,7 +309,6 @@ function updateChatStatus(
       generation: previousGeneration + 1,
       updatedAt: stamp(prev),
     };
-    delete next[RETIRED_SESSION_ROUTING_FIELD];
     // Keep inherited message IDs through heartbeats until the bridge can delete
     // them. A terminal record or a different pair must retire the old Stop key.
     if (

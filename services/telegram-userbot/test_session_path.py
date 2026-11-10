@@ -7,13 +7,7 @@ from pathlib import Path
 from unittest import mock
 
 import serve
-from serve import (
-    SESSION_NAME,
-    _adopt_legacy_session,
-    _legacy_session_candidates,
-    _root_dir,
-    _session_file,
-)
+from serve import SESSION_NAME, _root_dir, _session_file
 
 # Pinned by a landmark below, never by the number of directories walked: every
 # expectation here is written against a root that has been proved to be the
@@ -78,281 +72,33 @@ class SessionFileTest(unittest.TestCase):
             self.assertEqual(_session_file(), Path("/mnt/state") / SESSION_NAME)
 
 
-class LegacyCandidateTest(unittest.TestCase):
-    def test_a_relative_data_dir_is_tried_before_the_bare_working_directory(self):
-        with tempfile.TemporaryDirectory() as tmp, working_directory(Path(tmp)):
-            with env(ASSISTANT_DATA_DIR="data"):
-                here = Path(os.getcwd())
-                self.assertEqual(
-                    _legacy_session_candidates(),
-                    (here / "data" / SESSION_NAME, here / SESSION_NAME),
-                )
+class OldPlaceTest(unittest.TestCase):
+    """specs/UpdateFloor.tla, NoSilentLoss: releases before 0.3.21 kept the session in the
+    unit's working directory, 0.3.21 to 0.3.23 under <root>/data whatever the data dir."""
 
-    def test_an_absolute_data_dir_leaves_only_the_working_directory(self):
-        with tempfile.TemporaryDirectory() as tmp, working_directory(Path(tmp)):
-            with env(ASSISTANT_DATA_DIR="/mnt/state"):
-                self.assertEqual(
-                    _legacy_session_candidates(),
-                    (
-                        IVA_ROOT / "data" / SESSION_NAME,
-                        Path(os.getcwd()) / SESSION_NAME,
-                    ),
-                )
+    def test_a_session_at_an_older_place_is_left_as_it_was(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp) / "services" / "telegram-userbot"
+            data = Path(tmp) / "state"
+            cwd.mkdir(parents=True)
+            data.mkdir()
+            old = [cwd / SESSION_NAME, cwd / (SESSION_NAME + "-journal")]
+            for file in old:
+                file.write_bytes(b"auth key")
+                os.chmod(file, 0o644)
+            before = [(file.read_bytes(), file.stat().st_mode, file.stat().st_ino) for file in old]
+            errors = io.StringIO()
+            with env(ASSISTANT_DATA_DIR=str(data)), working_directory(cwd), redirect_stderr(errors):
+                path = serve._seed_session_env()
 
-
-class AdoptLegacySessionTest(unittest.TestCase):
-    def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.old = Path(self.tmp.name) / "services" / "telegram-userbot"
-        self.new = Path(self.tmp.name) / "data" / SESSION_NAME
-        self.old.mkdir(parents=True)
-        self.new.parent.mkdir(parents=True)
-        self.addCleanup(self.tmp.cleanup)
-
-    def adopt(self, **environment: str) -> str:
-        errors = io.StringIO()
-        with env(**environment), working_directory(self.old), redirect_stderr(errors):
-            _adopt_legacy_session(self.new)
-        return errors.getvalue()
-
-    def test_moves_the_session_and_its_journal(self):
-        (self.old / SESSION_NAME).write_text("auth key")
-        (self.old / f"{SESSION_NAME}-journal").write_text("journal")
-
-        message = self.adopt()
-
-        self.assertEqual(self.new.read_text(), "auth key")
-        self.assertEqual(
-            (self.new.parent / f"{SESSION_NAME}-journal").read_text(), "journal"
-        )
-        self.assertFalse((self.old / SESSION_NAME).exists())
-        self.assertIn("session moved from", message)
-        # Absolute on both sides: a relative path in the log is unusable to whoever
-        # has to finish a half-done move by hand.
-        self.assertIn(str(self.old.resolve()), message)
-        self.assertIn(str(self.new.parent.resolve()), message)
-
-    def test_the_adopted_session_lands_private_however_it_was_stored(self):
-        # The sessions worth adopting are the old ones, written before the proxy set
-        # umask 0077 — 0644, readable by every other account on the box. Carrying that
-        # mode to the anchor would keep the account key world-readable exactly for the
-        # installations this migration exists for.
-        legacy = self.old / SESSION_NAME
-        legacy.write_text("auth key")
-        legacy.chmod(0o644)
-        (self.old / f"{SESSION_NAME}-journal").write_text("journal")
-        (self.old / f"{SESSION_NAME}-journal").chmod(0o644)
-
-        self.adopt()
-
-        self.assertEqual(self.new.stat().st_mode & 0o777, 0o600)
-        self.assertEqual(
-            (self.new.parent / f"{SESSION_NAME}-journal").stat().st_mode & 0o777,
-            0o600,
-        )
-
-    def test_adopts_a_session_left_before_assistant_data_dir_existed(self):
-        # The variable arrived later; the account was linked while the session still
-        # resolved to the bare working directory.
-        (self.old / SESSION_NAME).write_text("auth key")
-
-        self.adopt(ASSISTANT_DATA_DIR="data")
-
-        self.assertEqual(self.new.read_text(), "auth key")
-
-    def test_a_relative_data_dir_under_the_old_cwd_is_adopted_first(self):
-        legacy_dir = self.old / "data"
-        legacy_dir.mkdir()
-        (legacy_dir / SESSION_NAME).write_text("newer")
-        (self.old / SESSION_NAME).write_text("older")
-
-        self.adopt(ASSISTANT_DATA_DIR="data")
-
-        self.assertEqual(self.new.read_text(), "newer")
-        self.assertEqual((self.old / SESSION_NAME).read_text(), "older")
-
-    def test_canonical_custom_data_adopts_the_previous_fixed_anchor(self):
-        self.new.write_text("auth key")
-        custom = Path(self.tmp.name) / "runtime" / SESSION_NAME
-        custom.parent.mkdir()
-        errors = io.StringIO()
-
-        with (
-            mock.patch.object(serve, "_root_dir", return_value=Path(self.tmp.name)),
-            env(ASSISTANT_DATA_DIR=str(custom.parent)),
-            working_directory(self.old),
-            redirect_stderr(errors),
-        ):
-            _adopt_legacy_session(custom)
-
-        self.assertEqual(custom.read_text(), "auth key")
-        self.assertFalse(self.new.exists())
-        self.assertIn("session moved from", errors.getvalue())
-
-    def test_keeps_the_anchored_session_when_both_exist(self):
-        (self.old / SESSION_NAME).write_text("stale")
-        self.new.write_text("live")
-
-        self.adopt()
-
-        self.assertEqual(self.new.read_text(), "live")
-        self.assertEqual((self.old / SESSION_NAME).read_text(), "stale")
-
-    def test_leaves_a_legacy_session_alone_when_the_path_is_explicit(self):
-        (self.old / SESSION_NAME).write_text("auth key")
-
-        self.adopt(TELEGRAM_SESSION_FILE=str(self.new))
-
-        self.assertFalse(self.new.exists())
-        self.assertEqual((self.old / SESSION_NAME).read_text(), "auth key")
-
-    def test_a_second_run_changes_nothing(self):
-        (self.old / SESSION_NAME).write_text("auth key")
-
-        self.adopt()
-        second = self.adopt()
-
-        self.assertEqual(self.new.read_text(), "auth key")
-        self.assertEqual(second, "")
-
-    def test_nothing_to_adopt_leaves_the_target_missing_and_says_nothing(self):
-        message = self.adopt()
-
-        self.assertFalse(self.new.exists())
-        self.assertEqual(message, "")
-
-    def test_a_session_that_vanishes_mid_flight_is_not_announced_as_moved(self):
-        # Two proxies starting at once: the loser finds the files already gone, and a
-        # "session moved" line it did not earn sends the reader to the wrong directory.
-        legacy = self.old / SESSION_NAME
-        legacy.write_text("auth key")
-        real_exists = Path.exists
-
-        def vanishing(candidate: Path) -> bool:
-            present = real_exists(candidate)
-            # resolve(), not ==: the working directory comes back physical (/private
-            # on macOS), so the plain paths never compare equal.
-            if present and candidate.resolve() == legacy.resolve():
-                legacy.unlink()
-            return present
-
-        with mock.patch.object(Path, "exists", vanishing):
-            message = self.adopt()
-
-        self.assertFalse(self.new.exists())
-        self.assertEqual(message, "")
-
-    def anchored_files(self) -> list[str]:
-        """Everything sitting in the destination directory, temporaries included."""
-        return sorted(entry.name for entry in self.new.parent.iterdir())
-
-    def test_a_copy_that_dies_mid_file_leaves_no_stump_at_the_anchor(self):
-        # The destructive shape: across filesystems a copy is what actually runs, and a
-        # half-written file at the anchor would be read as "already adopted" forever,
-        # hiding the whole session at the old path behind a corpse Telethon cannot use.
-        legacy = self.old / SESSION_NAME
-        legacy.write_bytes(b"SQLite format 3\x00auth key")
-        original = legacy.read_bytes()
-
-        def half_written_copy(source, target, *args, **kwargs):
-            payload = Path(source).read_bytes()
-            Path(target).write_bytes(payload[: len(payload) // 2])
-            raise OSError(28, "No space left on device")
-
-        with mock.patch.object(serve.shutil, "copy2", half_written_copy):
-            message = self.adopt()
-
-        self.assertEqual(self.anchored_files(), [])
-        self.assertEqual(legacy.read_bytes(), original)
-        self.assertIn("could not copy", message)
-        self.assertNotIn("session moved from", message)
-
-        # And the retry is not blocked by anything the failed attempt left behind.
-        retry = self.adopt()
-
-        self.assertEqual(self.new.read_bytes(), original)
-        self.assertFalse(legacy.exists())
-        self.assertIn("session moved from", retry)
-
-    def test_a_copy_that_fails_outright_keeps_the_database_and_its_journal(self):
-        legacy = self.old / SESSION_NAME
-        legacy.write_text("auth key")
-        journal = self.old / f"{SESSION_NAME}-journal"
-        journal.write_text("journal")
-
-        def failing_copy(source, target, *args, **kwargs):
-            raise OSError(13, "Permission denied")
-
-        with mock.patch.object(serve.shutil, "copy2", failing_copy):
-            message = self.adopt()
-
-        self.assertEqual(legacy.read_text(), "auth key")
-        self.assertEqual(journal.read_text(), "journal")
-        self.assertEqual(self.anchored_files(), [])
-        self.assertIn("could not copy", message)
-        self.assertIn(str(legacy.resolve()), message)
-        self.assertNotIn("session moved from", message)
-
-    def test_a_failed_publish_rolls_back_every_file_it_had_replaced(self):
-        # os.replace is atomic per file, not across them: if the journal lands and the
-        # database does not, the anchor must go back to empty rather than keep a pair
-        # the originals no longer match.
-        legacy = self.old / SESSION_NAME
-        legacy.write_text("auth key")
-        (self.old / f"{SESSION_NAME}-journal").write_text("journal")
-        real_replace = serve.os.replace
-
-        def failing_replace(source, target, *args, **kwargs):
-            if str(target).endswith("-journal"):
-                raise OSError(5, "Input/output error")
-            return real_replace(source, target, *args, **kwargs)
-
-        with mock.patch.object(serve.os, "replace", failing_replace):
-            message = self.adopt()
-
-        self.assertEqual(self.anchored_files(), [])
-        self.assertEqual(legacy.read_text(), "auth key")
-        self.assertEqual((self.old / f"{SESSION_NAME}-journal").read_text(), "journal")
-        self.assertNotIn("session moved from", message)
-
-    def test_an_original_a_racing_start_removed_is_not_announced_as_a_leftover(self):
-        # Two starts adopting at once: by the time this one drops the originals they
-        # can already be gone, and "still holds a copy of the account key, delete it by
-        # hand" about a file that no longer exists sends the owner hunting for nothing.
-        legacy = self.old / SESSION_NAME
-        legacy.write_text("auth key")
-        real_replace = serve.os.replace
-
-        def replace_and_lose_the_original(source, target, *args, **kwargs):
-            result = real_replace(source, target, *args, **kwargs)
-            legacy.unlink(missing_ok=True)
-            return result
-
-        with mock.patch.object(serve.os, "replace", replace_and_lose_the_original):
-            message = self.adopt()
-
-        self.assertEqual(self.new.read_text(), "auth key")
-        self.assertNotIn("delete it by hand", message)
-        self.assertIn("session moved from", message)
-
-    def test_an_original_that_cannot_be_removed_is_named_but_not_a_failure(self):
-        legacy = self.old / SESSION_NAME
-        legacy.write_text("auth key")
-        real_unlink = Path.unlink
-
-        def failing_unlink(target: Path, *args, **kwargs):
-            if target.resolve() == legacy.resolve():
-                raise OSError(1, "Operation not permitted")
-            return real_unlink(target, *args, **kwargs)
-
-        with mock.patch.object(Path, "unlink", failing_unlink):
-            message = self.adopt()
-
-        # The anchor holds the whole session, so this is a leftover copy of the key.
-        self.assertEqual(self.new.read_text(), "auth key")
-        self.assertEqual(legacy.read_text(), "auth key")
-        self.assertIn("delete it by hand", message)
-        self.assertIn("session moved from", message)
+            self.assertEqual(path, data / SESSION_NAME)
+            self.assertFalse(path.exists())
+            self.assertEqual(
+                [(file.read_bytes(), file.stat().st_mode, file.stat().st_ino) for file in old],
+                before,
+            )
+            self.assertEqual(sorted(item.name for item in cwd.iterdir()), sorted(file.name for file in old))
+            self.assertEqual(errors.getvalue(), "")
 
 
 if __name__ == "__main__":

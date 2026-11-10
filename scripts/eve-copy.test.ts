@@ -22,6 +22,10 @@ import { fileURLToPath } from "node:url";
 import { hashEveTree, listEveTreeFiles } from "./lib/eve-tree-hash.ts";
 
 const ROOT = fileURLToPath(new URL("../", import.meta.url));
+
+/** Migration files this tree ships; without any the directory is absent. */
+const migrationFiles = (): Promise<string[]> =>
+  readdir(path.join(ROOT, "scripts/migrations")).catch(() => []);
 const SOURCE_ROOT = path.join(ROOT, "eve");
 const INSTALLED_ROOT = path.join(ROOT, "node_modules/eve");
 
@@ -198,7 +202,7 @@ test("data migrations match the recorded migration file hashes", async () => {
   const baseline = await readJson<Record<string, string>>(
     path.join(ROOT, "scripts/fixtures/eve-migrations.json"),
   );
-  const current = (await readdir(path.join(ROOT, "scripts/migrations"))).sort();
+  const current = (await migrationFiles()).sort();
   assert.deepEqual(current, Object.keys(baseline).sort());
   for (const file of current)
     assert.equal(
@@ -219,9 +223,7 @@ test("migration guard works in a clone with no release tags", async (t) => {
     "scripts/eve-copy.test.ts",
     "scripts/lib/eve-tree-hash.ts",
     "scripts/fixtures/eve-migrations.json",
-    ...(await readdir(path.join(ROOT, "scripts/migrations"))).map(
-      (file) => `scripts/migrations/${file}`,
-    ),
+    ...(await migrationFiles()).map((file) => `scripts/migrations/${file}`),
   ])
     await copyFile(path.join(ROOT, file), path.join(fixture, file));
   execFileSync("git", ["init", "--quiet"], { cwd: fixture });

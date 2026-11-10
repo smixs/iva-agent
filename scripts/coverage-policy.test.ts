@@ -69,10 +69,6 @@ const BLIND_SPOT: ReadonlyArray<{
   },
   // Отдельные процессы: выполняются только на живой установке.
   {
-    path: "scripts/migrations/001-iva-port.ts",
-    why: "одноразовая миграция версии 0.3.3",
-  },
-  {
     path: "scripts/replica-smoke.ts",
     why: "ручной стенд; e2e идет через capture/analyze",
   },

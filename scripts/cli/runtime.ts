@@ -84,7 +84,6 @@ export function createCliRuntime(root: string) {
   const TOKEN_FILE = join(dataDirAbs(), "telegram-userbot.token");
 
   const DEFAULT_PORT = "8723";
-  const OLD_DEFAULT_HOST = "http://127.0.0.1:3000";
 
   const C: RuntimeColors =
     process.env.NO_COLOR || process.env.TERM === "dumb"
@@ -261,7 +260,6 @@ export function createCliRuntime(root: string) {
     VENV_PY,
     TOKEN_FILE,
     DEFAULT_PORT,
-    OLD_DEFAULT_HOST,
     C,
     ok,
     warn,

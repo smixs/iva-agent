@@ -1,28 +1,10 @@
-// One-shot, idempotent migration from the old systemd memory-rollup timers to the
-// in-process eve schedules (agent/schedules/memory-*.ts). Called fire-and-forget from
-// agent/instrumentation.ts on every server start, and living in the authored tree with the
-// schedules it migrates onto. The retired unit NAMES are systemd's business as much as the
-// agent's: `iva doctor` sweeps the same eight from a tree whose agent/ may be missing, so
-// scripts/lib/legacy-memory-units.ts carries its own copy and the two are pinned together
-// in this module's test. Two INDEPENDENT jobs — independent
-// enough that only one of them needs systemd at all:
+// Catch-up of a missed in-process eve schedule (agent/schedules/memory-*.ts). Called
+// fire-and-forget from agent/instrumentation.ts on every server start: a period whose last
+// success predates its most recent scheduled point runs now, bounded by a grace window so a
+// months-old miss does not fire late. A first boot seeds the baseline and runs nothing.
 //
-//   1. tear down the 8 retired iva-memory-{daily,weekly,monthly,yearly}.{service,timer}
-//      units, by exact name only — self-host users may have their own unrelated timers
-//      (e.g. xfeed-daily.timer) sitting in the same directory, never touch those. Skipped
-//      entirely wherever there is no user systemd at all (containers, this repo's own
-//      `npm run replica` sandbox, CI) — there is nothing to tear down there.
-//   2. catch up a period whose last systemd-timer success predates its most recent
-//      scheduled point, bounded by a grace window so a months-old miss doesn't fire late.
-//      Persistent=true is gone with the timers, so this replaces it — and runs on every
-//      boot REGARDLESS of systemd availability, since a missed rollup is worth catching
-//      up whether or not this host ever had systemd units to retire in the first place.
-//
-// Must NEVER throw: a broken systemctl or a corrupt status file must not stop the server
-// from starting.
-import { existsSync, rmSync } from "node:fs";
-import { spawnSync } from "node:child_process";
-import { dirname, join } from "node:path";
+// Must NEVER throw: a corrupt status file must not stop the server from starting.
+import { dirname } from "node:path";
 import { jobFactsFile } from "./job-facts.ts";
 
 // WHEN each period fires — time of day AND day constraint — comes from the schedule table
@@ -42,15 +24,6 @@ import { memoryLockPath } from "./schedule-paths.ts";
 import { addDaysToDate, zonedParts, zonedToUtcMs } from "./zoned-time.ts";
 
 type Period = "night";
-
-interface ExecResult {
-  readonly code: number;
-  readonly out?: string;
-  readonly err?: string;
-  readonly error?: unknown;
-}
-
-type ExecImplementation = (args: readonly string[]) => ExecResult;
 
 interface MigrationStatusEntry {
   readonly lastSuccessAt?: number;
@@ -75,8 +48,6 @@ type MigrationDecision =
     };
 
 export interface RunScheduleMigrationOptions {
-  readonly homedir?: string;
-  readonly execImpl?: ExecImplementation;
   readonly statusPath?: string;
   readonly tz?: string;
   readonly log?: (...args: unknown[]) => void;
@@ -90,21 +61,6 @@ function errorMessage(error: unknown): string {
   return (error as { readonly message: string }).message;
 }
 
-function errorCode(error: unknown): unknown {
-  return (error as { readonly code?: unknown } | null | undefined)?.code;
-}
-
-export const LEGACY_MEMORY_UNITS: readonly string[] = [
-  "iva-memory-daily.service",
-  "iva-memory-daily.timer",
-  "iva-memory-weekly.service",
-  "iva-memory-weekly.timer",
-  "iva-memory-monthly.service",
-  "iva-memory-monthly.timer",
-  "iva-memory-yearly.service",
-  "iva-memory-yearly.timer",
-];
-
 // How late a missed run may still be caught up, per period — a catch-up policy of this
 // module alone, not schedule metadata.
 const PERIOD_GRACE_MS: Record<Period, number> = {
@@ -116,16 +72,6 @@ const PERIODS = Object.keys(PERIOD_GRACE_MS) as Period[];
 // agent/schedules/memory-*.ts passes to runScheduledJob, not the bare period.
 function statusKey(period: Period): ScheduleName {
   return `memory-${period}`;
-}
-
-function defaultExecImpl(args: readonly string[]): ExecResult {
-  const r = spawnSync("systemctl", args, { encoding: "utf8" });
-  return {
-    code: r.status ?? (r.error ? 127 : 1),
-    out: (r.stdout || "").trim(),
-    err: (r.stderr || "").trim(),
-    error: r.error,
-  };
 }
 
 // Does a plain Y-M-D calendar date satisfy the cron's date fields? The weekday does not
@@ -168,80 +114,6 @@ function lastDueMs(cron: ScheduleCron, nowMs: number, tz: string): number {
   );
 }
 
-// ── legacy unit teardown ─────────────────────────────────────────────────
-function removeLegacyUnits({
-  homedir,
-  execImpl,
-  log,
-}: Required<
-  Pick<RunScheduleMigrationOptions, "homedir" | "execImpl" | "log">
->): void {
-  const unitDir = join(homedir, ".config/systemd/user");
-  let touchedAny = false;
-  for (const unit of LEGACY_MEMORY_UNITS) {
-    const path = join(unitDir, unit);
-    if (!existsSync(path)) continue;
-    touchedAny = true;
-    let disabled = false;
-    try {
-      const result = execImpl(["--user", "disable", "--now", unit]);
-      if (result.code !== 0) {
-        log(
-          `schedule-migration: disable --now ${unit} failed (best-effort): ${result.err || result.out}`,
-        );
-      } else {
-        disabled = true;
-      }
-    } catch (error) {
-      log(
-        `schedule-migration: disable --now ${unit} threw (best-effort): ${errorMessage(error)}`,
-      );
-    }
-    // Only remove the file once systemd has actually let go of the unit. Deleting it
-    // after a failed disable would leave a still-enabled/active unit with no file behind
-    // — invisible to a human, but still running (or still armed to run again). Leaving
-    // the file in place means this boot's cleanup is simply retried on the next one,
-    // same as a partial systemctl failure anywhere else in this function.
-    if (!disabled) {
-      log(
-        `schedule-migration: leaving ${unit} in place — disable failed, the next boot will retry`,
-      );
-      continue;
-    }
-    try {
-      rmSync(path, { force: true });
-    } catch (error) {
-      log(
-        `schedule-migration: removing ${unit} failed (best-effort): ${errorMessage(error)}`,
-      );
-    }
-  }
-  if (touchedAny) {
-    try {
-      const reload = execImpl(["--user", "daemon-reload"]);
-      if (reload.code !== 0)
-        log(
-          `schedule-migration: daemon-reload failed (best-effort): ${reload.err || reload.out}`,
-        );
-    } catch (error) {
-      log(
-        `schedule-migration: daemon-reload threw (best-effort): ${errorMessage(error)}`,
-      );
-    }
-    try {
-      const reset = execImpl(["--user", "reset-failed"]);
-      if (reset.code !== 0)
-        log(
-          `schedule-migration: reset-failed failed (best-effort): ${reset.err || reset.out}`,
-        );
-    } catch (error) {
-      log(
-        `schedule-migration: reset-failed threw (best-effort): ${errorMessage(error)}`,
-      );
-    }
-  }
-}
-
 // Задание догона одного периода — то же, что у расписания, со своими путями и со сроком
 // остановки сводки (agent/lib/schedule-paths.ts): сводка гасит ход на сервере до SIGKILL.
 export function catchUpJob(
@@ -273,8 +145,6 @@ export function catchUpJob(
 }
 
 export async function runScheduleMigration({
-  homedir,
-  execImpl = defaultExecImpl,
   statusPath,
   tz = "UTC",
   log = () => {},
@@ -370,21 +240,6 @@ export async function runScheduleMigration({
     );
 
     if (decision.action === "defer") return;
-
-    // The seed transaction must commit before the retired units are disabled. A crash
-    // before this point leaves the old persistent timers able to cover the night; a
-    // crash after it has a durable in-process catch-up baseline.
-    if (homedir && existsSync(join(homedir, ".config/systemd/user"))) {
-      let probe: ExecResult;
-      try {
-        probe = execImpl(["--version"]);
-      } catch (error) {
-        probe = { code: 127, error };
-      }
-      if (errorCode(probe.error) !== "ENOENT") {
-        removeLegacyUnits({ homedir, execImpl, log });
-      }
-    }
 
     if (decision.freshlySeeded.length > 0) {
       log(

@@ -24,7 +24,6 @@ const {
   enqueueQueueFile,
   isTelegramQueueUpdate,
   loadQueueFile,
-  normalizeQueueDocument,
   queueCount,
   removeQueueItems,
   TELEGRAM_QUEUE_ACK_ROLLED_BACK,
@@ -650,18 +649,6 @@ await test("a reply to Iva bypasses a non-empty queue in steer mode", async () =
   );
   assert.equal(result, "delivered");
   assert.deepEqual(delivered, [101]);
-});
-
-await test("an undeliverable legacy item in the queue holds steer like any other item", async () => {
-  const legacy = normalizeQueueDocument({ "1:": ["old text"] }).document;
-  const result = await routing.routeMessageUpdate(
-    text(101, "new"),
-    routeOptions({
-      loadQueueImpl: () => Promise.resolve(legacy),
-      deliverImpl: () => assert.fail("the queue is not empty"),
-    }),
-  );
-  assert.equal(result, "queued");
 });
 
 await test("queue mode keeps its decision: free chat with an empty queue goes direct, a running turn queues", async () => {

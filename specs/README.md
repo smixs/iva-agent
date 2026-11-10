@@ -60,6 +60,20 @@ and a third contender in the restore window. Run `sh specs/update-lock-check.sh`
 Actual milliseconds, process liveness and crashes during displacement are covered
 by executable tests and the accepted residual windows in `docs/tech-debt.md` §18.
 
+## UpdateFloor
+
+`UpdateFloor.tla` models one update onto a tree that names the oldest release it is taken from (`minUpdater` in `update-compat.json`). The old half is the CLI already on disk: from 0.3.30 it reads the marker before its first write, 0.3.15 to 0.3.29 do not know the marker and hand off all the same. The new half is the first code of the new tree to run. Once the new tree serves, it meets one state file that only releases below the floor wrote.
+
+`update-floor-check.sh` checks `UpdateFloor.cfg` and four mutants:
+
+- `StaysOnItsRelease`: an installation below the floor keeps serving its own release. `UpdateFloor-no-finish-check.cfg` drops the check in the new half and a CLI that does not read the marker lands on the new tree.
+- `NothingWritten`: a CLI that reads the marker stops before it unpacks anything. `UpdateFloor-late-check.cfg` moves the check after the unpack.
+- `RefusedIsTold`: a refusal names the release and the way out (`UpdateFloor-mute.cfg`).
+- `NoSilentLoss`: an old-format file is refused by name or left as it was (`UpdateFloor-silent-drop.cfg`).
+- `Served`: at the floor and above the update ends on the new release.
+
+Outside the model: `repair.sh` on a checkout, which resets the tree before any CLI runs, and the in-place updater before 0.3.15, which never hands off.
+
 ## RestartRecovery
 
 `RestartRecovery.cfg` checks restart, quarantine, failures, notification and queue

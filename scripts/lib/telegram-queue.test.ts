@@ -6,11 +6,9 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { spawn } from "node:child_process";
 import {
   mkdtemp,
-  link,
   open,
   readdir,
   readFile,
-  rename,
   rm,
   writeFile,
 } from "node:fs/promises";
@@ -29,8 +27,6 @@ import {
   invalidTelegramUpdatesDiagnostic,
   loadQueueFile,
   materializeQueueItem,
-  migrateQueueFile,
-  normalizeQueueDocument,
   parseTelegramUpdates,
   quarantineQueueRecords,
   queueCount,
@@ -72,10 +68,6 @@ type DrainOptions = {
   rotationState?: { afterKey: string | null };
   passBudgetMs?: number;
   deliveryTimeoutMs?: number;
-  legacyAllowedUserIds?: ReadonlySet<string>;
-  quarantineImpl?: (
-    records: Parameters<typeof quarantineQueueRecords>[1],
-  ) => Promise<unknown>;
 };
 
 type RouteMessageOptions = {
@@ -280,22 +272,111 @@ void test("invalid Telegram update diagnostics identify the item without logging
   );
 });
 
-void test("newer queue documents refuse loading and migration without changing bytes", async (t) => {
+void test("newer queue documents refuse loading without changing bytes", async (t) => {
   const file = await queueFile(t);
   const raw = Buffer.from(
     '{ "version": 2, "queues": { "1:": ["сохранить"] } }\n',
   );
   for (const strict of [true, false]) {
-    for (const load of [loadQueueFile, migrateQueueFile]) {
-      await writeFile(file, raw);
-      await assert.rejects(
-        load(file, { strict }),
-        /записано более новой Ивой.*версия 2.*понимает 1.*обновите Иву или верните файл/,
+    await writeFile(file, raw);
+    await assert.rejects(
+      loadQueueFile(file, { strict }),
+      /записано более новой Ивой.*версия 2.*понимает 1.*обновите Иву или верните файл/,
+    );
+    assert.deepEqual(await readFile(file), raw);
+    assert.deepEqual(await readdir(dirname(file)), ["telegram-queue.json"]);
+  }
+});
+
+// specs/UpdateFloor.tla: NoSilentLoss. Releases before 0.3.5 kept the queue as strings.
+void test("NoSilentLoss: a queue of strings is refused by the file's name and its bytes stay", async (t) => {
+  const file = await queueFile(t);
+  const pendingFile = `${file}.ack-pending`;
+  const current = JSON.stringify({
+    version: TELEGRAM_QUEUE_VERSION,
+    queues: {},
+  });
+  const strings = '{ "42:": ["private text"], "-100:7": ["group text"] }\n';
+  for (const strict of [true, false]) {
+    for (const [main, pending, named] of [
+      [strings, undefined, file],
+      [strings, current, file],
+      [current, strings, pendingFile],
+    ] as const) {
+      await writeFile(file, main);
+      if (pending === undefined) await rm(pendingFile, { force: true });
+      else await writeFile(pendingFile, pending);
+      await assert.rejects(loadQueueFile(file, { strict }), (error: Error) => {
+        assert.match(error.message, /старше 0\.3\.5.*не читает и не трогает/);
+        assert.ok(error.message.includes(` ${named}:`), error.message);
+        return true;
+      });
+      assert.equal(await readFile(file, "utf8"), main);
+      if (pending !== undefined)
+        assert.equal(await readFile(pendingFile, "utf8"), pending);
+      assert.deepEqual(
+        (await readdir(dirname(file))).sort(),
+        pending === undefined
+          ? ["telegram-queue.json"]
+          : ["telegram-queue.json", "telegram-queue.json.ack-pending"],
       );
-      assert.deepEqual(await readFile(file), raw);
-      assert.deepEqual(await readdir(dirname(file)), ["telegram-queue.json"]);
     }
   }
+});
+
+void test("PROPERTY NoSilentLoss: any document without a queue version keeps its bytes (seed=10112026)", async (t) => {
+  const file = await queueFile(t);
+  await fc.assert(
+    fc.asyncProperty(
+      fc.dictionary(
+        fc.string().filter((key) => key !== "version"),
+        fc.array(fc.string()),
+      ),
+      fc.boolean(),
+      async (queues, strict) => {
+        const raw = Buffer.from(` ${JSON.stringify(queues)}\n`);
+        await writeFile(file, raw);
+        await assert.rejects(loadQueueFile(file, { strict }), /старше 0\.3\.5/);
+        assert.deepEqual(await readFile(file), raw);
+        assert.deepEqual(await readdir(dirname(file)), ["telegram-queue.json"]);
+      },
+    ),
+    { seed: 10112026, numRuns: 100 },
+  );
+});
+
+void test("NoSilentLoss: an item converted from a string is copied whole to the record quarantine", async (t) => {
+  const file = await queueFile(t);
+  const good = createQueueItem(privateUpdate(11, "keep me"), 1);
+  const converted = {
+    version: 1,
+    updateId: -77,
+    legacyText: "text an older Iva converted",
+    migratedFrom: "string",
+  };
+  await writeFile(
+    file,
+    JSON.stringify({ version: 1, queues: { "42:": [converted, good] } }),
+  );
+  const logs: unknown[][] = [];
+  const loaded = await loadQueueFile(file, {
+    strict: true,
+    logImpl: (...parts) => logs.push(parts),
+  });
+  assert.deepEqual(loaded.document.queues, { "42:": [good] });
+  const copies = (await readdir(dirname(file))).filter((name) =>
+    name.startsWith("telegram-queue.json.damaged-"),
+  );
+  assert.equal(copies.length, 1);
+  assert.equal(logs.length, 1);
+  assert.deepEqual(
+    (
+      JSON.parse(await readFile(join(dirname(file), copies[0]), "utf8")) as {
+        record: unknown;
+      }
+    ).record,
+    converted,
+  );
 });
 
 for (const seed of [18102026, 18102027]) {
@@ -311,17 +392,15 @@ for (const seed of [18102026, 18102027]) {
         fc.boolean(),
         async (version, queues, strict) => {
           const raw = Buffer.from(`  ${JSON.stringify({ version, queues })}\n`);
-          for (const load of [loadQueueFile, migrateQueueFile]) {
-            await writeFile(file, raw);
-            await assert.rejects(
-              load(file, { strict }),
-              /записано более новой Ивой/,
-            );
-            assert.deepEqual(await readFile(file), raw);
-            assert.deepEqual(await readdir(dirname(file)), [
-              "telegram-queue.json",
-            ]);
-          }
+          await writeFile(file, raw);
+          await assert.rejects(
+            loadQueueFile(file, { strict }),
+            /записано более новой Ивой/,
+          );
+          assert.deepEqual(await readFile(file), raw);
+          assert.deepEqual(await readdir(dirname(file)), [
+            "telegram-queue.json",
+          ]);
         },
       ),
       { seed, numRuns: 100 },
@@ -348,7 +427,7 @@ void test("newer queue documents preserve both files during pending acknowledgem
       await writeFile(file, main);
       await writeFile(pendingFile, pending);
       await assert.rejects(
-        migrateQueueFile(file, { strict }),
+        loadQueueFile(file, { strict }),
         /записано более новой Ивой/,
       );
       assert.equal(await readFile(file, "utf8"), main);
@@ -440,25 +519,6 @@ void test("queue reads preserve nullish non-Error failures", async () => {
   }
   assert.equal(reads, 2);
   assert.equal(secondCaught, undefined);
-});
-
-void test("legacy quarantine preserves a null link failure", async (t) => {
-  const file = await queueFile(t);
-  await writeFile(file, JSON.stringify({ "-100:": ["legacy group text"] }));
-  const sentinel = Symbol("not rejected");
-  let caught: unknown = sentinel;
-
-  try {
-    await migrateQueueFile(file, {
-      linkImpl: () => Promise.reject(null),
-      quarantineNow: () => 1,
-      quarantineNonce: () => "fixed",
-    });
-  } catch (error) {
-    caught = error;
-  }
-
-  assert.equal(caught, null);
 });
 
 void test("versioned FIFO items preserve update ids, order and duplicate retries across reload", async (t) => {
@@ -1098,192 +1158,6 @@ void test("a missing terminal event becomes drainable after the run-status TTL",
   assert.equal(remaining, 0);
 });
 
-void test("legacy string arrays preserve private owner text but never invent a group author", async (t) => {
-  const file = await queueFile(t);
-  await writeFile(
-    file,
-    JSON.stringify({
-      "42:": ["first", "second"],
-      "-100:7": ["topic follow-up"],
-    }),
-  );
-
-  const document = await migrateQueueFile(file);
-  assert.equal(document.version, 1);
-  assert.equal(queueCount(document), 2);
-  assert.deepEqual(
-    document.queues["42:"].map((item) => item.legacyText),
-    ["first", "second"],
-  );
-  const privateReplay = materializeQueueItem("42:", document.queues["42:"][0], {
-    legacyAllowedUserIds: new Set(["42"]),
-  });
-  assert.equal(privateReplay!.message!.text, "first");
-  assert.equal(privateReplay!.message!.chat!.id, 42);
-  assert.equal(privateReplay!.message!.from!.id, 42);
-  const legacyGroupItem = normalizeQueueDocument({
-    "-100:7": ["topic follow-up"],
-  }).document.queues["-100:7"][0];
-  assert.equal(
-    materializeQueueItem("-100:7", legacyGroupItem, {
-      legacyAllowedUserIds: new Set(["42"]),
-    }),
-    null,
-  );
-
-  const persisted = JSON.parse(
-    await readFile(file, "utf8"),
-  ) as unknown as TelegramQueueDocument;
-  assert.equal(persisted.version, 1);
-  assert.equal(queueCount(persisted), 2);
-  const [quarantineName] = (await readdir(dirname(file))).filter((name) =>
-    name.includes(".legacy-unattributed-"),
-  );
-  const quarantined = JSON.parse(
-    await readFile(join(dirname(file), quarantineName), "utf8"),
-  ) as unknown as TelegramQueueDocument;
-  assert.equal(queueCount(quarantined), 1);
-  assert.equal(quarantined.queues["-100:7"][0].legacyText, "topic follow-up");
-});
-
-void test("legacy group quarantine failure leaves the original queue active for retry", async (t) => {
-  const file = await queueFile(t);
-  const original = JSON.stringify({
-    "42:": ["private follow-up"],
-    "-100:": ["group text with unknown author"],
-  });
-  await writeFile(file, original);
-
-  await assert.rejects(
-    migrateQueueFile(file, {
-      linkImpl: async (source, target) => {
-        if (target.includes(".legacy-unattributed-")) {
-          throw new Error("quarantine link failed");
-        }
-        await link(source, target);
-      },
-    }),
-    /quarantine link failed/,
-  );
-
-  assert.equal(await readFile(file, "utf8"), original);
-  assert.deepEqual(
-    (await readdir(dirname(file))).filter((name) =>
-      name.includes(".legacy-unattributed-"),
-    ),
-    [],
-  );
-});
-
-void test("failed active migration keeps both the old queue and its group quarantine", async (t) => {
-  const file = await queueFile(t);
-  const original = JSON.stringify({
-    "42:": ["private follow-up"],
-    "-100:": ["group text with unknown author"],
-  });
-  await writeFile(file, original);
-
-  await assert.rejects(
-    migrateQueueFile(file, {
-      renameImpl: async (source, target) => {
-        if (target === file) throw new Error("active rename failed");
-        await rename(source, target);
-      },
-    }),
-    /active rename failed/,
-  );
-
-  assert.equal(await readFile(file, "utf8"), original);
-  const [quarantineName] = (await readdir(dirname(file))).filter((name) =>
-    name.includes(".legacy-unattributed-"),
-  );
-  const quarantined = JSON.parse(
-    await readFile(join(dirname(file), quarantineName), "utf8"),
-  ) as unknown as TelegramQueueDocument;
-  assert.equal(
-    quarantined.queues["-100:"][0].legacyText,
-    "group text with unknown author",
-  );
-});
-
-void test("separate legacy migrations never overwrite an earlier group quarantine", async (t) => {
-  const file = await queueFile(t);
-  const first = JSON.stringify({ "-100:": ["first byte set"] });
-  const second = JSON.stringify({ "-100:": ["second byte set"] });
-  const logged: string[] = [];
-  const options = {
-    quarantineNow: () => 123,
-    quarantineNonce: () => "same",
-    onLegacyQuarantine: (path: string) => logged.push(path),
-  };
-
-  await writeFile(file, first);
-  await migrateQueueFile(file, options);
-  await writeFile(file, second);
-  await migrateQueueFile(file, options);
-
-  assert.equal(logged.length, 2);
-  assert.notEqual(logged[0], logged[1]);
-  assert.match(logged[0], /\.legacy-unattributed-/);
-  assert.match(logged[1], /\.legacy-unattributed-/);
-  const preserved = await Promise.all(
-    logged.map(
-      async (path) =>
-        JSON.parse(
-          await readFile(path, "utf8"),
-        ) as unknown as TelegramQueueDocument,
-    ),
-  );
-  assert.deepEqual(
-    preserved.map((document) => document.queues["-100:"][0].legacyText),
-    ["first byte set", "second byte set"],
-  );
-});
-
-void test("drain preserves legacy group text with unknown author in quarantine before ack", async (t) => {
-  const file = await queueFile(t);
-  let document = normalizeQueueDocument({
-    "-100:": ["unaddressed group text"],
-  }).document;
-  const delivered: TelegramQueueUpdate[] = [];
-  const acknowledged: [string, readonly number[]][] = [];
-
-  const remaining = await drainReadyQueueHeads({
-    loadImpl: async () => document,
-    runningImpl: () => false,
-    legacyAllowedUserIds: new Set(["42"]),
-    deliverImpl: async (update) => {
-      delivered.push(update);
-      return true;
-    },
-    acknowledgeImpl: async (chatKey, updateIds) => {
-      acknowledged.push([chatKey, updateIds]);
-      document = removeQueueItems(document, chatKey, updateIds).document;
-    },
-    quarantineImpl: (records) =>
-      quarantineQueueRecords(file, records, { logImpl: () => {} }),
-    settleUntil: new Map(),
-    inFlight: new Map(),
-    pins: new Map(),
-  });
-
-  assert.deepEqual(delivered, []);
-  assert.equal(acknowledged.length, 1);
-  assert.equal(remaining, 0);
-  assert.equal(queueHead(document, "-100:"), null);
-  const [copy] = (await readdir(dirname(file))).filter((name) =>
-    name.includes(".damaged-"),
-  );
-  assert.equal(
-    (
-      JSON.parse(await readFile(join(dirname(file), copy), "utf8")) as {
-        record: { legacyText: string };
-      }
-    ).record.legacyText,
-    "unaddressed group text",
-  );
-});
-
 void test("queued media and quoted metadata replay from the durable update without transformation", async (t) => {
   const file = await queueFile(t);
   const update = {
@@ -1305,10 +1179,7 @@ void test("queued media and quoted metadata replay from the durable update witho
   await enqueueQueueFile(file, "1:", update);
   const { document } = await loadQueueFile(file, { strict: true });
 
-  assert.deepEqual(
-    materializeQueueItem("1:", queueHead(document, "1:")!),
-    update,
-  );
+  assert.deepEqual(materializeQueueItem(queueHead(document, "1:")!), update);
 });
 
 void test("busy routing is fail-closed and keeps addressed private, group and topic updates", () => {
@@ -1937,115 +1808,4 @@ void test("POISON malformed pending acknowledgement is preserved and main queue 
     );
   }
   assert.equal(logs.length, 3);
-});
-
-void test("POISON an unreplayable queue head is quarantined before ack and next head runs", async (t) => {
-  const file = await queueFile(t);
-  let document = normalizeQueueDocument({
-    "-100:": ["private legacy"],
-  }).document;
-  const bad = document.queues["-100:"][0];
-  document = enqueueItem(
-    document,
-    "-100:",
-    createQueueItem(
-      {
-        ...privateUpdate(12, "next"),
-        message: {
-          ...privateUpdate(12, "next").message,
-          chat: { id: -100, type: "group" },
-        },
-      },
-      2,
-    ),
-  ).document;
-  const events: string[] = [];
-  const logs: unknown[][] = [];
-  const options = {
-    loadImpl: async () => document,
-    runningImpl: () => false,
-    statusImpl: () => null,
-    deliverImpl: async () => {
-      events.push("deliver");
-      return "handled" as const;
-    },
-    acknowledgeImpl: async (key: string, ids: readonly number[]) => {
-      events.push("ack");
-      document = removeQueueItems(document, key, ids).document;
-    },
-    quarantineImpl: async (
-      records: Parameters<typeof quarantineQueueRecords>[1],
-    ) => {
-      events.push("copy");
-      return quarantineQueueRecords(file, records, {
-        logImpl: (...parts) => logs.push(parts),
-      });
-    },
-    settleUntil: new Map<string, number>(),
-    inFlight: new Map<string, InFlightGate>(),
-    pins: new Map(),
-    resetPendingImpl: () => false,
-  };
-  // A failed copy keeps this head while another chat is delivered in the same pass.
-  const failures: unknown[][] = [];
-  t.mock.method(console, "log", (...parts: unknown[]) => failures.push(parts));
-  for (const code of ["EACCES", "ENOSPC"]) {
-    document = enqueueItem(
-      document,
-      "1:",
-      createQueueItem(privateUpdate(13, "other chat"), 3),
-    ).document;
-    assert.equal(
-      await drainReadyQueueHeads({
-        ...options,
-        quarantineImpl: async () => {
-          throw Object.assign(new Error("private copy failure"), { code });
-        },
-      }),
-      2,
-    );
-    assert.deepEqual(events, ["deliver", "ack"]);
-    assert.equal(queueCount(document), 2);
-    assert.deepEqual(queueHead(document, "-100:"), bad);
-    const line = JSON.stringify(failures.at(-1));
-    assert.match(line, new RegExp(code));
-    assert.ok(!line.includes("private"));
-    events.length = 0;
-  }
-  assert.equal(failures.length, 2);
-  await assert.rejects(
-    drainReadyQueueHeads({
-      ...options,
-      acknowledgeImpl: async () => {
-        events.push("ack-failed");
-        throw new Error("ack failed");
-      },
-    }),
-    /ack failed/,
-  );
-  assert.equal(queueCount(document), 2);
-  assert.equal(await drainReadyQueueHeads(options), 1);
-  assert.deepEqual(events, ["copy", "ack-failed", "copy", "ack"]);
-  assert.equal(await drainReadyQueueHeads(options), 0);
-  assert.deepEqual(events, [
-    "copy",
-    "ack-failed",
-    "copy",
-    "ack",
-    "deliver",
-    "ack",
-  ]);
-  assert.equal(logs.length, 1);
-  const copies = (await readdir(dirname(file))).filter((name) =>
-    name.includes(".damaged-"),
-  );
-  assert.equal(copies.length, 1);
-  assert.deepEqual(
-    (
-      JSON.parse(await readFile(join(dirname(file), copies[0]), "utf8")) as {
-        record: unknown;
-      }
-    ).record,
-    bad,
-  );
 });

@@ -15,7 +15,6 @@ import {
   reporterFor,
 } from "../lib/telegram-status.ts";
 import {
-  BETA_CONFIG,
   betaChannel,
   BranchUnavailableError,
   resolveReleaseTarget,
@@ -150,8 +149,8 @@ export async function ensureMirror(home: string): Promise<string> {
   rmSync(staging, { recursive: true, force: true });
   const git = (root: string, args: string[]): Promise<string> =>
     requireGit(gitAt, root, args);
-  // What the installation follows, not the clone: its branch and beta updates.
-  const keys = ["iva.updateBranch", BETA_CONFIG];
+  // What the installation follows, not the clone: its Update branch.
+  const keys = ["iva.updateBranch"];
   try {
     await git(home, ["clone", "--mirror", join(home, ".git"), staging]);
     const origin = await git(home, ["remote", "get-url", "origin"]);

@@ -103,9 +103,9 @@ function repoFixture() {
   git(temp, "clone", "--branch", "main", remote, local);
   git(local, "config", "user.email", "test@example.com");
   git(local, "config", "user.name", "Test");
-  // Эти проверки — о вершине ветки: бета-обновления (иначе обновление ждёт выпуск,
-  // метку vX.Y.Z — update-release-git.test.ts). Прежний флаг при main уводит на beta.
-  git(local, "config", "iva.beta", "true");
+  // Эти проверки — о вершине ветки: бета-обновления, Update branch `beta` (иначе
+  // обновление ждёт выпуск, метку vX.Y.Z — update-release-git.test.ts).
+  git(local, "config", "iva.updateBranch", "beta");
   return { temp, remote, seed, local };
 }
 
@@ -166,6 +166,8 @@ test("a merged legacy feature branch discovers updates from main", async () => {
   git(seed, "push", "origin", "feat/legacy");
   git(local, "fetch", "origin", "feat/legacy");
   git(local, "switch", "-c", "feat/legacy", "FETCH_HEAD");
+  // Ветка не выбрана: решает слитая ветка checkout, цель — выпуск main.
+  git(local, "config", "--unset", "iva.updateBranch");
 
   writeFileSync(
     join(seed, "package.json"),
@@ -173,11 +175,13 @@ test("a merged legacy feature branch discovers updates from main", async () => {
   );
   git(seed, "add", "package.json");
   git(seed, "commit", "-m", "release");
+  git(seed, "tag", "v1.3.0");
   git(seed, "push");
+  git(seed, "push", "origin", "v1.3.0");
 
   const info = await inspectUpstream({ root: local });
   assert.equal(info.currentBranch, "feat/legacy");
-  assert.equal(info.branch, "beta");
+  assert.equal(info.branch, "main");
   assert.equal(info.legacyMigration, true);
   assert.equal(info.remote, git(seed, "rev-parse", "HEAD"));
   assert.equal(info.hasVersionUpdate, true);
@@ -189,7 +193,9 @@ test("an explicitly configured feature channel does not drift to main", async ()
   writeFileSync(join(seed, "beta.txt"), "beta\n");
   git(seed, "add", "beta.txt");
   git(seed, "commit", "-m", "beta");
+  git(seed, "tag", "v1.2.3");
   git(seed, "push", "-u", "origin", "feat/beta");
+  git(seed, "push", "origin", "v1.2.3");
   git(local, "fetch", "origin", "feat/beta");
   git(local, "switch", "-c", "feat/beta", "FETCH_HEAD");
   git(local, "config", "iva.updateBranch", "feat/beta");

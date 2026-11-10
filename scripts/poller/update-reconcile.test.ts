@@ -181,14 +181,10 @@ const outcome = (before: string | undefined, after: string) => ({
 const minutesAgo = (minutes: number): string =>
   new Date(Date.now() - minutes * 60_000).toISOString();
 
-const settleMarker = (version: string, settledAt?: string): void =>
+const settleMarker = (version: string, settledAt: string): void =>
   writeFileSync(
     join(dataDir, "active.json"),
-    JSON.stringify({
-      schema: "iva-active/v1",
-      version,
-      ...(settledAt ? { settledAt } : {}),
-    }),
+    JSON.stringify({ schema: "iva-active/v2", version, settledAt }),
   );
 
 const finals = (calls: readonly Call[]): string[] =>
@@ -402,8 +398,8 @@ test(
 );
 
 test("a job killed after the flip is answered from what the installation says", async (t) => {
-  for (const settledAt of [minutesAgo(1), undefined]) {
-    await t.test(`settle marker time: ${settledAt ?? "absent"}`, async (st) => {
+  for (const settledAt of [minutesAgo(1)]) {
+    await t.test(`settle marker time: ${settledAt}`, async (st) => {
       clean(st);
       const root = install(st);
       settleMarker(NEW, settledAt);

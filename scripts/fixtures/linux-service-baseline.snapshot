@@ -243,7 +243,7 @@ exports[`Linux units, control argv and journal hints retain the release baseline
   },
   "quiesceRestore": {
     "code": 0,
-    "out": "[{\\"unit\\":\\"iva-brain.timer\\",\\"loadState\\":\\"loaded\\",\\"active\\":true,\\"enabled\\":true},{\\"unit\\":\\"iva-brain.service\\",\\"loadState\\":\\"loaded\\",\\"active\\":false,\\"enabled\\":false},{\\"unit\\":\\"iva-telegram-userbot.service\\",\\"loadState\\":\\"loaded\\",\\"active\\":true,\\"enabled\\":false},{\\"unit\\":\\"iva-memory-doctor.service\\",\\"loadState\\":\\"not-found\\",\\"active\\":false,\\"enabled\\":false},{\\"unit\\":\\"iva-memory-doctor.timer\\",\\"loadState\\":\\"not-found\\",\\"active\\":false,\\"enabled\\":false},{\\"unit\\":\\"iva-memory-daily.service\\",\\"loadState\\":\\"not-found\\",\\"active\\":false,\\"enabled\\":false},{\\"unit\\":\\"iva-memory-daily.timer\\",\\"loadState\\":\\"not-found\\",\\"active\\":false,\\"enabled\\":false},{\\"unit\\":\\"iva-memory-weekly.service\\",\\"loadState\\":\\"not-found\\",\\"active\\":false,\\"enabled\\":false},{\\"unit\\":\\"iva-memory-weekly.timer\\",\\"loadState\\":\\"not-found\\",\\"active\\":false,\\"enabled\\":false},{\\"unit\\":\\"iva-memory-monthly.service\\",\\"loadState\\":\\"not-found\\",\\"active\\":false,\\"enabled\\":false},{\\"unit\\":\\"iva-memory-monthly.timer\\",\\"loadState\\":\\"not-found\\",\\"active\\":false,\\"enabled\\":false},{\\"unit\\":\\"iva-memory-yearly.service\\",\\"loadState\\":\\"not-found\\",\\"active\\":false,\\"enabled\\":false},{\\"unit\\":\\"iva-memory-yearly.timer\\",\\"loadState\\":\\"not-found\\",\\"active\\":false,\\"enabled\\":false}]\\n",
+    "out": "[{\\"unit\\":\\"iva-brain.timer\\",\\"loadState\\":\\"loaded\\",\\"active\\":true,\\"enabled\\":true},{\\"unit\\":\\"iva-brain.service\\",\\"loadState\\":\\"loaded\\",\\"active\\":false,\\"enabled\\":false},{\\"unit\\":\\"iva-telegram-userbot.service\\",\\"loadState\\":\\"loaded\\",\\"active\\":true,\\"enabled\\":false}]\\n",
     "err": "",
     "calls": [
       [
@@ -305,86 +305,6 @@ exports[`Linux units, control argv and journal hints retain the release baseline
         "--user",
         "is-enabled",
         "iva-telegram-userbot.service"
-      ],
-      [
-        "systemctl",
-        "--user",
-        "show",
-        "iva-memory-doctor.service",
-        "--property=LoadState",
-        "--value"
-      ],
-      [
-        "systemctl",
-        "--user",
-        "show",
-        "iva-memory-doctor.timer",
-        "--property=LoadState",
-        "--value"
-      ],
-      [
-        "systemctl",
-        "--user",
-        "show",
-        "iva-memory-daily.service",
-        "--property=LoadState",
-        "--value"
-      ],
-      [
-        "systemctl",
-        "--user",
-        "show",
-        "iva-memory-daily.timer",
-        "--property=LoadState",
-        "--value"
-      ],
-      [
-        "systemctl",
-        "--user",
-        "show",
-        "iva-memory-weekly.service",
-        "--property=LoadState",
-        "--value"
-      ],
-      [
-        "systemctl",
-        "--user",
-        "show",
-        "iva-memory-weekly.timer",
-        "--property=LoadState",
-        "--value"
-      ],
-      [
-        "systemctl",
-        "--user",
-        "show",
-        "iva-memory-monthly.service",
-        "--property=LoadState",
-        "--value"
-      ],
-      [
-        "systemctl",
-        "--user",
-        "show",
-        "iva-memory-monthly.timer",
-        "--property=LoadState",
-        "--value"
-      ],
-      [
-        "systemctl",
-        "--user",
-        "show",
-        "iva-memory-yearly.service",
-        "--property=LoadState",
-        "--value"
-      ],
-      [
-        "systemctl",
-        "--user",
-        "show",
-        "iva-memory-yearly.timer",
-        "--property=LoadState",
-        "--value"
       ],
       [
         "systemctl",

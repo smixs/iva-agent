@@ -236,9 +236,7 @@ export type TelegramQueueItem = {
   version: number;
   updateId: number;
   enqueuedAt?: number;
-  update?: TelegramQueueUpdate;
-  legacyText?: string;
-  migratedFrom?: string;
+  update: TelegramQueueUpdate;
   [key: string]: unknown;
 };
 
@@ -274,9 +272,6 @@ type QueueFileOptions = {
   openImpl?: (path: string, flags: string) => Promise<SyncHandle>;
   nonce?: string | (() => string);
   replace?: boolean;
-  quarantineNow?: () => number;
-  quarantineNonce?: () => string;
-  onLegacyQuarantine?: (path: string) => void;
   now?: () => number;
   logImpl?: (...parts: unknown[]) => void;
 };
@@ -288,11 +283,6 @@ type TelegramEntity = {
   [key: string]: unknown;
 };
 
-type SplitChatKey = {
-  chatId: number | string;
-  threadId: number | null;
-};
-
 export const TELEGRAM_QUEUE_VERSION = 1;
 export const TELEGRAM_QUEUE_ITEM_VERSION = 1;
 export const TELEGRAM_QUEUE_DURABILITY = "ETELEGRAM_QUEUE_DURABILITY";
@@ -301,10 +291,22 @@ export const TELEGRAM_QUEUE_FATAL_DURABILITY =
   "ETELEGRAM_QUEUE_FATAL_DURABILITY";
 export const TELEGRAM_QUEUE_ACK_PENDING_SUFFIX = ".ack-pending";
 
-class NewerQueueVersionError extends Error {
+/** Файл целиком в формате, который эта Ива не читает: его байты остаются на месте. */
+class QueueFormatError extends Error {}
+
+class NewerQueueVersionError extends QueueFormatError {
   constructor(version: number, supported: number) {
     super(
       `Telegram queue: записано более новой Ивой (версия ${version}, эта Ива понимает ${supported}): обновите Иву или верните файл`,
+    );
+  }
+}
+
+/** Очередь строками `{ "<chat>:<topic>": ["text"] }` писали выпуски до 0.3.5. */
+class OlderQueueFormatError extends QueueFormatError {
+  constructor(file = "") {
+    super(
+      `Telegram queue${file && ` ${file}`}: записано Ивой старше 0.3.5 (очередь строками), эта Ива такой файл не читает и не трогает: перенесите его или удалите`,
     );
   }
 }
@@ -317,26 +319,11 @@ function cloneJson<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
-function legacyUpdateId(chatKey: string, index: number, text: string): number {
-  const digest = createHash("sha256")
-    .update(`${chatKey}\0${index}\0${text}`)
-    .digest();
-  return -(digest.readUInt32BE(0) || 1);
-}
-
 function normalizeItem(
   item: unknown,
   chatKey: string,
   index: number,
 ): TelegramQueueItem {
-  if (typeof item === "string") {
-    return {
-      version: TELEGRAM_QUEUE_ITEM_VERSION,
-      updateId: legacyUpdateId(chatKey, index, item),
-      legacyText: item,
-      migratedFrom: "string",
-    };
-  }
   const candidate = item as Record<string, unknown>;
   if (
     typeof candidate?.version === "number" &&
@@ -361,8 +348,7 @@ function normalizeItem(
     !Array.isArray(candidate.update) &&
     (candidate.update as Record<string, unknown>).update_id ===
       candidate.updateId;
-  const hasLegacyText = typeof candidate.legacyText === "string";
-  if (!hasUpdate && !hasLegacyText) {
+  if (!hasUpdate) {
     throw new Error(
       `Telegram queue item ${chatKey}[${index}] has no replayable payload`,
     );
@@ -380,11 +366,8 @@ export type DamagedQueueRecord = {
 
 function normalizeQueues(
   queues: unknown,
-  {
-    legacy = false,
-    damaged,
-  }: { legacy?: boolean; damaged?: DamagedQueueRecord[] } = {},
-): { document: TelegramQueueDocument; migrated: boolean } {
+  { damaged }: { damaged?: DamagedQueueRecord[] } = {},
+): { document: TelegramQueueDocument } {
   if (typeof queues !== "object" || queues === null || Array.isArray(queues)) {
     throw new Error("Telegram queue does not contain a queues object");
   }
@@ -425,17 +408,13 @@ function normalizeQueues(
       version: TELEGRAM_QUEUE_VERSION,
       queues: Object.fromEntries(entries),
     },
-    migrated: legacy,
   };
 }
 
 export function normalizeQueueDocument(
   value: unknown,
   { damaged }: { damaged?: DamagedQueueRecord[] } = {},
-): {
-  document: TelegramQueueDocument;
-  migrated: boolean;
-} {
+): { document: TelegramQueueDocument } {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new Error("Telegram queue does not contain an object");
   }
@@ -450,10 +429,7 @@ export function normalizeQueueDocument(
       damaged,
     });
   }
-  // Pre-IVA-008 format: { "<chat>:<topic>": ["text", ...] }.
-  // Convert every string to a versioned item with a stable synthetic update id.
-  // The text stays byte-for-byte present until Eve accepts the migrated head.
-  return normalizeQueues(value, { legacy: true, damaged });
+  throw new OlderQueueFormatError();
 }
 
 export function createQueueItem(
@@ -589,63 +565,10 @@ export function clearQueueKey(
   };
 }
 
-function splitChatKey(chatKey: string): SplitChatKey | null {
-  const colon = chatKey.lastIndexOf(":");
-  if (colon < 0) return null;
-  const chat = chatKey.slice(0, colon);
-  const thread = chatKey.slice(colon + 1);
-  if (!chat.length) return null;
-  const chatNumber = Number(chat);
-  const threadNumber = thread === "" ? null : Number(thread);
-  return {
-    chatId: Number.isSafeInteger(chatNumber) ? chatNumber : chat,
-    threadId: Number.isSafeInteger(threadNumber) ? threadNumber : null,
-  };
-}
-
 export function materializeQueueItem(
-  chatKey: string,
   item: TelegramQueueItem,
-  {
-    legacyAllowedUserIds,
-  }: {
-    legacyAllowedUserIds?: ReadonlySet<string> | Iterable<unknown> | null;
-  } = {},
-): TelegramQueueUpdate | null {
-  if (item.update) return cloneJson(item.update);
-  const route = splitChatKey(chatKey);
-  const allowed =
-    legacyAllowedUserIds instanceof Set
-      ? legacyAllowedUserIds
-      : new Set(legacyAllowedUserIds ?? []);
-  // The old string[] format did not retain a sender. A private Telegram chat id
-  // is also its participant's user id, so an allowlisted private route is the
-  // only legacy item whose author can be reconstructed. A group/topic key says
-  // nothing about which member wrote the text and must stay undelivered.
-  if (
-    !route ||
-    typeof route.chatId !== "number" ||
-    route.chatId <= 0 ||
-    !allowed.has(String(route.chatId))
-  ) {
-    return null;
-  }
-  const ownerId = route.chatId;
-  const messageId = Math.max(1, Math.abs(item.updateId));
-  return {
-    update_id: item.updateId,
-    message: {
-      message_id: messageId,
-      date: 0,
-      chat: {
-        id: route.chatId,
-        type: "private",
-      },
-      from: { id: ownerId, is_bot: false, first_name: "Owner" },
-      text: item.legacyText,
-      ...(route.threadId === null ? {} : { message_thread_id: route.threadId }),
-    },
-  };
+): TelegramQueueUpdate {
+  return cloneJson(item.update);
 }
 
 const TELEGRAM_USERNAME = /^[A-Za-z0-9_]{5,32}$/u;
@@ -875,7 +798,9 @@ export async function loadQueueFile(
         damaged,
       }).document;
     } catch (error) {
-      if (strict || error instanceof NewerQueueVersionError) throw error;
+      if (error instanceof OlderQueueFormatError)
+        throw new OlderQueueFormatError(pendingFile);
+      if (strict || error instanceof QueueFormatError) throw error;
       const backup = `${pendingFile}.corrupt-${Date.now()}-${quarantineNonce()}`;
       await renameImpl(pendingFile, backup);
       (options.logImpl ?? console.error)(
@@ -887,7 +812,9 @@ export async function loadQueueFile(
       try {
         normalizeQueueDocument(JSON.parse(await readFileImpl(file, "utf8")));
       } catch (error) {
-        if (error instanceof NewerQueueVersionError) throw error;
+        if (error instanceof OlderQueueFormatError)
+          throw new OlderQueueFormatError(file);
+        if (error instanceof QueueFormatError) throw error;
       }
       await quarantineQueueRecords(file, damaged, options);
       const recoveryOptions = { ...options };
@@ -897,7 +824,6 @@ export async function loadQueueFile(
       await removeFileDurable(pendingFile, options);
       return {
         document: recovered,
-        migrated: false,
         quarantined: null,
         recoveredPendingAcknowledgement: true,
       };
@@ -913,7 +839,6 @@ export async function loadQueueFile(
     ) {
       return {
         document: emptyQueueDocument(),
-        migrated: false,
         quarantined: null,
       };
     }
@@ -927,12 +852,13 @@ export async function loadQueueFile(
   try {
     normalized = normalizeQueueDocument(JSON.parse(raw), { damaged });
   } catch (error) {
-    if (strict || error instanceof NewerQueueVersionError) throw error;
+    if (error instanceof OlderQueueFormatError)
+      throw new OlderQueueFormatError(file);
+    if (strict || error instanceof QueueFormatError) throw error;
     const backup = `${file}.corrupt-${Date.now()}-${quarantineNonce()}`;
     await renameImpl(file, backup);
     return {
       document: emptyQueueDocument(),
-      migrated: false,
       quarantined: backup,
       error,
     };
@@ -1049,78 +975,6 @@ async function writeFileDurable(
   }
 }
 
-async function writeLegacyQuarantine(
-  file: string,
-  document: TelegramQueueDocument,
-  options: QueueFileOptions,
-): Promise<string> {
-  const now = options.quarantineNow?.() ?? Date.now();
-  const nonce = options.quarantineNonce?.() ?? randomBytes(8).toString("hex");
-  const stem = `${file}.legacy-unattributed-${now}-${nonce}`;
-
-  for (let attempt = 0; attempt < 1000; attempt++) {
-    const path = attempt === 0 ? stem : `${stem}-${attempt}`;
-    try {
-      // A hard link publishes the fully fsynced staging inode and fails with
-      // EEXIST instead of replacing an earlier migration's evidence.
-      await writeQueueFileAtomic(path, document, {
-        ...options,
-        replace: false,
-      });
-      return path;
-    } catch (error) {
-      if (
-        (error as NodeJS.ErrnoException | null | undefined)?.code !== "EEXIST"
-      )
-        throw error;
-    }
-  }
-  throw new Error(
-    `could not reserve a unique legacy Telegram quarantine path for ${file}`,
-  );
-}
-
-export async function migrateQueueFile(
-  file: string,
-  options: QueueFileOptions = {},
-): Promise<TelegramQueueDocument> {
-  const loaded = await loadQueueFile(file, options);
-  if (loaded.migrated) {
-    const activeEntries: [string, TelegramQueueItem[]][] = [];
-    const unattributedEntries: [string, TelegramQueueItem[]][] = [];
-    for (const [chatKey, items] of Object.entries(loaded.document.queues)) {
-      const route = splitChatKey(chatKey);
-      const target =
-        route && typeof route.chatId === "number" && route.chatId > 0
-          ? activeEntries
-          : unattributedEntries;
-      target.push([chatKey, items]);
-    }
-    const active = {
-      version: TELEGRAM_QUEUE_VERSION,
-      queues: Object.fromEntries(activeEntries),
-    };
-    if (unattributedEntries.length) {
-      // Preserve old group/topic text outside the active FIFO before removing it
-      // from automatic replay. The old format has no sender identity, so those
-      // entries cannot be delivered faithfully. Writing this sidecar first means
-      // every crash order leaves either the original queue or its durable copy.
-      const quarantine = await writeLegacyQuarantine(
-        file,
-        {
-          version: TELEGRAM_QUEUE_VERSION,
-          queues: Object.fromEntries(unattributedEntries),
-        },
-        options,
-      );
-      options.onLegacyQuarantine?.(quarantine);
-    }
-    await writeQueueFileAtomic(file, active, options);
-    return active;
-  }
-  return loaded.document;
-}
-
 export async function enqueueQueueFile(
   file: string,
   chatKey: string,
@@ -1193,7 +1047,7 @@ export async function clearQueueFileKey(
 ): Promise<TelegramQueueDocument> {
   const loaded = await loadQueueFile(file, { ...options, strict: true });
   const result = clearQueueKey(loaded.document, chatKey);
-  if (result.changed || loaded.migrated) {
+  if (result.changed) {
     await writeQueueFileAtomic(file, result.document, options);
   }
   return result.document;

@@ -10,7 +10,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { CATALOG, catalogProvider } from "./lib/model-catalog.ts";
 import { notificationChat } from "../packages/notification-chat/index.ts";
 import { redactNotice } from "./lib/notice.ts";
@@ -34,6 +34,13 @@ import {
 } from "./lib/version-layout.ts";
 import { throughLink } from "./lib/link-target.ts";
 import {
+  floorCompat,
+  installedVersion,
+  parseMinUpdater,
+  UPDATE_COMPAT_FILE,
+  updaterTooOldMessage,
+} from "./lib/update-check.ts";
+import {
   quarantinePath,
   rewriteRunStatusesForUpdate,
   sessionStateTargets,
@@ -41,14 +48,10 @@ import {
 import {
   adoptUpdateLock,
   layoutFor,
-  LEGACY_STATE_DIRS,
+  parseVersionName,
   readJson,
   STATE_DIRS,
 } from "./lib/version-store.ts";
-import {
-  LEGACY_BRAIN_UNITS,
-  LEGACY_MEMORY_UNITS,
-} from "./lib/legacy-memory-units.ts";
 import {
   commandRunner,
   customOverlay,
@@ -203,8 +206,6 @@ export function captureOptionalWriterState(
       runtime.BRAIN_TIMER,
       runtime.BRAIN_SERVICE,
       runtime.SVC_USERBOT,
-      ...LEGACY_BRAIN_UNITS,
-      ...LEGACY_MEMORY_UNITS,
     ]),
   ].map((unit) => {
     const loadState = unitLoadState(runtime, unit);
@@ -314,67 +315,21 @@ function restoreUnitState(
   restoreOptionalWriterState(runtime, [state]);
 }
 
-/** Restore captured writer semantics after writeUnits retires legacy names. */
-export function restoreMigratedWriterState(
+/** Restore captured writer semantics onto the units writeUnits just rewrote. */
+function restoreMigratedWriterState(
   runtime: WriterRuntime,
   states: readonly OptionalWriterState[],
-  { legacyMemoryOwnerProven = false } = {},
 ): void {
   restoreOptionalWriterState(
     runtime,
     states.filter((state) => state.unit === runtime.SVC_USERBOT),
   );
-  const brainTimers = new Set([
-    runtime.BRAIN_TIMER,
-    ...LEGACY_BRAIN_UNITS.filter((unit) => unit.endsWith(".timer")),
-  ]);
-  const brainServices = new Set([
-    runtime.BRAIN_SERVICE,
-    ...LEGACY_BRAIN_UNITS.filter((unit) => unit.endsWith(".service")),
-  ]);
-  restoreUnitState(runtime, {
-    unit: runtime.BRAIN_TIMER,
-    loadState: "loaded",
-    ...mergedState(states, brainTimers),
-  });
-  restoreUnitState(runtime, {
-    unit: runtime.BRAIN_SERVICE,
-    loadState: "loaded",
-    ...mergedState(states, brainServices),
-  });
-
-  const legacyMemory = states.filter(
-    (state) =>
-      LEGACY_MEMORY_UNITS.includes(state.unit) && present(state.loadState),
-  );
-  const remaining = new Map(
-    legacyMemory.map((state) => [
-      state.unit,
-      present(unitLoadState(runtime, state.unit)),
-    ]),
-  );
-  restoreOptionalWriterState(
-    runtime,
-    legacyMemory.filter((state) => remaining.get(state.unit)),
-  );
-  const hadLegacyMemorySchedule = legacyMemory.some(
-    (state) => state.active || state.enabled,
-  );
-  const completeLegacySchedule = legacyMemory.every((state) => {
-    if (!state.active && !state.enabled) return true;
-    if (!remaining.get(state.unit)) return false;
-    if (!state.unit.endsWith(".timer")) return true;
-    return remaining.get(state.unit.replace(/\.timer$/u, ".service")) === true;
-  });
-  const owner = runtime.SERVICES[0];
-  if (hadLegacyMemorySchedule && !completeLegacySchedule) {
-    if (!legacyMemoryOwnerProven)
-      throw new Error(
-        "legacy memory schedule owner was not proven by writeUnits",
-      );
-    if (!owner || !unitActive(runtime, owner))
-      throw new Error("legacy memory schedule has no active service owner");
-  }
+  for (const unit of [runtime.BRAIN_TIMER, runtime.BRAIN_SERVICE])
+    restoreUnitState(runtime, {
+      unit,
+      loadState: "loaded",
+      ...mergedState(states, new Set([unit])),
+    });
 }
 
 export function restoreWriterOwnership(
@@ -382,7 +337,6 @@ export function restoreWriterOwnership(
   states: readonly OptionalWriterState[],
   phase: {
     readonly unitMigrationStarted: boolean;
-    readonly legacyMemoryOwnerProven: boolean;
     readonly userbotReady: boolean;
   },
 ): void {
@@ -396,9 +350,7 @@ export function restoreWriterOwnership(
     restoreOptionalWriterState(runtime, states);
     return;
   }
-  restoreMigratedWriterState(runtime, states, {
-    legacyMemoryOwnerProven: phase.legacyMemoryOwnerProven,
-  });
+  restoreMigratedWriterState(runtime, states);
 }
 
 /** Build leftovers of a checkout: not tracked, not state, never worth keeping. */
@@ -560,7 +512,7 @@ function topLevel(path: string): string {
 
 /** Never removed, whatever git says about them. */
 const KEEP = new Set([
-  ...[...STATE_DIRS, ...LEGACY_STATE_DIRS].map(topLevel),
+  ...STATE_DIRS.map(topLevel),
   ...".env current repo versions".split(" "),
 ]);
 
@@ -967,7 +919,7 @@ export async function startCandidateServices(
   runtime: CliRuntime,
   services: Pick<
     ReturnType<typeof createCliSystemd>,
-    "restartServices" | "retireDeferredBrainUnits" | "writeUnits"
+    "restartServices" | "writeUnits"
   >,
   {
     states,
@@ -1002,8 +954,6 @@ export async function startCandidateServices(
       ...(capturedUserbot?.loadState === "not-found"
         ? { skipUnits: [runtime.SVC_USERBOT] }
         : {}),
-      deferBrainMigration: true,
-      deferMemoryMigration: true,
     });
     runtime.systemd.activate([runtime.UPDATE_TIMER]);
     // The code of every plugin proxy is in the version this flip just made
@@ -1017,16 +967,46 @@ export async function startCandidateServices(
       if (recovery.status === "failed") userbotOff = recovery.reason;
     }
   } finally {
-    if (states) {
+    if (states)
       restoreWriterOwnership(runtime, states, {
         unitMigrationStarted: migration.started,
-        legacyMemoryOwnerProven: false,
         userbotReady,
       });
-      if (migration.started) services.retireDeferredBrainUnits();
-    }
   }
   await tellAboutUserbot(alertUserbot, userbotOff, notify);
+}
+
+/**
+ * Why this tree is not installed over what serves now, or null. From 0.3.30 the old half
+ * reads `minUpdater` itself before its first write; 0.3.15 to 0.3.29 hand off without
+ * reading it, so the first code of the new tree asks the same question of the release on
+ * disk (specs/UpdateFloor.tla, StaysOnItsRelease). A checkout that was never converted
+ * is named by its own package.json.
+ */
+export function belowFloor(
+  home: string,
+  tree: string = join(import.meta.dirname, ".."),
+): string | null {
+  const layout = layoutFor(home);
+  const serving = existsSync(layout.current)
+    ? parseVersionName(basename(realpathSync(layout.current)))?.version
+    : installedVersion(home);
+  if (!serving) return null;
+  const floor = parseMinUpdater(
+    readFileSync(join(tree, UPDATE_COMPAT_FILE), "utf8"),
+  );
+  return floorCompat(serving, floor).status === "too-old"
+    ? updaterTooOldMessage(serving, layout.values.AGENT_LANGUAGE)
+    : null;
+}
+
+/** An outcome reported before the lock is adopted: nothing was touched. */
+function refuse(message: string): number {
+  const outcome: UpdateOutcome = { status: "failed", message };
+  const report = process.env.IVA_UPDATE_OUTCOME;
+  if (report) writeFileSync(report, JSON.stringify(outcome));
+  else console.log(JSON.stringify(outcome));
+  return 1;
 }
 
 /**
@@ -1054,16 +1034,12 @@ export async function main(argv: readonly string[]): Promise<number> {
   // a health cycle - and finally names the value. `iva update` on the release after this one
   // refuses before even that (scripts/cli/version-update-command.ts).
   const configured = layout.values.MODEL_PROVIDER ?? "ollama";
-  if (!catalogProvider(configured)) {
-    const outcome: UpdateOutcome = {
-      status: "failed",
-      message: `Invalid MODEL_PROVIDER ${JSON.stringify(configured)}; expected one of: ${Object.keys(CATALOG).join(", ")} — run: iva config`,
-    };
-    const report = process.env.IVA_UPDATE_OUTCOME;
-    if (report) writeFileSync(report, JSON.stringify(outcome));
-    else console.log(JSON.stringify(outcome));
-    return 1;
-  }
+  if (!catalogProvider(configured))
+    return refuse(
+      `Invalid MODEL_PROVIDER ${JSON.stringify(configured)}; expected one of: ${Object.keys(CATALOG).join(", ")} — run: iva config`,
+    );
+  const tooOld = belowFloor(home);
+  if (tooOld) return refuse(tooOld);
 
   const lock = adoptUpdateLock(layout.data);
   const log: Say = (message) => console.log(`  ${message}`);
@@ -1126,7 +1102,6 @@ export async function main(argv: readonly string[]): Promise<number> {
           if (stateReady && optionalWriterState)
             restoreWriterOwnership(runtime, optionalWriterState, {
               unitMigrationStarted: migration.started,
-              legacyMemoryOwnerProven: false,
               userbotReady: true,
             });
         }
@@ -1150,14 +1125,6 @@ export async function main(argv: readonly string[]): Promise<number> {
             return Promise.resolve();
           },
         });
-      },
-      retireCommittedWriters: async (root) => {
-        const { createCliRuntime } = await import("./cli/runtime.ts");
-        const { createCliSystemd } = await import("./cli/systemd.ts");
-        const runtime = createCliRuntime(root);
-        const services = createCliSystemd(runtime);
-        services.retireLegacyMemoryUnits();
-        await Promise.resolve();
       },
       adopt: () => {
         writeShim(home, log, notify);

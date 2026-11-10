@@ -441,7 +441,7 @@ test("SIGKILL after offset ownership preserves every burst part for restart", as
         ).document
       : { version: 1, queues: {} },
   };
-  assert.deepEqual(crashed.offset, { offset: 103, delivered: null });
+  assert.deepEqual(crashed.offset, { offset: 103 });
   assert.deepEqual(ownedUpdates(crashed), [
     { location: "inbox", updateId: 101 },
     { location: "inbox", updateId: 102 },
@@ -727,10 +727,7 @@ test("button tap daily text survives durable queue reload and materialization", 
     queues: { "42:": [createQueueItem(update)] },
   });
   const loaded = await loadQueueFile(file, { strict: true });
-  const materialized = materializeQueueItem(
-    "42:",
-    loaded.document.queues["42:"][0],
-  );
+  const materialized = materializeQueueItem(loaded.document.queues["42:"][0]);
   assert.deepEqual(materialized, update);
   assert.equal(
     materialized?.message?.[TELEGRAM_BUTTON_TAP_DAILY_TEXT_FIELD],
@@ -852,7 +849,7 @@ test("SIGKILL after callback rejection preserves it for restart delivery", async
     parseOffsetFile(
       readFileSync(join(dataDir, "telegram-offset.json"), "utf8"),
     ),
-    { offset: 102, delivered: null },
+    { offset: 102 },
   );
   assert.deepEqual(
     ownedUpdates({
@@ -926,7 +923,7 @@ test("SIGKILL after core synthetic ownership replays distillation text", async (
     parseOffsetFile(
       readFileSync(join(dataDir, "telegram-offset.json"), "utf8"),
     ),
-    { offset: 100, delivered: null },
+    { offset: 100 },
   );
   assert.equal(crashedItems.length, 1);
   assert.ok(crashedItems[0].update?.message);
@@ -1025,7 +1022,7 @@ test("SIGKILL after first core synthetic EIO reconstructs distillation from the 
     parseOffsetFile(
       readFileSync(join(dataDir, "telegram-offset.json"), "utf8"),
     ),
-    { offset: 100, delivered: null },
+    { offset: 100 },
   );
   assert.match(
     readFileSync(join(dataDir, "vault", "core-interview.md"), "utf8"),

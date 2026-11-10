@@ -461,25 +461,6 @@ test("the ⏹ Stop button cancels through the channel route, never through Eve",
   assert.deepEqual(replies, []);
 });
 
-test("the legacy iva_cancel button stays out of the inbox and cancels the recorded pair", async () => {
-  runningTurn();
-  writeFileSync(
-    join(
-      dataDir,
-      "run-status.d",
-      `${Buffer.from("7:").toString("base64url")}.json`,
-    ),
-    JSON.stringify({ ...status.getChatStatus("7:"), statusMessageId: 4 }),
-  );
-  const { cancels, acks, deps } = recordingDeps();
-  assert.equal(await handleControl(stopButton(), deps), true);
-  assert.equal(cancels.length, 1);
-  assert.equal(cancels[0].sessionId, "session-1");
-  assert.equal(cancels[0].turnId, "turn-1");
-  assert.equal(status.getChatStatus("7:")?.wasCancelled, true);
-  assert.deepEqual(acks, [["cq-5", undefined]]);
-});
-
 test("/stop takes the same door and stays silent while the status message speaks", async () => {
   runningTurn({ sessionId: "session-2", turnId: "turn-2" });
   const { cancels, replies, deps } = recordingDeps();

@@ -37,7 +37,6 @@ test("runtime exposes the CLI primitives and shared unit constants", async (t) =
     "NODE",
     "NODE_BIN_DIR",
     "NPM",
-    "OLD_DEFAULT_HOST",
     "ROOT",
     "SERVICES",
     "SVC_USERBOT",
@@ -95,7 +94,6 @@ test("runtime exposes the CLI primitives and shared unit constants", async (t) =
   );
   assert.equal(runtime.TOKEN_FILE, join(root, "data/telegram-userbot.token"));
   assert.equal(runtime.DEFAULT_PORT, "8723");
-  assert.equal(runtime.OLD_DEFAULT_HOST, "http://127.0.0.1:3000");
 });
 
 test("runtime resolves executable uv from its captured child PATH", async (t) => {

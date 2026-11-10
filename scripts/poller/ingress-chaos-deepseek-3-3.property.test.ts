@@ -55,7 +55,7 @@ async function run(
   offsets: number[] = [],
   lines: string[] = [],
 ): Promise<{ offset: number; ingressBlocked: boolean }> {
-  return processTelegramUpdate(update, OFFSET, null, {
+  return processTelegramUpdate(update, OFFSET, {
     handleControlImpl: () => Promise.resolve(false),
     saveOffsetImpl: (nextOffset) => {
       offsets.push(nextOffset);
@@ -207,7 +207,6 @@ await test("контроль: отказ записи (ENOSPC) по-прежне
   const result = await processTelegramUpdate(
     messageUpdate(401, { text: "не записалось" }),
     OFFSET,
-    null,
     {
       handleControlImpl: () => Promise.resolve(false),
       admitImpl: () => Promise.resolve("write-failed"),

@@ -214,7 +214,6 @@ async function flip(
     box.runtime,
     {
       restartServices: (options) => options?.afterUnitWrite?.(),
-      retireDeferredBrainUnits: () => [],
       writeUnits: () => [],
     },
     {

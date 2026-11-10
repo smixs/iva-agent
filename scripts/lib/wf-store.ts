@@ -273,7 +273,6 @@ export function resetStateTargets(root: string, dataDir: string): string[] {
   return [
     ...sessionStateTargets(root, dataDir),
     join(dataDir, "run-status.d"),
-    join(dataDir, "run-status.json"),
     ...queuedInputTargets(dataDir),
   ];
 }

@@ -252,9 +252,12 @@ void test("reset stops services, quarantines every state target with one stamp, 
     ".eve/.workflow-data",
     ".workflow-data",
     "data/run-status.d",
-    "data/run-status.json",
     "data/telegram-queue.json",
   ];
+  // specs/UpdateFloor.tla, NoSilentLoss: the shared file of releases before 0.3.10 is not
+  // a reset target; it stays where it is, byte for byte.
+  const shared = join(context.project, "data/run-status.json");
+  const sharedBytes = '{"7:":{"status":"running"}}\n';
   for (const target of targets) {
     const path = join(context.project, target);
     if (target.endsWith(".json")) {
@@ -266,9 +269,12 @@ void test("reset stops services, quarantines every state target with one stamp, 
     }
   }
 
+  await writeFile(shared, sharedBytes);
+
   const result = runCli(context, ["reset"]);
 
   assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.equal(await readFile(shared, "utf8"), sharedBytes);
   const quarantineLines = result.stdout
     .split("\n")
     .filter((line) => line.includes("reset state quarantined"));

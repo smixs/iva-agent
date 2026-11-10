@@ -160,7 +160,6 @@ void test("global reset plan includes workflow and all Telegram control-state ta
     "/srv/iva/.eve/.workflow-data",
     "/srv/iva/.workflow-data",
     "/var/lib/iva/run-status.d",
-    "/var/lib/iva/run-status.json",
     "/var/lib/iva/telegram-queue.json",
   ]);
 });

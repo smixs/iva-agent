@@ -15,7 +15,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import * as systemdControl from "./systemd-control.ts";
 import { plantCliTree } from "../fixtures/cli-tree.ts";
 
@@ -342,716 +342,71 @@ void test("doctor warns on a non-zero last exit code even right after a fresh su
   assert.doesNotMatch(output, /таблица фактов не читается/);
 });
 
-void test("legacy memory-timer cleanup is skipped when the current build doesn't contain the eve schedules yet", async (t) => {
-  const { home, project, runCommand } = await fixture(t);
-  const unitDir = join(home, ".config/systemd/user");
-  await mkdir(unitDir, { recursive: true });
-  await writeFile(join(unitDir, "iva-memory-daily.timer"), "[Unit]\n");
-  // The fixture's stub .output/server/index.mjs is empty — no schedule names in it,
-  // i.e. exactly what a build made before this migration landed looks like.
-  await writeFile(join(project, ".output/server/index.mjs"), "");
+// UpdateFloor.NoSilentLoss: a .env written before 0.3.15 names no port. Doctor says so with
+// the file's name and adds no line of its own; every line the owner wrote stays.
+void test("NoSilentLoss: doctor names a .env without IVA_PORT and does not add the line", async (t) => {
+  const { envPath, runCommand } = await fixture(t);
+  const before = await readFile(envPath, "utf8");
+  assert.doesNotMatch(before, /^IVA_PORT=/mu);
 
-  const result = runCommand("restart");
+  const result = runCommand("doctor");
   const output = `${result.stdout}\n${result.stderr}`;
 
-  assert.equal(result.status, 0, output);
-  assert.match(output, /skipping legacy memory-timer cleanup/);
-  assert.equal(
-    existsSync(join(unitDir, "iva-memory-daily.timer")),
-    true,
-    "the legacy unit is left alone on a stale build",
+  assert.equal(result.status, 1, output);
+  assert.ok(
+    output.includes(`${envPath} has no IVA_PORT`),
+    `the file is not named: ${output.replaceAll(SECRET, "<secret>")}`,
   );
+  const after = await readFile(envPath, "utf8");
+  assert.doesNotMatch(after, /^IVA_PORT=/mu);
+  for (const line of before.split("\n")) assert.ok(after.includes(line));
 });
 
-void test("a build that only bundles LEGACY_MEMORY_UNITS strings (not the compiled schedules) still counts as stale", async (t) => {
-  // Regression test: instrumentation.ts always imports schedule-migration.ts, whose
-  // LEGACY_MEMORY_UNITS array contains "iva-memory-daily.service" — which itself
-  // contains "memory-daily" as a substring. A marker that was just the bare string
-  // "memory-daily" would match THIS text and wrongly conclude the schedules compiled.
-  const { home, project, runCommand } = await fixture(t);
-  const unitDir = join(home, ".config/systemd/user");
-  await mkdir(unitDir, { recursive: true });
-  await writeFile(join(unitDir, "iva-memory-daily.timer"), "[Unit]\n");
-  await writeFile(
-    join(project, ".output/server/index.mjs"),
-    'const LEGACY_MEMORY_UNITS = ["iva-memory-daily.service", "iva-memory-daily.timer"];\n',
-  );
-
-  const result = runCommand("restart");
-  const output = `${result.stdout}\n${result.stderr}`;
-
-  assert.equal(result.status, 0, output);
-  assert.match(
-    output,
-    /skipping legacy memory-timer cleanup/,
-    "the legacy-units array text must not be mistaken for a compiled schedule",
-  );
-  assert.equal(existsSync(join(unitDir, "iva-memory-daily.timer")), true);
-});
-
-// Mirrors the actual shape Nitro's schedule-task wrapper compiles (see a real
-// `.output/server/_virtual/*.schedule.mjs`) — the description string embeds the
-// schedule's own source path, which is what BUILD_SCHEDULE_MARKERS looks for.
-const scheduleDescriptionMjs = (period: string): string =>
-  `var eve_schedule_default = { meta: { description: 'Run eve schedule "memory-${period}" from "schedules/memory-${period}.ts".' } };\n`;
-
-function updaterMemoryTransferScript(
-  project: string,
-  afterRestart = "",
-): string {
-  const runtime = pathToFileURL(join(project, "scripts/cli/runtime.ts")).href;
-  const systemd = pathToFileURL(join(project, "scripts/cli/systemd.ts")).href;
-  return `
-    const { createCliRuntime } = await import(${JSON.stringify(runtime)});
-    const { createCliSystemd } = await import(${JSON.stringify(systemd)});
-    const runtime = createCliRuntime(${JSON.stringify(project)});
-    const services = createCliSystemd(runtime);
-    services.restartServices({ deferMemoryMigration: true });
-    ${afterRestart}
-  `;
-}
-
-async function seedCompiledMemorySchedules(project: string): Promise<void> {
-  await mkdir(join(project, ".output/server/_virtual"), { recursive: true });
-  await writeFile(
-    join(project, ".output/server/_virtual/eve-night.schedule.mjs"),
-    scheduleDescriptionMjs("night"),
-  );
-}
-
-void test("legacy memory-timer cleanup proceeds once the build contains memory-night", async (t) => {
+// UpdateFloor.NoSilentLoss: unit files of a release below the floor (the eight
+// iva-memory-{daily,weekly,monthly,yearly} units and the iva-memory-doctor pair) are not
+// this CLI's. Every command that writes or reads units leaves them byte for byte and names
+// none of them to systemctl.
+void test("NoSilentLoss: unit files of a release below the floor stay as they were through install, restart, doctor and status", async (t) => {
   const { calls, home, project, runCommand } = await fixture(t);
   const unitDir = join(home, ".config/systemd/user");
   await mkdir(unitDir, { recursive: true });
-  await writeFile(join(unitDir, "iva-memory-daily.timer"), "[Unit]\n");
-  await mkdir(join(project, ".output/server/_virtual"), { recursive: true });
-  await writeFile(
-    join(project, ".output/server/_virtual/eve-night.schedule.mjs"),
-    scheduleDescriptionMjs("night"),
-  );
-
-  const result = runCommand("restart");
-  const output = `${result.stdout}\n${result.stderr}`;
-
-  assert.equal(result.status, 0, output);
-  assert.doesNotMatch(output, /skipping legacy memory-timer cleanup/);
-  assert.equal(
-    existsSync(join(unitDir, "iva-memory-daily.timer")),
-    false,
-    "a build that has the single night schedule lets cleanup proceed",
-  );
-  const systemctlCalls = (await readFile(calls, "utf8")).trim().split("\n");
-  assert.ok(
-    systemctlCalls.some(
-      (c) => c === "--user disable --now iva-memory-daily.timer",
-    ),
-  );
-});
-
-void test("an updater restart keeps legacy memory recoverable while live health is pending", async (t) => {
-  const { calls, home, project, runScript, seedUnit, state } = await fixture(t);
-  const unit = "iva-memory-daily.timer";
-  const unitDir = join(home, ".config/systemd/user");
-  await mkdir(unitDir, { recursive: true });
-  await writeFile(join(unitDir, unit), "[Unit]\n");
-  await seedUnit(unit);
-  await seedCompiledMemorySchedules(project);
-
-  const result = runScript(updaterMemoryTransferScript(project));
-  const output = `${result.stdout}\n${result.stderr}`;
-  const systemctlCalls = (await readFile(calls, "utf8")).trim().split("\n");
-
-  assert.equal(result.status, 0, output);
-  assert.equal(existsSync(join(unitDir, unit)), true);
-  assert.equal(existsSync(join(state, `${unit}.enabled`)), true);
-  assert.equal(existsSync(join(state, `${unit}.active`)), true);
-  assert.equal(systemctlCalls.includes(`--user disable --now ${unit}`), false);
-});
-
-void test("committed updater cleanup retires legacy memory after active-owner proof", async (t) => {
-  const { home, project, runScript } = await fixture(t);
-  const unit = "iva-memory-daily.timer";
-  const unitDir = join(home, ".config/systemd/user");
-  await mkdir(unitDir, { recursive: true });
-  await writeFile(join(unitDir, unit), "[Unit]\n");
-  await seedCompiledMemorySchedules(project);
-
-  const result = runScript(
-    updaterMemoryTransferScript(project, "services.retireLegacyMemoryUnits();"),
-  );
-  const output = `${result.stdout}\n${result.stderr}`;
-
-  assert.equal(result.status, 0, output);
-  assert.equal(existsSync(join(unitDir, unit)), false);
-});
-
-void test("committed updater cleanup keeps legacy memory when the new owner is inactive", async (t) => {
-  const { calls, home, project, runScript } = await fixture(t);
-  const unit = "iva-memory-daily.timer";
-  const unitDir = join(home, ".config/systemd/user");
-  await mkdir(unitDir, { recursive: true });
-  await writeFile(join(unitDir, unit), "[Unit]\n");
-  await seedCompiledMemorySchedules(project);
-
-  const result = runScript(
-    updaterMemoryTransferScript(
-      project,
-      "runtime.systemd.stop(runtime.SERVICES); services.retireLegacyMemoryUnits();",
-    ),
-  );
-  const systemctlCalls = (await readFile(calls, "utf8")).trim().split("\n");
-
-  assert.notEqual(result.status, 0);
-  assert.equal(existsSync(join(unitDir, unit)), true);
-  assert.equal(systemctlCalls.includes(`--user disable --now ${unit}`), false);
-});
-
-void test("a restart fault after unit write keeps legacy memory units and their state", async (t) => {
-  const { calls, home, project, runCommand, seedUnit, state } =
-    await fixture(t);
-  const unit = "iva-memory-daily.timer";
-  const unitDir = join(home, ".config/systemd/user");
-  await mkdir(unitDir, { recursive: true });
-  await writeFile(join(unitDir, unit), "[Unit]\n");
-  await seedUnit(unit);
-  await mkdir(join(project, ".output/server/_virtual"), { recursive: true });
-  for (const period of ["daily", "weekly", "monthly", "yearly"]) {
-    await writeFile(
-      join(project, `.output/server/_virtual/eve-${period}.schedule.mjs`),
-      scheduleDescriptionMjs(period),
-    );
-  }
-
-  const result = runCommand("restart", { exit: 1, failAction: "restart" });
-  const output = `${result.stdout}\n${result.stderr}`;
-  const systemctlCalls = (await readFile(calls, "utf8")).trim().split("\n");
-
-  assert.equal(result.status, 1, output);
-  assert.equal(await readFile(join(unitDir, unit), "utf8"), "[Unit]\n");
-  assert.equal(existsSync(join(state, `${unit}.enabled`)), true);
-  assert.equal(existsSync(join(state, `${unit}.active`)), true);
-  assert.ok(systemctlCalls.includes("--user restart iva.service"));
-  assert.equal(systemctlCalls.includes(`--user disable --now ${unit}`), false);
-});
-
-void test("a build without memory-night keeps legacy units", async (t) => {
-  const { home, project, runCommand } = await fixture(t);
-  const unitDir = join(home, ".config/systemd/user");
-  await mkdir(unitDir, { recursive: true });
-  for (const period of ["daily", "weekly", "monthly", "yearly"]) {
-    await writeFile(join(unitDir, `iva-memory-${period}.timer`), "[Unit]\n");
-  }
+  const old = new Map([
+    [
+      "iva-memory-doctor.service",
+      `[Service]\nExecStart=${process.execPath} scripts/memory/doctor.ts\n`,
+    ],
+    ["iva-memory-doctor.timer", "[Timer]\nOnCalendar=*-*-* 05:00:00\n"],
+    ["iva-memory-daily.service", "[Service]\nExecStart=/bin/true\n"],
+    ["iva-memory-daily.timer", "[Timer]\nOnCalendar=daily\n"],
+    ["iva-memory-yearly.timer", "[Timer]\nOnCalendar=yearly\n"],
+  ]);
+  for (const [unit, body] of old) await writeFile(join(unitDir, unit), body);
   await mkdir(join(project, ".output/server/_virtual"), { recursive: true });
   await writeFile(
     join(project, ".output/server/_virtual/eve.schedule.mjs"),
-    scheduleDescriptionMjs("daily"),
+    `var eve_schedule_default = { meta: { description: 'Run eve schedule "memory-night" from "schedules/memory-night.ts".' } };\n`,
   );
 
-  const result = runCommand("restart");
-  const output = `${result.stdout}\n${result.stderr}`;
-
-  assert.equal(result.status, 0, output);
-  assert.match(
-    output,
-    /skipping legacy memory-timer cleanup/,
-    "a retired schedule marker must not stand in for memory-night",
-  );
-  for (const period of ["daily", "weekly", "monthly", "yearly"]) {
-    assert.equal(
-      existsSync(join(unitDir, `iva-memory-${period}.timer`)),
-      true,
-      `${period}'s legacy unit survives a partial build`,
-    );
+  for (const command of ["_install-units", "restart", "doctor", "status"]) {
+    const result = runCommand(command);
+    const output = `${result.stdout}\n${result.stderr}`;
+    // The fixture's .env is incomplete, so doctor reports a failure of its own.
+    if (command !== "doctor")
+      assert.equal(result.status, 0, `${command}: ${output}`);
+    assert.doesNotMatch(output, /iva-memory-/u, command);
   }
-});
 
-// ── Brain rename: iva-memory-doctor.{service,timer} → iva-brain.{service,timer} ─────────
-// The nightly vault care is the one thing that must never be absent, so the migration is
-// ordered: write the new timer, enable it, and only then tear the old pair down. Every test
-// below drives the real CLI against the fake systemctl, so it proves the ORDER of the calls,
-// not just the end state.
-
-// Two units, one nightly job: the state an install carries before it is updated. The service
-// body is the pre-rename one, placeholders already substituted the way writeUnits() left them
-// — including the ExecStart naming scripts/memory/doctor.ts, which this tree no longer ships.
-async function seedLegacyBrainUnits(
-  unitDir: string,
-  project: string,
-): Promise<void> {
-  await mkdir(unitDir, { recursive: true });
-  await writeFile(
-    join(unitDir, "iva-memory-doctor.service"),
-    [
-      "[Unit]",
-      "Description=Iva nightly vault care (pre-rename unit)",
-      "",
-      "[Service]",
-      "Type=oneshot",
-      `WorkingDirectory=${project}`,
-      `ExecStart=/usr/bin/flock -w 900 ${project}/.memory.lock ${process.execPath} --env-file=.env scripts/memory/doctor.ts`,
-      "",
-    ].join("\n"),
-  );
-  await writeFile(
-    join(unitDir, "iva-memory-doctor.timer"),
-    "[Unit]\nDescription=Iva nightly vault care (pre-rename unit)\n\n[Timer]\nOnCalendar=*-*-* 05:00:00\n",
-  );
-}
-
-// What the retained unit will actually try to run: the trailing script path of its ExecStart,
-// resolved against the project it runs in. A unit whose entrypoint is missing is a lost night,
-// not a safety net — existsSync on the unit FILE proves nothing about that.
-async function nightlyEntrypoint(
-  unitDir: string,
-  unit: string,
-): Promise<string> {
-  const body = await readFile(join(unitDir, unit), "utf8");
-  const execStart = body.match(/^ExecStart=(.*)$/m);
-  assert.ok(execStart, `${unit} has no ExecStart: ${body}`);
-  return execStart[1].trim().split(/\s+/).at(-1) as string;
-}
-
-// At no point may a run leave the install with zero nightly units on disk.
-function nightlyUnitsOnDisk(unitDir: string): string[] {
-  return ["iva-brain.timer", "iva-memory-doctor.timer"].filter((unit) =>
-    existsSync(join(unitDir, unit)),
-  );
-}
-
-function updaterBrainTransferScript(project: string): string {
-  const runtime = pathToFileURL(join(project, "scripts/cli/runtime.ts")).href;
-  const systemd = pathToFileURL(join(project, "scripts/cli/systemd.ts")).href;
-  const finish = pathToFileURL(join(ROOT, "scripts/update-finish.ts")).href;
-  return `
-    const { createCliRuntime } = await import(${JSON.stringify(runtime)});
-    const { createCliSystemd } = await import(${JSON.stringify(systemd)});
-    const {
-      captureOptionalWriterState,
-      restoreWriterOwnership,
-      stopWriterUnits,
-    } = await import(${JSON.stringify(finish)});
-    const runtime = createCliRuntime(${JSON.stringify(project)});
-    const before = captureOptionalWriterState(runtime);
-    stopWriterUnits(runtime, before);
-    let unitMigrationStarted = false;
-    const services = createCliSystemd(runtime);
-    services.restartServices({
-      deferBrainMigration: true,
-      afterUnitWrite: () => { unitMigrationStarted = true; },
-    });
-    restoreWriterOwnership(runtime, before, {
-      unitMigrationStarted,
-      legacyMemoryOwnerProven: true,
-      userbotReady: true,
-    });
-    services.retireDeferredBrainUnits();
-  `;
-}
-
-void test("a disabled legacy Brain timer stays disabled throughout updater ownership transfer", async (t) => {
-  const { calls, home, project, runScript, state } = await fixture(t);
-  const unitDir = join(home, ".config/systemd/user");
-  await seedLegacyBrainUnits(unitDir, project);
-
-  const result = runScript(updaterBrainTransferScript(project));
-  const output = `${result.stdout}\n${result.stderr}`;
-  const systemctlCalls = existsSync(calls)
-    ? (await readFile(calls, "utf8")).trim().split("\n")
-    : [];
-
-  assert.equal(result.status, 0, output);
-  assert.equal(existsSync(join(state, "iva-brain.timer.enabled")), false);
-  assert.equal(existsSync(join(state, "iva-brain.timer.active")), false);
-  assert.equal(
-    systemctlCalls.some(
-      (call) =>
-        call === "--user enable --now iva-brain.timer" ||
-        call === "--user start iva-brain.timer",
-    ),
-    false,
-  );
-});
-
-void test("an active legacy Brain timer can fire only after core restart and exact-state restore", async (t) => {
-  const { calls, home, project, runScript, seedUnit } = await fixture(t);
-  const unitDir = join(home, ".config/systemd/user");
-  await seedLegacyBrainUnits(unitDir, project);
-  await seedUnit("iva-memory-doctor.timer");
-
-  const result = runScript(updaterBrainTransferScript(project));
-  const output = `${result.stdout}\n${result.stderr}`;
-  const systemctlCalls = existsSync(calls)
-    ? (await readFile(calls, "utf8")).trim().split("\n")
-    : [];
-  const coreRestart = systemctlCalls.indexOf("--user restart iva.service");
-  const newTimerStart = systemctlCalls.indexOf("--user start iva-brain.timer");
-  const oldTimerRetire = systemctlCalls.indexOf(
-    "--user disable --now iva-memory-doctor.timer",
-  );
-
-  assert.equal(result.status, 0, output);
-  assert.equal(
-    systemctlCalls.includes("--user enable --now iva-brain.timer"),
-    false,
-  );
-  assert.ok(coreRestart >= 0, systemctlCalls.join("\n"));
-  assert.ok(newTimerStart > coreRestart, systemctlCalls.join("\n"));
-  assert.ok(oldTimerRetire > newTimerStart, systemctlCalls.join("\n"));
-});
-
-void test("the brain rename enables the new timer BEFORE retiring the old memory-doctor pair", async (t) => {
-  const { calls, home, project, runCommand } = await fixture(t);
-  const unitDir = join(home, ".config/systemd/user");
-  await seedLegacyBrainUnits(unitDir, project);
-
-  const result = runCommand("_install-units");
-  const output = `${result.stdout}\n${result.stderr}`;
-  const systemctlCalls = (await readFile(calls, "utf8")).trim().split("\n");
-
-  assert.equal(result.status, 0, output);
-  assert.equal(
-    existsSync(join(unitDir, "iva-brain.timer")),
-    true,
-    "the new timer is installed",
-  );
-  assert.deepEqual(
-    nightlyUnitsOnDisk(unitDir),
-    ["iva-brain.timer"],
-    "the old pair is gone and the new timer stands in its place",
-  );
-  assert.equal(existsSync(join(unitDir, "iva-memory-doctor.service")), false);
-
-  const enabledNew = systemctlCalls.indexOf(
-    "--user enable --now iva-brain.timer",
-  );
-  const activeNew = systemctlCalls.indexOf("--user is-active iva-brain.timer");
-  const disabledOld = systemctlCalls.indexOf(
-    "--user disable --now iva-memory-doctor.timer",
-  );
-  assert.ok(enabledNew >= 0, "the new timer is enabled by the migration");
-  assert.ok(disabledOld >= 0, "the old timer is disabled by the migration");
-  assert.ok(
-    enabledNew < disabledOld && activeNew < disabledOld,
-    `the new timer must be confirmed up first: ${systemctlCalls.join(" | ")}`,
-  );
-});
-
-void test("the brain rename is idempotent and stops touching systemd once the old pair is gone", async (t) => {
-  const { calls, home, project, runCommand } = await fixture(t);
-  const unitDir = join(home, ".config/systemd/user");
-  await seedLegacyBrainUnits(unitDir, project);
-
-  assert.equal(runCommand("_install-units").status, 0);
-  await writeFile(calls, "");
-  const second = runCommand("_install-units");
-
-  assert.equal(second.status, 0, `${second.stdout}\n${second.stderr}`);
-  const systemctlCalls = (await readFile(calls, "utf8")).trim();
-  assert.doesNotMatch(systemctlCalls, /enable --now iva-brain\.timer/);
-  assert.doesNotMatch(systemctlCalls, /iva-memory-doctor/);
-  assert.deepEqual(nightlyUnitsOnDisk(unitDir), ["iva-brain.timer"]);
-});
-
-// A half-unpacked deploy/: only the named units of the new pair landed — the shape that must
-// make the migration keep the old pair. Used by every "the kept unit must still work" test
-// below; the default (service only) is the tree an update died in before writing the timer.
-async function partialDeploy(
-  project: string,
-  units: readonly string[] = ["iva-brain.service"],
-): Promise<void> {
-  const deploy = join(project, "deploy");
-  await rm(deploy); // the fixture symlinks the real deploy/ — swap in a partial copy
-  await mkdir(deploy, { recursive: true });
-  for (const unit of units)
-    await copyFile(join(ROOT, "deploy", unit), join(deploy, unit));
-}
-
-void test("an update interrupted before deploy/ carries iva-brain.timer keeps the old nightly unit", async (t) => {
-  // A half-extracted tree: the new service file landed, the timer did not. Removing the old
-  // pair here would leave the install with no nightly vault care at all until the next
-  // successful update — the exact night this migration must not cost anyone.
-  const { home, project, runCommand } = await fixture(t);
-  const unitDir = join(home, ".config/systemd/user");
-  await seedLegacyBrainUnits(unitDir, project);
-  await partialDeploy(project);
-
-  const result = runCommand("_install-units");
-  const output = `${result.stdout}\n${result.stderr}`;
-
-  assert.equal(result.status, 0, output);
-  assert.match(output, /skipping legacy brain-unit cleanup/);
-  assert.deepEqual(
-    nightlyUnitsOnDisk(unitDir),
-    ["iva-memory-doctor.timer"],
-    "the old nightly timer survives an update that never delivered the new one",
-  );
-});
-
-void test("an update interrupted before deploy/ carries iva-brain.service keeps the old nightly unit", async (t) => {
-  // The mirror half-extracted tree: the new TIMER landed, the service it points at did not.
-  // A timer alone is not a nightly job — OnCalendar fires and systemd finds no iva-brain
-  // .service to start. Retiring the old pair on that state costs every night until the next
-  // successful update, and the timer on disk makes the install look migrated while it is not.
-  const { home, project, runCommand } = await fixture(t);
-  const unitDir = join(home, ".config/systemd/user");
-  await seedLegacyBrainUnits(unitDir, project);
-  await partialDeploy(project, ["iva-brain.timer"]);
-
-  const result = runCommand("_install-units");
-  const output = `${result.stdout}\n${result.stderr}`;
-
-  assert.equal(result.status, 0, output);
-  assert.equal(
-    existsSync(join(unitDir, "iva-brain.service")),
-    false,
-    "the fixture must really lack the new service — otherwise this proves nothing",
-  );
-  assert.match(output, /skipping legacy brain-unit cleanup/);
-  assert.match(output, /iva-brain\.service/);
-  assert.deepEqual(
-    nightlyUnitsOnDisk(unitDir).sort(),
-    ["iva-brain.timer", "iva-memory-doctor.timer"],
-    "the old nightly pair survives a timer that has no service to start",
-  );
-  assert.equal(
-    existsSync(join(unitDir, "iva-memory-doctor.service")),
-    true,
-    "the kept timer needs its own service to stay a working nightly job",
-  );
-  const entrypoint = await nightlyEntrypoint(
-    unitDir,
-    "iva-memory-doctor.service",
-  );
-  assert.equal(entrypoint, "scripts/memory/brain.ts");
-  assert.equal(existsSync(join(project, entrypoint)), true);
-});
-
-void test("iva status and iva doctor both see the nightly unit kept by a service-less new timer", async (t) => {
-  // The blind-spot check for the mirror case: iva-brain.timer IS on disk here, so a status
-  // built from this version's unit list alone looks complete while the unit actually carrying
-  // the night is the kept pre-rename one.
-  const { calls, home, project, runCommand } = await fixture(t);
-  const unitDir = join(home, ".config/systemd/user");
-  await seedLegacyBrainUnits(unitDir, project);
-  await partialDeploy(project, ["iva-brain.timer"]);
-
-  assert.equal(runCommand("_install-units").status, 0);
-  await writeFile(calls, "");
-  const status = runCommand("status");
-  const statusOutput = `${status.stdout}\n${status.stderr}`;
-
-  assert.equal(status.status, 0, statusOutput);
-  assert.match(
-    await readFile(calls, "utf8"),
-    /--user list-timers --no-pager iva-brain\.timer iva-update-check\.timer iva-memory-doctor\.timer/,
-  );
-  assert.match(statusOutput, /iva-memory-doctor\.timer still installed/);
-
-  await writeFile(calls, "");
-  const doctor = runCommand("doctor", {
-    failedUnit: "iva-memory-doctor.service",
-  });
-  const doctorOutput = `${doctor.stdout}\n${doctor.stderr}`;
-  assert.match(doctorOutput, /iva-memory-doctor\.service failed/);
-  assert.match(
-    doctorOutput,
-    /journalctl --user -u iva-memory-doctor\.service -n 100 --no-pager/,
-  );
-});
-
-void test("a new brain timer that refuses to come up keeps the old pair installed", async (t) => {
-  // enable --now succeeded but the unit is not active: systemd took the file and the job
-  // still is not scheduled. Tearing down the old pair on that signal would lose the night.
-  const { home, project, runCommand } = await fixture(t);
-  const unitDir = join(home, ".config/systemd/user");
-  await seedLegacyBrainUnits(unitDir, project);
-
-  const result = runCommand("_install-units", {
-    inactiveUnit: "iva-brain.timer",
-  });
-  const output = `${result.stdout}\n${result.stderr}`;
-
-  assert.equal(result.status, 0, output);
-  assert.match(output, /skipping legacy brain-unit cleanup/);
-  assert.match(output, /did not become active/);
-  assert.deepEqual(nightlyUnitsOnDisk(unitDir).sort(), [
-    "iva-brain.timer",
-    "iva-memory-doctor.timer",
-  ]);
-});
-
-void test("a legacy nightly unit kept by an interrupted update still names a script that exists", async (t) => {
-  // The unit file surviving on disk proves nothing: its ExecStart was written before the
-  // rename and names scripts/memory/doctor.ts, while writeUnits() runs on the ALREADY updated
-  // tree (update.ts calls it from postCommit), where that file is gone. Kept as-is, the unit
-  // dies at 05:00 with "Cannot find module" — the lost night, just quieter.
-  const { home, project, runCommand } = await fixture(t);
-  const unitDir = join(home, ".config/systemd/user");
-  await seedLegacyBrainUnits(unitDir, project);
-  await partialDeploy(project);
-
-  const result = runCommand("_install-units");
-  const output = `${result.stdout}\n${result.stderr}`;
-
-  assert.equal(result.status, 0, output);
-  assert.deepEqual(nightlyUnitsOnDisk(unitDir), ["iva-memory-doctor.timer"]);
-  const entrypoint = await nightlyEntrypoint(
-    unitDir,
-    "iva-memory-doctor.service",
-  );
-  assert.equal(
-    existsSync(join(project, entrypoint)),
-    true,
-    `the kept unit runs ${entrypoint}, which this tree does not ship`,
-  );
-  assert.equal(entrypoint, "scripts/memory/brain.ts");
-  assert.match(output, /repointed at scripts\/memory\/brain\.ts/);
-});
-
-void test("a legacy nightly unit kept because the new timer stayed down is repointed too", async (t) => {
-  const { home, project, runCommand } = await fixture(t);
-  const unitDir = join(home, ".config/systemd/user");
-  await seedLegacyBrainUnits(unitDir, project);
-
-  const result = runCommand("_install-units", {
-    inactiveUnit: "iva-brain.timer",
-  });
-  const output = `${result.stdout}\n${result.stderr}`;
-
-  assert.equal(result.status, 0, output);
-  const entrypoint = await nightlyEntrypoint(
-    unitDir,
-    "iva-memory-doctor.service",
-  );
-  assert.equal(entrypoint, "scripts/memory/brain.ts");
-  assert.equal(existsSync(join(project, entrypoint)), true);
-});
-
-void test("repointing a kept legacy unit is idempotent and leaves the rest of the unit alone", async (t) => {
-  const { home, project, runCommand } = await fixture(t);
-  const unitDir = join(home, ".config/systemd/user");
-  await seedLegacyBrainUnits(unitDir, project);
-  await partialDeploy(project);
-  const before = await readFile(
-    join(unitDir, "iva-memory-doctor.service"),
-    "utf8",
-  );
-
-  assert.equal(runCommand("_install-units").status, 0);
-  const first = await readFile(
-    join(unitDir, "iva-memory-doctor.service"),
-    "utf8",
-  );
-  assert.equal(runCommand("_install-units").status, 0);
-  const second = await readFile(
-    join(unitDir, "iva-memory-doctor.service"),
-    "utf8",
-  );
-
-  assert.equal(second, first, "a second run rewrites nothing");
-  assert.equal(
-    first,
-    before.replaceAll("scripts/memory/doctor.ts", "scripts/memory/brain.ts"),
-    "only the entrypoint changes — flock, TimeoutStartSec, WorkingDirectory stay",
-  );
-});
-
-void test("doctor reports a failed legacy nightly service the migration had to keep", async (t) => {
-  // Without this the failure is invisible: the kept unit is the one carrying the nightly
-  // vault care, and doctor used to query only the new service's failed state.
-  const { calls, home, project, runCommand } = await fixture(t);
-  const unitDir = join(home, ".config/systemd/user");
-  await seedLegacyBrainUnits(unitDir, project);
-  await partialDeploy(project);
-
-  const doctor = runCommand("doctor", {
-    failedUnit: "iva-memory-doctor.service",
-  });
-  const output = `${doctor.stdout}\n${doctor.stderr}`;
-  const checked = (await readFile(calls, "utf8"))
-    .trim()
-    .split("\n")
-    .filter((call) => call.startsWith("--user is-failed "))
-    .map((call) => call.split(" ").at(-1));
-
-  assert.ok(
-    checked.includes("iva-memory-doctor.service"),
-    `doctor never asked about the kept unit: ${checked.join(", ")}`,
-  );
-  assert.match(output, /iva-memory-doctor\.service failed/);
-  assert.match(
-    output,
-    /journalctl --user -u iva-memory-doctor\.service -n 100 --no-pager/,
-  );
-});
-
-void test("iva status and iva doctor both see the renamed nightly unit", async (t) => {
-  const { calls, home, project, runCommand } = await fixture(t);
-  const unitDir = join(home, ".config/systemd/user");
-  await seedLegacyBrainUnits(unitDir, project);
-
-  const status = runCommand("status");
-  assert.equal(status.status, 0, `${status.stdout}\n${status.stderr}`);
-  assert.match(
-    await readFile(calls, "utf8"),
-    /--user list-timers --no-pager iva-brain\.timer iva-update-check\.timer/,
-    "the old iva-memory-* glob stopped matching the renamed unit",
-  );
-
-  await writeFile(calls, "");
-  const doctor = runCommand("doctor");
-  const output = `${doctor.stdout}\n${doctor.stderr}`;
+  for (const [unit, body] of old)
+    assert.equal(await readFile(join(unitDir, unit), "utf8"), body, unit);
   const systemctlCalls = await readFile(calls, "utf8");
-
-  assert.match(systemctlCalls, /--user enable --now iva-brain\.timer/);
-  assert.match(systemctlCalls, /--user is-failed iva-brain\.service/);
-  assert.match(output, /Background timers enabled and active \(2/);
-  assert.doesNotMatch(output, /iva-memory-doctor/);
-  assert.deepEqual(nightlyUnitsOnDisk(unitDir), ["iva-brain.timer"]);
-});
-
-void test("iva status lists the pre-rename nightly timer an interrupted update kept", async (t) => {
-  // The blind spot the rename opened: with the migration held back, the only nightly unit on
-  // disk is iva-memory-doctor.timer, and a status built from this version's unit list alone
-  // prints a timer table with nothing in it. The night is still running — invisibly.
-  const { calls, home, project, runCommand } = await fixture(t);
-  const unitDir = join(home, ".config/systemd/user");
-  await seedLegacyBrainUnits(unitDir, project);
-  await partialDeploy(project);
-
-  assert.equal(runCommand("_install-units").status, 0);
-  assert.deepEqual(nightlyUnitsOnDisk(unitDir), ["iva-memory-doctor.timer"]);
-  await writeFile(calls, "");
-  const status = runCommand("status");
-  const output = `${status.stdout}\n${status.stderr}`;
-
-  assert.equal(status.status, 0, output);
+  assert.doesNotMatch(systemctlCalls, /iva-memory-/u);
+  assert.match(systemctlCalls, /--user enable --now iva-brain\.timer/u);
+  assert.match(systemctlCalls, /--user is-failed iva-brain\.service/u);
   assert.match(
-    await readFile(calls, "utf8"),
-    /--user list-timers --no-pager iva-brain\.timer iva-update-check\.timer iva-memory-doctor\.timer/,
-    "the nightly unit actually installed here never reached list-timers",
+    systemctlCalls,
+    /--user list-timers --no-pager iva-brain\.timer iva-update-check\.timer\n/u,
   );
-  assert.match(output, /iva-memory-doctor\.timer still installed/);
-  assert.match(output, /run: iva doctor/);
-});
-
-void test("iva status stays quiet about legacy units once the brain rename is done", async (t) => {
-  const { calls, home, project, runCommand } = await fixture(t);
-  const unitDir = join(home, ".config/systemd/user");
-  await seedLegacyBrainUnits(unitDir, project);
-
-  assert.equal(runCommand("_install-units").status, 0);
-  assert.deepEqual(nightlyUnitsOnDisk(unitDir), ["iva-brain.timer"]);
-  await writeFile(calls, "");
-  const status = runCommand("status");
-  const output = `${status.stdout}\n${status.stderr}`;
-
-  assert.equal(status.status, 0, output);
-  assert.match(
-    await readFile(calls, "utf8"),
-    /--user list-timers --no-pager iva-brain\.timer iva-update-check\.timer\n/,
-  );
-  assert.doesNotMatch(output, /iva-memory-doctor/);
+  assert.equal(existsSync(join(unitDir, "iva-brain.timer")), true);
 });
 
 // enforce-report.json писал удалённый autograph (enforce.py); новый Brain его не пишет.

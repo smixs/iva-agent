@@ -32,10 +32,7 @@ test("corrupt JSON fails closed before getUpdates(-1)", async () => {
 test("ENOENT is the only first-run path and fast-forwards to the Telegram tail", async () => {
   const dir = tempDir("iva-offset-first-run-test-");
   const file = join(dir, "telegram-offset.json");
-  assert.deepEqual(await loadOffset({ file }), {
-    offset: null,
-    delivered: null,
-  });
+  assert.deepEqual(await loadOffset({ file }), { offset: null });
 
   const calls: Call[] = [];
   const offset = await fastForwardOffset({
@@ -82,7 +79,7 @@ test("saveOffset propagates the canonical durable-write failure", async () => {
   const file = join(dataDir, "telegram-offset-test.json");
   const calls: Call[] = [];
   await assert.rejects(
-    saveOffset(42, 41, {
+    saveOffset(42, {
       file,
       writeFileImpl: async (path, _data, options) => {
         calls.push(["write", path, options]);
@@ -103,14 +100,11 @@ test("saveOffset delegates one private replacement to the canonical primitive", 
     calls.push(["write", path, options]);
     await writeFileAtomic(path, data, options);
   };
-  await saveOffset(42, 41, {
+  await saveOffset(42, {
     file,
     writeFileImpl,
   });
   assert.deepEqual(calls, [["write", file, { mode: 0o600 }]]);
-  assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), {
-    offset: 42,
-    delivered: 41,
-  });
+  assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), { offset: 42 });
   assert.equal(statSync(file).mode & 0o777, 0o600);
 });

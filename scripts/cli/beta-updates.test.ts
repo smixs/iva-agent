@@ -51,14 +51,17 @@ function printed(t: TestContext): string[] {
   return lines;
 }
 
-void test("iva beta / iva stable: iva.beta и ветка beta/main в установке и зеркале, одна строка с iva update", async (t) => {
+void test("iva beta / iva stable: ветка beta/main в установке и зеркале, прежний флаг снят, одна строка с iva update", async (t) => {
   const fx = install(t);
   const lines = printed(t);
   process.env.AGENT_LANGUAGE = "ru";
   const cli = createCliMain(fx.home);
+  // Флаг бета-сборки до 0.5.0: выбор его снимает, чтобы откат на неё не вернул бету.
+  for (const repo of [fx.home, join(fx.home, "repo")])
+    git(repo, "config", "iva.beta", "true");
   await cli.commands.beta([]);
-  assert.equal(fx.beta(fx.home), "true");
-  assert.equal(fx.beta(join(fx.home, "repo")), "true");
+  assert.equal(fx.beta(fx.home), "");
+  assert.equal(fx.beta(join(fx.home, "repo")), "");
   assert.equal(fx.branch(fx.home), "beta");
   assert.equal(fx.branch(join(fx.home, "repo")), "beta");
   assert.deepEqual(lines, ["Обновления: бета. Обновиться: iva update"]);
@@ -93,7 +96,7 @@ void test("меню обслуживания: одна кнопка обновл
     /data="iva_menu:svc:beta"[^>]*>🧪 Обновления: стабильные</u,
   );
   await service.on("beta", [], st, ctx);
-  assert.equal(fx.beta(join(fx.home, "repo")), "true");
+  assert.equal(fx.beta(join(fx.home, "repo")), "");
   assert.equal(fx.branch(join(fx.home, "repo")), "beta");
   assert.match(screens[0], />🧪 Обновления: бета</u);
   await service.on("beta", [], st, ctx);
@@ -150,7 +153,9 @@ void test("iva beta: запись ветки не прошла — флаг не
   assert.doesNotMatch(screens[0], /Обновления: бета/u);
 });
 
-void test("бета — это ветка: beta без флага и прежний флаг при main показывают бету", async (t) => {
+// UpdateFloor.NoSilentLoss: показ решает Update branch; флаг бета-сборок до 0.5.0 не
+// читается и остаётся в конфиге как был.
+void test("NoSilentLoss: бета — это ветка; флаг iva.beta при main показывает stable и не тронут", async (t) => {
   const fx = install(t);
   const lines = printed(t);
   const repo = join(fx.home, "repo");
@@ -161,11 +166,11 @@ void test("бета — это ветка: beta без флага и прежн�
   git(repo, "config", "iva.updateBranch", "main");
   git(repo, "config", "iva.beta", "true");
   await cli.commands.version([]);
-  assert.match(lines[1], /updates beta/u);
+  assert.match(lines[1], /updates stable/u);
   git(repo, "config", "iva.updateBranch", "dev");
-  git(repo, "config", "--unset", "iva.beta");
   await cli.commands.version([]);
   assert.match(lines[2], /updates stable/u);
+  assert.equal(fx.beta(repo), "true");
 });
 
 // QA: каталог версии лежит внутри чужого git-дерева (домашняя папка под git, стенд в
@@ -223,7 +228,7 @@ void test("setBeta failure table: any single failed write leaves every key as it
   for (const on of [true, false])
     for (const repo of repos)
       for (const write of on
-        ? ["iva.updateBranch beta", "iva.beta true"]
+        ? ["iva.updateBranch beta", "--unset-all iva.beta"]
         : ["iva.updateBranch main", "--unset-all iva.beta"]) {
         setBeta(fx.home, !on);
         const before = JSON.stringify(keys());
@@ -269,9 +274,9 @@ void test("iva beta: the restore write fails too — the refusal says it may be 
   chmodSync(join(bin, "git"), 0o755);
   const path = process.env.PATH;
   process.env.PATH = `${bin}:${path ?? ""}`;
-  // Флаг в checkout не пишется, и возврат прежней ветки (её не было) в checkout тоже.
+  // Флаг в checkout не снимается, и возврат прежней ветки (её не было) в checkout тоже.
   const home = fx.home.replace(/[.*+?^${}()|[\]\\/]/gu, "\\$&");
-  process.env.IVA_FAIL_GIT = `-C (/private)?${home} config --local (iva\\.beta true|--unset-all iva\\.updateBranch)`;
+  process.env.IVA_FAIL_GIT = `-C (/private)?${home} config --local --unset-all iva\\.(beta|updateBranch)`;
   t.after(() => {
     process.env.PATH = path;
     delete process.env.IVA_FAIL_GIT;

@@ -45,7 +45,7 @@ void test("first run publishes its marker before permitting one backlog drop", a
   const events: string[] = [];
   const first = await prepareTelegramStartup(lease, {
     markerFile,
-    loadOffsetImpl: () => Promise.resolve({ offset: null, delivered: null }),
+    loadOffsetImpl: () => Promise.resolve({ offset: null }),
     createMarkerImpl: async (file, data) => {
       events.push("marker");
       // The SIGKILL matrix in telegram-startup-crash.test.ts crosses the same
@@ -55,7 +55,7 @@ void test("first run publishes its marker before permitting one backlog drop", a
   });
   events.push("drop-permitted");
 
-  assert.deepEqual(first, { firstRun: true, offset: null, delivered: null });
+  assert.deepEqual(first, { firstRun: true, offset: null });
   assert.deepEqual(events, ["marker", "drop-permitted"]);
   assert.deepEqual(parseBacklogDropMarker(await readFile(markerFile, "utf8")), {
     schema: "iva-telegram-backlog-drop/v1",
@@ -65,7 +65,7 @@ void test("first run publishes its marker before permitting one backlog drop", a
   await assert.rejects(
     prepareTelegramStartup(lease, {
       markerFile,
-      loadOffsetImpl: () => Promise.resolve({ offset: null, delivered: null }),
+      loadOffsetImpl: () => Promise.resolve({ offset: null }),
       createMarkerImpl: () => assert.fail("must not replace the marker"),
     }),
     /marker exists without an offset/u,
@@ -76,10 +76,10 @@ void test("an existing offset upgrades by writing a private marker without dropp
   const { markerFile, lease } = await temporaryStartup(t);
   const state = await prepareTelegramStartup(lease, {
     markerFile,
-    loadOffsetImpl: () => Promise.resolve({ offset: 42, delivered: 41 }),
+    loadOffsetImpl: () => Promise.resolve({ offset: 42 }),
   });
 
-  assert.deepEqual(state, { firstRun: false, offset: 42, delivered: 41 });
+  assert.deepEqual(state, { firstRun: false, offset: 42 });
   assert.equal((await stat(markerFile)).mode & 0o777, 0o600);
 });
 
@@ -93,8 +93,7 @@ void test("corrupt and invalid-UTF-8 marker bytes fail closed and remain unchang
     await assert.rejects(
       prepareTelegramStartup(lease, {
         markerFile,
-        loadOffsetImpl: () =>
-          Promise.resolve({ offset: null, delivered: null }),
+        loadOffsetImpl: () => Promise.resolve({ offset: null }),
       }),
       /failed to load Telegram backlog marker/u,
     );
@@ -107,7 +106,7 @@ void test("startup rejects fabricated and released leases before reading state",
   const options = {
     loadOffsetImpl: () => {
       stateRead = true;
-      return Promise.resolve({ offset: null, delivered: null });
+      return Promise.resolve({ offset: null });
     },
   };
   await assert.rejects(
@@ -161,14 +160,10 @@ void test("property: startup decision is total and fail-closed", () => {
       fc.option(fc.integer({ min: 0, max: Number.MAX_SAFE_INTEGER }), {
         nil: null,
       }),
-      fc.option(fc.integer({ min: 0, max: Number.MAX_SAFE_INTEGER }), {
-        nil: null,
-      }),
       fc.boolean(),
-      (offset, delivered, markerPresent) => {
-        const normalizedDelivered = offset === null ? null : delivered;
+      (offset, markerPresent) => {
         const decision = decideTelegramStartup(
-          { offset, delivered: normalizedDelivered },
+          { offset },
           markerPresent ? "present" : "missing",
         );
         if (offset === null && markerPresent) {
@@ -184,7 +179,6 @@ void test("property: startup decision is total and fail-closed", () => {
           markerPresent ? "resume" : "write-marker-and-resume",
         );
         assert.equal(decision.offset, offset);
-        assert.equal(decision.delivered, normalizedDelivered);
       },
     ),
     { seed: SEED, numRuns: 2_000 },

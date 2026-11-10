@@ -13,13 +13,6 @@ import {
   generateAssistantBearer,
   isAssistantBearer,
 } from "../lib/assistant-auth.ts";
-import { writeEnvAtomicSync } from "../lib/env-file.ts";
-import {
-  BRAIN_ENTRYPOINT,
-  LEGACY_BRAIN_ENTRYPOINT,
-  LEGACY_BRAIN_UNITS,
-  LEGACY_MEMORY_UNITS,
-} from "../lib/legacy-memory-units.ts";
 import {
   cleanupSystemdUnits,
   systemdExecArgument,
@@ -45,52 +38,14 @@ type QuietOptions = {
 };
 
 type WriteUnitsOptions = {
-  readonly deferBrainMigration?: boolean;
   readonly ensureBearer?: boolean;
   readonly skipUnits?: readonly string[];
 };
 
 type RestartServicesOptions = {
   readonly afterUnitWrite?: () => void;
-  readonly deferBrainMigration?: boolean;
-  readonly deferMemoryMigration?: boolean;
   readonly skipUnits?: readonly string[];
 };
-
-type MemoryCleanupOptions = {
-  readonly requireActiveOwner?: boolean;
-  readonly strict?: boolean;
-};
-
-type BrainCleanupOptions = {
-  readonly activateNewTimer?: boolean;
-};
-
-type PortMigration = {
-  readonly port: string;
-  /** ASSISTANT_HOST is the old :3000 default and moves to the new port. */
-  readonly moveHost: boolean;
-};
-
-/**
- * `.env` text with `IVA_PORT` appended after the last non-empty line. Every other line
- * stays as it is, except a stale :3000 `ASSISTANT_HOST`, which would keep clients on
- * the taken port.
- */
-function withIvaPort(raw: string, migration: PortMigration): string {
-  const appended = `${raw.replace(/\n*$/, "\n")}IVA_PORT=${migration.port}\n`;
-  return migration.moveHost
-    ? appended.replace(
-        /^(\s*ASSISTANT_HOST\s*=).*$/m,
-        `$1http://127.0.0.1:${migration.port}`,
-      )
-    : appended;
-}
-
-function portMigrationMessage(migration: PortMigration): string {
-  const moved = migration.moveHost ? ", ASSISTANT_HOST moved off :3000" : "";
-  return `.env migrated → IVA_PORT=${migration.port}${moved}`;
-}
 
 class CliSystemdLifecycle {
   private readonly runtime: CliRuntime;
@@ -305,7 +260,6 @@ class CliSystemdLifecycle {
       ...this.writeDeployUnits(new Set(options.skipUnits)),
     ];
     this.reloadUnits();
-    if (!options.deferBrainMigration) this.removeLegacyBrainUnits(written);
     return written;
   }
 
@@ -348,19 +302,6 @@ class CliSystemdLifecycle {
     if (this.runtime.hasSystemd()) this.runtime.systemd.daemonReload();
   }
 
-  // The unit names from `names` that are installed; none without this.runtime.systemd.
-  installedUnits(names: readonly string[]): string[] {
-    return this.runtime.hasSystemd()
-      ? names.filter((unit) =>
-          existsSync(
-            this.runtime.systemd.manager === "launchd"
-              ? launchdUnitPath(unit, this.runtime.UNIT_DIR)
-              : join(this.runtime.UNIT_DIR, unit),
-          ),
-        )
-      : [];
-  }
-
   unitCleanupSteps() {
     return {
       disable: (unit: string) => this.runtime.systemd.disableNow([unit]),
@@ -378,265 +319,11 @@ class CliSystemdLifecycle {
     };
   }
 
-  // The Brain rename: iva-memory-doctor.{service,timer} → iva-brain.{service,timer}. deploy/
-  // ships only the new pair, so the copy loop above never overwrites or removes the old one —
-  // this retires it by exact name on ordinary this.writeUnits() calls (doctor/config/restart/
-  // install.sh), so every install migrates without a dedicated command. The quiesced updater
-  // defers retirement until its captured enabled/active state is restored onto the new pair.
-  //
-  // Order is the whole point. The nightly vault care must never be absent, not even for the
-  // window between two steps of an update that dies halfway:
-  //   1. BOTH new units must be written to this.runtime.UNIT_DIR by THIS run (daemon-reload already done).
-  //      The timer alone is not a nightly job: a half-unpacked deploy/ can carry either file
-  //      without the other, and a timer whose iva-brain.service is missing fires at 05:00 into
-  //      nothing — while looking migrated. A service without its timer never fires at all.
-  //   2. and, on ordinary CLI paths, the timer enabled+active,
-  //   3. only then may the old pair be disabled and deleted.
-  // Any failure in 1–2 keeps the old units: a duplicated nightly run is harmless (both take
-  // the same .memory.lock), a missing one costs the user a night of memory care.
-  // The kept-unit half of the same guarantee. The legacy pair was written by an install made
-  // before the rename, so its ExecStart names scripts/memory/doctor.ts — a file THIS tree no
-  // longer ships (it is scripts/memory/brain.ts now), and this.writeUnits() runs on the already
-  // updated tree (update.ts calls it from postCommit). So every path that keeps the old unit
-  // as the safety net would otherwise keep a unit that fails at 05:00 with "Cannot find
-  // module" — the lost night the ordering above exists to prevent. Repoint it in place, by
-  // the exact old path only, so an operator-edited unit keeps everything else it says.
-  // Silent on its own: the callers that keep the pair report it, the one that retires the
-  // pair right after has nothing to report.
-  repointLegacyBrainUnits(stale: readonly string[]): string[] {
-    const repointed = stale.filter((unit) => this.repointLegacyBrainUnit(unit));
-    if (repointed.length) this.runtime.systemd.daemonReload();
-    return repointed;
-  }
-
-  repointLegacyBrainUnit(unit: string): boolean {
-    const path = join(this.runtime.UNIT_DIR, unit);
-    // unreadable — nothing safe to rewrite, and the cleanup after still tries
-    const body = this.readUnit(path);
-    if (!body?.includes(LEGACY_BRAIN_ENTRYPOINT)) return false;
-    return this.rewriteUnit(
-      unit,
-      body.replaceAll(LEGACY_BRAIN_ENTRYPOINT, BRAIN_ENTRYPOINT),
-    );
-  }
-
-  readUnit(path: string): string | null {
-    try {
-      return readFileSync(path, "utf8");
-    } catch {
-      return null;
-    }
-  }
-
-  rewriteUnit(unit: string, body: string): boolean {
-    try {
-      writeFileSync(join(this.runtime.UNIT_DIR, unit), body);
-      return true;
-    } catch (error) {
-      this.runtime.warn(
-        `could not repoint ${unit} at ${BRAIN_ENTRYPOINT}: ${(error as { message: string }).message}`,
-      );
-      return false;
-    }
-  }
-
-  removeLegacyBrainUnits(
-    written: readonly string[],
-    options: BrainCleanupOptions = {},
-  ): string[] {
-    const stale = this.installedUnits(LEGACY_BRAIN_UNITS);
-    if (!stale.length) return [];
-    return this.retireBrainPair(stale, written, options);
-  }
-
-  retireBrainPair(
-    stale: readonly string[],
-    written: readonly string[],
-    options: BrainCleanupOptions,
-  ): string[] {
-    // Before anything else: whatever the steps below decide, a kept unit must be able to run.
-    const repointed = this.repointLegacyBrainUnits(stale);
-    const blocker = this.brainPairBlocker(written, options);
-    if (!blocker) return this.cleanupBrainUnits(stale, repointed);
-    this.runtime.warn(`skipping legacy brain-unit cleanup — ${blocker}`);
-    this.reportKeptBrainUnits(repointed);
-    return [];
-  }
-
-  // Why the old pair must stay this run, or null when it may go.
-  brainPairBlocker(
-    written: readonly string[],
-    options: BrainCleanupOptions,
-  ): string | null {
-    const missing = this.missingBrainUnits(written);
-    if (missing.length)
-      return `${missing.join(" and ")} not installed yet (run \`iva doctor\`, then it will run automatically)`;
-    return options.activateNewTimer === false ? null : this.brainTimerBlocker();
-  }
-
-  missingBrainUnits(written: readonly string[]): string[] {
-    return [this.runtime.BRAIN_SERVICE, this.runtime.BRAIN_TIMER].filter(
-      (unit) =>
-        !written.includes(unit) ||
-        !existsSync(join(this.runtime.UNIT_DIR, unit)),
-    );
-  }
-
-  brainTimerBlocker(): string | null {
-    try {
-      this.runtime.systemd.activate([this.runtime.BRAIN_TIMER]);
-      return null;
-    } catch (error) {
-      return `${this.runtime.BRAIN_TIMER} did not come up: ${(error as { message: string }).message}`;
-    }
-  }
-
-  cleanupBrainUnits(
-    stale: readonly string[],
-    repointed: readonly string[],
-  ): string[] {
-    try {
-      return cleanupSystemdUnits({ units: stale, ...this.unitCleanupSteps() });
-    } catch (error) {
-      this.runtime.warn(
-        `legacy brain-unit cleanup incomplete: ${(error as { message: string }).message}`,
-      );
-      this.reportKeptBrainUnits(repointed);
-      return [...stale];
-    }
-  }
-
-  reportKeptBrainUnits(repointed: readonly string[]): void {
-    if (repointed.length)
-      this.runtime.ok(
-        `kept ${repointed.join(", ")} — repointed at ${BRAIN_ENTRYPOINT}, so tonight's vault care still runs`,
-      );
-  }
-
-  // Existing installs may still carry the 8 retired iva-memory-{daily,weekly,monthly,yearly}
-  // unit files (deploy/ no longer ships them, so the copy loop above never overwrites or
-  // removes them on its own). `iva update`/`iva doctor` both call this.writeUnits() on every run,
-  // so this self-heals every existing install onto eve schedules without a dedicated
-  // migration command — by exact name only, so an unrelated self-host timer is never touched.
-  // Guards against tearing down the old systemd safety net while running a BUILD that
-  // predates the eve-schedules migration — e.g. .output/ wasn't rebuilt yet after an
-  // `iva update` pulled this change (this.writeUnits() runs before the build step in some
-  // call paths). Without this check, a stale build would lose its memory rollups
-  // entirely (old timers gone, new eve schedules not actually in the bundle) until the
-  // next successful build. A shallow recursive text scan for markers unique to the
-  // COMPILED schedules is enough — bare "memory-daily" is NOT unique enough: instrumentation.ts
-  // always imports agent/lib/schedule-migration.ts, whose LEGACY_MEMORY_UNITS array contains
-  // the string "iva-memory-daily.service", which itself contains "memory-daily" as a substring
-  // — that would make the marker match on every build regardless of whether the schedules
-  // themselves actually compiled. Nitro's schedule-task wrapper embeds each schedule's own
-  // source path ("schedules/memory-daily.ts") in its description string, which cannot
-  // appear anywhere else.
-  //
-  // ALL FOUR memory-* markers are required, not just one: a partial build (e.g. one
-  // schedule file failed to compile, or a build got interrupted mid-write) could contain
-  // memory-daily.ts's marker while missing weekly/monthly/yearly — a single-marker check
-  // would then let this.removeLegacyMemoryUnits() tear down the OLD systemd timers for periods
-  // that have no working in-process replacement in THIS build, losing those rollups
-  // entirely rather than just delaying the migration one more boot.
-  private readonly BUILD_SCHEDULE_MARKERS = ["schedules/memory-night.ts"];
-  private readonly BUILD_SCAN_MAX_FILE_BYTES = 15_000_000;
-  private readonly NOTHING = Buffer.alloc(0);
-  buildHasSchedules(): boolean {
-    const outputServer = join(this.runtime.ROOT, ".output/server");
-    if (!existsSync(outputServer)) return false;
-    try {
-      return this.missingScheduleMarkers(outputServer).size === 0;
-    } catch {
-      return false;
-    }
-  }
-
-  missingScheduleMarkers(outputServer: string): Set<string> {
-    const remaining = new Set(this.BUILD_SCHEDULE_MARKERS);
-    for (const path of readdirSync(outputServer, {
-      recursive: true,
-    }) as string[]) {
-      if (remaining.size === 0) break;
-      this.strikeMarkers(remaining, this.scannableContent(outputServer, path));
-    }
-    return remaining;
-  }
-
-  // Markers can land in different files (each schedule may compile to its own
-  // _virtual/*.schedule.mjs, or all get inlined into one bundle) — check every
-  // still-missing marker against every file rather than stopping at the first hit.
-  strikeMarkers(remaining: Set<string>, content: Buffer): void {
-    for (const marker of remaining)
-      if (content.includes(marker)) remaining.delete(marker);
-  }
-
-  // .output/server is the WHOLE server bundle plus every vendored dependency — a
-  // miss (the common case: doctor/writeUnits runs on every `iva update`) would
-  // otherwise mean synchronously reading tens to hundreds of MB. The markers can only
-  // ever land in Nitro's own compiled JS/JSON output, never in a vendored asset.
-  // Anything else reads as empty.
-  scannableContent(outputServer: string, path: string): Buffer {
-    const full = join(outputServer, path);
-    if (!/\.(mjs|cjs|js|json)$/.test(path)) return this.NOTHING;
-    return this.isScannableFile(full) ? this.readOrNothing(full) : this.NOTHING;
-  }
-
-  isScannableFile(full: string): boolean {
-    try {
-      const stat = statSync(full);
-      return stat.isFile() && stat.size <= this.BUILD_SCAN_MAX_FILE_BYTES;
-    } catch {
-      return false;
-    }
-  }
-
-  // Buffer — no need to decode as UTF-8 just to substring-search; unreadable is not
-  // where a schedule name would live anyway.
-  readOrNothing(full: string): Buffer {
-    try {
-      return readFileSync(full);
-    } catch {
-      return this.NOTHING;
-    }
-  }
-
-  removeLegacyMemoryUnits(options: MemoryCleanupOptions = {}): string[] {
-    const units = this.installedUnits(LEGACY_MEMORY_UNITS);
-    if (!units.length) return [];
-    return this.retireMemoryUnits(units, options);
-  }
-
-  retireMemoryUnits(units: string[], options: MemoryCleanupOptions): string[] {
-    if (!this.buildHasSchedules()) {
-      this.runtime.warn(
-        "skipping legacy memory-timer cleanup — the current build doesn't contain the eve schedules yet (rebuild with `iva doctor` or `npm run build`, then it will run automatically)",
-      );
-      return [];
-    }
-    if (options.requireActiveOwner)
-      this.requireScheduleOwner(
-        "legacy memory schedules have no active committed service owner",
-      );
-    return this.cleanupMemoryUnits(units, options.strict === true);
-  }
-
   // The first service runs the in-process schedules; it must be up for them to fire.
   requireScheduleOwner(message: string): void {
     const owner = this.runtime.SERVICES[0];
     if (!owner || !this.runtime.systemd.isActive(owner))
       throw new Error(message);
-  }
-
-  cleanupMemoryUnits(units: string[], strict: boolean): string[] {
-    try {
-      return cleanupSystemdUnits({ units, ...this.unitCleanupSteps() });
-    } catch (error) {
-      this.runtime.warn(
-        `legacy memory-timer cleanup incomplete: ${(error as { message: string }).message}`,
-      );
-      if (strict) throw error;
-      return units;
-    }
   }
 
   activateUnits(): void {
@@ -660,77 +347,14 @@ class CliSystemdLifecycle {
     return cleanupSystemdUnits({ units, ...this.unitCleanupSteps() });
   }
 
-  // Migrate old installs to IVA_PORT. Idempotent: on the first `iva update`
-  // after switching to the new scheme it guarantees the variable and keeps the server
-  // (Environment=PORT=$IVA_PORT) from drifting away from clients (whose default is ASSISTANT_HOST).
-  migrateEnv(options: QuietOptions = {}): boolean {
-    const migration = this.portMigration();
-    if (!migration) return false;
-    writeEnvAtomicSync(
-      this.runtime.ENV_PATH,
-      withIvaPort(readFileSync(this.runtime.ENV_PATH, "utf8"), migration),
-    );
-    return this.announce(true, options, portMigrationMessage(migration));
-  }
-
-  // null: no .env, or already on the new scheme — leave it alone.
-  portMigration(): PortMigration | null {
-    if (!existsSync(this.runtime.ENV_PATH)) return null;
-    const env = this.runtime.readEnv();
-    return env.IVA_PORT ? null : this.portFor(env.ASSISTANT_HOST);
-  }
-
-  // old default :3000 → new default 8723; custom local host → its port; otherwise the default
-  portFor(host = ""): PortMigration {
-    const moveHost = host === this.runtime.OLD_DEFAULT_HOST;
-    return {
-      port: moveHost ? this.runtime.DEFAULT_PORT : this.localPort(host),
-      moveHost,
-    };
-  }
-
-  localPort(host: string): string {
-    return (
-      host.match(/^https?:\/\/(?:127\.0\.0\.1|localhost):(\d+)\/?$/i)?.[1] ??
-      this.runtime.DEFAULT_PORT
-    );
-  }
-
   // Any restart via `iva` first regenerates the unit → Environment=PORT always equals
   // the current IVA_PORT from .env. Without this, editing IVA_PORT + restart would leave the server
   // on the old port (the unit was already baked) while clients read the new one — the same desync.
   restartServices(options: RestartServicesOptions = {}): void {
-    this.writeUnits({
-      deferBrainMigration: options.deferBrainMigration,
-      skipUnits: options.skipUnits,
-    });
+    this.writeUnits({ skipUnits: options.skipUnits });
     options.afterUnitWrite?.();
     this.runtime.systemd.restart(this.runtime.SERVICES);
     this.requireScheduleOwner("iva.service is not active after unit restart");
-    this.settleMemoryUnits(options);
-  }
-
-  // The old timers remain the recovery owner until the compiled schedules and
-  // their freshly restarted process owner have both been proved.
-  settleMemoryUnits(options: RestartServicesOptions): void {
-    if (!options.deferMemoryMigration) this.removeLegacyMemoryUnits();
-  }
-
-  /** Retire recovery units only after the updater commits the live service. */
-  retireLegacyMemoryUnits(): string[] {
-    return this.removeLegacyMemoryUnits({
-      requireActiveOwner: true,
-      strict: true,
-    });
-  }
-
-  retireDeferredBrainUnits(): string[] {
-    return this.removeLegacyBrainUnits(
-      [this.runtime.BRAIN_SERVICE, this.runtime.BRAIN_TIMER],
-      {
-        activateNewTimer: false,
-      },
-    );
   }
 
   api() {
@@ -739,9 +363,6 @@ class CliSystemdLifecycle {
       writeUnits: this.writeUnits.bind(this),
       activateUnits: this.activateUnits.bind(this),
       removeUnits: this.removeUnits.bind(this),
-      retireDeferredBrainUnits: this.retireDeferredBrainUnits.bind(this),
-      retireLegacyMemoryUnits: this.retireLegacyMemoryUnits.bind(this),
-      migrateEnv: this.migrateEnv.bind(this),
       restartServices: this.restartServices.bind(this),
     };
   }

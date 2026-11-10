@@ -25,7 +25,6 @@
 // otherwise inert, but a stray default of `true` would still turn on payload capture we
 // never asked for. Keep `eve dev` startup unaffected — verified by `timeout 30 npx eve dev`.
 import { join } from "node:path";
-import { homedir } from "node:os";
 import { defineInstrumentation } from "eve/instrumentation";
 import { PROBE_FLAG, probeEveHealth } from "./lib/eve-health.ts";
 import { dataDir as configuredDataDir } from "./lib/data-dir.ts";
@@ -99,7 +98,6 @@ export default defineInstrumentation({
           return;
         }
         await runScheduleMigration({
-          homedir: homedir(),
           statusPath: join(dataDir, "rollup-status.json"),
           tz,
           root,

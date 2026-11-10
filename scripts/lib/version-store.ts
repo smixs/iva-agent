@@ -41,26 +41,17 @@ const LEFTOVER = [FLIP_PREFIX, ".probe-"];
 const VERSION_ORDER = new Intl.Collator("en", { numeric: true }).compare;
 /** What a version borrows from the installation; the rest of `.eve` is a build cache. */
 export const STATE_DIRS = ["data", "vault", ".eve/.workflow-data"];
-/** Where older builds kept the workflow store: linked where one is, never created. */
-export const LEGACY_STATE_DIRS = [".workflow-data"];
 /** The active version plus one to roll back to; a build takes the rollback slot. Disks on these boxes are small. */
 export const KEEP = 2;
 
-type ActiveStateV1 = {
-  readonly schema: "iva-active/v1";
-  readonly version: string;
-  readonly settledAt?: string;
-};
-
-type ActiveStateV2 = {
+/** `iva-active/v1`, written by releases before 0.3.24, is not read: the marker is corrupt. */
+export type ActiveState = {
   readonly schema: "iva-active/v2";
   readonly version: string;
   readonly previous?: string;
   readonly settledAt: string;
   readonly cleanupPending?: boolean;
 };
-
-export type ActiveState = ActiveStateV1 | ActiveStateV2;
 
 export type ActiveStateRead =
   | { readonly kind: "missing" }
@@ -166,11 +157,6 @@ function validActiveState(value: unknown): value is ActiveState {
   const state = value as Record<string, unknown>;
   if (typeof state.version !== "string" || !parseVersionName(state.version))
     return false;
-  if (state.schema === "iva-active/v1")
-    return (
-      exactKeys(state, ["schema", "version", "settledAt"]) &&
-      (state.settledAt === undefined || isoTimestamp(state.settledAt))
-    );
   if (state.schema !== "iva-active/v2") return false;
   if (
     !exactKeys(state, [
@@ -406,10 +392,7 @@ export function createVersionStore(
   function previousName(): string | null {
     const active = currentName();
     const state = activeState();
-    for (const candidate of [
-      state?.schema === "iva-active/v2" ? state.previous : undefined,
-      state?.version,
-    ]) {
+    for (const candidate of [state?.previous, state?.version]) {
       if (
         typeof candidate === "string" &&
         candidate !== active &&
@@ -502,11 +485,7 @@ export function createVersionStore(
     } = {},
   ): void {
     const before = activeState();
-    const previous = [
-      options.previous,
-      before?.version,
-      before?.schema === "iva-active/v2" ? before.previous : undefined,
-    ].find(
+    const previous = [options.previous, before?.version, before?.previous].find(
       (candidate): candidate is string =>
         typeof candidate === "string" &&
         candidate !== name &&
@@ -525,17 +504,13 @@ export function createVersionStore(
   /** Cleanup is retryable debt after a version has already served and committed. */
   function cleanupPending(name: string): boolean {
     const state = activeState();
-    return (
-      state?.schema === "iva-active/v2" &&
-      state.version === name &&
-      state.cleanupPending === true
-    );
+    return state?.version === name && state.cleanupPending === true;
   }
 
   /** Clear only the debt belonging to the still-settled version. */
   function finishCleanup(name: string): void {
     const state = activeState();
-    if (state?.schema !== "iva-active/v2" || state.version !== name)
+    if (state?.version !== name)
       throw new Error(`cleanup state changed from ${name}`);
     const finished = { ...state };
     delete finished.cleanupPending;
@@ -628,11 +603,7 @@ export function createVersionStore(
         finished,
         options.references === "current"
           ? [active]
-          : [
-              active,
-              state?.version,
-              state?.schema === "iva-active/v2" ? state.previous : null,
-            ],
+          : [active, state?.version, state?.previous],
         keep,
       ),
     );
@@ -682,14 +653,6 @@ export function createVersionStore(
       name,
       stateAt(name, stateHome),
     ]);
-    for (const name of LEGACY_STATE_DIRS) {
-      // Cleared even where nothing replaces it, or a link from an earlier pass
-      // survives into a probe aimed at live state. Asked of the install, never
-      // the scratch: a box without a legacy store never grows one.
-      rmSync(join(dir, name), { recursive: true, force: true });
-      if (existsSync(join(home, name)))
-        links.push([name, join(stateHome, name)]);
-    }
     for (const [, target] of links) mkdirSync(target, { recursive: true });
     // The .env is the installation's in both modes: a probe under a configuration
     // nobody runs proves nothing, and `iva config` writes through to the real file.
