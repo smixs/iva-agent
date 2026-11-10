@@ -1,7 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import fc from "fast-check";
 import {
@@ -13,6 +12,7 @@ import {
   screenPayload,
 } from "./telegram-buttons.ts";
 import { escapeRichText } from "./menu/buttons.ts";
+import { tempDir } from "../fixtures/temp-dir.ts";
 
 void test("classic: a button line becomes one keyboard row and its explanation stays in the text", () => {
   const md = [
@@ -91,7 +91,7 @@ void test("two per row: consecutive button lines pair up in both renders, a styl
 
 void test("screenPayload: rich only when settings.json says so, classic otherwise", () => {
   const saved = process.env.ASSISTANT_DATA_DIR;
-  const dir = mkdtempSync(join(tmpdir(), "iva-buttons-"));
+  const dir = tempDir("iva-buttons-");
   try {
     process.env.ASSISTANT_DATA_DIR = dir;
     const md = `${button("A", "a")} — пояснение`;

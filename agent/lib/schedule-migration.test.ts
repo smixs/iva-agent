@@ -1,9 +1,8 @@
 import { strict as assert } from "node:assert";
 import test from "node:test";
 import { spawnSync } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { LEGACY_MEMORY_UNITS as CLI_LEGACY_MEMORY_UNITS } from "../../scripts/lib/legacy-memory-units.ts";
@@ -13,6 +12,7 @@ import {
   runScheduleMigration,
 } from "./schedule-migration.ts";
 import { parseCron, SCHEDULE_CRON } from "./schedule-table.ts";
+import { tempDir } from "../../scripts/fixtures/temp-dir.ts";
 
 type MigrationOptions = NonNullable<Parameters<typeof runScheduleMigration>[0]>;
 type ExecImplementation = NonNullable<MigrationOptions["execImpl"]>;
@@ -32,7 +32,7 @@ const UNIT_DIR_REL = ".config/systemd/user";
 async function scaffoldHome({
   withUnitDir = true,
 }: { readonly withUnitDir?: boolean } = {}): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), "iva-schedule-migration-"));
+  const dir = tempDir("iva-schedule-migration-");
   const home = join(dir, "home");
   await mkdir(home, { recursive: true });
   if (withUnitDir) await mkdir(join(home, UNIT_DIR_REL), { recursive: true });
@@ -449,7 +449,7 @@ void test("style-matched integration: a real fake systemctl on PATH, tmpdir HOME
   // We exercise it here through the schedule-migration module directly (not a CLI command,
   // since the migration's real trigger is agent/instrumentation.ts, not bin/iva.mjs), but with
   // the same fake-systemctl-on-PATH technique.
-  const dir = await mkdtemp(join(tmpdir(), "iva-schedule-migration-onpath-"));
+  const dir = tempDir("iva-schedule-migration-onpath-");
   const home = join(dir, "home");
   const bin = join(dir, "bin");
   await mkdir(join(home, UNIT_DIR_REL), { recursive: true });

@@ -11,12 +11,11 @@
 // и прогон повторится байт в байт, включая shrink.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import fc from "fast-check";
+import { tempDir } from "../fixtures/temp-dir.ts";
 
-const root = mkdtempSync(join(tmpdir(), "iva-ingress-pbt-"));
+const root = tempDir("iva-ingress-pbt-");
 process.env.ASSISTANT_DATA_DIR = join(root, "data");
 process.env.TELEGRAM_ALLOWED_USER_IDS = "42";
 process.env.AGENT_LANGUAGE = "en";

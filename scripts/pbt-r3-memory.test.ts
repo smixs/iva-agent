@@ -6,15 +6,16 @@
 // (размер запроса), поэтому seed не нужен: повтор даёт тот же запрос.
 
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 
 // Хук резолвинга идёт первым: тул тянет соседей NodeNext-спецификаторами.
 import "./lib/ts-esm-hooks.ts";
+import { tempDir } from "./fixtures/temp-dir.ts";
 
-const vault = mkdtempSync(join(tmpdir(), "pbt-r3-memory-"));
+// Vault — подкаталог: файл «вне вольта» ложится рядом с ним, а не в общий tmp.
+const vault = join(tempDir("pbt-r3-memory-"), "vault");
 process.env.ASSISTANT_VAULT_DIR = vault;
 mkdirSync(join(vault, "cards"), { recursive: true });
 for (let index = 0; index < 40; index++) {

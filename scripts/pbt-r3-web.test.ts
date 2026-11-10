@@ -12,16 +12,16 @@
 // `.scratch/work/reviews/pbt-deepseek-4-3-2026-09-12.md`.
 
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import fc from "fast-check";
 
 // Хук резолвинга идёт первым: тулы тянут соседей NodeNext-спецификаторами.
 import "./lib/ts-esm-hooks.ts";
+import { tempDir } from "./fixtures/temp-dir.ts";
 
-const traceRoot = mkdtempSync(join(tmpdir(), "pbt-r3-web-"));
+const traceRoot = tempDir("pbt-r3-web-");
 process.env.ASSISTANT_DATA_DIR = join(traceRoot, "data");
 mkdirSync(process.env.ASSISTANT_DATA_DIR, { recursive: true });
 process.env.TAVILY_API_KEY = "test-key";

@@ -13,8 +13,7 @@
 // КАК ВОСПРОИЗВЕСТИ падение свойства: fast-check печатает `{ seed, path }` — подставь
 // их вторым аргументом fc.assert.
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -28,6 +27,7 @@ import {
   parseEnvText,
 } from "./lib/env-file.ts";
 import { createCliRuntime } from "./cli/runtime.ts";
+import { tempDir } from "./fixtures/temp-dir.ts";
 
 // Байт NUL строим из кода: сырой NUL в исходнике ломает и git, и редакторы.
 const NUL = String.fromCharCode(0);
@@ -36,7 +36,7 @@ const RUNS = 60;
 const BATCH = 12;
 const ABSENT = "<absent>";
 
-const scratch = mkdtempSync(join(tmpdir(), "env-agreement-"));
+const scratch = tempDir("env-agreement-");
 let files = 0;
 
 /** Что увидит сам процесс агента: значения из `node --env-file=<файл>`. */
@@ -82,7 +82,7 @@ await test("владелец видит то же значение, что по�
 });
 
 await test("`iva doctor` читает .env глазами процесса, а не своими", () => {
-  const root = mkdtempSync(join(tmpdir(), "env-agreement-root-"));
+  const root = tempDir("env-agreement-root-");
   // Ключ, начинающийся с решётки: для процесса переменной просто нет. Доктор обязан
   // назвать её пустой и отправить владельца в `iva config`, а не рапортовать «заполнено».
   writeFileSync(join(root, ".env"), "CUSTOM_API_KEY=#secret\nIVA_PORT=8723\n");
@@ -285,7 +285,7 @@ await test("ключи claude доезжают до процесса как ес
 });
 
 await test("iva userbot creds: значение вне подмножества отвергается, файл не тронут", () => {
-  const root = mkdtempSync(join(tmpdir(), "env-agreement-creds-"));
+  const root = tempDir("env-agreement-creds-");
   const envPath = join(root, ".env");
   const before = "IVA_PORT=8723\nTELEGRAM_API_ID=12345\n";
   writeFileSync(envPath, before);

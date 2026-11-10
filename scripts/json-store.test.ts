@@ -3,14 +3,7 @@
 // Импорт .ts напрямую: Node 24 стрипает типы без флагов при явном .ts-специфкаторе.
 import test from "node:test";
 import assert from "node:assert/strict";
-import {
-  existsSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   acquireLock,
@@ -18,9 +11,10 @@ import {
   releaseLock,
   saveJsonAtomic,
 } from "../agent/lib/json-store.ts";
+import { tempDir } from "./fixtures/temp-dir.ts";
 
 test("нет файла → fallback; save+load round-trip; tmp не остаётся", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "json-store-"));
+  const dir = tempDir("json-store-");
   const file = join(dir, "tasks.json");
   assert.deepEqual(await loadJsonStrict(file, []), []);
   await saveJsonAtomic(file, [{ id: 1 }]);
@@ -33,7 +27,7 @@ test("нет файла → fallback; save+load round-trip; tmp не остаё�
 });
 
 test("битый JSON: бэкап *.corrupt-* и явная ошибка, не пустой fallback", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "json-store-"));
+  const dir = tempDir("json-store-");
   const file = join(dir, "tasks.json");
   writeFileSync(file, "{broken");
   await assert.rejects(() => loadJsonStrict(file, []), /damaged/);
@@ -50,7 +44,7 @@ test("битый JSON: бэкап *.corrupt-* и явная ошибка, не �
 });
 
 test("лок эксклюзивен, снимается, протухший лок отбирается", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "json-store-"));
+  const dir = tempDir("json-store-");
   const lock = join(dir, "tasks.json.lock");
   const t1 = await acquireLock(lock);
   await assert.rejects(
@@ -64,7 +58,7 @@ test("лок эксклюзивен, снимается, протухший ло
 });
 
 test("release с чужим токеном не снимает лок преемника", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "json-store-"));
+  const dir = tempDir("json-store-");
   const lock = join(dir, "tasks.json.lock");
   const stale = await acquireLock(lock);
   // Имитация staleness-вытеснения: преемник отобрал лок и держит его под своим токеном.

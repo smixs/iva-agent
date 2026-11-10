@@ -2,8 +2,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -25,6 +24,7 @@ import {
 } from "./svc-run.ts";
 import { acquireUpdateLock } from "../version-store.ts";
 import { createFlows } from "../tg-flow.ts";
+import { tempDir } from "../../fixtures/temp-dir.ts";
 
 const { SCREENS } = (await import("./index.ts")) as {
   SCREENS: Record<string, unknown>;
@@ -218,7 +218,7 @@ test("up: хендофф в deps.handleUpdateCheck с chatId", async () => {
 
 test("cln: TypeScript cleaner берётся из репо, cwd — vault", async () => {
   const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../..");
-  const dataDir = mkdtempSync(join(tmpdir(), "iva-data-"));
+  const dataDir = tempDir("iva-data-");
   const h = makeCtx({
     deps: { root: repoRoot, envPath: join(dataDir, ".env") },
   });
@@ -235,7 +235,7 @@ test("cln: TypeScript cleaner берётся из репо, cwd — vault", asyn
 });
 
 test("doc: doctor receives the menu's canonical data directory", async () => {
-  const dataDir = mkdtempSync(join(tmpdir(), "iva-data-"));
+  const dataDir = tempDir("iva-data-");
   const h = makeCtx({ deps: { dataDir, root: "/iva", envPath: "/iva/.env" } });
   const spec = await commandSpec("doc", h.ctx);
   assert.equal(spec.kind, "proc");
@@ -244,7 +244,7 @@ test("doc: doctor receives the menu's canonical data directory", async () => {
 
 test("go:doc: прогресс с 🔄, финал ✅ с кнопкой Назад", async () => {
   resetForTests();
-  const dataDir = mkdtempSync(join(tmpdir(), "iva-data-"));
+  const dataDir = tempDir("iva-data-");
   const h = makeCtx({
     deps: {
       dataDir,
@@ -273,7 +273,7 @@ test("go:doc: прогресс с 🔄, финал ✅ с кнопкой Наз�
 
 test("go:cln: сводка парсит финальную строку cleanup", async () => {
   resetForTests();
-  const dataDir = mkdtempSync(join(tmpdir(), "iva-data-"));
+  const dataDir = tempDir("iva-data-");
   const h = makeCtx({
     deps: {
       dataDir,
@@ -312,7 +312,7 @@ test("go:cln: чистка оставляет в vault пару коммитов
     cancelRun();
     resetForTests();
   });
-  const vault = mkdtempSync(join(tmpdir(), "iva-vault-"));
+  const vault = tempDir("iva-vault-");
   const git = (...args: string[]) =>
     execFileSync("git", ["-c", "core.quotePath=false", ...args], {
       cwd: vault,
@@ -327,7 +327,7 @@ test("go:cln: чистка оставляет в vault пару коммитов
   // Правка владельца в Obsidian, ещё не в истории: она уезжает в снимок «до».
   writeFileSync(join(vault, "CORE.md"), "# CORE\n\nправка владельца\n");
 
-  const dataDir = mkdtempSync(join(tmpdir(), "iva-data-"));
+  const dataDir = tempDir("iva-data-");
   const h = makeCtx({
     deps: {
       dataDir,
@@ -367,7 +367,7 @@ test("go:cln: чистка оставляет в vault пару коммитов
 
 test("go:mem: юнит через systemctl, финал «Цикл памяти пройден»", async () => {
   resetForTests();
-  const dataDir = mkdtempSync(join(tmpdir(), "iva-data-"));
+  const dataDir = tempDir("iva-data-");
   const active = ["activating", "inactive"];
   const execFileImpl: ExecFileImplementation = (
     cmd,
@@ -400,7 +400,7 @@ test("go:mem: юнит через systemctl, финал «Цикл памяти 
 
 test("busy-гейт: второй go при running — экран «Уже идёт», без второго процесса", async () => {
   resetForTests();
-  const dataDir = mkdtempSync(join(tmpdir(), "iva-data-"));
+  const dataDir = tempDir("iva-data-");
   const h = makeCtx({
     deps: {
       dataDir,
@@ -430,7 +430,7 @@ test("busy-гейт: второй go при running — экран «Уже ид
 
 test("update-lock: занят — go:doc не стартует, текст про обновление", async () => {
   resetForTests();
-  const dataDir = mkdtempSync(join(tmpdir(), "iva-data-"));
+  const dataDir = tempDir("iva-data-");
   const lock = acquireUpdateLock(dataDir);
   assert.ok(lock);
   const h = makeCtx({
@@ -456,7 +456,7 @@ test("update-lock: занят — go:doc не стартует, текст пр�
 // одного такого падения молчит про обновление до конца жизни установки.
 test("update-lock: владелец лока мёртв — go:doc стартует", async () => {
   resetForTests();
-  const dataDir = mkdtempSync(join(tmpdir(), "iva-data-"));
+  const dataDir = tempDir("iva-data-");
   const dead = spawnSync(process.execPath, ["-e", "0"]).pid;
   assert.ok(dead);
   mkdirSync(join(dataDir, "update.lock"), { recursive: true });
@@ -513,7 +513,7 @@ function gatedStand(
     globalThis.fetch = originalFetch;
     console.error = originalError;
   });
-  const dataDir = mkdtempSync(join(tmpdir(), "iva-data-"));
+  const dataDir = tempDir("iva-data-");
   const flows = createFlows({ tg: bridgeTg as never });
   const st = flows.start(10, "20", "menu", {
     screen: "svc",

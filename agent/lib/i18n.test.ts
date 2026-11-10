@@ -2,10 +2,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { tempDir } from "../../scripts/fixtures/temp-dir.ts";
 
 // getLang() читает env/файл на импорте и кэширует язык на ~2с, поэтому каждый сценарий
 // гоняем в СВЕЖЕМ процессе: чистый модуль, чистое окно кэша, свои env/settings.json.
@@ -45,7 +45,7 @@ function probe({
   agentLanguage,
   corrupt,
 }: ProbeOptions = {}): ProbeResult {
-  const dataDir = mkdtempSync(join(tmpdir(), "iva-i18n-"));
+  const dataDir = tempDir("iva-i18n-");
   if (corrupt !== undefined)
     writeFileSync(join(dataDir, "settings.json"), corrupt);
   else if (language !== undefined)

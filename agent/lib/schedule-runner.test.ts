@@ -5,9 +5,8 @@ import {
   spawnSync,
   type SpawnOptions,
 } from "node:child_process";
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync, readdirSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { randomBytes } from "node:crypto";
 
@@ -18,6 +17,7 @@ import {
   runScheduledJob,
   type RunScheduledJobResult,
 } from "./schedule-runner.ts";
+import { tempDir } from "../../scripts/fixtures/temp-dir.ts";
 
 function typecheckRequiredOptions(): void {
   // @ts-expect-error The pre-conversion declaration required an options object.
@@ -47,8 +47,8 @@ function parseStatus(source: string): TestStatus {
   return parsed as TestStatus;
 }
 
-async function scaffold() {
-  const dir = await mkdtemp(join(tmpdir(), "iva-schedule-runner-"));
+function scaffold() {
+  const dir = tempDir("iva-schedule-runner-");
   // No .env on purpose: the runner spawns `node --env-file-if-exists=.env <argv>`, so a
   // checkout or version tree without the file still starts the child. The one line node
   // prints about the missing file is what the tail test below pins.
@@ -65,9 +65,8 @@ function collectLogs() {
   };
 }
 
-void test("direct run (no lockPath): success writes lastSuccessAt and does not touch other entries", async (t) => {
-  const root = await scaffold();
-  t.after(() => {});
+void test("direct run (no lockPath): success writes lastSuccessAt and does not touch other entries", async () => {
+  const root = scaffold();
   await writeFile(join(root, "ok.ts"), "process.exit(0);\n");
   const statusPath = join(root, "data/rollup-status.json");
   await mkdir(join(root, "data"), { recursive: true });
@@ -115,7 +114,7 @@ void test("direct run (no lockPath): success writes lastSuccessAt and does not t
 });
 
 void test("non-zero exit: lastExitCode recorded, lastSuccessAt left untouched", async () => {
-  const root = await scaffold();
+  const root = scaffold();
   await writeFile(join(root, "fail.ts"), "process.exit(7);\n");
   const statusPath = join(root, "data/rollup-status.json");
   await mkdir(join(root, "data"), { recursive: true });
@@ -147,7 +146,7 @@ void test("non-zero exit: lastExitCode recorded, lastSuccessAt left untouched", 
 });
 
 void test("guard: a lastSuccessAt inside the 2h window skips the job without spawning", async () => {
-  const root = await scaffold();
+  const root = scaffold();
   await writeFile(join(root, "boom.ts"), "process.exit(1);\n"); // would fail loudly if actually spawned
   const statusPath = join(root, "data/rollup-status.json");
   await mkdir(join(root, "data"), { recursive: true });
@@ -185,7 +184,7 @@ void test("guard: a lastSuccessAt inside the 2h window skips the job without spa
 });
 
 void test("guard: a lastSuccessAt older than 2h runs normally", async () => {
-  const root = await scaffold();
+  const root = scaffold();
   await writeFile(join(root, "ok.ts"), "process.exit(0);\n");
   const statusPath = join(root, "data/rollup-status.json");
   await mkdir(join(root, "data"), { recursive: true });
@@ -210,7 +209,7 @@ void test("guard: a lastSuccessAt older than 2h runs normally", async () => {
 });
 
 void test("lockPath given: the spawned command is flock-wrapped in the documented shape", async () => {
-  const root = await scaffold();
+  const root = scaffold();
   await writeFile(join(root, "ok.ts"), "process.exit(0);\n");
   const lockPath = join(root, ".memory.lock");
   const statusPath = join(root, "data/rollup-status.json");
@@ -255,7 +254,7 @@ void test("lockPath given: the spawned command is flock-wrapped in the documente
 });
 
 void test("no lockPath: the spawned command invokes nodeBin directly (digest case)", async () => {
-  const root = await scaffold();
+  const root = scaffold();
   await writeFile(join(root, "ok.ts"), "process.exit(0);\n");
   const statusPath = join(root, "data/rollup-status.json");
 
@@ -284,7 +283,7 @@ void test("no lockPath: the spawned command invokes nodeBin directly (digest cas
 });
 
 void test("root без .env: ребёнок стартует, и node говорит об этом одной честной строкой", async () => {
-  const root = await scaffold();
+  const root = scaffold();
   await writeFile(
     join(root, "ok.ts"),
     "console.log(`mark=${process.env.MARK}`);\n",
@@ -323,7 +322,7 @@ void test(
   "full flock integration (real /usr/bin/flock): success path end to end",
   { skip: !existsSync("/usr/bin/flock") },
   async () => {
-    const root = await scaffold();
+    const root = scaffold();
     await writeFile(join(root, "ok.ts"), "process.exit(0);\n");
     const statusPath = join(root, "data/rollup-status.json");
     await mkdir(join(root, "data"), { recursive: true });
@@ -345,7 +344,7 @@ void test(
 );
 
 void test("timeout: SIGTERM first, escalates to SIGKILL after the grace window", async () => {
-  const root = await scaffold();
+  const root = scaffold();
   const sigtermMarker = join(root, "got-sigterm");
   // Ignores SIGTERM and spins forever — forces the SIGKILL escalation. Writes a marker
   // file the INSTANT it receives SIGTERM: that's the real proof the process was still
@@ -431,7 +430,7 @@ void test("timeout: SIGTERM first, escalates to SIGKILL after the grace window",
 });
 
 void test("spawn failure (bad nodeBin) never throws and records the error", async () => {
-  const root = await scaffold();
+  const root = scaffold();
   const statusPath = join(root, "data/rollup-status.json");
 
   let threw = false;
@@ -462,7 +461,7 @@ void test(
   "timeout kills the WHOLE process group, not just flock's own pid: the lock is released and no grandchild lingers",
   { skip: !existsSync("/usr/bin/flock") },
   async () => {
-    const root = await scaffold();
+    const root = scaffold();
     const marker = `iva-schedule-runner-test-${randomBytes(6).toString("hex")}`;
     // Ignores SIGTERM (forces the SIGKILL escalation) and never exits on its own — a stand-in
     // for a wedged rollup that would otherwise keep the flock lock held via its inherited fd.
@@ -518,7 +517,7 @@ void test(
 );
 
 void test("double entry: two concurrent calls for the same name only run once (inProgressSince admission guard)", async () => {
-  const root = await scaffold();
+  const root = scaffold();
   await writeFile(
     join(root, "slow.ts"),
     "await new Promise((r) => setTimeout(r, 250)); process.exit(0);\n",
@@ -568,7 +567,7 @@ void test("double entry: two concurrent calls for the same name only run once (i
 });
 
 void test("a stale inProgressSince (older than timeoutMs — a presumed crash) does not block a new run forever", async () => {
-  const root = await scaffold();
+  const root = scaffold();
   await writeFile(join(root, "ok.ts"), "process.exit(0);\n");
   const statusPath = join(root, "data/rollup-status.json");
   await mkdir(join(root, "data"), { recursive: true });
@@ -598,7 +597,7 @@ void test("a stale inProgressSince (older than timeoutMs — a presumed crash) d
 });
 
 void test("a fresh reservation owned by a dead process is recovered immediately", async () => {
-  const root = await scaffold();
+  const root = scaffold();
   await writeFile(join(root, "ok.ts"), "process.exit(0);\n");
   const statusPath = join(root, "data/rollup-status.json");
   await mkdir(join(root, "data"), { recursive: true });
@@ -627,7 +626,7 @@ void test("a fresh reservation owned by a dead process is recovered immediately"
 });
 
 void test("a fresh reservation owned by a live process still blocks duplicate entry", async () => {
-  const root = await scaffold();
+  const root = scaffold();
   await writeFile(join(root, "boom.ts"), "process.exit(1);\n");
   const statusPath = join(root, "data/rollup-status.json");
   await mkdir(join(root, "data"), { recursive: true });
@@ -661,7 +660,7 @@ void test("a fresh reservation owned by a live process still blocks duplicate en
 });
 
 void test("completion and finally do not modify status when their lock acquisition fails", async () => {
-  const root = await scaffold();
+  const root = scaffold();
   const statusPath = join(root, "data/rollup-status.json");
   await mkdir(join(root, "data"), { recursive: true });
   await writeFile(
@@ -695,7 +694,7 @@ void test("no lockPath: a clean exit right after SIGTERM cancels the pending har
   // The direct-spawn case (digest has no lockPath): "child" IS the actual target, so its
   // exit really does mean the process is gone, and any still-pending hard-kill timer must
   // be canceled — left dangling, it would risk firing later against a since-reused pid.
-  const root = await scaffold();
+  const root = scaffold();
   await writeFile(
     join(root, "graceful.ts"),
     "process.on('SIGTERM', () => { process.exit(0); });\nsetInterval(() => {}, 1000);\n",
@@ -736,7 +735,7 @@ void test("no lockPath: a clean exit right after SIGTERM cancels the pending har
 });
 
 void test("if the status lock can't be acquired, the run is deferred: no unlocked reservation write, nothing spawned", async () => {
-  const root = await scaffold();
+  const root = scaffold();
   await writeFile(join(root, "boom.ts"), "process.exit(1);\n"); // would fail loudly if actually spawned
   const statusPath = join(root, "data/rollup-status.json");
   await mkdir(join(root, "data"), { recursive: true });
@@ -785,13 +784,13 @@ void test("if the status lock can't be acquired, the run is deferred: no unlocke
 // и «успех был N минут назад» отключались, а первая же запись сносила записи соседних
 // расписаний. Та же развилка, что в agent/lib/reminder-tick.ts:50-74.
 
-void test("readStatus: no status file yet (fresh install) is an empty status, not an error", async () => {
-  const root = await scaffold();
+void test("readStatus: no status file yet (fresh install) is an empty status, not an error", () => {
+  const root = scaffold();
   assert.deepEqual(readStatus(join(root, "data/rollup-status.json")), {});
 });
 
 void test("readStatus: damaged JSON throws, naming the file and the reason", async () => {
-  const root = await scaffold();
+  const root = scaffold();
   const statusPath = join(root, "data/rollup-status.json");
   await mkdir(join(root, "data"), { recursive: true });
   await writeFile(statusPath, '{"memory-daily": {"lastSuccessAt": 1', "utf8");
@@ -807,7 +806,7 @@ void test("readStatus: damaged JSON throws, naming the file and the reason", asy
 });
 
 void test("readStatus: an unreadable path throws instead of reading as empty", async () => {
-  const root = await scaffold();
+  const root = scaffold();
   // A directory where the file belongs: EISDIR on every platform and every uid, unlike
   // chmod 000, which root would read straight through.
   const statusPath = join(root, "data/rollup-status.json");
@@ -823,7 +822,7 @@ void test("readStatus: an unreadable path throws instead of reading as empty", a
 });
 
 void test("readStatus: valid JSON that is not an object throws", async () => {
-  const root = await scaffold();
+  const root = scaffold();
   const statusPath = join(root, "data/rollup-status.json");
   await mkdir(join(root, "data"), { recursive: true });
   await writeFile(statusPath, '["memory-daily"]', "utf8");
@@ -836,7 +835,7 @@ void test("readStatus: valid JSON that is not an object throws", async () => {
 });
 
 void test("damaged status file: the attempt is deferred, nothing is spawned, and the neighbours survive on disk", async () => {
-  const root = await scaffold();
+  const root = scaffold();
   await writeFile(join(root, "ok.ts"), "process.exit(0);\n");
   const statusPath = join(root, "data/rollup-status.json");
   await mkdir(join(root, "data"), { recursive: true });
@@ -880,7 +879,7 @@ void test("damaged status file: the attempt is deferred, nothing is spawned, and
 
 // T50c: напоминание запускается без срока (timeoutMs: null) — ход живёт, пока идут события.
 void test("no deadline (timeoutMs: null): a working child runs to completion, nothing kills it", async () => {
-  const root = await scaffold();
+  const root = scaffold();
   const marker = join(root, "done");
   await writeFile(
     join(root, "slow.ts"),
@@ -910,7 +909,7 @@ void test("no deadline (timeoutMs: null): a working child runs to completion, no
 });
 
 void test("the child reads its stop time from the runner, never from a stale service environment", async () => {
-  const root = await scaffold();
+  const root = scaffold();
   await writeFile(join(root, "ok.ts"), "process.exit(0);\n");
   let seen: SpawnOptions | null = null;
   await runScheduledJob({
@@ -934,7 +933,7 @@ void test("the child reads its stop time from the runner, never from a stale ser
 });
 
 void test("a throwing log still settles the run as a failure", async () => {
-  const root = await scaffold();
+  const root = scaffold();
   await writeFile(join(root, "ok.ts"), "process.exit(0);\n");
   const result = await runScheduledJob({
     name: "digest",
@@ -951,7 +950,7 @@ void test("a throwing log still settles the run as a failure", async () => {
 });
 
 void test("a job without its own stop grace keeps the short SIGKILL grace", async () => {
-  const root = await scaffold();
+  const root = scaffold();
   await writeFile(join(root, "ok.ts"), "process.exit(0);\n");
   let seen: SpawnOptions | null = null;
   await runScheduledJob({
@@ -975,7 +974,7 @@ void test("a job without its own stop grace keeps the short SIGKILL grace", asyn
 // этого имени — он и закрывает провал; провал пишется всегда; остальные расписания (без
 // опции) пишут успех как прежде.
 void test("factOnSuccess after-failure: a success is written only to close a failure of the same name", async () => {
-  const root = await scaffold();
+  const root = scaffold();
   await writeFile(join(root, "ok.ts"), "process.exit(0);\n");
   await writeFile(join(root, "fail.ts"), "process.exit(3);\n");
   const statusPath = join(root, "data/rollup-status.json");

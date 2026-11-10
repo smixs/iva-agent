@@ -1,12 +1,12 @@
 /* eslint-disable @typescript-eslint/no-floating-promises, @typescript-eslint/require-await -- Node's test runner owns registrations and test doubles return promises. */
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtemp, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { runSetupCommand } from "./userbot.ts";
 import userbot from "./userbot.ts";
+import { tempDir } from "../../fixtures/temp-dir.ts";
 
 type ExecCallback = (
   error: (Error & { code?: number }) | null,
@@ -46,7 +46,7 @@ test("userbot menu setup rejects exit 1 with a redacted error", async () => {
 });
 
 test("userbot menu renders the shared Telethon authorization state", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "iva-userbot-health-menu-"));
+  const dir = tempDir("iva-userbot-health-menu-");
   const envPath = join(dir, ".env");
   await writeFile(
     envPath,
@@ -88,7 +88,7 @@ test("userbot menu renders the shared Telethon authorization state", async () =>
 });
 
 test("userbot menu surfaces setup exit 1 and keeps the userbot heading", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "iva-userbot-menu-"));
+  const dir = tempDir("iva-userbot-menu-");
   const envPath = join(dir, ".env");
   await writeFile(
     envPath,
