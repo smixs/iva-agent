@@ -124,6 +124,46 @@ void test(
 );
 
 void test(
+  "S-rem-ontime: failed reminder turn sends the original text and records the reason",
+  { timeout: 120_000 },
+  async (t) => {
+    const h = await createHarness(t);
+    const row = await askReminder(h, true);
+    h.provider.enqueue({ kind: "overloaded", times: 3 });
+    await tick(h, row.nextRunAtMs);
+    const delivered = (await rows(h))[0];
+    t.diagnostic(JSON.stringify({ row: delivered, sends: texts(h, TEXT) }));
+    assert.equal(
+      h.provider.requests.length,
+      5,
+      "two setup requests and three refused attempts",
+    );
+    assert.equal(
+      texts(h, TEXT).length,
+      1,
+      "a failed turn preserves the reminder text verbatim",
+    );
+    assert.equal(String(texts(h, TEXT)[0].chat), String(OWNER));
+    assert.equal(String(texts(h, TEXT)[0].topic), String(TOPIC));
+    assert.equal(delivered.delivered, true);
+    assert.match(delivered.error ?? "", /^agent turn failed: .+/u);
+    assert.match(
+      await readFile(join(h.root, "process.log"), "utf8"),
+      /agent turn failed:/u,
+    );
+    await tick(h, row.nextRunAtMs + 60_000);
+    assert.equal(
+      texts(h, TEXT).length,
+      1,
+      "OneAttemptPerCapture after a failed turn",
+    );
+    assert.equal(h.provider.requests.length, 5);
+    await h.saveEvidence("reminder-failed");
+    h.pass();
+  },
+);
+
+void test(
   "S-rem-reset: /new during a reminder turn delivers its text — ждёт починки F1",
   { timeout: 90_000, todo: "F1: reset currently becomes cancelled by owner" },
   async (t) => {
