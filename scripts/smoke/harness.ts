@@ -102,6 +102,7 @@ export type BotRequest = {
 };
 export async function startTelegram(log: string) {
   const requests: BotRequest[] = [];
+  const refusals: { method: string; status: number }[] = [];
   const batches: unknown[][] = [];
   let pending: ServerResponse | undefined;
   let deadline: NodeJS.Timeout | undefined;
@@ -131,6 +132,18 @@ export async function startTelegram(log: string) {
       };
       requests.push(entry);
       appendFileSync(log, JSON.stringify(entry) + "\n");
+      if (refusals[0]?.method === method) {
+        const refusal = refusals.shift()!;
+        res.writeHead(refusal.status, { "content-type": "application/json" });
+        res.end(
+          JSON.stringify({
+            ok: false,
+            error_code: refusal.status,
+            description: "smoke Bot API refusal",
+          }),
+        );
+        return;
+      }
       if (method === "getUpdates") {
         if (pending) throw new Error("Concurrent getUpdates");
         pending = res;
@@ -173,6 +186,8 @@ export async function startTelegram(log: string) {
   return {
     url: `http://127.0.0.1:${address.port}`,
     requests,
+    rejectNext: (method: string, status: number) =>
+      refusals.push({ method, status }),
     push: (...updates: unknown[]) => {
       batches.push(updates);
       flush();
@@ -248,18 +263,22 @@ function environment(
 // Workers of one node --test invocation share one build, even at concurrency=2.
 const cache = join(diskTmp, `iva-smoke-build-${process.ppid}`);
 const doneDir = join(cache, "done");
+const workerDir = join(cache, "workers");
 const suite = /^(smoke|smoke:full)$/u.test(
   process.env.npm_lifecycle_event ?? "",
 );
-const participants = suite
+const suiteParticipants = suite
   ? (await readdir(new URL("./", import.meta.url))).filter((name) =>
       name.endsWith(".smoke.ts"),
     )
-  : [basename(process.argv[1])];
+  : [];
 await mkdir(doneDir, { recursive: true });
+await mkdir(workerDir, { recursive: true });
+await writeFile(join(workerDir, basename(process.argv[1])), "active");
 after(async () => {
   await writeFile(join(doneDir, basename(process.argv[1])), "done");
   const completed: string[] = await readdir(doneDir).catch(() => []);
+  const participants = suite ? suiteParticipants : await readdir(workerDir);
   if (participants.every((name) => completed.includes(name))) {
     const failed = await readFile(join(cache, "failed"), "utf8").catch(
       () => "",
@@ -329,7 +348,11 @@ export async function kill(
   await done;
 }
 
-export async function createHarness(t: TestContext, steps: MockStep[] = []) {
+export async function createHarness(
+  t: TestContext,
+  steps: MockStep[] = [],
+  beforeStart?: (app: string, env: NodeJS.ProcessEnv) => Promise<void>,
+) {
   await mkdir(diskTmp, { recursive: true });
   const root = await mkdtemp(join(diskTmp, "iva-smoke-"));
   await mkdir(join(root, "tmp"));
@@ -433,6 +456,7 @@ export async function createHarness(t: TestContext, steps: MockStep[] = []) {
     `ASSISTANT_BEARER=${env.ASSISTANT_BEARER}\n`,
     { mode: 0o600 },
   );
+  await beforeStart?.(app, env);
   await run([join(app, "scripts/init-vault.mjs")], app, env, note);
   await writeFile(join(app, "data/telegram-offset.json"), '{"offset":0}');
   const eve: EveProcess = startEve(app, env, port, note);
@@ -463,6 +487,13 @@ export async function createHarness(t: TestContext, steps: MockStep[] = []) {
     telegram,
     eve,
     bridge,
+    saveEvidence: async (name: string) => {
+      if (!process.env.SMOKE_EVIDENCE_DIR) return;
+      const destination = join(process.env.SMOKE_EVIDENCE_DIR, name);
+      await mkdir(destination, { recursive: true });
+      for (const file of ["process.log", "provider.jsonl", "telegram.jsonl"])
+        await cp(join(root, file), join(destination, file));
+    },
     pass: () => {
       passed = true;
     },

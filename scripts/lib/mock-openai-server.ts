@@ -110,7 +110,7 @@ async function readBody(req: IncomingMessage): Promise<string> {
 }
 
 export type MockStep =
-  | { kind: "text"; text: string }
+  | { kind: "text"; text: string; waitFor?: Promise<void> }
   | { kind: "tool"; name: string; arguments: string; id?: string }
   | { kind: "overloaded"; times?: number }
   | { kind: "empty" }
@@ -163,6 +163,7 @@ export async function startMockOpenAiServer(
     if (step?.kind === "overloaded" && (step.times ?? 1) > 1)
       step.times = (step.times ?? 1) - 1;
     else scenario.shift();
+    if (step?.kind === "text") await step.waitFor;
     if (step?.kind === "overloaded") {
       res.writeHead(429, {
         "content-type": "application/json",
