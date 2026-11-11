@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-floating-promises, @typescript-eslint/require-await -- Node owns registrations; doubles preserve asynchronous boundaries. */
 import assert from "node:assert/strict";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync, unlinkSync, mkdirSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import test, { beforeEach } from "node:test";
 import type { Session } from "eve/channels";
@@ -16,6 +16,15 @@ import {
   list,
   fireDue,
   reminderFile,
+  reminderContentFile,
+  reminderContent,
+  readReminderContents,
+  remove,
+  sweepFired,
+  recordDelivery,
+  recordTurnSession,
+  recordReminderReset,
+  reminderWasReset,
   parseReminderTable,
   REMINDER_SCHEMA_VERSION,
 } from "#lib/reminder-store.ts";
@@ -330,7 +339,7 @@ test(`ReminderLifecycle legacy content: schema-2 rows from 0.5.0–0.5.12 remain
           NOW,
         );
         assert.ok(read);
-        assert.equal(read.content, undefined);
+        assert.equal(reminderContent(read), "task");
         writeFileSync(
           reminderFile(),
           JSON.stringify({ schemaVersion: 2, rows: [row] }),
@@ -373,17 +382,99 @@ test("Reminder content: invalid or absent choice returns a ready call and does n
   assert.equal(parsed.content, undefined);
 });
 
-test("Reminder format: persisted content uses schema 3 and survives a reread", async () => {
+test("Reminder format: unchanged schema 2, content stored beside the table", async () => {
   await accepted("text");
   const raw = JSON.parse(readFileSync(reminderFile(), "utf8")) as {
     schemaVersion: number;
-    rows: unknown[];
+    rows: Array<Record<string, unknown>>;
   };
   assert.equal(raw.schemaVersion, REMINDER_SCHEMA_VERSION);
-  assert.equal(raw.schemaVersion, 3);
-  assert.equal((await list())[0]?.content, "text");
-  assert.equal(
-    join(process.env.ASSISTANT_DATA_DIR!, "reminders.json"),
-    reminderFile(),
-  );
+  assert.equal(raw.schemaVersion, 2);
+  assert.equal(Object.hasOwn(raw.rows[0]!, "content"), false);
+  assert.equal(Object.hasOwn(raw.rows[0]!, "resetSessionId"), false);
+  assert.deepEqual(readReminderContents(), { "r-f1": "text" });
+  assert.equal(reminderContent((await list())[0]!), "text");
+  assert.equal(statSync(reminderContentFile()).mode & 0o777, 0o600);
+  assert.equal(join(process.env.ASSISTANT_DATA_DIR!, "reminders.json"), reminderFile());
+});
+
+test("ReminderLifecycle LoseContent: AcceptedVisibleOutcome and OneAttemptPerCapture survive loss", async () => {
+  await accepted("text");
+  unlinkSync(reminderContentFile());
+  assert.equal(reminderContent((await list())[0]!), "task");
+  let turns = 0;
+  const sends: string[] = [];
+  await runReminderFire("r-f1", {
+    ...delivery(sends),
+    runTurn: async () => {
+      turns++;
+      return { status: "completed", message: TEXT, feedback: async () => {} };
+    },
+  });
+  assert.equal(turns, 1);
+  assert.deepEqual(sends, [TEXT]);
+  assert.equal((await list())[0]?.delivered, true);
+  assert.deepEqual(await fireDue(NOW + 60_000, 5), []);
+});
+
+for (const raw of ["{broken", JSON.stringify({ schemaVersion: 99, rows: [] })]) {
+  test(`Reminder content: damaged or future file degrades to task with reason: ${raw}`, async (t) => {
+    await accepted("text");
+    writeFileSync(reminderContentFile(), raw);
+    const reasons: string[] = [];
+    t.mock.method(console, "warn", (reason: string) => reasons.push(reason));
+    let turns = 0;
+    const sends: string[] = [];
+    await runReminderFire("r-f1", {
+      ...delivery(sends),
+      runTurn: async () => {
+        turns++;
+        return { status: "completed", message: TEXT, feedback: async () => {} };
+      },
+    });
+    assert.equal(turns, 1);
+    assert.deepEqual(sends, [TEXT]);
+    assert.ok(reasons.some((reason) => /reminder-content.json.*unreadable.*using tasks/u.test(reason)));
+    assert.equal(readFileSync(reminderContentFile(), "utf8"), raw);
+  });
+}
+
+test("Reminder content: a failed kind write refuses the row; sweep removes a kind-only crash cut", async () => {
+  // Failure is exercised deterministically by making the kind destination a directory first.
+  mkdirSync(reminderContentFile());
+  await assert.rejects(add({ id: "rejected", text: TEXT, content: "text", schedule: { kind: "at", atMs: NOW } }));
+  assert.equal((await list()).length, 0);
+  rmSync(reminderContentFile(), { recursive: true });
+  // The exact crash cut after the first commit has the following durable state.
+  writeFileSync(reminderContentFile(), JSON.stringify({ orphan: "text" }));
+  assert.equal((await list()).length, 0);
+  assert.equal(await sweepFired(NOW), 0);
+  assert.deepEqual(readReminderContents(), {});
+});
+
+test("Reminder content: remove and sweep prune only ids absent from the remaining rows", async () => {
+  await accepted("text");
+  await recordDelivery("r-f1", { firedAt: NOW, delivered: true, error: null });
+  await add({ id: "pending", text: TEXT, content: "text", schedule: { kind: "at", atMs: NOW + 100_000 } });
+  writeFileSync(reminderContentFile(), JSON.stringify({ ...readReminderContents(), orphan: "text" }));
+  assert.equal(await sweepFired(NOW + 24 * 60 * 60_000), 1);
+  assert.deepEqual(readReminderContents(), { pending: "text" });
+  await remove("pending");
+  assert.deepEqual(readReminderContents(), {});
+  writeFileSync(reminderContentFile(), JSON.stringify({ orphan: "text" }));
+  await assert.rejects(remove("orphan"), /not found/u);
+  assert.deepEqual(readReminderContents(), {});
+});
+
+test("Reminder reset: the cause stays outside schema 2 and belongs to its firing", async () => {
+  await accepted("task");
+  await recordTurnSession("r-f1", { firedAt: NOW, sessionId: "reset-session" });
+  await recordReminderReset("reset-session");
+  const [row] = await list();
+  assert.ok(row);
+  assert.equal(reminderWasReset(row), true);
+  assert.equal(reminderWasReset({ ...row, firedAt: NOW + 1 }), false);
+  assert.equal(reminderWasReset({ ...row, sessionId: "other" }), false);
+  const raw = readFileSync(reminderFile(), "utf8");
+  assert.doesNotMatch(raw, /resetSessionId|content/u);
 });
