@@ -277,6 +277,11 @@ void test(
     await kill(child);
     assert.equal(child.signalCode, "SIGKILL");
     assert.equal((await rows(h))[0].delivered, null);
+    // Recovery after agent death: stop its real second Schedule before advancing
+    // the separate recovery process by 31 minutes. Otherwise two agents with
+    // incompatible clocks race to alert, and alertDue treats the old clock as a rewind.
+    await kill(h.eve);
+
     await tick(h, row.nextRunAtMs + 31 * 60_000);
     await tick(h, row.nextRunAtMs + 32 * 60_000);
     const alerts = h.telegram.requests.filter(
