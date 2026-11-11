@@ -3,7 +3,6 @@ import { appendFileSync, existsSync, mkdirSync, readdirSync } from "node:fs";
 import { readFileSync, rmSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { z } from "zod";
-import { setTimeout as pause } from "node:timers/promises";
 import { resolveVaultDir } from "@iva/vault-dir";
 import { resolveDataDir } from "#lib/data-dir.ts";
 import { resolveTimeZone } from "../../packages/timezone/index.ts";
@@ -1284,20 +1283,15 @@ const attemptDay = (date: string, reason: attempts.AttemptReason) =>
   attempts.addAttempt(ATTEMPTS, date, reason, new Date().toISOString());
 
 async function processDayWithAttempts(date: string): Promise<boolean> {
-  for (let reconnect = 0; ; reconnect++) {
-    try {
+  return call.withNightRetry(
+    async () => {
       const complete = await processDay(date);
       if (!complete) attemptDay(date, "day-unfinished");
       return complete;
-    } catch (error) {
-      if (!(error instanceof call.NightTransientError)) throw error;
-      const delay = [5_000, 30_000, 120_000][Math.min(reconnect, 2)];
-      jobs.push(
-        `${date}: связь с моделью оборвалась; продолжаю через ${delay / 1_000} с`,
-      );
-      await pause(delay, undefined, { signal });
-    }
-  }
+    },
+    date,
+    signal,
+  );
 }
 
 async function runDays(dates: readonly string[]) {
@@ -1370,11 +1364,12 @@ async function night(manual: string | undefined): Promise<number> {
       Object.keys(tried).filter((d) => attempts.isExhausted(tried[d])),
     );
   };
-  const periods = async (): Promise<string[]> =>
+  const periods = async () =>
     manual
-      ? []
+      ? { fallbacks: [], failed: false }
       : buildReadyPeriods(vault, today, { ...ask, paused: paused() }, jobs);
-  const fallbacks = await periods();
+  const firstPeriods = await periods();
+  const fallbacks: string[] = firstPeriods.fallbacks;
   const tried = attempts.readAttempts(ATTEMPTS);
   const queue = manual
     ? [manual]
@@ -1384,7 +1379,8 @@ async function night(manual: string | undefined): Promise<number> {
   const queueLeft = dayQueue(today);
   await retryTruth(today);
   await runCore(done.at(-1));
-  fallbacks.push(...(await periods()));
+  const lastPeriods = await periods();
+  fallbacks.push(...lastPeriods.fallbacks);
   cleanupCaches();
   await alertsAtEnd(today, queueLeft, fallbacks);
   const recovered = recoveryNotices();
@@ -1407,7 +1403,7 @@ async function night(manual: string | undefined): Promise<number> {
       )
     : "";
   console.error(`memory-night: ${done.length} day(s), ${usage}${unknown}`);
-  return code;
+  return firstPeriods.failed || lastPeriods.failed ? 1 : code;
 }
 
 function reportModelAuthSuccess(): void {

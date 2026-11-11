@@ -878,20 +878,19 @@ async function serveAndFinish(
     return await goBack(run, { tree, rollback, port, log: live.log });
   // Served: whatever this code did to the installation before, it does not now.
   store.recordLive(name, true);
-  // Фаза «кандидат закреплён и отвечал» пишется здесь, а не в конце хода: процесс,
-  // который её пишет, умирает вместе со старой версией, и всё, что после, - уборка.
+  // Commit active.json before publishing success to UpdateJob (FinalOnlyWhenPinned).
+  // Service state commits before every optional cleanup. A crash or cleanup
+  // fault leaves explicit debt, never a healthy update reported as unfinished.
+  store.settle(name, {
+    cleanupPending: true,
+    previous: run.active !== name ? run.active : rollback,
+  });
   markUpdateRun(store.layout.data, name, "settled", {
     outcome: {
       status: "updated",
       ...(rollback ? { before: rollback } : {}),
       after: name,
     },
-  });
-  // Service state commits before every optional cleanup. A crash or cleanup
-  // fault leaves explicit debt, never a healthy update reported as unfinished.
-  store.settle(name, {
-    cleanupPending: true,
-    previous: run.active !== name ? run.active : rollback,
   });
   // After the service is up: until it runs the new version, the old checkout is
   // what a failed restart falls back to, so it is not ours to remove any earlier.

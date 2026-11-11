@@ -116,14 +116,14 @@ await test(
       force: true,
     });
     write(join(source, "scripts/vault-cleanup.ts"), "export {};\n");
-    // Kill after health, before publishing the final journal phase. The separate
-    // S-update-cycle-pin case owns the known R1 window at active.json.
+    // Kill after health, before committing active.json. The separate
+    // S-update-cycle-pin case checks success cannot precede that commit.
     const storePath = join(source, "scripts/lib/version-update.ts");
     write(
       storePath,
       readFileSync(storePath, "utf8").replace(
-        '  markUpdateRun(store.layout.data, name, "settled", {',
-        '  if (process.env.IVA_KILL_AT === "pin") process.kill(process.pid, "SIGKILL");\n  markUpdateRun(store.layout.data, name, "settled", {',
+        "  store.settle(name, {",
+        '  if (process.env.IVA_KILL_AT === "pin") process.kill(process.pid, "SIGKILL");\n  store.settle(name, {',
       ),
     );
     const entry = join(source, "scripts/update-finish.ts");
@@ -308,6 +308,5 @@ await test("S-update-cycle: a freshly staged Version reads the installation Vaul
 
 await test(
   "S-update-cycle-pin: FinalOnlyWhenPinned keeps UpdateJob pending before active.json",
-  { todo: "ждёт починки R1" },
   assertPinnedFinal,
 );

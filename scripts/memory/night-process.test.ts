@@ -1,3 +1,4 @@
+import "../fixtures/no-host-anthropic.ts";
 // Настоящий процесс ночи (scripts/memory/night.ts) против двойника модели: локальный
 // OpenAI-совместимый сервер отвечает потоком текста и считает запросы. Vault
 // под git во временной папке. Утверждаются файлы vault, история git, stderr и код выхода.
@@ -95,9 +96,10 @@ class ModelDouble {
         .end(JSON.stringify(value));
     if (reply === undefined)
       return send(500, { error: { message: "unexpected model call" } });
+    if (reply.disconnect === true) return response.destroy();
     if (typeof reply.status === "number")
       return send(reply.status, {
-        error: { message: `double ${reply.status}` },
+        error: { message: reply.message ?? `double ${reply.status}` },
       });
     const own = "usage" in reply;
     const promptContent = messages.at(-1)?.content;
@@ -703,16 +705,23 @@ void test("негодный факт отбрасывается со строк�
   );
 });
 
-void test("сеть 429: один вызов, без попытки дня, день в очереди", async (t) => {
+void test("сеть 429: повтор в ту же ночь, без попытки дня", async (t) => {
   const fx = await fixture(t);
+  reportsOn(fx, "ru");
   day(fx, "## 10:00 [text]\nФакт\n");
-  fx.model.replies = [{ status: 429 }];
-  const result = await night(fx);
-  assert.equal(result.code, 1);
-  assert.equal(fx.model.prompts.length, 1);
+  fx.model.replies = [{ status: 429 }, A()];
+  const result = await night(fx, DATE, {
+    IVA_TEST_PAUSES: join(fx.data, "pauses.log"),
+  });
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(fx.model.prompts.length, 2);
   assert.equal(existsSync(join(fx.data, "rollup-attempts.json")), false);
-  fx.model.replies = [A(), B()];
-  assert.equal((await night(fx)).code, 0);
+  assert.ok(existsSync(summary(fx)));
+  assert.ok(reportOf(result.stderr));
+  assert.doesNotMatch(
+    reportOf(result.stderr)!,
+    /мелких правок|Не всё получилось/u,
+  );
 });
 
 void test(
@@ -3167,7 +3176,10 @@ void test("owner edit window: period summary saved while the model runs wins", a
     summaryText({ description: "День", input_hash: "old" }, "# Day\n"),
   );
   commit(fx.vault);
-  fx.model.replies = [periodReply("Ночная неделя")];
+  fx.model.replies = [
+    periodReply("Ночная неделя"),
+    periodReply("Готовый месяц"),
+  ];
   const held = fx.model.hold(1);
   const run = spawnNight(fx, null);
   await held.reached;
@@ -3182,6 +3194,7 @@ void test("owner edit window: period summary saved while the model runs wins", a
   assert.equal(result.code, 0, result.stderr);
   assert.match(read(weekly), /OWNER_EDIT/u);
   assert.doesNotMatch(read(weekly), /Ночная неделя/u);
+  assert.match(read(join(fx.vault, "monthly/2026-08.md")), /Готовый месяц/u);
 });
 
 void test("#309: kill during a later portion resumes from the saved answer", async (t) => {
@@ -3264,6 +3277,92 @@ void test("#309: a 503 resumes the same night without repeating earlier portions
     1,
   );
   assert.equal(existsSync(join(fx.data, "rollup-attempts.json")), false);
+});
+
+void test("period recovery: weekly and monthly share day backoff and finish green after overload/429/5xx", async (t) => {
+  const fx = await fixture(t);
+  mkdirSync(join(fx.vault, "summaries/daily"), { recursive: true });
+  for (const date of ["2026-10-12", "2026-10-19"])
+    writeFileSync(
+      summary(fx, date),
+      `---\ndescription: "день ${date}"\n---\n# ${date}\n`,
+    );
+  commit(fx.vault);
+  fx.model.replies = [
+    { status: 503, message: "The inference service is overloaded" },
+    { status: 429 },
+    { status: 502 },
+    { disconnect: true },
+    periodReply("неделя 42"),
+    { status: 503 },
+    periodReply("неделя 43"),
+    { status: 503 },
+    periodReply("октябрь"),
+  ];
+  const pauses = join(fx.data, "pauses.log");
+  const result = await night(fx, null, {
+    IVA_TEST_NOW: "2026-11-11T12:00:00Z",
+    IVA_TEST_PAUSES: pauses,
+  });
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(fx.model.prompts.length, 9);
+  assert.deepEqual(
+    read(pauses).trim().split("\n").map(Number),
+    [5_000, 30_000, 120_000, 120_000, 5_000, 5_000],
+  );
+  for (const [file, text] of [
+    ["weekly/2026-W42.md", "неделя 42"],
+    ["weekly/2026-W43.md", "неделя 43"],
+    ["monthly/2026-10.md", "октябрь"],
+  ])
+    assert.ok(read(join(fx.vault, file)).includes(text));
+  assert.doesNotMatch(result.stderr, /не собран/u);
+  assert.equal(existsSync(join(fx.data, "rollup-attempts.json")), false);
+});
+
+void test("period recovery: failed W42/W43 and October are collected the next night after 28h", async (t) => {
+  const fx = await fixture(t);
+  mkdirSync(join(fx.vault, "summaries/daily"), { recursive: true });
+  for (const date of ["2026-10-12", "2026-10-19"])
+    writeFileSync(
+      summary(fx, date),
+      `---\ndescription: "день ${date}"\n---\n# ${date}\n`,
+    );
+  commit(fx.vault);
+  const source = [
+    read(summary(fx, "2026-10-12")),
+    read(summary(fx, "2026-10-19")),
+  ];
+  const pauses = join(fx.data, "pauses.log");
+  fx.model.replies = [{ status: 503 }];
+  const failed = await night(fx, null, {
+    IVA_TEST_NOW: "2026-11-11T12:00:00Z",
+    IVA_JOB_STOP_AT: String(Date.parse("2026-11-11T12:00:00Z") + 2_500),
+  });
+  assert.equal(failed.code, 1, failed.stderr);
+  assert.equal(fx.model.prompts.length, 1);
+  assert.equal(existsSync(join(fx.vault, "weekly/2026-W42.md")), false);
+  fx.model.replies = [
+    periodReply("неделя 42"),
+    periodReply("неделя 43"),
+    periodReply("октябрь"),
+  ];
+  const resumed = await night(fx, null, {
+    IVA_TEST_NOW: "2026-11-12T16:00:00Z",
+    IVA_TEST_PAUSES: pauses,
+  });
+  assert.equal(resumed.code, 0, resumed.stderr);
+  assert.equal(fx.model.prompts.length, 4);
+  for (const file of [
+    "weekly/2026-W42.md",
+    "weekly/2026-W43.md",
+    "monthly/2026-10.md",
+  ])
+    assert.ok(existsSync(join(fx.vault, file)), file);
+  assert.deepEqual(
+    [read(summary(fx, "2026-10-12")), read(summary(fx, "2026-10-19"))],
+    source,
+  );
 });
 
 void test("#341: transient failures use growing pauses and preserve day attempts", async (t) => {
@@ -3590,7 +3689,7 @@ for (const [scenario, usage, legacy] of [
 
 void test(
   "night clean: SIGKILL matrix at every durable day and CORE boundary",
-  { timeout: 180_000 },
+  { timeout: 20 * 60_000 },
   async (t) => {
     const answerA = A({
       new_cards: [newAurora],
@@ -4055,7 +4154,7 @@ void test("repair sweep: git timeout at a raised ceiling sends one alert across 
   writeFileSync(
     join(bin, "git"),
     `#!${process.execPath}
-const cp = require("node:child_process");
+import cp from "node:child_process";
 const args = process.argv.slice(2);
 if (args[0] === "status") setInterval(() => {}, 1000);
 else process.exit(cp.spawnSync("/usr/bin/git", args, { stdio: "inherit" }).status ?? 1);
@@ -4097,7 +4196,7 @@ globalThis.fetch = async (url, init) => {
     night: { gitTimeoutMs: number };
     language: string;
   };
-  assert.equal(saved.night.gitTimeoutMs, 24_000);
+  assert.equal(saved.night.gitTimeoutMs, 24_000, first.stderr);
   const messages = () =>
     read(sent)
       .trim()
