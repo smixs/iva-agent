@@ -30,19 +30,6 @@ function write(path: string, body: string, mode = 0o644) {
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, body, { mode });
 }
-function git(cwd: string, ...args: string[]) {
-  return execFileSync("git", args, {
-    cwd,
-    encoding: "utf8",
-    env: {
-      ...process.env,
-      GIT_AUTHOR_NAME: "fixture",
-      GIT_AUTHOR_EMAIL: "fixture@example.invalid",
-      GIT_COMMITTER_NAME: "fixture",
-      GIT_COMMITTER_EMAIL: "fixture@example.invalid",
-    },
-  }).trim();
-}
 function run(command: string, args: string[], env: NodeJS.ProcessEnv) {
   return new Promise<{ code: number | null; out: string }>(
     (resolve, reject) => {
@@ -74,6 +61,35 @@ await test(
     const home = join(root, "iva");
     const bin = join(root, "bin");
     const state = join(root, "units.json");
+    // Strip command-scope config and repository overrides as well as user config.
+    // The updater's own git children inherit the same isolated environment.
+    const gitEnv: NodeJS.ProcessEnv = {
+      ...Object.fromEntries(
+        Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_")),
+      ),
+      HOME: root,
+      GIT_CONFIG_NOSYSTEM: "1",
+      GIT_CONFIG_GLOBAL: "/dev/null",
+      GIT_CONFIG_COUNT: "0",
+      GIT_AUTHOR_NAME: "fixture",
+      GIT_AUTHOR_EMAIL: "fixture@example.invalid",
+      GIT_COMMITTER_NAME: "fixture",
+      GIT_COMMITTER_EMAIL: "fixture@example.invalid",
+    };
+    const git = (cwd: string, ...args: string[]) =>
+      execFileSync(
+        "git",
+        [
+          "-c",
+          "user.name=fixture",
+          "-c",
+          "user.email=fixture@example.invalid",
+          "-c",
+          "commit.gpgsign=false",
+          ...args,
+        ],
+        { cwd, env: gitEnv, encoding: "utf8" },
+      ).trim();
     mkdirSync(bin);
     cpSync(process.execPath, join(bin, "node"));
     mkdirSync(source);
@@ -142,7 +158,7 @@ await test(
           "deploy",
           "package.json",
         ],
-        { cwd: ROOT, maxBuffer: 32 * 1024 * 1024 },
+        { cwd: ROOT, env: gitEnv, maxBuffer: 32 * 1024 * 1024 },
       ),
     });
     symlinkSync(join(ROOT, "node_modules"), join(oldDir, "node_modules"));
@@ -163,6 +179,20 @@ await test(
       '{"kept":true}\n',
     );
     write(join(home, "data/sentinel"), "owner data survives\n");
+    const card = "---\ntype: note\n---\nOWNER_CARD_MUST_SURVIVE\n";
+    write(join(home, "vault/cards/smoke-owner.md"), card);
+    const assertState = () => {
+      // Read through current, as a Version using the default relative Vault does.
+      // Reading home/vault alone would miss a broken link in the active Version.
+      assert.equal(
+        readFileSync(join(home, "current/vault/cards/smoke-owner.md"), "utf8"),
+        card,
+      );
+      assert.equal(
+        readFileSync(join(home, "current/data/sentinel"), "utf8"),
+        "owner data survives\n",
+      );
+    };
     write(
       state,
       JSON.stringify({
@@ -199,8 +229,8 @@ const result=await fixtureRunner()("npm",args,dir); console.log(result.output); 
       0o755,
     );
     const env = {
-      ...process.env,
-      HOME: root,
+      ...gitEnv,
+      NODE_DISABLE_COMPILE_CACHE: "1",
       PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin`,
       IVA_KILL_STATE: state,
       IVA_TRACE: join(root, "trace.log"),
@@ -226,6 +256,7 @@ const result=await fixtureRunner()("npm",args,dir); console.log(result.output); 
     assert.equal(again.code, 0, again.out);
     assert.equal(store.currentName(), name);
     assert.equal(store.settled(), name);
+    assertState();
     assert.ok(
       ["settled", "done"].includes(
         readUpdateRun(store.layout.data)?.phase ?? "",
@@ -249,13 +280,31 @@ const result=await fixtureRunner()("npm",args,dir); console.log(result.output); 
     assert.equal(rollback.code, 0, rollback.out);
     assert.equal(store.currentName(), old);
     assert.equal(store.settled(), old);
-    assert.equal(
-      readFileSync(join(home, "data/sentinel"), "utf8"),
-      "owner data survives\n",
-    );
+    assertState();
     passed = true;
   },
 );
+
+await test("S-update-cycle: a freshly staged Version reads the installation Vault after settled", (t) => {
+  const home = mkdtempSync(join(tmpdir(), "iva-smoke-vault-"));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  const card = "OWNER_CARD_MUST_SURVIVE\n";
+  write(join(home, "vault/cards/smoke-owner.md"), card);
+  const store = createVersionStore(home);
+  const name = versionName("0.5.13", "a".repeat(40));
+  // The shipped old CLI also links state before handoff, which can conceal
+  // a missing link in the candidate. Exercise a fresh Version independently.
+  store.linkState(store.stage(name));
+  store.complete(name);
+  store.activate(name);
+  store.settle(name);
+  assert.equal(store.currentName(), name);
+  assert.equal(store.settled(), name);
+  assert.equal(
+    readFileSync(join(home, "current/vault/cards/smoke-owner.md"), "utf8"),
+    card,
+  );
+});
 
 await test(
   "S-update-cycle-pin: FinalOnlyWhenPinned keeps UpdateJob pending before active.json",

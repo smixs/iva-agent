@@ -211,6 +211,7 @@ function environment(
     TMPDIR: join(root, "tmp"),
     TZ: "UTC",
     NODE_ENV: "production",
+    NODE_DISABLE_COMPILE_CACHE: "1",
     npm_config_offline: "true",
     npm_config_audit: "false",
     npm_config_fund: "false",
