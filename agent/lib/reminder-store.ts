@@ -93,6 +93,7 @@ async function sweepReminderData(
   file: string,
   rows: Reminder[],
 ): Promise<void> {
+  if (file !== reminderFile()) return;
   const entries = readReminderContents(dirname(file));
   const ids = new Set(rows.map((row) => row.id));
   const kept = Object.fromEntries(
@@ -635,18 +636,20 @@ export async function add(
     if (rows.some((candidate) => candidate.id === row.id))
       fail(file, `duplicate reminder id ${JSON.stringify(row.id)}`);
     const reminder = assertReminder(file, row);
-    const contents = readReminderContents(dirname(file));
-    if (input.content === "text") {
-      await saveJsonAtomic(
-        reminderContentFile(dirname(file)),
-        { ...contents, [reminder.id]: "text" },
-        { mode: 0o600 },
-      );
-    } else if (Object.hasOwn(contents, reminder.id)) {
-      delete contents[reminder.id];
-      await saveJsonAtomic(reminderContentFile(dirname(file)), contents, {
-        mode: 0o600,
-      });
+    if (file === reminderFile()) {
+      const contents = readReminderContents(dirname(file));
+      if (input.content === "text") {
+        await saveJsonAtomic(
+          reminderContentFile(dirname(file)),
+          { ...contents, [reminder.id]: "text" },
+          { mode: 0o600 },
+        );
+      } else if (Object.hasOwn(contents, reminder.id)) {
+        delete contents[reminder.id];
+        await saveJsonAtomic(reminderContentFile(dirname(file)), contents, {
+          mode: 0o600,
+        });
+      }
     }
     rows.push(reminder);
     await saveTable(file, rows);

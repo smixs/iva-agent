@@ -554,3 +554,23 @@ test(`Reminder content roundtrip: rows keep legacy keys, text and kind survive (
     { seed: SEED, numRuns: 30 },
   );
 });
+
+test("Reminder content: removing or sweeping commands preserves reminder kinds", async () => {
+  await accepted("text");
+  const commandFile = join(
+    process.env.ASSISTANT_DATA_DIR!,
+    "schedule-commands.json",
+  );
+  await add(
+    {
+      id: "c-example",
+      text: "echo fixture",
+      schedule: { kind: "at", atMs: NOW },
+    },
+    { file: commandFile },
+  );
+  await remove("c-example", commandFile);
+  assert.deepEqual(readReminderContents(), { "r-f1": "text" });
+  await sweepFired(NOW, 0, commandFile);
+  assert.deepEqual(readReminderContents(), { "r-f1": "text" });
+});
