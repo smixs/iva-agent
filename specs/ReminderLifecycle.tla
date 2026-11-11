@@ -4,7 +4,10 @@ EXTENDS Naturals
 \* AcceptedVisibleOutcome: принятое напоминание с адресатом при восстанавливающемся
 \* транспорте получает текст в чате либо явный отказ; только явный /stop владельца
 \* закрывает отменённый ход без текста. Сброс разговора сохраняет доставку текста.
-\* TextNeverRunsTurn: текст-напоминание не запускает ход.
+\* TextNeverRunsTurn: текст с сохранённым видом не запускает ход.
+\* Content lives in data/reminder-content.json beside the unchanged schema-2 row.
+\* A missing entry means task, including after a crash or loss of the content file.
+\* LoseContent preserves AcceptedVisibleOutcome and OneAttemptPerCapture.
 \* ResetRetainsDelivery: /new не закрывает ход как явный /stop.
 \* Mature denotes the exact second of atMs inside a minute, not the next minute.
 \* TickDue is admission on the free second dispatcher; the <=5s implementation bound
@@ -48,15 +51,15 @@ Firings == 1..2
 Dues == 1..2
 Slots == 1..2
 
-VARIABLES agent, tick, matured, dueAt, status, firing, delivered, error, expired,
+VARIABLES content, agent, tick, matured, dueAt, status, firing, delivered, error, expired,
           child, handler, sender, tracked, alertFact, crashes, faults,
           texts, lostText, alerts, misses, reasons, captures, overdue, falseAlert, dropped, lateCapture
 row == <<status, dueAt, firing, delivered, error, expired>>
 ghost == <<texts, lostText, alerts, misses, reasons, captures, overdue, falseAlert, dropped, lateCapture>>
-vars == <<agent, tick, matured, row, child, handler, sender, tracked, alertFact, crashes,
+vars == <<content, agent, tick, matured, row, child, handler, sender, tracked, alertFact, crashes,
           faults, ghost>>
 
-Init == /\ agent = "up" /\ tick = "idle" /\ matured = 0 /\ crashes = 0 /\ faults = 0
+Init == /\ content = Content /\ agent = "up" /\ tick = "idle" /\ matured = 0 /\ crashes = 0 /\ faults = 0
         /\ status = "pending" /\ dueAt = 1 /\ firing = 0
         /\ delivered = "null" /\ error = "none" /\ expired = FALSE
         /\ child = [f \in Firings |-> "none"] /\ handler = [f \in Firings |-> FALSE]
@@ -155,7 +158,7 @@ Tick == TickStart \/ TickDue \/ TickSweep \/ TickClose \/ TickAlert
 
 \* ---- the fire child ----
 Spawn(f) == /\ agent = "up" /\ handler[f] /\ child[f] = "none"
-            /\ child' = [child EXCEPT ![f] = IF Content = "text" THEN
+            /\ child' = [child EXCEPT ![f] = IF content = "text" THEN
                        (IF Fault = "textturn" THEN "text-turn" ELSE "text") ELSE "turn"]
             /\ UNCHANGED <<agent, tick, matured, row, handler, sender, tracked, alertFact,
                            crashes, faults, ghost>>
@@ -308,18 +311,23 @@ Restart == /\ agent = "down" /\ agent' = "up"
 ChildStep(f) == Spawn(f) \/ ChildSend(f) \/ ChildAnswer(f) \/ ChildRecord(f) \/ HandlerFill(f)
 SenderStep(f, k) == AlertCheck(f, k) \/ AlertAccept(f, k) \/ AlertAnswer(f, k) \/ AlertRecord(f, k)
                     \/ AlertResume(f, k)
-Next == \/ Mature \/ Expire \/ Tick \/ Crash \/ Restart
+LifecycleNext == \/ Mature \/ Expire \/ Tick \/ Crash \/ Restart
         \/ \E f \in Firings :
              \/ ChildStep(f) \/ ChildAnswerLost(f) \/ ChildRefused(f) \/ ChildSilent(f)
              \/ ChildDie(f) \/ ChildReset(f) \/ ChildStop(f) \/ ChildNoRoute(f)
              \/ \E k \in Slots : SenderStep(f, k) \/ AlertAnswerLost(f, k) \/ AlertWait(f, k)
                                  \/ AlertRefused(f, k) \/ AlertDie(f, k)
+\* Losing the auxiliary entry never changes the row, the firing or its send count.
+LoseContent == /\ content = "text" /\ content' = "task"
+               /\ UNCHANGED <<agent, tick, matured, row, child, handler, sender, tracked,
+                              alertFact, crashes, faults, ghost>>
+Next == LoseContent \/ (LifecycleNext /\ UNCHANGED content)
 Spec == Init /\ [][Next]_vars
 \* After the last crash the agent comes back, the tick keeps ticking, the clock moves, and
 \* the children finish: the turn has its silence watchdog, Telegram answers in the end.
-FairSpec == /\ Spec /\ WF_vars(Restart) /\ WF_vars(Tick) /\ WF_vars(Expire) /\ WF_vars(Mature)
-            /\ \A f \in Firings : /\ WF_vars(ChildStep(f))
-                                  /\ \A k \in Slots : WF_vars(SenderStep(f, k))
+FairSpec == /\ Spec /\ WF_vars(Restart /\ UNCHANGED content) /\ WF_vars(Tick /\ UNCHANGED content) /\ WF_vars(Expire /\ UNCHANGED content) /\ WF_vars(Mature /\ UNCHANGED content)
+            /\ \A f \in Firings : /\ WF_vars(ChildStep(f) /\ UNCHANGED content)
+                                  /\ \A k \in Slots : WF_vars(SenderStep(f, k) /\ UNCHANGED content)
 
 \* 5. One capture, one delivery attempt: the text of a firing reaches the chat once, and again
 \*    only when Telegram accepted it and the answer was lost (at least once at the transport).
