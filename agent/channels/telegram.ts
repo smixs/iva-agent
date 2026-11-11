@@ -20,6 +20,7 @@ import {
 // внутри него outbound-Gate, выбор rich/HTML, нарезка на чанки и plain-фолбэк.
 import {
   noticeSender,
+  redactNotice,
   sendThroughOutbox,
   type NoticeSend,
   type OutboxAck,
@@ -51,6 +52,7 @@ import {
   closeTelegramDraftChat,
   startTelegramAcceptedTyping,
   closeTelegramAcceptedTyping,
+  draftText,
 } from "../lib/telegram-draft.ts";
 import { notifyTelegramFailure } from "../lib/telegram-failure-notice.js";
 import { rememberTurnQuestion, turnQuestion } from "../lib/turn-question.js";
@@ -647,13 +649,32 @@ const telegram = telegramChannel({
     async "message.completed"(data, channel, ctx) {
       if (!ctx?.session) return;
       if (data.finishReason === "tool-calls") {
-        telegramDraftTurn(
+        const stream = telegramDraftTurn(
           channel.telegram,
           ctx.session.id,
           data.turnId,
           channel.state.chatType === "private" &&
             channel.telegram.messageThreadId === undefined,
-        )?.completeStep(data.stepIndex, data.message ?? "");
+        );
+        const { text, silent } = parseTelegramDelivery(data.message ?? "");
+        // Redact the complete text before the draft renderer cuts its tail.
+        const progress = draftText(redactNotice(text), true);
+        stream?.completeStep(data.stepIndex, data.message ?? "");
+        if (stream?.claimProgress(data.stepIndex, progress)) {
+          await traceOutbox(
+            { turn: data.turnId, session: ctx.session.id, source: "telegram" },
+            progress,
+            () =>
+              sendThroughOutbox(
+                progress,
+                outboxTransport(
+                  channel.telegram,
+                  TELEGRAM_RICH_REPLIES,
+                  silent,
+                ),
+              ),
+          );
+        }
         return;
       }
       await closeTelegramDraftChat(

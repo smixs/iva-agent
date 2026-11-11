@@ -111,7 +111,13 @@ async function readBody(req: IncomingMessage): Promise<string> {
 
 export type MockStep =
   | { kind: "text"; text: string; waitFor?: Promise<void> }
-  | { kind: "tool"; name: string; arguments: string; id?: string }
+  | {
+      kind: "tool";
+      name: string;
+      arguments: string;
+      id?: string;
+      text?: string;
+    }
   | { kind: "overloaded"; times?: number }
   | { kind: "empty" }
   | { kind: "disconnect" };
@@ -177,7 +183,13 @@ export async function startMockOpenAiServer(
       return;
     }
     const text =
-      step?.kind === "text" ? step.text : step ? "" : chooseResponse(body);
+      step?.kind === "text"
+        ? step.text
+        : step?.kind === "tool"
+          ? (step.text ?? "")
+          : step
+            ? ""
+            : chooseResponse(body);
     const tool =
       step?.kind === "tool"
         ? {

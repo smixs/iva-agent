@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-floating-promises -- Node's test runner owns registrations. */
 // Проводка канала: текст шага модели перед вызовом инструментов (finishReason "tool-calls")
-// правит статус хода на месте, ответ модели уходит отдельным сообщением, как раньше, а ход
-// без промежуточного текста зовёт Bot API байт в байт прежним образом. Двойник — fetch:
+// обновляет draft и один раз уходит обычным сообщением; финальный ответ идёт отдельно.
+// Ход без промежуточного текста сохраняет прежние вызовы Bot API. Двойник — fetch:
 // здесь видно тело запроса таким, каким его получает Telegram.
 import "./lib/ts-esm-hooks.ts";
 import assert from "node:assert/strict";
@@ -523,7 +523,7 @@ function startTurn(chatId: string, sessionId: string) {
   });
 }
 
-test("channel wire streams a draft, gates secrets once per turn, closes before separate Outbox reply", async () => {
+test("channel wire redacts draft and one progress message, closes before separate Outbox reply", async () => {
   apiCalls.length = 0;
   telegramReply = () => null;
   setChatStatus("9:", {
@@ -567,6 +567,22 @@ test("channel wire streams a draft, gates secrets once per turn, closes before s
     },
     pair,
   );
+  const progressCalls = () =>
+    apiCalls.filter((call) => call.method === "sendMessage");
+  assert.equal(progressCalls().length, 1);
+  assert.match(String(progressCalls()[0].body?.text), /hello.*REDACTED/u);
+  assert.doesNotMatch(String(progressCalls()[0].body?.text), /sk-ant/u);
+  await emit(
+    "message.completed",
+    {
+      turnId: "turn_1",
+      stepIndex: 0,
+      message: "Repeated progress " + key,
+      finishReason: "tool-calls",
+    },
+    pair,
+  );
+  assert.equal(progressCalls().length, 1);
   await emit(
     "actions.requested",
     {
@@ -593,7 +609,16 @@ test("channel wire streams a draft, gates secrets once per turn, closes before s
       e.turn === "turn_1" &&
       e.session === "wire-1",
   );
-  assert.equal(gates.length, 1);
+  assert.equal(
+    gates.length,
+    2,
+    "one flagged draft event and one clean Outbox delivery",
+  );
+  assert.equal(
+    gates.filter((event) => (event.data as { clean: boolean }).clean === false)
+      .length,
+    1,
+  );
   await emit(
     "action.result",
     { turnId: "turn_1", stepIndex: 0, result: { callId: "a" } },

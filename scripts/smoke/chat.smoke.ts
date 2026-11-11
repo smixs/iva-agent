@@ -2,14 +2,137 @@ import assert from "node:assert/strict";
 import { readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
+import { once } from "node:events";
 import {
   createHarness,
   kill,
   message,
   OWNER,
+  NOW,
   smokeParameters,
   waitFor,
 } from "./harness.ts";
+
+void test(
+  "S-chat-notice-reply: own watchdog quote and immediate progress before tools finish",
+  { timeout: 120_000 },
+  async (t) => {
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    t.after(() => release());
+    const h = await createHarness(t, [
+      {
+        kind: "tool",
+        name: "bash",
+        arguments: '{"command":"true"}',
+        text: "<!-- iva:silent -->\nI am checking the failed schedule.",
+      },
+      {
+        kind: "tool",
+        name: "bash",
+        arguments: '{"command":"true"}',
+        text: "More details about the schedule.",
+      },
+      { kind: "text", text: "WATCHDOG_EXPLAINED", waitFor: held },
+      { kind: "text", text: "FOREIGN_QUOTE_EXPLAINED" },
+    ]);
+    await writeFile(
+      join(h.app, "data/jobs.json"),
+      JSON.stringify([
+        {
+          name: "memory-night",
+          startedAt: Date.parse(NOW) - 60_000,
+          finishedAt: Date.parse(NOW) - 59_000,
+          ok: false,
+          error: "overloaded",
+          exitCode: 1,
+          tail: "",
+          acked: false,
+          wake: null,
+        },
+      ]),
+    );
+    const watchdog = h.start(["scripts/jobs/watchdog.ts"]);
+    assert.deepEqual(await once(watchdog, "exit"), [0, null]);
+    const sends = () =>
+      h.telegram.requests.filter((r) => r.method === "sendMessage");
+    assert.equal(sends().length, 1);
+    const notice = String(sends()[0].body.text);
+    assert.match(notice, /scheduled jobs failed/u);
+    assert.match(
+      await readFile(join(h.app, "vault/daily/2026-06-15.md"), "utf8"),
+      /\[assistant:jobs-watchdog\]/u,
+    );
+    // The fake Telegram server assigned id 101 to the real watchdog send.
+    const update = message(401, "what is this?");
+    h.telegram.rejectNext("sendRichMessageDraft", 400);
+    const startedAt = performance.now();
+    h.telegram.push({
+      ...update,
+      message: {
+        ...update.message,
+        reply_to_message: {
+          message_id: 101,
+          from: { id: 987654321, is_bot: true, first_name: "Smoke" },
+          chat: update.message.chat,
+          text: notice,
+        },
+      },
+    });
+    await waitFor(() =>
+      sends().some((r) => r.body.text === "I am checking the failed schedule."),
+    );
+    const firstMessageMs = performance.now() - startedAt;
+    assert.ok(firstMessageMs < 60_000, `first message: ${firstMessageMs}ms`);
+    // Keep the final provider response held: drafts and final-only delivery cannot pass.
+    await waitFor(() => h.provider.requests.length === 3);
+    const wire = h.provider.requests[0] as { messages: { content: unknown }[] };
+    const content = wire.messages
+      .map((m) =>
+        typeof m.content === "string" ? m.content : JSON.stringify(m.content),
+      )
+      .join("\n");
+    assert.ok(content.includes(notice));
+    assert.match(content, /"source":"assistant"/u);
+    assert.match(content, /"untrusted":false/u);
+    assert.doesNotMatch(content, /"untrusted":true/u);
+    assert.equal(
+      sends().length,
+      2,
+      "one watchdog and one progress despite two intermediate texts",
+    );
+    assert.equal(String(sends()[1].chat), String(OWNER));
+    assert.equal(sends()[1].body.disable_notification, true);
+    release();
+    await waitFor(() =>
+      sends().some((r) => r.body.text === "WATCHDOG_EXPLAINED"),
+    );
+    await settledChat(h);
+    const foreign = message(402, "explain this foreign quote");
+    h.telegram.push({
+      ...foreign,
+      message: {
+        ...foreign.message,
+        reply_to_message: {
+          message_id: 42,
+          from: { id: 999, is_bot: true, username: "smoke_bot" },
+          text: "FOREIGN_QUOTE_MARKER",
+        },
+      },
+    });
+    await waitFor(() =>
+      sends().some((r) => r.body.text === "FOREIGN_QUOTE_EXPLAINED"),
+    );
+    assert.match(JSON.stringify(h.provider.requests[3]), /untrusted\\":true/u);
+    t.diagnostic(
+      `watchdog reply first durable message: ${firstMessageMs.toFixed(0)}ms (threshold 60000ms)`,
+    );
+    await h.saveEvidence("notice-reply");
+    h.pass();
+  },
+);
 
 void test(
   "S-chat-reply: one reply and one provider request despite repeated updates",

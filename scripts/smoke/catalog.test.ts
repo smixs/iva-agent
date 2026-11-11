@@ -64,7 +64,7 @@ void test("smoke scenario ids and executable todos match the testing table", asy
     "duplicate table id",
   );
   assert.equal(new Set(names).size, names.length, "duplicate test name");
-  assert.equal(documented.length, 10);
+  assert.equal(documented.length, 11);
   assert.deepEqual(
     [...implemented].filter((id) => id !== "S-update-cycle-pin").sort(),
     documented.sort(),

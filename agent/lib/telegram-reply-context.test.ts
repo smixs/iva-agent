@@ -37,6 +37,7 @@ interface ParsedReply {
   text: string;
   truncated: boolean;
   untrusted: boolean;
+  source?: "assistant";
   media?: ParsedReplyMedia;
 }
 
@@ -213,7 +214,7 @@ await test("sanitized author and filename preserve bounded Unicode truncation", 
   assert.equal(parsed.media.filename.endsWith("\ud83d"), false);
 });
 
-await test("bot-authored HITL reply remains explicitly untrusted", () => {
+await test("a different bot's HITL reply remains explicitly untrusted", () => {
   const parsed = parseTelegramReplyContext({
     reply_to_message: reply({
       from: { id: 777, is_bot: true, username: "my_bot" },
@@ -227,6 +228,47 @@ await test("bot-authored HITL reply remains explicitly untrusted", () => {
     isBot: true,
   });
   assert.equal(parsed.untrusted, true);
+});
+
+await test("only this bot's original message is assistant history", () => {
+  const quoted = {
+    reply_to_message: reply({
+      from: { id: 777, is_bot: true, username: "my_bot" },
+      text: "scheduled jobs failed; run: iva doctor",
+    }),
+  };
+  const own = buildReplyResult(
+    quoted,
+    sanitizeInbound,
+    hasInboundAttackSignal,
+    "777",
+  );
+  assert.ok(own);
+  const ownItem = JSON.parse(own.item) as ParsedReply;
+  assert.deepEqual(ownItem.source, "assistant");
+  assert.equal(ownItem.untrusted, false);
+  assert.equal(own.flagged, false);
+  for (const [botId, overrides] of [
+    [undefined, {}],
+    ["778", {}],
+    ["777", { from: { id: 777, is_bot: false } }],
+    ["777", { from: { id: "777", is_bot: true } }],
+    ["777", { sender_chat: { id: -100, type: "channel" } }],
+    ["777", { forward_origin: { type: "user" } }],
+    ["777", { forward_from: { id: 999 } }],
+    ["777", { forward_from_chat: { id: -100 } }],
+  ] as const) {
+    const result = buildReplyResult(
+      { reply_to_message: { ...quoted.reply_to_message, ...overrides } },
+      sanitizeInbound,
+      hasInboundAttackSignal,
+      botId,
+    );
+    assert.ok(result);
+    const item = JSON.parse(result.item) as ParsedReply;
+    assert.equal(item.untrusted, true);
+    assert.equal(item.source, undefined);
+  }
 });
 
 await test("malformed and empty raw replies fail closed while valid text survives bad media", () => {
