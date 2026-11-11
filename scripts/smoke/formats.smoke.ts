@@ -65,7 +65,8 @@ await test("P-formats: every tagged writer survives read-write-read, supported u
   await fc.assert(
     fc.asyncProperty(
       fc.string({ maxLength: 80 }).map((value) => "smoke " + value),
-      fc.jsonValue(),
+      // JSON text normalizes -0, which jsonValue() can generate at any depth.
+      fc.json().map((value): unknown => JSON.parse(value)),
       fc.integer({ min: 1, max: 1000 }),
       async (text, unknown, count) => {
         for (const sample of corpus) {
