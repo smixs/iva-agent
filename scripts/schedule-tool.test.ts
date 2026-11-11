@@ -30,7 +30,7 @@ const answer = z.object({
   schedules: z.array(z.object({ action_kind: z.string() })).optional(),
 });
 const call = async (input: Parameters<typeof schedule.execute>[0]) =>
-  answer.parse(await schedule.execute(input, ctx));
+  answer.parse(await schedule.execute({ content: "task", ...input }, ctx));
 after(() => rmSync(dir, { recursive: true, force: true }));
 beforeEach(() => {
   rmSync(dir, { recursive: true, force: true });
@@ -39,6 +39,7 @@ beforeEach(() => {
 test("prompt uses the old rows, move preserves id and payload, list includes both kinds", async () => {
   const added = await call({
     action: "add",
+    content: "task",
     text: "find the news",
     at: "in 30m",
   });
@@ -54,6 +55,7 @@ test("prompt uses the old rows, move preserves id and payload, list includes bot
   assert.equal(moved.schedule.text, "find the news");
   const command = await call({
     action: "add",
+    content: "task",
     command: "printf done",
     cron: "0 6 * * *",
   });
@@ -99,6 +101,7 @@ test("time and daily cron resolve in the owner zone with a replayable seed", asy
         const at = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
         const command = await call({
           action: "add",
+          content: "task",
           command: "true",
           cron: `${minute} ${hour} * * *`,
         });
@@ -129,6 +132,7 @@ for (const action of ["run_now", "move"] as const)
       t.mock.timers.enable({ apis: ["Date"], now });
       const added = await call({
         action: "add",
+        content: "task",
         text: "report",
         ...(recurring ? { cron: "0 9 * * *" } : { at: "in 1h" }),
       });
@@ -163,6 +167,7 @@ test("command timeouts survive add/move/list and invalid values return text (see
     fc.asyncProperty(fc.integer({ min: 1, max: 60 }), async (minutes) => {
       const added = await call({
         action: "add",
+        content: "task",
         command: "true",
         at: "in 1m",
         timeout_minutes: minutes,
@@ -197,6 +202,7 @@ test("command timeouts survive add/move/list and invalid values return text (see
   for (const timeout_minutes of [0, 61, 1.5, NaN, Infinity]) {
     const result = await call({
       action: "add",
+      content: "task",
       command: "true",
       at: "in 1m",
       timeout_minutes,
@@ -208,6 +214,7 @@ test("command timeouts survive add/move/list and invalid values return text (see
     (
       await call({
         action: "add",
+        content: "task",
         text: "prompt",
         at: "in 1m",
         timeout_minutes: 20,

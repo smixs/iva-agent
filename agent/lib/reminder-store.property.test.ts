@@ -238,9 +238,8 @@ test(`P3: мусорные вызовы не портят таблицу (seed $
           typeof parsed === "object" && parsed !== null,
           "таблица сломана",
         );
-        assert.equal(
-          (parsed as { schemaVersion: number }).schemaVersion,
-          2,
+        assert.ok(
+          [2, 3].includes((parsed as { schemaVersion: number }).schemaVersion),
           "версия схемы потеряна",
         );
         assert.ok(

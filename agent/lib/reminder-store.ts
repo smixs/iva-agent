@@ -32,7 +32,7 @@ import { listChatStatuses, RUN_STALE_MS } from "./run-status.ts";
 import { isRecord, isSafeInteger } from "../../packages/guards/index.ts";
 import { alertDue } from "../../packages/alert-state/index.ts";
 
-export const REMINDER_SCHEMA_VERSION = 2;
+export const REMINDER_SCHEMA_VERSION = 3;
 /** Сколько держим сработавшую разовую строку: столько владелец видит факт в remind list. */
 export const REMINDER_FIRED_KEEP_MS = 24 * 60 * 60_000;
 
@@ -61,9 +61,16 @@ export interface ReminderChat {
   threadId: string | null;
 }
 
+/** Content decides whether the text is sent directly or executed as a task. */
+export type ReminderContent = "text" | "task";
+export const reminderContent = (row: {
+  content?: ReminderContent;
+}): ReminderContent => row.content ?? "task";
+
 export interface Reminder {
   id: string;
   text: string;
+  content?: ReminderContent;
   /** null - строка старой схемы или запрос не из Telegram: тогда чат владельца из настроек. */
   chat: ReminderChat | null;
   schedule: ReminderSchedule;
@@ -84,12 +91,15 @@ export interface Reminder {
    * его не несут вовсе.
    */
   sessionId?: string | null;
+  /** Session cancelled by a conversation reset; scoped to this firing. */
+  resetSessionId?: string;
   timeout_minutes?: number;
   running_timeout_minutes?: number;
 }
 export type ReminderInput = {
   id: string;
   text: string;
+  content?: ReminderContent;
   chat?: ReminderChat | null;
   timeout_minutes?: number;
   schedule: unknown;
@@ -100,6 +110,8 @@ export type ReminderInput = {
 const ROW_KEYS = [
   "id",
   "text",
+  "content",
+  "resetSessionId",
   "chat",
   "schedule",
   "nextRunAtMs",
@@ -353,9 +365,18 @@ function assertReminder(file: string, value: unknown): Reminder {
       `error must be null or a string, got ${JSON.stringify(error)}`,
     );
 
+  const content = z.enum(["text", "task"]).optional().safeParse(value.content);
+  if (!content.success)
+    badReminder(file, idLabel, "content must be text or task");
+  if (value.resetSessionId !== undefined)
+    assertSessionId(file, idLabel, value.resetSessionId);
   return {
     id,
     text: value.text,
+    ...(content.data === undefined ? {} : { content: content.data }),
+    ...(typeof value.resetSessionId === "string"
+      ? { resetSessionId: value.resetSessionId }
+      : {}),
     // Строки до этого поля чата не несут: им остаётся чат владельца из настроек.
     chat: assertChat(file, idLabel, value.chat),
     schedule: assertSchedule(file, idLabel, value.schedule),
@@ -482,7 +503,10 @@ export function parseReminderTable(
 async function saveTable(file: string, rows: Reminder[]): Promise<void> {
   await saveJsonAtomic(
     file,
-    { schemaVersion: REMINDER_SCHEMA_VERSION, rows },
+    {
+      schemaVersion: file === commandFile() ? 2 : REMINDER_SCHEMA_VERSION,
+      rows,
+    },
     { mode: 0o600 },
   );
 }
@@ -538,6 +562,7 @@ function buildReminder(
     if (
       key !== "id" &&
       key !== "text" &&
+      key !== "content" &&
       key !== "chat" &&
       key !== "schedule" &&
       key !== "nextRunAtMs" &&
@@ -550,6 +575,7 @@ function buildReminder(
   return {
     id: input.id,
     text: input.text,
+    ...(input.content === undefined ? {} : { content: input.content }),
     chat: assertChat(file, idLabel, input.chat ?? null),
     schedule,
     nextRunAtMs: assertFirstRun(file, idLabel, schedule, input.nextRunAtMs),
@@ -666,6 +692,7 @@ export async function fireDue(
       row.delivered = null;
       row.error = null;
       row.sessionId = null;
+      delete row.resetSessionId;
       if (row.schedule.kind === "cron") {
         try {
           row.nextRunAtMs = nextCronRunMs(
@@ -770,6 +797,22 @@ export async function recordTurnSession(
       row.sessionId = session.sessionId;
     },
   );
+}
+
+/** Record the cause before eve cancels the session: the fire child reads it after cancellation.
+ * The row lock and session identity keep a later firing or another chat out of this write.
+ */
+export async function recordReminderReset(sessionId: string): Promise<void> {
+  const file = reminderFile();
+  await mutate(file, async () => {
+    const rows = await loadTable(file);
+    const own = rows.filter(
+      (row) => isOpen(row) && row.sessionId === sessionId,
+    );
+    if (own.length === 0) return;
+    for (const row of own) row.resetSessionId = sessionId;
+    await saveTable(file, rows);
+  });
 }
 
 /** Журнал отброшенного результата: по умолчанию в stdout, как у планировщика. */

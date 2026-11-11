@@ -16,6 +16,7 @@ import {
 /** Поля add в том виде, в каком их прислала модель. */
 export interface AddFields {
   readonly text?: string;
+  readonly content?: string;
   readonly at?: string;
   readonly cron?: string;
   readonly id?: string;
@@ -57,6 +58,7 @@ function addExample(
   kind: "at" | "cron",
   value: string,
   text: string | undefined,
+  content = "task",
 ): string {
   const sample =
     text === undefined
@@ -64,7 +66,7 @@ function addExample(
       : text.length <= ECHOED_TEXT_CHARS
         ? text
         : "<the same text>";
-  return `Example: ${JSON.stringify({ action: "add", text: sample, [kind]: value })}`;
+  return `Example: ${JSON.stringify({ action: "add", content, text: sample, [kind]: value })}`;
 }
 
 /** at, который не читается: образец даёт форму, время - пользователя. Формы перечисляет
@@ -107,10 +109,10 @@ function bothRefusal(
     "Leave the other field out of the call entirely: no empty string or placeholder.";
   const atIssue = atProblem(fields.at, nowMs, tz);
   if (atIssue !== null && cronProblem(fields.cron, nowMs, tz) === null)
-    return `${head} Keep cron for a repeating reminder. ${addExample("cron", fields.cron, fields.text)}`;
+    return `${head} Keep cron for a repeating reminder. ${addExample("cron", fields.cron, fields.text, fields.content)}`;
   const reason = atIssue === null ? "" : ` ${atIssue}. ${atNote(atIssue)}`;
   const value = atIssue === null ? fields.at : AT_EXAMPLE;
-  return `${head} Keep at for a one-time reminder.${reason} ${addExample("at", value, fields.text)}`;
+  return `${head} Keep at for a one-time reminder.${reason} ${addExample("at", value, fields.text, fields.content)}`;
 }
 
 /** Нет text: образец берёт пришедший срок, чтобы исправить ровно одно поле. */
@@ -119,7 +121,7 @@ function missingTextRefusal(fields: AddFields): string {
     fields.at === undefined && fields.cron !== undefined
       ? (["cron", fields.cron] as const)
       : (["at", fields.at ?? AT_EXAMPLE] as const);
-  return `add needs text: the instruction to yourself for the due time; got ${receivedFields(fields)}. ${addExample(kind, value, undefined)}`;
+  return `add needs text: the instruction to yourself for the due time; got ${receivedFields(fields)}. ${addExample(kind, value, undefined, fields.content)}`;
 }
 
 /** Отказ add до записи: нет text, нет расписания или пришли оба. null - поля годятся. */
@@ -133,7 +135,7 @@ export function addFieldsRefusal(
   if (at !== undefined && cron !== undefined)
     return bothRefusal({ ...fields, at, cron }, nowMs, tz);
   if (at === undefined && cron === undefined)
-    return `add needs a schedule: at (one-time) or cron (repeating, 5 fields like "${CRON_EXAMPLE}"); got ${receivedFields(fields)}. ${addExample("at", AT_EXAMPLE, text)}`;
+    return `add needs a schedule: at (one-time) or cron (repeating, 5 fields like "${CRON_EXAMPLE}"); got ${receivedFields(fields)}. ${addExample("at", AT_EXAMPLE, text, fields.content)}`;
   return null;
 }
 
@@ -144,9 +146,9 @@ function scheduleRefusal(
   fields: AddFields,
 ): string {
   if (kind === "at")
-    return `${error.message}. ${atNote(error.message)} ${addExample("at", AT_EXAMPLE, fields.text)}`;
+    return `${error.message}. ${atNote(error.message)} ${addExample("at", AT_EXAMPLE, fields.text, fields.content)}`;
   const reason = error.message.replace(/^(?:schedule|cron): /u, "");
-  return `cron ${shown(fields.cron ?? "")}: ${reason}; it takes 5 fields (minute hour day month weekday) in the user's zone, for a one-time reminder send at instead. ${addExample("cron", CRON_EXAMPLE, fields.text)}`;
+  return `cron ${shown(fields.cron ?? "")}: ${reason}; it takes 5 fields (minute hour day month weekday) in the user's zone, for a one-time reminder send at instead. ${addExample("cron", CRON_EXAMPLE, fields.text, fields.content)}`;
 }
 
 /**

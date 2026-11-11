@@ -2,6 +2,8 @@
 // диспетчер жив. Читает таблицу и пульс тика, ничего не решает сам.
 import {
   reminderPhase,
+  reminderContent,
+  type ReminderContent,
   type Reminder,
   type ReminderChat,
   type ReminderPhase,
@@ -12,6 +14,7 @@ import { formatZoned } from "./zoned-time.ts";
 export interface ReminderView {
   readonly id: string;
   readonly text: string;
+  readonly content: ReminderContent;
   readonly kind: "at" | "cron";
   readonly cron?: string;
   readonly next_run_at: string;
@@ -58,6 +61,7 @@ export function describeReminder(
   return {
     id: row.id,
     text: row.text,
+    content: reminderContent(row),
     kind: row.schedule.kind,
     ...(row.schedule.kind === "cron" ? { cron: row.schedule.expr } : {}),
     next_run_at: formatZoned(row.nextRunAtMs, tz),
@@ -76,7 +80,7 @@ export interface SchedulerStatus {
 }
 
 /**
- * Жив ли минутный диспетчер по пульсу (mtime data/reminders.tick). Пульса нет — диспетчер
+ * Жив ли секундный диспетчер по пульсу (mtime data/reminders.tick). Пульса нет — диспетчер
  * ещё не проходил; пульс старше трёх минут — не бьётся. Это не повод не ставить
  * напоминание, но и не повод молчать: наружу идёт warning, а не исключение.
  */

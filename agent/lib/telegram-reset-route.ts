@@ -1,5 +1,6 @@
 import type { RouteHandlerArgs } from "eve/channels";
 import { verifyTelegramRequest } from "eve/channels/telegram";
+import { recordReminderReset } from "./reminder-store.ts";
 import { isRecord } from "../../packages/guards/index.ts";
 
 export type TelegramSessionAddress = {
@@ -127,6 +128,9 @@ export async function handleTelegramResetRequest(
     target.sessionId === undefined &&
     key !== undefined &&
     (resetCompletedByChat.get(key) ?? 0) > accepted;
+  // Save the cause before reset emits turn.cancelled. A fire child is a separate
+  // process; a local flag or the later chat cleanup cannot preserve this distinction.
+  if (session && !resetSinceAccepted) await recordReminderReset(session.id);
   const result =
     session && !resetSinceAccepted
       ? await session.reset({ reason: "Telegram recovery command" })
