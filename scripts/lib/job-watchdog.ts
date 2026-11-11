@@ -6,7 +6,12 @@
 // openJobFailures, общий с Brief и ходом агента). Брони расписаний сторож не читает и не пишет.
 import { readFileSync } from "node:fs";
 import { writeFileAtomicSync } from "#lib/fs-atomic.ts";
-import { jobFactsFile, readFactsSync, type JobFact } from "#lib/job-facts.ts";
+import {
+  jobFactsFile,
+  latestFact,
+  readFactsSync,
+  type JobFact,
+} from "#lib/job-facts.ts";
 import {
   OPEN_FAILURES_WINDOW_MS,
   openJobFailures,
@@ -79,11 +84,83 @@ export function agentTurnSeen(
 export function watchdogMessage(
   failures: readonly OpenFailure[],
   tr: Translate,
+  facts: readonly JobFact[] = [],
 ): string {
-  // Число двоеточием, а не согласованием: «1 провалов» владелец читает как есть.
+  const names: Record<string, string> = {
+    "memory-night": tr("Night memory", "Ночная обработка памяти"),
+    "jobs-watchdog": tr("Schedule check", "Проверка расписаний"),
+    proactive: tr("Review and updates", "Обзор и новости"),
+  };
+  const lines = failures.map((failure) => {
+    const fact = latestFact(facts, failure.name);
+    const reason = watchdogReason(fact?.tail ?? "", failure.reason, tr);
+    const when = new Date(failure.at)
+      .toISOString()
+      .replace("T", " ")
+      .replace(/\.\d{3}Z$/u, " UTC");
+    return `${names[failure.name] ?? failure.name} — ${when}: ${reason}.`;
+  });
+  if (failures.some((failure) => failure.name === "memory-night"))
+    lines.push(
+      tr(
+        "Some memory summaries are still pending. Source entries are preserved; the next night will retry them automatically.",
+        "Часть сводок памяти ещё не готова. Исходные записи сохранены; следующая ночь автоматически повторит сборку.",
+      ),
+    );
+  lines.push(
+    tr(
+      "Iva did not wake to handle the failure. To check it now, run iva doctor and send Iva: check the failed schedules.",
+      "Ива не проснулась разобрать провал. Для проверки сейчас выполни iva doctor и напиши Иве: проверь упавшие расписания.",
+    ),
+  );
+  return lines.join("\n");
+}
+
+/** Translate known causes, keeping provider traces and raw payloads out of the notice. */
+function watchdogReason(tail: string, error: string, tr: Translate): string {
+  const causes: Array<[RegExp, string]> = [
+    [/overloaded/iu, tr("the model is overloaded", "модель перегружена")],
+    [
+      /invalid.*key|\b401\b|insufficient.quota/iu,
+      tr(
+        "the model rejected access or the account quota was exhausted",
+        "модель отклонила доступ или исчерпана квота аккаунта",
+      ),
+    ],
+    [
+      /\b429\b|rate.?limit/iu,
+      tr(
+        "the model request rate limit was reached",
+        "провайдер временно ограничил частоту запросов",
+      ),
+    ],
+    [
+      /terminated|ECONNRESET|fetch failed|connection.*lost|связь.*оборвалась/iu,
+      tr(
+        "the connection to the model was interrupted",
+        "связь с моделью оборвалась",
+      ),
+    ],
+    [
+      /\b5\d{2}\b/iu,
+      tr(
+        "the model service is temporarily unavailable",
+        "сервис модели временно недоступен",
+      ),
+    ],
+  ];
+  for (const line of `${error}\n${tail}`.split("\n").reverse()) {
+    const cause = causes.find(([pattern]) => pattern.test(line));
+    if (cause) return cause[1];
+  }
+  if (/deadline|ceiling/iu.test(`${error}\n${tail}`))
+    return tr(
+      "the night time or request limit was reached",
+      "достигнут предел времени или запросов ночи",
+    );
   return tr(
-    `scheduled jobs failed in the last 24h: ${failures.length}; the agent is not responding; run: iva doctor`,
-    `за сутки провалов расписаний: ${failures.length}; агент не отвечает; iva doctor`,
+    "the command ended with an error; details are in iva logs",
+    "команда завершилась с ошибкой; подробности в iva logs",
   );
 }
 
@@ -94,8 +171,8 @@ export function watchdogMessage(
  */
 export function watchdogUnreadableMessage(tr: Translate): string {
   return tr(
-    "the schedule facts table cannot be read, so the agent cannot wake with a fact; run: iva doctor",
-    "таблица фактов расписаний не читается, агент не может проснуться с фактом; iva doctor",
+    "Iva cannot read the schedule run history, so it cannot check the results or wake to handle a failure. Run iva doctor and ask Iva to check the schedule history.",
+    "Ива не смогла прочитать историю запусков расписаний: проверить итоги и проснуться для разбора провала сейчас невозможно. Выполни iva doctor и попроси Иву проверить историю расписаний.",
   );
 }
 
@@ -128,7 +205,7 @@ export function watchdogDecision({
   if (failures.length === 0) return null;
   const latestFailureAt = Math.max(...failures.map((failure) => failure.at));
   if (agentTurnSeen(facts, latestFailureAt)) return null;
-  return watchdogMessage(failures, tr);
+  return watchdogMessage(failures, tr, facts);
 }
 
 export interface WatchdogDeps {

@@ -308,6 +308,5 @@ await test("S-update-cycle: a freshly staged Version reads the installation Vaul
 
 await test(
   "S-update-cycle-pin: FinalOnlyWhenPinned keeps UpdateJob pending before active.json",
-  { todo: "ждёт починки R1" },
   assertPinnedFinal,
 );
