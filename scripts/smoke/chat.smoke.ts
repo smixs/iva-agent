@@ -46,10 +46,12 @@ void test(
     const cursor = h.telegram.requests.length;
     h.telegram.push(
       update,
-      message(101, update.message.text, update.message.message_id),
+      { ...update, message: { ...update.message, message_id: 101 } },
       update,
     );
-    // Next getUpdates proves the entire injected batch has passed through the real Bridge.
+    // Replay a completed update with stale message metadata. A new, unseen update_id
+    // is a new input, even if a fake server violates the requested offset.
+    // Next getUpdates proves the injected batch has passed through the real Bridge.
     await waitFor(
       () =>
         h.telegram.requests

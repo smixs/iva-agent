@@ -1,6 +1,5 @@
 import "../fixtures/no-host-anthropic.ts";
 import { spawn, type ChildProcess } from "node:child_process";
-import { randomInt } from "node:crypto";
 import { appendFileSync } from "node:fs";
 import {
   cp,
@@ -76,16 +75,8 @@ export function waitFor<T>(
   });
 }
 
-export function smokeParameters() {
-  const seed = Number(process.env.SMOKE_SEED ?? randomInt(0x7fffffff));
-  const numRuns = Number(process.env.SMOKE_RUNS ?? 30);
-  if (!Number.isInteger(seed) || !Number.isSafeInteger(numRuns) || numRuns < 1)
-    throw new Error(
-      "SMOKE_SEED must be an integer; SMOKE_RUNS must be positive",
-    );
-  console.log(`SMOKE_SEED=${seed} SMOKE_RUNS=${numRuns}`);
-  return { seed, numRuns };
-}
+import { smokeParameters } from "./pbt.ts";
+export { smokeParameters } from "./pbt.ts";
 
 export async function smokeProperty<Ts extends [unknown, ...unknown[]]>(
   property: fc.IAsyncProperty<Ts> | fc.IProperty<Ts>,
@@ -268,9 +259,19 @@ const suite = /^(smoke|smoke:full)$/u.test(
   process.env.npm_lifecycle_event ?? "",
 );
 const suiteParticipants = suite
-  ? (await readdir(new URL("./", import.meta.url))).filter((name) =>
-      name.endsWith(".smoke.ts"),
-    )
+  ? (
+      await Promise.all(
+        (await readdir(new URL("./", import.meta.url)))
+          .filter((name) => name.endsWith(".smoke.ts"))
+          .map(async (name) =>
+            (await readFile(new URL(name, import.meta.url), "utf8")).includes(
+              "./harness.ts",
+            )
+              ? name
+              : null,
+          ),
+      )
+    ).filter((name): name is string => name !== null)
   : [];
 await mkdir(doneDir, { recursive: true });
 await mkdir(workerDir, { recursive: true });

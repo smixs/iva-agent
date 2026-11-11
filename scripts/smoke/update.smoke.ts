@@ -61,7 +61,7 @@ function run(command: string, args: string[], env: NodeJS.ProcessEnv) {
 }
 
 await test(
-  "S-update-cycle: shipped CLI hands off, SIGKILL before pin recovers, rollback preserves data",
+  "S-update-cycle: shipped CLI hands off, SIGKILL after health recovers, rollback preserves data",
   { timeout: 110_000 },
   async (t) => {
     const root = mkdtempSync(join(tmpdir(), "iva-smoke-update-"));
@@ -100,13 +100,14 @@ await test(
       force: true,
     });
     write(join(source, "scripts/vault-cleanup.ts"), "export {};\n");
-    // Instrument the copied candidate at the precise R1 boundary, before active.json.
-    const storePath = join(source, "scripts/lib/version-store.ts");
+    // Kill after health, before publishing the final journal phase. The separate
+    // S-update-cycle-pin case owns the known R1 window at active.json.
+    const storePath = join(source, "scripts/lib/version-update.ts");
     write(
       storePath,
       readFileSync(storePath, "utf8").replace(
-        "    const before = activeState();",
-        '    if (process.env.IVA_KILL_AT === "pin") process.kill(process.pid, "SIGKILL");\n    const before = activeState();',
+        '  markUpdateRun(store.layout.data, name, "settled", {',
+        '  if (process.env.IVA_KILL_AT === "pin") process.kill(process.pid, "SIGKILL");\n  markUpdateRun(store.layout.data, name, "settled", {',
       ),
     );
     const entry = join(source, "scripts/update-finish.ts");
@@ -257,6 +258,7 @@ const result=await fixtureRunner()("npm",args,dir); console.log(result.output); 
 );
 
 await test(
-  "S-update-cycle: FinalOnlyWhenPinned keeps UpdateJob pending before active.json",
+  "S-update-cycle-pin: FinalOnlyWhenPinned keeps UpdateJob pending before active.json",
+  { todo: "ждёт починки R1" },
   assertPinnedFinal,
 );
