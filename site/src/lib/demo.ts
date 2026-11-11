@@ -1,8 +1,9 @@
-import { actionFrames, demoCopy, demoMessages, demoProviders, demoMenuEntries, demoMenuInfo, demoMenuCopy, type DemoProvider, type DemoMenuEntry, type ActionId, type DemoLang } from "../data/demo.ts";
+import { T, actionFrames, widgetFrames, demoCopy, demoMessages, demoProviders, demoMenuEntries, demoMenuInfo, demoMenuCopy, type DemoProvider, type DemoMenuEntry, type ActionId, type DemoLang } from "../data/demo.ts";
 import {
-  DEMO_FRAMES, FPS, actions, advance, choose, clamp01, clockAt, demoFrame,
-  easeOut, filmFrame, freshDemo, type Choice, freshInteractions, menuCommand, selectInstallFromButton, beginInstallCopy, finishInstallCopy, replayInteractions, chatAt, chatOf, sceneAt, sceneFrames, springAt, swapAt, tapPhase,
+  DEMO_FRAMES, FPS, MARIA_SCENE, RATE, actions, advance, choose, clamp01, clockAt, demoFrame,
+  easeOut, filmFrame, freshDemo, type Choice, freshInteractions, menuCommand, selectInstallFromButton, beginInstallCopy, finishInstallCopy, replayInteractions, chatAt, chatOf, offered, sceneAt, sceneFrames, sceneNeeds, springAt, swapAt, tapPhase,
 } from "./demo-state.ts";
+import { mountWidgets } from "./demo-widgets.ts";
 
 export function mountDemos() {
   document.querySelectorAll<HTMLElement>("[data-demo]").forEach(mountDemo);
@@ -23,7 +24,11 @@ function mountDemo(root: HTMLElement) {
   const playLabel = get("[data-play-label]");
   const icon = root.querySelector<SVGPathElement>("[data-play-icon] path")!;
   const sceneLabel = get("[data-scene]");
-  const photo = root.querySelector<HTMLImageElement>("[data-photo]");
+  // Pictures start loading a scene ahead, so each is there when its message arrives.
+  const photos: [HTMLImageElement | null, number][] = [
+    [root.querySelector<HTMLImageElement>("[data-photo]"), T(5200)],
+    [root.querySelector<HTMLImageElement>("[data-order-photo]"), widgetFrames.order - 300],
+  ];
   const announcement = get("[data-announcement]");
   const clock = get("[data-demo-clock]");
   const tap = get("[data-tap]");
@@ -61,6 +66,7 @@ function mountDemo(root: HTMLElement) {
   let suspended = false;
   const abort = new AbortController();
   const on = { signal: abort.signal };
+  const widgets = mountWidgets(root, messages, lang, () => sync(), abort.signal);
   // The page opening (Home.astro) runs first; the story starts once the phone has landed.
   let introHold = ["play", "land"].includes(document.documentElement.dataset.intro ?? "");
   if (introHold) {
@@ -68,7 +74,7 @@ function mountDemo(root: HTMLElement) {
     window.addEventListener("iva:intro-done", release, { once: true });
     window.setTimeout(release, 8000);
   }
-  const playing = () => !disposed && !suspended && !introHold && interaction.menu === null && !reduced && !userPaused && !focusPaused && !document.hidden && inView && state.frame < DEMO_FRAMES;
+  const playing = () => !disposed && !suspended && !introHold && interaction.menu === null && !reduced && !userPaused && !focusPaused && !widgets.holding() && !document.hidden && inView && state.frame < DEMO_FRAMES;
   const setText = (el: Element, value: string) => {
     if (el.textContent !== value) el.textContent = value;
   };
@@ -91,17 +97,19 @@ function mountDemo(root: HTMLElement) {
   function render() {
     const f = filmFrame(state.frame);
     const open = { maria: chatAt(state, "maria", f), helga: chatAt(state, "helga", f) };
-    // The post's photo starts loading a scene ahead, so it is already there when the message arrives.
-    if (photo && f >= 5200) photo.loading = "eager";
+    for (const [photo, at] of photos) if (photo && f >= at) photo.loading = "eager";
+    const yes = (id?: ActionId) => !id || state.decisions[id]?.value === "yes";
     let thinking: { start: number; end: number } | undefined;
     for (const ref of refs) {
       const { message, el, think, words, after, buttons } = ref;
       el.inert = interaction.menu !== null;
       if (think) think.inert = interaction.menu !== null;
-      arrival(el, f, message.at);
+      // A message that waits for an answer comes only after that "yes".
+      const shown = yes(message.when);
+      arrival(el, f, shown ? message.at : Infinity);
       if (think && message.think !== undefined) {
-        arrival(think, f, message.think);
-        if (f >= message.think) {
+        arrival(think, f, shown ? message.think : Infinity);
+        if (shown && f >= message.think) {
           const swap = swapAt(f, message.at - 6);
           if (f >= message.at + 90) think.hidden = true;
           else {
@@ -112,7 +120,7 @@ function mountDemo(root: HTMLElement) {
             if (swap.k > 0) style(think, "grid-template-rows", `${1 - swap.k}fr`);
           }
         }
-        if (f >= message.think && f < message.at) thinking = { start: message.think, end: message.at };
+        if (shown && f >= message.think && f < message.at) thinking = { start: message.think, end: message.at };
       }
       if (el.hidden) continue;
       const limit = reduced ? Infinity : Math.max(0, (f - message.at - 6) * 25 / FPS);
@@ -148,6 +156,8 @@ function mountDemo(root: HTMLElement) {
         style(button, "background", pressed > .5 ? primary ? "#0473d6" : "#d5d4d8" : primary ? "#0589ff" : "#e7e6e9");
       }
     }
+    const widgetFrame = { f, reduced, state };
+    widgets.render(widgetFrame);
     // Maria's or Helga's chat slides in over Iva's, which moves a little aside under a shade.
     let p = 0, mariaActive = false;
     for (const { chat, screen } of chats) {
@@ -193,12 +203,17 @@ function mountDemo(root: HTMLElement) {
     }
     tap.hidden = true;
     if (!reduced && !chatActive && interaction.menu === null) {
-      for (const id of actions) {
+      // The ring of a touch: on an answer under a card, or where the film itself taps a widget.
+      const touches: { start: number; el: () => Element }[] = actions.filter(id => offered(state, id)).map(id => {
         const decision = state.decisions[id];
-        const phase = tapPhase(f, decision ? decision.at - 12 : actionFrames[id]);
+        return { start: decision ? decision.at - 12 : actionFrames[id], el: () => buttonRows.get(id)!.querySelector(`[data-choice="${decision?.value ?? "yes"}"]`)! };
+      });
+      for (const ghost of widgets.ghosts(widgetFrame)) touches.push({ start: ghost.at - 12, el: () => ghost.el });
+      for (const touch of touches) {
+        const phase = tapPhase(f, touch.start);
         if (phase.opacity <= .001 || phase.d <= 1) continue;
-        const button = buttonRows.get(id)!.querySelector<HTMLElement>(`[data-choice="${decision?.value ?? "yes"}"]`)!;
-        const targetBox = button.getBoundingClientRect();
+        const targetBox = touch.el().getBoundingClientRect();
+        if (!targetBox.width) continue;
         const screenBox = iva.parentElement!.getBoundingClientRect();
         const scale = screenBox.width / 402;
         const d = phase.d * scale;
@@ -216,7 +231,7 @@ function mountDemo(root: HTMLElement) {
     root.dataset.state = interaction.menu !== null ? "paused" : complete ? "complete" : isPlaying ? "playing" : "paused";
     const filmScene = sceneAt(f);
     // Maria's chat is its own scene while it is open, and only then.
-    const scene = mariaActive ? 9 : filmScene === 9 ? 8 : filmScene;
+    const scene = mariaActive ? MARIA_SCENE : filmScene === MARIA_SCENE ? MARIA_SCENE - 1 : filmScene;
     root.dataset.sceneNumber = String(scene);
     if (scene !== previousScene) {
       setText(sceneLabel, copy.scenes[scene]);
@@ -394,7 +409,7 @@ function mountDemo(root: HTMLElement) {
   function tick(now: number) {
     raf = 0;
     if (!playing()) { lastTime = null; render(); return; }
-    if (lastTime !== null) advance(state, state.frame + (now - lastTime) / 1000 * FPS);
+    if (lastTime !== null) advance(state, state.frame + (now - lastTime) / 1000 * FPS * RATE);
     lastTime = now;
     render();
     schedule();
@@ -410,10 +425,10 @@ function mountDemo(root: HTMLElement) {
     const f = filmFrame(state.frame);
     // Manual reduced-motion playback settles pending choices before moving on.
     for (const id of actions) {
-      if (!state.decisions[id] && f >= actionFrames[id] - 20) choose(state, id, "yes", "auto");
+      if (!state.decisions[id] && f >= actionFrames[id] - 20 && offered(state, id)) choose(state, id, "yes", "auto");
     }
-    let next = sceneFrames.find(at => at > f + 10);
-    if (next === 3470 && state.decisions.restaurant && state.decisions.restaurant.value !== "yes") next = 3780;
+    // A scene that needed a "yes" it did not get is passed over.
+    const next = sceneFrames.find((at, scene) => at > f + 10 && (!sceneNeeds[scene] || state.decisions[sceneNeeds[scene]]?.value === "yes"));
     advance(state, next === undefined ? DEMO_FRAMES : demoFrame(next), false);
     render();
   }
@@ -506,6 +521,7 @@ function mountDemo(root: HTMLElement) {
   }, on);
   replay.addEventListener("click", () => {
     state = freshDemo();
+    widgets.reset();
     interaction = replayInteractions(interaction);
     menuShown = false;
     menuSignature = "";

@@ -1,6 +1,8 @@
 ---
 import Phone from "./Phone.astro";
 import Leaves from "./Leaves.astro";
+import DemoWidget from "./DemoWidget.astro";
+import DemoWidgetStyle from "./DemoWidgetStyle.astro";
 // The services flying into the phone are switched off for now (06.11.2026): they drew the eye
 // away from the phone. HeroApps.astro stays as it is, to come back to.
 // import HeroApps from "./HeroApps.astro";
@@ -33,9 +35,13 @@ const prepared = messages.map(message => {
     emojiHtml: block.emoji ? typed(block.emoji, counter) : "",
     html: typed(block.text, counter),
   }));
-  return { ...message, blocks, after: counter.i };
+  // Where the card's widget stands among its blocks, and whether it runs to the bubble's edges.
+  const widgetAt = message.widget ? message.widgetAt ?? blocks?.length ?? 0 : -1;
+  const bleed = ["weather", "game", "order"].includes(message.widget ?? "");
+  return { ...message, blocks, after: counter.i, widgetAt, bleed, bleedTop: bleed && widgetAt === 0, bleedEnd: bleed && widgetAt >= (blocks?.length ?? 0) && !message.action };
 });
 ---
+<DemoWidgetStyle />
 <figure class="v7-demo" data-demo data-ui="telegram-demo" data-lang={lang} aria-label={c.label}>
   <div class="v7-device-wrap">
   <Leaves />
@@ -57,19 +63,23 @@ const prepared = messages.map(message => {
                 <div class="v7-arrival" data-message={message.id} hidden={message.id !== "morning"}>
                   <div class="v7-collapse"><div class="v7-arrival-body" data-arrival-body>
                     {message.kind === "card" && (
-                      <div class="v7-card">
+                      <div class:list={["v7-card", message.bleed && "has-bleed", message.bleedTop && "is-bleed-top", message.bleedEnd && "is-bleed-end"]}>
                         {message.photo && (
                           <picture>
                             <source type="image/avif" srcset={`${message.photo}.avif`} />
                             <img class="v7-photo" src={`${message.photo}.webp`} alt={c.photo} width="600" height="400" loading="lazy" decoding="async" data-photo />
                           </picture>
                         )}
-                        {message.blocks?.map(block => (
-                          <div class:list={["v7-text-block", `v7-${block.kind}`]}>
-                            {block.emoji && <span class="v7-emoji" set:html={block.emojiHtml} />}
-                            <span set:html={block.html} />
-                          </div>
+                        {message.blocks?.map((block, i) => (
+                          <>
+                            {message.widget && message.widgetAt === i && <DemoWidget id={message.widget} lang={lang} />}
+                            <div class:list={["v7-text-block", `v7-${block.kind}`]}>
+                              {block.emoji && <span class="v7-emoji" set:html={block.emojiHtml} />}
+                              <span set:html={block.html} />
+                            </div>
+                          </>
                         ))}
+                        {message.widget && message.widgetAt >= (message.blocks?.length ?? 0) && <DemoWidget id={message.widget} lang={lang} />}
                         {message.action && (
                           <div data-after-index={message.after}>
                             {message.doc && <div class="v7-document"><span class="v7-document-icon">PDF</span><span><b>{message.doc[0]}</b><small>{message.doc[1]}</small></span></div>}
@@ -83,7 +93,7 @@ const prepared = messages.map(message => {
                               </div></div>
                               <div class="v7-swap-after" data-after hidden><div class="v7-collapse">
                                 <div class="v7-result" data-result>
-                                  <div data-outcome="yes">{message.action === "shopping" ? c.shopping.map(block => <div class="v7-item"><span class="v7-emoji">{block.emoji}</span><span>{block.text}</span></div>) : choices(message.action).accepted}</div>
+                                  <div data-outcome="yes">{message.action === "shopping" ? <DemoWidget id="list" lang={lang} /> : choices(message.action).accepted}{message.action === "taxi" && <DemoWidget id="route" lang={lang} />}</div>
                                   <div data-outcome="no" hidden>{choices(message.action).declined}</div>
                                   {choices(message.action).opened && <div data-outcome="open" hidden>{choices(message.action).opened}</div>}
                                 </div>

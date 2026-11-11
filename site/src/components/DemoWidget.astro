@@ -1,0 +1,225 @@
+---
+// A widget inside a message of the demonstration: the live cards Iva sends with Bot API 10.4.
+// The markup is complete without the script; src/lib/demo-widgets.ts plays it by the film's frame.
+import { demoCopy } from "../data/demo";
+import { routePaths, widgetCopy } from "../data/demo-widgets";
+import type { Lang } from "../lib/copy";
+const { id, lang = "en" } = Astro.props as { id: string; lang?: Lang };
+const w = widgetCopy(lang);
+const c = demoCopy[lang];
+
+// The day's temperatures as one smooth line (Catmull-Rom through the points).
+const W = 318, H = 64;
+const temps = w.weather.hours.map(hour => hour.temp);
+const lo = Math.min(...temps), hi = Math.max(...temps);
+const points = temps.map((temp, i) => [22 + i * (W - 44) / (temps.length - 1), 22 + (hi - temp) / (hi - lo) * (H - 34)] as const);
+const line = points.map(([x, y], i) => {
+  if (i === 0) return `M${x.toFixed(1)} ${y.toFixed(1)}`;
+  const [x0, y0] = points[Math.max(0, i - 2)], [x1, y1] = points[i - 1], [x3, y3] = points[Math.min(points.length - 1, i + 1)];
+  return `C${(x1 + (x - x0) / 6).toFixed(1)} ${(y1 + (y - y0) / 6).toFixed(1)} ${(x - (x3 - x1) / 6).toFixed(1)} ${(y - (y3 - y1) / 6).toFixed(1)} ${x.toFixed(1)} ${y.toFixed(1)}`;
+}).join("");
+const sky: Record<string, string> = {
+  sun: "M8 4.2a3.8 3.8 0 1 0 0 7.6a3.8 3.8 0 0 0 0-7.6M8 .8v1.6M8 13.6v1.6M.8 8h1.6M13.6 8h1.6M2.9 2.9l1.1 1.1M12 12l1.1 1.1M2.9 13.1l1.1-1.1M12 4l1.1-1.1",
+  cloud: "M4.6 12.4h7a2.9 2.9 0 0 0 .5-5.76a4 4 0 0 0-7.7-.9A3.3 3.3 0 0 0 4.6 12.4Z",
+  rain: "M4.6 9.6h7a2.9 2.9 0 0 0 .5-5.76a4 4 0 0 0-7.7-.9A3.3 3.3 0 0 0 4.6 9.6ZM5.4 12l-.7 2.2M8.4 12l-.7 2.2M11.4 12l-.7 2.2",
+  moon: "M12.6 9.6A5.4 5.4 0 0 1 6.4 3.4a5.4 5.4 0 1 0 6.2 6.2Z",
+};
+const weekMax = Math.max(...w.summary.week.map(bar => bar.value));
+const monthMax = Math.max(...w.summary.month.map(bar => bar.value));
+const money = (value: number) => `$${value.toLocaleString(lang === "ru" ? "ru-RU" : "en-US").replace(/\s/g, "\u00a0")}`;
+const way = (points: readonly (readonly number[])[]) => `M${points.map(point => point.join(" ")).join("L")}`;
+const teamShare = (state: string) => w.team.rows.filter(row => row.state === state).length;
+---
+{id === "day" && (
+  <div class="v7w v7w-day" data-widget="day">
+    <div class="v7w-tabs" data-tabs>
+      {w.day.tabs.map((tab, i) => <button type="button" data-tab={i} aria-pressed={i === 0 ? "true" : "false"}>{tab}</button>)}
+    </div>
+    <div class="v7w-panes">
+      <div class="v7w-pane v7w-line" data-pane="0">
+        <div class="v7w-ev is-now" data-in="0"><b>9:41</b><i></i><span>{w.day.now}</span></div>
+        {w.day.events.map((event, i) => (
+          <div class="v7w-ev" data-in={i + 1}><b>{event.time}</b><i></i><span><strong>{event.title}</strong><small>{event.note}</small></span></div>
+        ))}
+      </div>
+      <div class="v7w-pane" data-pane="1" data-off inert>
+        <div class="v7w-week">
+          {w.day.week.map(day => (
+            <div class:list={["v7w-wd", day.today && "is-today"]}><small>{day.day}</small><b>{day.date}</b><span>{Array.from({ length: day.count }, () => <i></i>)}</span></div>
+          ))}
+        </div>
+        {w.day.ahead.map(item => <div class="v7w-ahead"><b>{item.when}</b><span>{item.title}</span></div>)}
+      </div>
+    </div>
+  </div>
+)}
+{id === "weather" && (
+  <div class="v7w v7w-weather is-bleed" data-widget="weather">
+    <div class="v7w-wx-top">
+      <div>
+        <div class="v7w-wx-city" data-in="0">{w.weather.city}</div>
+        <div class="v7w-wx-temp" data-in="1">{w.weather.temp}</div>
+        <div class="v7w-wx-note" data-in="2">{w.weather.note}<br />{w.weather.range}</div>
+      </div>
+      <svg class="v7w-wx-sun" viewBox="0 0 76 60" aria-hidden="true" data-in="1">
+        <g data-sun><circle cx="50" cy="22" r="13" fill="#ffd257" /><path d="M50 2v5M50 37v5M30 22h5M65 22h5M35.9 7.9l3.5 3.5M60.6 32.6l3.5 3.5M35.9 36.1l3.5-3.5M60.6 11.4l3.5-3.5" stroke="#ffd257" stroke-width="3" stroke-linecap="round" fill="none" /></g>
+        <path d="M17 52h30a10 10 0 0 0 1.6-19.9A13.5 13.5 0 0 0 22.7 29A11.6 11.6 0 0 0 17 52Z" fill="#fff" />
+      </svg>
+    </div>
+    <svg class="v7w-wx-curve" viewBox={`0 0 ${W} ${H}`} aria-hidden="true">
+      <path d={`${line}L${W - 22} ${H}L22 ${H}Z`} fill="#ffffff24" data-fade="14" />
+      <path d={line} fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" pathLength="1" stroke-dasharray="1" data-draw="14,62" />
+      {points.map(([x, y], i) => (
+        <g data-pop={(i / (points.length - 1)).toFixed(3)}>
+          <circle cx={x} cy={y} r="3.4" fill="#2f77c9" stroke="#fff" stroke-width="2" />
+          <text x={x} y={y - 9} text-anchor="middle">{temps[i]}°</text>
+        </g>
+      ))}
+    </svg>
+    <div class="v7w-wx-hours">
+      {w.weather.hours.map((hour, i) => (
+        <div data-in={8 + i}><span>{hour.at}</span><svg viewBox="0 0 16 16" aria-hidden="true"><path d={sky[hour.sky]} /></svg></div>
+      ))}
+    </div>
+    <div class="v7w-wx-tiles">
+      {w.weather.tiles.map((tile, i) => <div data-in={15 + i * 2}><small>{tile.label}</small><b>{tile.value}</b><span>{tile.note}</span></div>)}
+    </div>
+    <div class="v7w-wx-advice" data-in="21">{w.weather.advice}</div>
+  </div>
+)}
+{id === "team" && (
+  <div class="v7w v7w-team" data-widget="team">
+    <div class="v7w-hint" data-in="0">{w.team.source}</div>
+    <div class="v7w-stack" data-in="1" aria-hidden="true">
+      {(["late", "stuck", "yours", "work"] as const).map((state, i) => <i class={`is-${state}`} style={`flex:${teamShare(state)}`} data-grow={6 + i * 5}></i>)}
+    </div>
+    {w.team.rows.map((row, i) => (
+      <div class={`v7w-row is-${row.state}`} data-in={3 + i}>
+        <i></i><span><strong>{row.title}</strong><small>{row.who}</small></span><em>{w.team.states[row.state]}</em>
+      </div>
+    ))}
+  </div>
+)}
+{id === "route" && (
+  <div class="v7w v7w-route" data-widget="route">
+    <div class="v7w-map">
+      <svg viewBox="0 0 318 150" role="img" aria-label={w.route.label}>
+        <rect width="318" height="150" fill="#edf1e8" />
+        <path d="M-10 142C60 126 120 150 190 138S290 120 330 132V160H-10Z" fill="#cfe3f5" />
+        <rect x="118" y="46" width="38" height="22" rx="5" fill="#d5e8bf" />
+        <rect x="246" y="90" width="38" height="22" rx="5" fill="#d5e8bf" />
+        <g stroke="#fff" stroke-width="9" stroke-linecap="round" fill="none">
+          <path d="M-6 34H324M-6 78H324M-6 122H324M40 -6V156M104 -6V156M168 -6V156M232 -6V156M296 -6V156" />
+        </g>
+        <path d={way(routePaths.approach)} fill="none" stroke="#17211d" stroke-opacity=".34" stroke-width="2.4" stroke-dasharray="1 6" stroke-linecap="round" data-approach />
+        <path d={way(routePaths.trip)} fill="none" stroke="#0589ff" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round" pathLength="1" stroke-dasharray="1" data-draw="8,54" data-route />
+        <g data-pin="a" data-fade="4"><circle cx="104" cy="122" r="8" fill="#fff" stroke="#17211d" stroke-width="3.4" /><circle cx="104" cy="122" r="2.2" fill="#17211d" /></g>
+        <g data-pin="b" data-fade="44"><circle cx="286" cy="34" r="10.5" fill="#0589ff" stroke="#fff" stroke-width="2.4" /><path d="M280.6 35.6l10.6-5.2-2.4 10.2-2.8-3.4-2.4 2 .2-3Z" fill="#fff" /></g>
+        <g data-car><circle r="13" fill="#17211d" opacity=".12" data-car-halo /><g data-car-body><rect x="-8" y="-4.6" width="16" height="9.2" rx="3.4" fill="#17211d" /><rect x="1.4" y="-3.1" width="3.6" height="6.2" rx="1.2" fill="#fff" opacity=".9" /></g></g>
+      </svg>
+      <span class="v7w-tag is-a" data-fade="10">{w.route.from}</span>
+      <span class="v7w-tag is-b" data-fade="50">{w.route.to}</span>
+    </div>
+    <div class="v7w-eta" data-in="6">
+      <div><small data-eta-label data-wait={w.route.wait} data-ride={w.route.ride} data-done={w.route.done}>{w.route.wait}</small><b data-eta data-min={w.route.min} data-done={w.route.doneNote}>1:00</b></div>
+      <div><strong>{w.route.car}</strong><small>{w.route.plate}</small></div>
+    </div>
+    <div class="v7w-bar" data-in="7" aria-hidden="true"><i data-eta-bar></i></div>
+  </div>
+)}
+{id === "game" && (
+  <div class="v7w v7w-game is-bleed" data-widget="game">
+    <canvas width="116" height="72" data-game aria-hidden="true"></canvas>
+    <div class="v7w-game-hud"><small>{w.game.score}</small><b data-game-score>0</b></div>
+    <div class="v7w-game-hint" data-game-hint>{w.game.hint}</div>
+    <button type="button" class="v7w-game-tap" data-game-tap aria-label={w.game.label}></button>
+  </div>
+)}
+{id === "list" && (
+  <div class="v7w v7w-list" data-widget="list">
+    <div class="v7w-hint" data-in="0">{w.list.hint}</div>
+    {c.shopping.map((product, i) => (
+      <button type="button" class="v7w-check" data-check={i} data-in={i + 1} aria-pressed="false">
+        <i aria-hidden="true"><svg viewBox="0 0 12 12"><path d="M2.4 6.4l2.4 2.4 4.8-5.4" /></svg></i>
+        <span class="v7-emoji">{product.emoji}</span>
+        <span class="v7w-check-name"><span>{product.text}</span></span>
+        <em>${w.list.prices[i]}</em>
+      </button>
+    ))}
+    <div class="v7w-hint v7w-list-left" data-in="6">{w.list.left}: <b data-list-left>{c.shopping.length}</b></div>
+  </div>
+)}
+{id === "order" && (
+  <div class="v7w v7w-order is-bleed" data-widget="order">
+    <div class="v7w-order-photo">
+      <picture>
+        <source type="image/avif" srcset="/media/demo/groceries.avif" />
+        <img src="/media/demo/groceries.webp" alt={w.order.photo} width="800" height="450" loading="lazy" decoding="async" data-order-photo />
+      </picture>
+      <span class="v7w-chip" data-in="0">{w.order.shop}</span>
+      <span class="v7w-chip is-state" data-order-state data-cart={w.order.cart} data-paying={w.order.paying} data-paid={w.order.paid}><i aria-hidden="true"></i><span>{w.order.cart}</span></span>
+      <div class="v7w-confetti" data-confetti aria-hidden="true">{Array.from({ length: 22 }, () => <i></i>)}</div>
+    </div>
+    <div class="v7w-order-body">
+      {c.shopping.map((product, i) => (
+        <div class="v7w-order-row" data-order-item={i} data-price={w.list.prices[i]} data-in={i + 1}><span class="v7-emoji">{product.emoji}</span><span>{product.text}</span><em>${w.list.prices[i]}</em></div>
+      ))}
+      <div class="v7w-order-total" data-in="6"><span>{w.order.total}<small data-order-number hidden>{w.order.number}</small></span><b data-order-total>$0</b></div>
+    </div>
+  </div>
+)}
+{id === "goal" && (
+  <div class="v7w v7w-steps" data-widget="goal">
+    {w.goal.steps.map((step, i) => (
+      <div class={`v7w-step is-${step.state}`} data-in={i}>
+        <i aria-hidden="true">{step.state === "done" && <svg viewBox="0 0 12 12"><path d="M2.4 6.4l2.4 2.4 4.8-5.4" /></svg>}</i>
+        <span><strong>{step.title}</strong><small>{step.note}</small></span>
+      </div>
+    ))}
+  </div>
+)}
+{id === "ads" && (
+  <div class="v7w v7w-ads" data-widget="ads">
+    <div class="v7w-hint" data-in="0">{w.ads.source}</div>
+    {w.ads.rows.map((row, i) => (
+      <div class:list={["v7w-ad", row.leads === 0 && "is-empty"]} data-in={1 + i * 2}>
+        <div><strong>{row.name}</strong><b>{row.result}</b></div>
+        <div class="v7w-bar"><i style={`width:${Math.round(row.spend / 42 * 100)}%`} data-grow={8 + i * 8}></i></div>
+        <small>{row.note}</small>
+      </div>
+    ))}
+  </div>
+)}
+{id === "stock" && (
+  <div class="v7w v7w-stock" data-widget="stock">
+    <div class="v7w-stock-top" data-in="0"><span><strong>{w.stock.name}</strong><small>{w.stock.note}</small></span><b>{w.stock.left}<small>{w.stock.of}</small></b></div>
+    <div class="v7w-bar is-low" data-in="1" aria-hidden="true"><i style={`width:${w.stock.share * 100}%`} data-grow="8"></i></div>
+  </div>
+)}
+{id === "summary" && (
+  <div class="v7w v7w-summary" data-widget="summary">
+    <div class="v7w-sum-top" data-in="0">
+      <span><small>{w.summary.label}</small><b data-count={w.summary.revenue} data-money={lang}>{money(w.summary.revenue)}</b></span>
+      <span class="v7w-delta"><b>{w.summary.delta}</b><small>{w.summary.deltaNote}</small></span>
+    </div>
+    <div class="v7w-tabs" data-tabs data-in="1">
+      {w.summary.tabs.map((tab, i) => <button type="button" data-tab={i} aria-pressed={i === 0 ? "true" : "false"}>{tab}</button>)}
+    </div>
+    <div class="v7w-panes" data-in="2">
+      <div class="v7w-pane v7w-chart" data-pane="0">
+        {w.summary.week.map((bar, i, all) => (
+          <div class:list={["v7w-col", i === all.length - 1 && "is-today", i === 0 && "is-ref"]}><span><i style={`height:${Math.round(bar.value / weekMax * 100)}%`} data-rise={10 + i * 3}></i></span><small>{bar.label}</small></div>
+        ))}
+      </div>
+      <div class="v7w-pane v7w-chart is-month" data-pane="1" data-off inert>
+        {w.summary.month.map((bar, i, all) => (
+          <div class:list={["v7w-col", i === all.length - 1 && "is-today"]}><span><i style={`height:${Math.round(bar.value / monthMax * 100)}%`}></i></span><small>{bar.label}</small></div>
+        ))}
+        <div class="v7w-chart-note">{w.summary.monthTotal}</div>
+      </div>
+    </div>
+    <div class="v7w-facts">
+      {w.summary.facts.map((fact, i) => <div data-in={12 + i * 2}><b>{fact.value}</b><small>{fact.label}</small></div>)}
+    </div>
+  </div>
+)}

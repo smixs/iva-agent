@@ -1,9 +1,12 @@
-import { actionFrames, demoProviders, demoMenuEntries, type DemoProvider, type DemoMenuEntry, type DemoLang, type ActionId } from "../data/demo.ts";
+import { T, actionFrames, actionNeeds, widgetFrames, demoProviders, demoMenuEntries, type DemoProvider, type DemoMenuEntry, type DemoLang, type ActionId } from "../data/demo.ts";
 
 export const FPS = 60;
+// The film runs a fifth faster than it was shot: the widget scenes made it longer (owner, 11.11.2026).
+export const RATE = 1.2;
 // Only phone footage remains. Morning starts with the fully readable film card; the team brief
 // and Helga's message fill the stretch where the film had its titles.
-const spans = [[360, 1860], [1980, 2760], [2880, 6240]] as const;
+// T() adds the frames of the widget scenes, which the film did not have.
+const spans = [[360, 1860], [1980, 2760], [2880, 6240]].map(([a, b]) => [T(a), T(b)] as const);
 export const DEMO_FRAMES = spans.reduce((sum, [a, b]) => sum + b - a, 0);
 export const actions = Object.keys(actionFrames) as ActionId[];
 // Most cards ask yes or no; Helga's also offers to open her chat.
@@ -35,13 +38,27 @@ export function choose(state: DemoState, action: ActionId, value: Choice, source
   state.decisions[action] = { value, at: filmFrame(state.frame), source };
   return true;
 }
+// An answer that depends on another is offered only after that one was "yes".
+export const offered = (state: DemoState, action: ActionId): boolean => {
+  const need = actionNeeds[action];
+  return !need || state.decisions[need]?.value === "yes";
+};
+// The stretch a declined answer leaves empty: the game after the taxi, the order after the list.
+const skips: { action: ActionId; from: number; to: number }[] = [
+  { action: "taxi", from: widgetFrames.game - 60, to: T(2760) },
+  { action: "shopping", from: widgetFrames.order - 60, to: T(3950) - 20 },
+];
 export function advance(state: DemoState, frame: number, automatic = true): void {
   state.frame = Math.min(DEMO_FRAMES, Math.max(state.frame, frame));
+  for (const { action, from, to } of skips) {
+    const f = filmFrame(state.frame), choice = state.decisions[action];
+    if (f >= from && f < to && choice && choice.value !== "yes") state.frame = demoFrame(to);
+  }
   if (!automatic) return;
   const f = filmFrame(state.frame);
   for (const action of actions) {
     const at = actionFrames[action] + 12; // film's contact frame, after the ring approaches
-    if (!state.decisions[action] && f >= at) {
+    if (!state.decisions[action] && f >= at && offered(state, action)) {
       state.decisions[action] = { value: "yes", at, source: "auto" };
     }
   }
@@ -115,15 +132,18 @@ export function chatAt(state: DemoState, chat: Chat, f = filmFrame(state.frame))
     confirmed: f >= choice.at + 138,
   };
 }
-export const sceneFrames = [360, 760, 1075, 1460, 1710, 2190, 2580, 3080, 3340, 3470, 3780, 4160, 4300, 4510, 4790, 5090, 5470, 5850, 6100];
+// Where each scene stands complete, and the answer a scene waits for, if any.
+export const sceneFrames = [360, 700, T(760), T(1075), T(1460), T(1710), T(2190), T(2580), T(2760) - 60, T(3080), T(3340), T(3470), T(3780), actionFrames.order - 10, T(4160), T(4300), T(4510), T(4790), T(5090), T(5470), T(5850), T(6100)];
+export const sceneNeeds: Record<number, ActionId> = { 8: "taxi", 11: "restaurant", 13: "shopping" };
+export const MARIA_SCENE = 11;
 export function sceneAt(f: number): number {
-  const starts = [360, 540, 915, 1240, 1530, 2010, 2330, 2910, 3180, 3392, 3600, 3950, 4220, 4330, 4620, 4910, 5220, 5600, 5950];
+  const starts = [360, widgetFrames.weather - 45, T(540), T(915), T(1240), T(1530), T(2010), T(2330), widgetFrames.game - 50, T(2910), T(3180), T(3392), T(3600), widgetFrames.order - 50, T(3950), T(4220), T(4330), T(4620), T(4910), T(5220), T(5600), T(5950)];
   let scene = 0;
   starts.forEach((at, i) => { if (f >= at) scene = i; });
   return scene;
 }
 export function clockAt(f: number): string {
-  const marks: [number, string][] = [[0, "9:41"], [540, "9:42"], [905, "11:25"], [1220, "12:04"], [1510, "12:10"], [2000, "13:00"], [2310, "15:20"], [2900, "16:05"], [3170, "17:41"], [3440, "17:42"], [3590, "18:30"], [3930, "19:04"], [4220, "14:31"], [4330, "15:10"], [4620, "16:02"], [4910, "16:40"], [5220, "17:15"], [5600, "18:20"], [5950, "20:00"]];
+  const marks: [number, string][] = [[0, "9:41"], [T(540), "9:42"], [T(905), "11:25"], [T(1220), "12:04"], [T(1510), "12:10"], [T(2000), "13:00"], [T(2310), "15:20"], [widgetFrames.game - 60, "15:24"], [T(2900), "16:05"], [T(3170), "17:41"], [T(3440), "17:42"], [T(3590), "18:30"], [widgetFrames.order - 60, "18:34"], [T(3930), "19:04"], [T(4220), "14:31"], [T(4330), "15:10"], [T(4620), "16:02"], [T(4910), "16:40"], [T(5220), "17:15"], [T(5600), "18:20"], [T(5950), "20:00"]];
   return marks.reduce((time, [at, value]) => f >= at ? value : time, "9:41");
 }
 
