@@ -40,6 +40,7 @@ import {
   abandonedAlertKey,
   list,
   owesAlert,
+  reminderContent,
   recordDelivery,
   recordTurnSession,
   type Reminder,
@@ -109,6 +110,7 @@ type Outcome = {
   readonly error: string | null;
   /** Ход погашен снаружи (/stop): отправлять нечего и не нужно. */
   readonly cancelled?: boolean;
+  readonly ownerStopped?: boolean;
 };
 
 /** Итог отправки: причина есть, только если Telegram отказал. */
@@ -201,7 +203,12 @@ async function stampSession(
 }
 
 /** Присмотр чата за ходом срабатывания: чат и тема — из строки. */
-function chatWatch(row: Reminder, target: Target, deps: Wiring): TurnWatch {
+function chatWatch(
+  row: Reminder,
+  target: Target,
+  deps: Wiring,
+  onOwnerStop: () => void,
+): TurnWatch {
   const chatKey = chatKeyOf(target.chat, target.threadId);
   return {
     claim: async (sessionId) => {
@@ -211,7 +218,12 @@ function chatWatch(row: Reminder, target: Target, deps: Wiring): TurnWatch {
     pulse: (sessionId) =>
       writeQuietly(deps.log, "pulse", () => pulseChat(chatKey, sessionId)),
     release: (sessionId) =>
-      writeQuietly(deps.log, "release", () => releaseChat(chatKey, sessionId)),
+      writeQuietly(deps.log, "release", () => {
+        const current = getChatStatus(chatKey);
+        if (current?.sessionId === sessionId && current.wasCancelled === true)
+          onOwnerStop();
+        releaseChat(chatKey, sessionId);
+      }),
   };
 }
 
@@ -320,18 +332,24 @@ async function agentOutcome(
     },
     tr,
   );
+  let ownerStopped = false;
   try {
     const turn = await deps.runTurn(prompt, clientFor(row, deps.env), {
       log: deps.log,
       // Пока ход идёт, чат и тема строки видят его сессию: по ней /stop гасит её.
-      watch: chatWatch(row, target, deps),
+      watch: chatWatch(row, target, deps, () => {
+        ownerStopped = true;
+      }),
     });
     const notice = stepLimitNotice(turn.failureInfo, tr);
-    return replyOf(
-      turn,
-      notice ? `${row.text}\n${notice}` : row.text,
-      sessionLimitText(row.text, tr),
-    );
+    return {
+      ...replyOf(
+        turn,
+        notice ? `${row.text}\n${notice}` : row.text,
+        sessionLimitText(row.text, tr),
+      ),
+      ownerStopped,
+    };
   } catch (error) {
     return { text: row.text, error: `agent turn failed: ${message(error)}` };
   }
@@ -409,7 +427,24 @@ async function fireRow(row: Reminder, deps: Wiring): Promise<void> {
     );
     return;
   }
-  const outcome = await agentOutcome(row, routed.target, deps);
+  let outcome: Outcome =
+    reminderContent(row) === "text"
+      ? { text: row.text, error: null }
+      : await agentOutcome(row, routed.target, deps);
+  if (outcome.cancelled === true && outcome.ownerStopped !== true) {
+    const current = (await deps.list()).find((entry) => entry.id === row.id);
+    if (
+      current?.firedAt === row.firedAt &&
+      current.resetSessionId !== undefined &&
+      current.resetSessionId === current.sessionId
+    ) {
+      const tr = await deps.translator(deps.env);
+      outcome = {
+        text: `${row.text}\n\n${tr("Execution was interrupted by a conversation reset.", "Выполнение прервал сброс разговора.")}`,
+        error: "conversation reset interrupted the turn",
+      };
+    }
+  }
   noteTurnFailure(row, outcome, deps);
   if (outcome.cancelled === true) {
     // Владелец погасил ход сам: дословный текст напоминания ему не отправляем, в строке —

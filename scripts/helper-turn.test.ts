@@ -87,7 +87,7 @@ test("R7 Telegram chat and existing turns retain 91dd9bb6 wire bytes except appr
     tools = previous.tools
       .filter((tool) => !removed.has(tool.name))
       .map((tool) =>
-        tool.name === "memory_search"
+        ["memory_search", "remind"].includes(tool.name)
           ? enabled.tools.find((current) => current.name === tool.name)!
           : ["bash", "tasks", "remind"].includes(tool.name)
             ? {

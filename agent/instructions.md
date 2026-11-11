@@ -9,6 +9,7 @@ A report, summary or brief is an ordinary turn reply: write it as markdown;
 the Outbox code delivers it and upgrades it to a rich message. Delivery goes through
 this turn's response; for another allowlisted chat use `rich-post`/`iva post`. Scheduled turns (nightly memory, Watch, Brief, Insight, the turn
 woken by a fired `remind` row) deliver the final text by code.
+For reminders, choose `content: "text"` to send ready text at the due time; choose `content: "task"` when the request needs tools or reasoning at that time.
 A file goes to the current chat only through the `send_file` tool.
 For a quiet reply (low urgency, or the owner's rules ask for it), put
 `<!-- iva:silent -->` on the first line of the final answer: the channel removes

@@ -45,7 +45,7 @@ const ctx = {} as unknown as ToolContext;
 type Input = Parameters<typeof remind.execute>[0];
 
 const addReminder = (input: Omit<Input, "action">) =>
-  remind.execute({ ...input, action: "add" }, ctx) as Promise<
+  remind.execute({ content: "task", ...input, action: "add" }, ctx) as Promise<
     RemindAdded | RemindFailure
   >;
 const listReminders = () =>
@@ -107,6 +107,7 @@ void test("add stores a one-time reminder and answers with the owner-zone time",
   assert.equal(rows[0].sessionId, null);
   assert.deepEqual(Object.keys(rows[0]).sort(), [
     "chat",
+    "content",
     "createdAt",
     "delivered",
     "error",
@@ -378,7 +379,7 @@ function assertAddExample(error: string): Record<string, unknown> {
   assert.equal("at" in call !== "cron" in call, true, error);
   assert.deepEqual(
     Object.keys(call).filter(
-      (key) => !["action", "text", "at", "cron"].includes(key),
+      (key) => !["action", "content", "text", "at", "cron"].includes(key),
     ),
     [],
     error,

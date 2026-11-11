@@ -1,4 +1,4 @@
-// Минутный тик диспетчера напоминаний: забрать созревшие строки таблицы и отдать каждую
+// Тик диспетчера напоминаний: забрать созревшие строки таблицы и отдать каждую
 // своему ребёнку scripts/reminders/fire.ts. Ход агента и отправка живут в
 // scripts/: authored tree не может импортировать транспорт Telegram и клиента eve
 // (scripts/authored-tree-guard.test.ts), поэтому тик спавнит скрипт по имени.
@@ -89,7 +89,7 @@ const childKey = (file: string, row: Reminder) =>
 
 export interface ReminderTickOptions {
   readonly command?: boolean;
-  /** Finish admission before returning to the minute Schedule, not the child turn. */
+  /** Finish admission before returning to the Schedule, not the child turn. */
   readonly dispatchOnly?: boolean;
   readonly nowMs?: number;
   readonly limit?: number;

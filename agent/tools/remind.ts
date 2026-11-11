@@ -55,6 +55,7 @@ export type RemindAnswer =
 type Input = {
   readonly action: "add" | "list" | "remove";
   readonly text?: string;
+  readonly content?: string;
   readonly at?: string;
   readonly cron?: string;
   readonly id?: string;
@@ -66,6 +67,20 @@ async function addReminder(
   nowMs: number,
   chat: ReminderChat | null,
 ): Promise<RemindAdded | RemindFailure> {
+  if (input.content !== "text" && input.content !== "task")
+    return {
+      ok: false,
+      error:
+        'add needs content: "text" to send the text, "task" to execute it at the due time. Example: ' +
+        JSON.stringify({
+          action: "add",
+          content: "text",
+          text: input.text ?? "Call the clinic",
+          ...(input.cron === undefined
+            ? { at: input.at ?? "in 30m" }
+            : { cron: input.cron }),
+        }),
+    };
   const refusal = addFieldsRefusal(input, nowMs, tz);
   if (refusal !== null) return { ok: false as const, error: refusal };
   // Напоминание возвращается туда, где его попросили (чат и тема хода). Без Telegram-хода
@@ -83,6 +98,7 @@ async function addReminder(
     id: `r-${randomBytes(3).toString("hex")}`,
     // addFieldsRefusal пропускает только вызов с text.
     text: input.text ?? "",
+    content: input.content,
     chat,
     ...planned,
   });
@@ -122,20 +138,27 @@ async function removeReminder(
 
 export default defineTool({
   description:
-    "Текстовые напоминания: add (text, at или cron), list, remove (id). " +
+    "Напоминания: add (content, text, at или cron), list, remove (id). " +
     "Совместимый вход к schedule. Для переноса, run_now и команд используй schedule. " +
     "Читай скилл scheduling; время считает код, сообщи next_run_at.",
   inputSchema: z.object({
     action: z
       .enum(["add", "list", "remove"])
       .describe("Что сделать: поставить, показать список, снять"),
+    content: z
+      .enum(["text", "task"])
+      .optional()
+      .catch(undefined)
+      .describe(
+        "add: обязательно text — прислать текст сразу в срок, task — выполнить задание одним ходом",
+      ),
     text: z
       .string()
       .min(1)
       .max(2000)
       .optional()
       .describe(
-        "add: инструкция самой себе на срок словами пользователя - что сделать и о чём напомнить, самодостаточно",
+        "add: готовый текст напоминания для content=text; самодостаточное задание на срок для content=task",
       ),
     at: z
       .string()

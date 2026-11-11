@@ -47,9 +47,16 @@ function plannedSchedule(
 
 export default defineTool({
   description:
-    "Расписание: add, move, remove, list, run_now. Читай скилл scheduling. Текст будит Иву; command выполняется без модели. Время считает код, сообщи next_run_at.",
+    "Расписание: add, move, remove, list, run_now. Читай скилл scheduling. content=text отправляет готовый текст; content=task будит Иву; command выполняется без модели. Время считает код, сообщи next_run_at.",
   inputSchema: z.object({
     action: z.enum(["add", "move", "remove", "list", "run_now"]),
+    content: z
+      .enum(["text", "task"])
+      .optional()
+      .catch(undefined)
+      .describe(
+        "add с text: обязательно text — прислать текст, task — выполнить задание",
+      ),
     text: z.string().min(1).max(2000).optional(),
     command: z.string().min(1).max(2000).optional(),
     timeout_minutes: z.number().optional(),

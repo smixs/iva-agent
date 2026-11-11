@@ -160,7 +160,7 @@ test("enabled tools keep retained schemas and descriptions except the approved h
     previous.tools
       .filter((t) => !removed.has(t.name))
       .map((t) =>
-        t.name === "memory_search"
+        ["memory_search", "remind"].includes(t.name)
           ? revised.get(t.name)!
           : revised.has(t.name)
             ? { ...t, description: revised.get(t.name)!.description }
