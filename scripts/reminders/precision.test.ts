@@ -589,6 +589,25 @@ for (const raw of [
   });
 }
 
+test("Reminder content: schemaVersion remains a valid flat-map reminder id", async () => {
+  await add({
+    id: "schemaVersion",
+    text: TEXT,
+    content: "text",
+    schedule: { kind: "at", atMs: NOW },
+  });
+  await add({
+    id: "neighbor",
+    text: TEXT,
+    content: "text",
+    schedule: { kind: "at", atMs: NOW },
+  });
+  await remove("neighbor");
+  await sweepFired(NOW);
+  assert.equal(reminderContent({ id: "schemaVersion" }), "text");
+  assert.deepEqual(readReminderContents(), { schemaVersion: "text" });
+});
+
 test("Reminder content: a future entry matching a new row id is preserved", async (t) => {
   t.mock.method(console, "warn", () => {});
   const raw = '{"future":{"content":"text","schemaVersion":99}}';

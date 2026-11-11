@@ -75,7 +75,11 @@ function loadReminderContents(
   const file = reminderContentFile(directory);
   try {
     const contents: unknown = JSON.parse(readFileSync(file, "utf8"));
-    if (!isRecord(contents) || Object.hasOwn(contents, "schemaVersion"))
+    if (
+      !isRecord(contents) ||
+      (Object.hasOwn(contents, "schemaVersion") &&
+        contents.schemaVersion !== "text")
+    )
       throw new Error("unsupported reminder content format");
     // Unknown values belong to future writers; retain them on every write.
     return contents;
@@ -99,6 +103,28 @@ export function readReminderContents(
       (entry): entry is [string, "text"] => entry[1] === "text",
     ),
   );
+}
+
+/** Preserve future entries; an unavailable map leaves the accepted row as a task. */
+async function writeReminderContent(
+  directory: string,
+  id: string,
+  content?: ReminderContent,
+): Promise<void> {
+  let contents = loadReminderContents(directory);
+  if (contents === null) return;
+  if (Object.hasOwn(contents, id) && contents[id] !== "text") {
+    console.warn(
+      `reminders: ${reminderContentFile(directory)} has a future entry for ${id}; preserving content map, using task`,
+    );
+    return;
+  }
+  if (content === "text") contents = { ...contents, [id]: "text" };
+  else if (contents[id] === "text") delete contents[id];
+  else return;
+  await saveJsonAtomic(reminderContentFile(directory), contents, {
+    mode: 0o600,
+  });
 }
 
 export function reminderContent(row: { id: string }): ReminderContent {
@@ -657,29 +683,8 @@ export async function add(
     if (rows.some((candidate) => candidate.id === row.id))
       fail(file, `duplicate reminder id ${JSON.stringify(row.id)}`);
     const reminder = assertReminder(file, row);
-    if (file === reminderFile()) {
-      const contents = loadReminderContents(dirname(file));
-      if (
-        contents !== null &&
-        Object.hasOwn(contents, reminder.id) &&
-        contents[reminder.id] !== "text"
-      ) {
-        console.warn(
-          `reminders: ${reminderContentFile(dirname(file))} has a future entry for ${reminder.id}; preserving content map, using task`,
-        );
-      } else if (contents !== null && input.content === "text") {
-        await saveJsonAtomic(
-          reminderContentFile(dirname(file)),
-          { ...contents, [reminder.id]: "text" },
-          { mode: 0o600 },
-        );
-      } else if (contents?.[reminder.id] === "text") {
-        delete contents[reminder.id];
-        await saveJsonAtomic(reminderContentFile(dirname(file)), contents, {
-          mode: 0o600,
-        });
-      }
-    }
+    if (file === reminderFile())
+      await writeReminderContent(dirname(file), reminder.id, input.content);
     rows.push(reminder);
     await saveTable(file, rows);
     return structuredClone(reminder);
