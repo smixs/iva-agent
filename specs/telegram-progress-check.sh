@@ -24,3 +24,5 @@ check() {
 check TelegramProgress none
 check TelegramProgress-repeat Once
 check TelegramProgress-no-owner LiveOwner
+check TelegramProgress-draft-claim Once
+check TelegramProgress-no-threshold Quiet

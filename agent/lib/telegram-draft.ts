@@ -15,6 +15,8 @@ export const DRAFT_INTERVAL_MS = 1_000;
 export const DRAFT_REFRESH_MS = 20_000;
 export const TYPING_INTERVAL_MS = 4_500;
 export const DRAFT_TIMEOUT_MS = 10_000;
+// Fast tool chains stay quiet; only a completed step more than 10s into the turn may send progress.
+export const PROGRESS_MIN_TURN_MS = 10_000;
 
 export type TelegramDraftHandle = {
   readonly chatId: string;
@@ -162,7 +164,6 @@ export class TelegramDraftStream {
   #step = -1;
   #text = "";
   #complete = false;
-  #progressClaimed = false;
   #tools = new Map<string, string>();
   #flagged = false;
   #latest = "";
@@ -266,18 +267,38 @@ export class TelegramDraftStream {
     this.#push();
   }
 
-  /** Claim one durable progress message independently of draft API support. */
+  /** Claim in ChatRecord before Outbox: stream recreation and process restart cannot repeat it. */
   claimProgress(step: number, text: string): boolean {
+    const status = this.#getStatus();
     if (
       this.#closed ||
-      this.#progressClaimed ||
+      !this.#identity ||
       step < this.#step ||
       !draftText(text, true) ||
-      !this.#matches(this.#getStatus())
+      !this.#matches(status) ||
+      status?.status !== "running" ||
+      status.sessionId !== this.#identity.sessionId ||
+      status.turnId !== this.#identity.turnId ||
+      status.progressClaimed !== undefined ||
+      typeof status.turnAt !== "number" ||
+      !Number.isFinite(status.turnAt) ||
+      this.#now() - status.turnAt <= PROGRESS_MIN_TURN_MS
     )
       return false;
-    this.#progressClaimed = true;
-    return true;
+    return Boolean(
+      setChatStatusIf(
+        this.chatKey,
+        {
+          status: "running",
+          sessionId: this.#identity.sessionId,
+          turnId: this.#identity.turnId,
+          draftId: this.#identity.draftId,
+          turnAt: status.turnAt,
+          progressClaimed: undefined,
+        },
+        { progressClaimed: true },
+      ),
+    );
   }
 
   requested(step: number, actions: readonly Action[]): void {

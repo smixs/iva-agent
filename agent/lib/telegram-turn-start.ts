@@ -378,8 +378,16 @@ export async function publishTelegramTurnStarted({
           draftId,
           wasCancelled: null,
           compacting: null,
-          turnAt: now(),
+          turnAt:
+            current?.sessionId === sessionId && current.turnId === turnId
+              ? (current.turnAt ?? now())
+              : now(),
           latencyLogged: null,
+          // A replay of turn.started must keep the same turn's progress claim.
+          progressClaimed:
+            current?.sessionId === sessionId && current.turnId === turnId
+              ? (current.progressClaimed ?? null)
+              : null,
           ...(early
             ? current.queuedIngressId === undefined
               ? {}

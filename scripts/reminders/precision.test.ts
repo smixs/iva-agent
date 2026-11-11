@@ -8,6 +8,9 @@ import {
   rmSync,
   statSync,
 } from "node:fs";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import { join } from "node:path";
 import test, { beforeEach } from "node:test";
 import type { Session } from "eve/channels";
@@ -453,9 +456,37 @@ for (const raw of [
   });
 }
 
-test("Reminder content: a failed kind write refuses the row; sweep removes a kind-only crash cut", async () => {
-  // Failure is exercised deterministically by making the kind destination a directory first.
+test("Reminder content: unreadable directory degrades add to task; orphan sweep still works", async () => {
   mkdirSync(reminderContentFile());
+  await add({
+    id: "degraded",
+    text: TEXT,
+    content: "text",
+    schedule: { kind: "at", atMs: NOW },
+  });
+  assert.equal((await list()).length, 1);
+  assert.equal(reminderContent({ id: "degraded" }), "task");
+  await remove("degraded");
+  assert.ok(statSync(reminderContentFile()).isDirectory());
+  rmSync(reminderContentFile(), { recursive: true });
+  writeFileSync(reminderContentFile(), JSON.stringify({ orphan: "text" }));
+  assert.equal((await list()).length, 0);
+  assert.equal(await sweepFired(NOW), 0);
+  assert.deepEqual(readReminderContents(), {});
+});
+
+test("Reminder content: a failed kind write still refuses the row", async (t) => {
+  const rename = fsp.rename;
+  t.mock.method(fsp, "rename", (...args: Parameters<typeof fsp.rename>) => {
+    if (String(args[1]) === reminderContentFile())
+      return Promise.reject(new Error("injected content write failure"));
+    return rename(...args);
+  });
+  syncBuiltinESMExports();
+  t.after(() => {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+  });
   await assert.rejects(
     add({
       id: "rejected",
@@ -463,14 +494,148 @@ test("Reminder content: a failed kind write refuses the row; sweep removes a kin
       content: "text",
       schedule: { kind: "at", atMs: NOW },
     }),
+    /injected content write failure/,
   );
-  assert.equal((await list()).length, 0);
-  rmSync(reminderContentFile(), { recursive: true });
-  // The exact crash cut after the first commit has the following durable state.
-  writeFileSync(reminderContentFile(), JSON.stringify({ orphan: "text" }));
-  assert.equal((await list()).length, 0);
-  assert.equal(await sweepFired(NOW), 0);
-  assert.deepEqual(readReminderContents(), {});
+  assert.deepEqual(await list(), []);
+});
+
+for (const operation of ["add", "remove", "sweep"] as const) {
+  test(`Reminder content: EIO during ${operation} preserves bytes and existing text kind`, async (t) => {
+    await add({
+      id: "existing",
+      text: TEXT,
+      content: "text",
+      schedule: { kind: "at", atMs: NOW },
+    });
+    await add({
+      id: "removed",
+      text: TEXT,
+      content: "text",
+      schedule: { kind: "at", atMs: NOW },
+    });
+    const before = readFileSync(reminderContentFile());
+    const read = fs.readFileSync;
+    let injected = false;
+    const warnings: string[] = [];
+    t.mock.method(console, "warn", (reason: string) => warnings.push(reason));
+    t.mock.method(
+      fs,
+      "readFileSync",
+      (...args: Parameters<typeof fs.readFileSync>) => {
+        if (String(args[0]) === reminderContentFile() && !injected) {
+          injected = true;
+          throw Object.assign(new Error("injected content read failure"), {
+            code: "EIO",
+          });
+        }
+        return read(...args);
+      },
+    );
+    syncBuiltinESMExports();
+    t.after(() => {
+      t.mock.restoreAll();
+      syncBuiltinESMExports();
+    });
+    if (operation === "add")
+      await add({
+        id: "new",
+        text: TEXT,
+        content: "text",
+        schedule: { kind: "at", atMs: NOW },
+      });
+    else if (operation === "remove") await remove("removed");
+    else await sweepFired(NOW);
+    assert.equal(injected, true);
+    assert.deepEqual(readFileSync(reminderContentFile()), before);
+    assert.equal(reminderContent({ id: "existing" }), "text");
+    if (operation === "add")
+      assert.equal(reminderContent({ id: "new" }), "task");
+    assert.ok(
+      warnings.some((reason) =>
+        /preserving content map.*EIO|preserving content map.*injected/.test(
+          reason,
+        ),
+      ),
+    );
+  });
+}
+
+for (const raw of [
+  "{broken",
+  "null",
+  "[]",
+  '{"schemaVersion":99,"existing":"text"}',
+]) {
+  test(`Reminder content: unsupported map is byte-preserved across all mutations: ${raw}`, async (t) => {
+    t.mock.method(console, "warn", () => {});
+    await add({
+      id: "existing",
+      text: TEXT,
+      content: "text",
+      schedule: { kind: "at", atMs: NOW },
+    });
+    writeFileSync(reminderContentFile(), raw);
+    await add({
+      id: "new",
+      text: TEXT,
+      content: "text",
+      schedule: { kind: "at", atMs: NOW },
+    });
+    assert.equal(reminderContent({ id: "new" }), "task");
+    await remove("new");
+    await sweepFired(NOW);
+    await assert.rejects(remove("missing"), /not found/);
+    assert.equal(readFileSync(reminderContentFile(), "utf8"), raw);
+  });
+}
+
+test("Reminder content: a future entry matching a new row id is preserved", async (t) => {
+  t.mock.method(console, "warn", () => {});
+  const raw = '{"future":{"content":"text","schemaVersion":99}}';
+  writeFileSync(reminderContentFile(), raw);
+  await add({
+    id: "future",
+    text: TEXT,
+    content: "text",
+    schedule: { kind: "at", atMs: NOW },
+  });
+  assert.equal(reminderContent({ id: "future" }), "task");
+  await remove("future");
+  assert.equal(readFileSync(reminderContentFile(), "utf8"), raw);
+});
+
+test(`Reminder content: future values survive add/remove/sweep (seed ${SEED})`, async () => {
+  await fc.assert(
+    fc.asyncProperty(fc.jsonValue(), async (future) => {
+      process.env.ASSISTANT_DATA_DIR = tempDir("iva-reminder-future-");
+      await add({
+        id: "existing",
+        text: TEXT,
+        content: "text",
+        schedule: { kind: "at", atMs: NOW },
+      });
+      const unknown = { content: "future", schemaVersion: 99, payload: future };
+      writeFileSync(
+        reminderContentFile(),
+        JSON.stringify({ existing: "text", future: unknown }),
+      );
+      await add({
+        id: "new",
+        text: TEXT,
+        content: "text",
+        schedule: { kind: "at", atMs: NOW },
+      });
+      assert.equal(reminderContent({ id: "existing" }), "text");
+      assert.equal(reminderContent({ id: "new" }), "text");
+      await remove("new");
+      await sweepFired(NOW);
+      assert.deepEqual(
+        JSON.parse(readFileSync(reminderContentFile(), "utf8")),
+        { existing: "text", future: unknown },
+      );
+    }),
+    { seed: SEED, numRuns: 30 },
+  );
 });
 
 test("Reminder content: remove and sweep prune only ids absent from the remaining rows", async () => {

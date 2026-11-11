@@ -64,23 +64,41 @@ export interface ReminderChat {
 
 /** Content decides whether the text is sent directly or executed as a task. */
 export type ReminderContent = "text" | "task";
-const contentSchema = z.record(z.string(), z.literal("text"));
 export const reminderContentFile = (directory = dataDir()): string =>
   join(directory, "reminder-content.json");
 
-/** A missing or unreadable kind file means task; a bad file is preserved and logged. */
+/** null forbids mutation; only ENOENT permits creating a new content map. */
+function loadReminderContents(
+  directory: string,
+  log: (reason: string) => void = console.warn,
+): Record<string, unknown> | null {
+  const file = reminderContentFile(directory);
+  try {
+    const contents: unknown = JSON.parse(readFileSync(file, "utf8"));
+    if (!isRecord(contents) || Object.hasOwn(contents, "schemaVersion"))
+      throw new Error("unsupported reminder content format");
+    // Unknown values belong to future writers; retain them on every write.
+    return contents;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
+    log(
+      `reminders: ${file} unreadable; preserving content map, using tasks: ${String(error)}`,
+    );
+    return null;
+  }
+}
+
+/** Read known kinds even when the map also contains future entries. */
 export function readReminderContents(
   directory = dataDir(),
   log: (reason: string) => void = console.warn,
 ): Record<string, "text"> {
-  const file = reminderContentFile(directory);
-  try {
-    return contentSchema.parse(JSON.parse(readFileSync(file, "utf8")));
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT")
-      log(`reminders: ${file} unreadable; using tasks: ${String(error)}`);
-    return {};
-  }
+  const contents = loadReminderContents(directory, log);
+  return Object.fromEntries(
+    Object.entries(contents ?? {}).filter(
+      (entry): entry is [string, "text"] => entry[1] === "text",
+    ),
+  );
 }
 
 export function reminderContent(row: { id: string }): ReminderContent {
@@ -94,10 +112,13 @@ async function sweepReminderData(
   rows: Reminder[],
 ): Promise<void> {
   if (file !== reminderFile()) return;
-  const entries = readReminderContents(dirname(file));
+  const entries = loadReminderContents(dirname(file));
+  if (entries === null) return;
   const ids = new Set(rows.map((row) => row.id));
   const kept = Object.fromEntries(
-    Object.entries(entries).filter(([id]) => ids.has(id)),
+    Object.entries(entries).filter(
+      ([id, value]) => value !== "text" || ids.has(id),
+    ),
   );
   if (Object.keys(kept).length !== Object.keys(entries).length)
     await saveJsonAtomic(reminderContentFile(dirname(file)), kept, {
@@ -637,14 +658,22 @@ export async function add(
       fail(file, `duplicate reminder id ${JSON.stringify(row.id)}`);
     const reminder = assertReminder(file, row);
     if (file === reminderFile()) {
-      const contents = readReminderContents(dirname(file));
-      if (input.content === "text") {
+      const contents = loadReminderContents(dirname(file));
+      if (
+        contents !== null &&
+        Object.hasOwn(contents, reminder.id) &&
+        contents[reminder.id] !== "text"
+      ) {
+        console.warn(
+          `reminders: ${reminderContentFile(dirname(file))} has a future entry for ${reminder.id}; preserving content map, using task`,
+        );
+      } else if (contents !== null && input.content === "text") {
         await saveJsonAtomic(
           reminderContentFile(dirname(file)),
           { ...contents, [reminder.id]: "text" },
           { mode: 0o600 },
         );
-      } else if (Object.hasOwn(contents, reminder.id)) {
+      } else if (contents?.[reminder.id] === "text") {
         delete contents[reminder.id];
         await saveJsonAtomic(reminderContentFile(dirname(file)), contents, {
           mode: 0o600,

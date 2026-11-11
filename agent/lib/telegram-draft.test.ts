@@ -32,24 +32,18 @@ const widgetHtml =
 const widgetBlock = (caption = "", html = widgetHtml) =>
   [`\`\`\`tg-widget${caption ? ` ${caption}` : ""}`, html, "```"].join("\n");
 
-await test("TelegramProgress model: one live progress claim despite empty, stale and repeated steps (seed 111101)", async () => {
+await test("TelegramProgress Once/Quiet: claims survive stream recovery (seed 111101)", async () => {
   const fc = await import("fast-check");
   await fc.assert(
     fc.asyncProperty(
       fc.boolean(),
       fc.array(
-        fc.oneof(
-          fc.record({
-            kind: fc.constant("complete" as const),
-            step: fc.integer({ min: 0, max: 2 }),
-            text: fc.boolean(),
-          }),
-          fc.record({
-            kind: fc.constantFrom("close" as const, "lose" as const),
-            step: fc.constant(0),
-            text: fc.constant(false),
-          }),
-        ),
+        fc.record({
+          kind: fc.constantFrom("complete", "close", "lose", "restore", "age"),
+          step: fc.integer({ min: 0, max: 2 }),
+          text: fc.boolean(),
+          elapsed: fc.constantFrom(0, 1, 10_000, 10_001),
+        }),
         { maxLength: 30 },
       ),
       async (enabled, events) => {
@@ -57,25 +51,47 @@ await test("TelegramProgress model: one live progress claim despite empty, stale
         let closed = false;
         let claimed = false;
         let step = 0;
+        let now = 100_000;
+        let draftId = 41;
         const { tg } = handle();
-        const stream = new status.TelegramDraftStream(tg, {
-          enabled,
-          matches: () => owner,
-          getStatus: () => ({}),
+        runStatus.setChatStatus("77:", {
+          status: "running",
+          sessionId: "s",
+          turnId: "t",
+          draftId,
+          turnAt: now,
+          progressClaimed: null,
         });
+        const create = () =>
+          new status.TelegramDraftStream(tg, {
+            identity: { sessionId: "s", turnId: "t", draftId },
+            enabled,
+            matches: () => owner,
+            now: () => now,
+          });
+        let stream = create();
         try {
           for (const event of events) {
             if (event.kind === "close") {
               closed = true;
               await stream.close();
             } else if (event.kind === "lose") owner = false;
-            else {
+            else if (event.kind === "age") now += event.elapsed;
+            else if (event.kind === "restore") {
+              await stream.close();
+              draftId++;
+              runStatus.setChatStatus("77:", { draftId });
+              stream = create();
+              closed = !owner;
+              step = 0;
+            } else {
               const expected: boolean =
                 !closed &&
                 owner &&
                 event.step >= step &&
                 event.text &&
-                !claimed;
+                !claimed &&
+                now - 100_000 > 10_000;
               if (!closed && event.step >= step) step = event.step;
               stream.completeStep(event.step, event.text ? "Checking." : "");
               assert.equal(
@@ -83,6 +99,10 @@ await test("TelegramProgress model: one live progress claim despite empty, stale
                 expected,
               );
               claimed ||= expected;
+              assert.equal(
+                runStatus.getChatStatus("77:")?.progressClaimed === true,
+                claimed,
+              );
             }
           }
         } finally {

@@ -117,6 +117,7 @@ export type MockStep =
       arguments: string;
       id?: string;
       text?: string;
+      waitFor?: Promise<void>;
     }
   | { kind: "overloaded"; times?: number }
   | { kind: "empty" }
@@ -169,7 +170,7 @@ export async function startMockOpenAiServer(
     if (step?.kind === "overloaded" && (step.times ?? 1) > 1)
       step.times = (step.times ?? 1) - 1;
     else scenario.shift();
-    if (step?.kind === "text") await step.waitFor;
+    if (step?.kind === "text" || step?.kind === "tool") await step.waitFor;
     if (step?.kind === "overloaded") {
       res.writeHead(429, {
         "content-type": "application/json",

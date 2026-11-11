@@ -399,8 +399,26 @@ test("question answers resume typing and a fresh stoppable draft in the same tur
     resetAt: null,
   });
   await emit("turn.started", { turnId: "turn_1" }, pair);
+  t.mock.timers.tick(10_001);
   try {
     for (let stepIndex = 0; stepIndex < 2; stepIndex++) {
+      await emit(
+        "message.completed",
+        {
+          turnId: "turn_1",
+          stepIndex,
+          message: "Checking.",
+          finishReason: "tool-calls",
+        },
+        pair,
+      );
+      assert.equal(
+        apiCalls.filter(
+          (c) => c.method === "sendMessage" && c.body?.text === "Checking.",
+        ).length,
+        1,
+      );
+
       const previousDraftId = getChatStatus("92:")?.draftId;
       const requestId = `q-${stepIndex}`;
       await emit(
@@ -523,7 +541,7 @@ function startTurn(chatId: string, sessionId: string) {
   });
 }
 
-test("channel wire redacts draft and one progress message, closes before separate Outbox reply", async () => {
+test("channel wire redacts draft and one progress message, closes before separate Outbox reply", async (t) => {
   apiCalls.length = 0;
   telegramReply = () => null;
   setChatStatus("9:", {
@@ -532,6 +550,8 @@ test("channel wire redacts draft and one progress message, closes before separat
     turnId: null,
     resetAt: null,
   });
+  let turnNow = Date.now();
+  t.mock.method(Date, "now", () => turnNow);
   const pair = { chatId: "9", sessionId: "wire-1" };
   await emit("turn.started", { turnId: "turn_1" }, pair);
   await pause();
@@ -557,6 +577,7 @@ test("channel wire redacts draft and one progress message, closes before separat
   );
   await pause(1000);
   assert.doesNotMatch(draftCalls().map(richText).join(""), /sk-ant/u);
+  turnNow += 11_000;
   await emit(
     "message.completed",
     {
@@ -648,6 +669,75 @@ test("channel wire redacts draft and one progress message, closes before separat
   assert.equal(apiCalls.length, count);
   await emit("turn.cancelled", { turnId: "turn_1" }, pair);
   assert.equal(getChatStatus("9:")?.draftId, undefined);
+});
+
+test("progress threshold is measured from turn start; quick tools keep one final reply", async (t) => {
+  apiCalls.length = 0;
+  const pair = { chatId: "93", sessionId: "quiet-tools" };
+  let now = 100_000;
+  t.mock.method(Date, "now", () => now);
+  await emit("turn.started", { turnId: "turn_1" }, pair);
+  for (now of [100_000, 109_999, 110_000]) {
+    await emit(
+      "message.completed",
+      {
+        turnId: "turn_1",
+        stepIndex: 0,
+        message: "Fast tool.",
+        finishReason: "tool-calls",
+      },
+      pair,
+    );
+  }
+  assert.equal(apiCalls.filter((c) => c.method === "sendMessage").length, 0);
+  assert.equal(getChatStatus("93:")?.progressClaimed, undefined);
+  await emit(
+    "message.completed",
+    {
+      turnId: "turn_1",
+      stepIndex: 1,
+      message: "Fast final.",
+      finishReason: "stop",
+    },
+    pair,
+  );
+  assert.deepEqual(
+    apiCalls.filter((c) => c.method === "sendMessage").map((c) => c.body?.text),
+    ["Fast final."],
+  );
+  await emit("turn.completed", { turnId: "turn_1" }, pair);
+  await emit("turn.started", { turnId: "turn_2" }, pair);
+  now += 10_001;
+  await emit(
+    "message.completed",
+    {
+      turnId: "turn_2",
+      stepIndex: 0,
+      message: "Slow tool.",
+      finishReason: "tool-calls",
+    },
+    pair,
+  );
+  assert.equal(getChatStatus("93:")?.progressClaimed, true);
+  await emit("turn.completed", { turnId: "turn_2" }, pair);
+  assert.equal(getChatStatus("93:")?.progressClaimed, undefined);
+  await emit("turn.started", { turnId: "turn_3" }, pair);
+  now += 10_001;
+  await emit(
+    "message.completed",
+    {
+      turnId: "turn_3",
+      stepIndex: 0,
+      message: "Another slow tool.",
+      finishReason: "tool-calls",
+    },
+    pair,
+  );
+  assert.deepEqual(
+    apiCalls.filter((c) => c.method === "sendMessage").map((c) => c.body?.text),
+    ["Fast final.", "Slow tool.", "Another slow tool."],
+  );
+  await emit("turn.cancelled", { turnId: "turn_3" }, pair);
 });
 
 for (const scope of [

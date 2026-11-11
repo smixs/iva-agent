@@ -22,22 +22,37 @@ void test(
       release = resolve;
     });
     t.after(() => release());
-    const h = await createHarness(t, [
-      {
-        kind: "tool",
-        name: "bash",
-        arguments: '{"command":"true"}',
-        text: "<!-- iva:silent -->\nI am checking the failed schedule.",
+    let releaseProgress = () => {};
+    const progressReady = new Promise<void>((resolve) => {
+      releaseProgress = resolve;
+    });
+    t.after(() => releaseProgress());
+    let clockFile = "";
+    const h = await createHarness(
+      t,
+      [
+        {
+          kind: "tool",
+          name: "bash",
+          arguments: '{"command":"true"}',
+          text: "<!-- iva:silent -->\nI am checking the failed schedule.",
+          waitFor: progressReady,
+        },
+        {
+          kind: "tool",
+          name: "bash",
+          arguments: '{"command":"true"}',
+          text: "More details about the schedule.",
+        },
+        { kind: "text", text: "WATCHDOG_EXPLAINED", waitFor: held },
+        { kind: "text", text: "FOREIGN_QUOTE_EXPLAINED" },
+      ],
+      async (app, env) => {
+        clockFile = join(app, "data/progress-clock");
+        await writeFile(clockFile, "0");
+        env.IVA_TEST_CLOCK_FILE = clockFile;
       },
-      {
-        kind: "tool",
-        name: "bash",
-        arguments: '{"command":"true"}',
-        text: "More details about the schedule.",
-      },
-      { kind: "text", text: "WATCHDOG_EXPLAINED", waitFor: held },
-      { kind: "text", text: "FOREIGN_QUOTE_EXPLAINED" },
-    ]);
+    );
     await writeFile(
       join(h.app, "data/jobs.json"),
       JSON.stringify([
@@ -82,6 +97,10 @@ void test(
         },
       },
     });
+    await waitFor(() => h.provider.requests.length === 1);
+    // turn.started has reached the provider; cross the 10s threshold before message.completed.
+    await writeFile(clockFile, "11000");
+    releaseProgress();
     await waitFor(() =>
       sends().some((r) => r.body.text === "I am checking the failed schedule."),
     );

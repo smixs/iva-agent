@@ -485,3 +485,38 @@ void test("a record written by 0.5.11 reads into its state and keeps every field
     });
   }
 });
+
+void test("progress claim belongs to the turn pair through start replay, heartbeat and terminal cleanup", async () => {
+  const chatKey = freshChat();
+  await startTurn(chatKey, "progress-session", "turn-1");
+  const turnAt = getChatStatus(chatKey)?.turnAt;
+  assert.ok(
+    setChatStatusIf(
+      chatKey,
+      {
+        sessionId: "progress-session",
+        turnId: "turn-1",
+        progressClaimed: undefined,
+      },
+      { progressClaimed: true },
+    ),
+  );
+  assert.equal(
+    setChatStatusIf(
+      chatKey,
+      { progressClaimed: undefined },
+      { progressClaimed: true },
+    ),
+    null,
+  );
+  await startTurn(chatKey, "progress-session", "turn-1");
+  assert.equal(getChatStatus(chatKey)?.progressClaimed, true);
+  assert.equal(getChatStatus(chatKey)?.turnAt, turnAt);
+  setChatStatusIf(chatKey, { sessionId: "progress-session" }, {});
+  assert.equal(getChatStatus(chatKey)?.progressClaimed, true);
+  await startTurn(chatKey, "progress-session", "turn-2");
+  assert.equal(getChatStatus(chatKey)?.progressClaimed, undefined);
+  setChatStatusIf(chatKey, { turnId: "turn-2" }, { progressClaimed: true });
+  await finishTurn(chatKey, "progress-session", "turn-2");
+  assert.equal(getChatStatus(chatKey)?.progressClaimed, undefined);
+});

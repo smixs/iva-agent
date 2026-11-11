@@ -52,6 +52,7 @@ const turnFields = {
   turnAt: num,
   firstOutputAt: num,
   latencyLogged: mark,
+  progressClaimed: mark,
   compacting: mark,
 };
 /** Отметки: переживают конец хода и не говорят, занят ли чат. */
@@ -233,6 +234,7 @@ export const TURN_FIELDS_CLEARED = {
   turnAt: null,
   firstOutputAt: null,
   latencyLogged: null,
+  progressClaimed: null,
   compacting: null,
 } as const satisfies Record<TurnField, null>;
 
