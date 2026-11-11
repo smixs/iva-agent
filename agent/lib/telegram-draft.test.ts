@@ -32,6 +32,68 @@ const widgetHtml =
 const widgetBlock = (caption = "", html = widgetHtml) =>
   [`\`\`\`tg-widget${caption ? ` ${caption}` : ""}`, html, "```"].join("\n");
 
+await test("TelegramProgress model: one live progress claim despite empty, stale and repeated steps (seed 111101)", async () => {
+  const fc = await import("fast-check");
+  await fc.assert(
+    fc.asyncProperty(
+      fc.boolean(),
+      fc.array(
+        fc.oneof(
+          fc.record({
+            kind: fc.constant("complete" as const),
+            step: fc.integer({ min: 0, max: 2 }),
+            text: fc.boolean(),
+          }),
+          fc.record({
+            kind: fc.constantFrom("close" as const, "lose" as const),
+            step: fc.constant(0),
+            text: fc.constant(false),
+          }),
+        ),
+        { maxLength: 30 },
+      ),
+      async (enabled, events) => {
+        let owner = true;
+        let closed = false;
+        let claimed = false;
+        let step = 0;
+        const { tg } = handle();
+        const stream = new status.TelegramDraftStream(tg, {
+          enabled,
+          matches: () => owner,
+          getStatus: () => ({}),
+        });
+        try {
+          for (const event of events) {
+            if (event.kind === "close") {
+              closed = true;
+              await stream.close();
+            } else if (event.kind === "lose") owner = false;
+            else {
+              const expected: boolean =
+                !closed &&
+                owner &&
+                event.step >= step &&
+                event.text &&
+                !claimed;
+              if (!closed && event.step >= step) step = event.step;
+              stream.completeStep(event.step, event.text ? "Checking." : "");
+              assert.equal(
+                stream.claimProgress(event.step, event.text ? "Checking." : ""),
+                expected,
+              );
+              claimed ||= expected;
+            }
+          }
+        } finally {
+          await stream.close();
+        }
+      },
+    ),
+    { seed: 111101, numRuns: 120 },
+  );
+});
+
 await test("draft widget: closed blocks show their delivery caption or a short placeholder", () => {
   for (const complete of [false, true]) {
     assert.equal(

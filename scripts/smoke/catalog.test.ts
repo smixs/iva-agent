@@ -64,12 +64,9 @@ void test("smoke scenario ids and executable todos match the testing table", asy
     "duplicate table id",
   );
   assert.equal(new Set(names).size, names.length, "duplicate test name");
-  assert.equal(documented.length, 10);
-  assert.deepEqual(
-    [...implemented].filter((id) => id !== "S-update-cycle-pin").sort(),
-    documented.sort(),
-  );
-  assert.deepEqual(pending.sort(), ["S-rem-reset", "S-update-cycle-pin"]);
+  assert.equal(documented.length, 12);
+  assert.deepEqual([...implemented].sort(), documented.sort());
+  assert.deepEqual(pending.sort(), []);
   for (const id of pending)
     assert.ok(
       docs

@@ -162,6 +162,7 @@ export class TelegramDraftStream {
   #step = -1;
   #text = "";
   #complete = false;
+  #progressClaimed = false;
   #tools = new Map<string, string>();
   #flagged = false;
   #latest = "";
@@ -263,6 +264,20 @@ export class TelegramDraftStream {
     this.#text = text;
     this.#complete = true;
     this.#push();
+  }
+
+  /** Claim one durable progress message independently of draft API support. */
+  claimProgress(step: number, text: string): boolean {
+    if (
+      this.#closed ||
+      this.#progressClaimed ||
+      step < this.#step ||
+      !draftText(text, true) ||
+      !this.#matches(this.#getStatus())
+    )
+      return false;
+    this.#progressClaimed = true;
+    return true;
   }
 
   requested(step: number, actions: readonly Action[]): void {
