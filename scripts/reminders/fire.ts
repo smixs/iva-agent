@@ -41,6 +41,7 @@ import {
   list,
   owesAlert,
   reminderContent,
+  reminderWasReset,
   recordDelivery,
   recordTurnSession,
   type Reminder,
@@ -435,8 +436,7 @@ async function fireRow(row: Reminder, deps: Wiring): Promise<void> {
     const current = (await deps.list()).find((entry) => entry.id === row.id);
     if (
       current?.firedAt === row.firedAt &&
-      current.resetSessionId !== undefined &&
-      current.resetSessionId === current.sessionId
+      reminderWasReset(current)
     ) {
       const tr = await deps.translator(deps.env);
       outcome = {
