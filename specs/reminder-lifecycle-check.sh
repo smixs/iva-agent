@@ -33,7 +33,8 @@ check ReminderLifecycle-sweepfirst AlertBeforeDrop
 check ReminderLifecycle-takefirst AlertBeforeDrop
 check ReminderLifecycle-retryblind NoFalseAlert
 
-check ReminderLifecycle-text none
+check ReminderLifecycle-text-ok none
+check ReminderLifecycle-text TextRetainsDelivery
 check ReminderLifecycle-resetdrop ResetRetainsDelivery
 check ReminderLifecycle-textturn TextNeverRunsTurn
 check ReminderLifecycle-minutetick NoMinuteDelay

@@ -16,7 +16,7 @@ EXTENDS Naturals
 
 
 \* One row of data/reminders.json through its firings: a Reminder (Kind = "at") or a
-\* Routine (Kind = "cron"). The processes that share the row: the minute tick inside the
+\* Routine (Kind = "cron"). The processes that share the row: the second tick inside the
 \* agent, the fire child, the Alert children, and the tick's in-memory continuations.
 \*
 \* Tick -> agent/lib/reminder-tick.ts:runReminderTick, table transactions in order:
@@ -45,7 +45,7 @@ ASSUME Content \in {"text", "task"}
 ASSUME Kind \in {"at", "cron"}
 ASSUME Fault \in {"none", "nopickup", "resend", "stale", "recapture", "sweepopen",
                   "closelive", "alertblind", "forget", "nofact", "sweepfirst",
-                  "takefirst", "retryblind", "resetdrop", "textturn", "minutetick"}
+                  "takefirst", "retryblind", "resetdrop", "text", "textturn", "minutetick"}
 
 Firings == 1..2
 Dues == 1..2
@@ -159,7 +159,8 @@ Tick == TickStart \/ TickDue \/ TickSweep \/ TickClose \/ TickAlert
 \* ---- the fire child ----
 Spawn(f) == /\ agent = "up" /\ handler[f] /\ child[f] = "none"
             /\ child' = [child EXCEPT ![f] = IF content = "text" THEN
-                       (IF Fault = "textturn" THEN "text-turn" ELSE "text") ELSE "turn"]
+                       (IF Fault = "textturn" THEN "text-turn" ELSE
+                         IF Fault = "text" THEN "text-dropped" ELSE "text") ELSE "turn"]
             /\ UNCHANGED <<agent, tick, matured, row, handler, sender, tracked, alertFact,
                            crashes, faults, ghost>>
 \* Telegram accepts the reply of the turn or the row text as is.
@@ -197,7 +198,7 @@ ChildRefused(f) == /\ child[f] \in {"turn", "text", "text-turn", "reset", "resen
 \* The fact goes to the row only for the firing it belongs to.
 Mine(f) == status # "swept" /\ (firing = f \/ Fault = "stale")
 ChildRecord(f) ==
-  /\ child[f] \in {"sent", "refused", "stopped", "unroutable", "reset-dropped"} /\ child' = [child EXCEPT ![f] = "done"]
+  /\ child[f] \in {"sent", "refused", "stopped", "unroutable", "reset-dropped", "text-dropped"} /\ child' = [child EXCEPT ![f] = "done"]
   /\ IF Mine(f)
      THEN /\ delivered' = IF child[f] = "sent" THEN "true" ELSE "false"
           /\ error' = IF child[f] # "sent" THEN "other" ELSE error
@@ -208,7 +209,7 @@ ChildRecord(f) ==
                  tracked, alertFact, crashes, faults, texts, lostText, alerts, misses,
                  captures, overdue, falseAlert, dropped, lateCapture>>
 \* The fact write failed (the table lock was busy): the child leaves without it.
-ChildSilent(f) == /\ child[f] \in {"sent", "refused", "stopped", "unroutable", "reset-dropped"} /\ child' = [child EXCEPT ![f] = "done"]
+ChildSilent(f) == /\ child[f] \in {"sent", "refused", "stopped", "unroutable", "reset-dropped", "text-dropped"} /\ child' = [child EXCEPT ![f] = "done"]
                   /\ UNCHANGED <<agent, tick, matured, row, handler, sender, tracked,
                                  alertFact, crashes, faults, ghost>>
 \* SIGKILL, or the service manager stops the child together with the agent.
@@ -358,6 +359,7 @@ LateFact(f) == firing = f /\ status # "swept" /\ delivered # "null"
 AbandonedAlerted == \A f \in Firings : Owes(f) ~> (alertFact[f] \/ LateFact(f))
 NoMinuteDelay == ~lateCapture
 ResetRetainsDelivery == \A f \in Firings : child[f] # "reset-dropped"
+TextRetainsDelivery == \A f \in Firings : child[f] # "text-dropped"
 TextNeverRunsTurn == \A f \in Firings : child[f] # "text-turn"
 \* Every accepted due gets its text or explicit refusal, including a reset while the
 \* model is running. This starts at the due event, not only after a successful capture.

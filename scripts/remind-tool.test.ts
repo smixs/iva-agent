@@ -107,7 +107,6 @@ void test("add stores a one-time reminder and answers with the owner-zone time",
   assert.equal(rows[0].sessionId, null);
   assert.deepEqual(Object.keys(rows[0]).sort(), [
     "chat",
-    "content",
     "createdAt",
     "delivered",
     "error",

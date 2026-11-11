@@ -65,38 +65,22 @@ export interface ReminderChat {
 /** Content decides whether the text is sent directly or executed as a task. */
 export type ReminderContent = "text" | "task";
 const contentSchema = z.record(z.string(), z.literal("text"));
-const resetsSchema = z.record(z.string(), z.object({
-  firedAt: z.number().int().nonnegative(),
-  sessionId: z.string().min(1),
-}));
-
-/** Auxiliary files never prevent a reminder from running as a task. Reads preserve bad bytes. */
-function readReminderData<T>(
-  file: string,
-  schema: z.ZodType<T>,
-  fallback: T,
-  log: (reason: string) => void = console.warn,
-): T {
-  try {
-    return schema.parse(JSON.parse(readFileSync(file, "utf8")));
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT")
-      log(`reminders: ${file} unreadable; using tasks: ${String(error)}`);
-    return fallback;
-  }
-}
-
 export const reminderContentFile = (directory = dataDir()): string =>
   join(directory, "reminder-content.json");
-const reminderResetsFile = (file = reminderFile()): string =>
-  join(dirname(file), "reminder-resets.json");
 
-/** One reader for the fire child, tools and doctor; only id -> "text" is persisted. */
+/** A missing or unreadable kind file means task; a bad file is preserved and logged. */
 export function readReminderContents(
   directory = dataDir(),
   log: (reason: string) => void = console.warn,
 ): Record<string, "text"> {
-  return readReminderData(reminderContentFile(directory), contentSchema, {}, log);
+  const file = reminderContentFile(directory);
+  try {
+    return contentSchema.parse(JSON.parse(readFileSync(file, "utf8")));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT")
+      log(`reminders: ${file} unreadable; using tasks: ${String(error)}`);
+    return {};
+  }
 }
 
 export function reminderContent(row: { id: string }): ReminderContent {
@@ -104,18 +88,20 @@ export function reminderContent(row: { id: string }): ReminderContent {
   return Object.hasOwn(contents, row.id) ? "text" : "task";
 }
 
-/** Both auxiliary maps share the table lock; remove the row before removing its hints. */
-async function sweepReminderData(file: string, rows: Reminder[]): Promise<void> {
-  if (file !== reminderFile()) return;
+/** The content map shares the table lock; remove the row before removing its hints. */
+async function sweepReminderData(
+  file: string,
+  rows: Reminder[],
+): Promise<void> {
+  const entries = readReminderContents(dirname(file));
   const ids = new Set(rows.map((row) => row.id));
-  const prune = async (path: string, entries: Record<string, unknown>) => {
-    const kept = Object.fromEntries(Object.entries(entries).filter(([id]) => ids.has(id)));
-    if (Object.keys(kept).length !== Object.keys(entries).length)
-      await saveJsonAtomic(path, kept, { mode: 0o600 });
-  };
-  await prune(reminderContentFile(dirname(file)), readReminderContents(dirname(file)));
-  const resetsFile = reminderResetsFile(file);
-  await prune(resetsFile, readReminderData(resetsFile, resetsSchema, {}));
+  const kept = Object.fromEntries(
+    Object.entries(entries).filter(([id]) => ids.has(id)),
+  );
+  if (Object.keys(kept).length !== Object.keys(entries).length)
+    await saveJsonAtomic(reminderContentFile(dirname(file)), kept, {
+      mode: 0o600,
+    });
 }
 
 export interface Reminder {
@@ -540,10 +526,7 @@ export function parseReminderTable(
 async function saveTable(file: string, rows: Reminder[]): Promise<void> {
   await saveJsonAtomic(
     file,
-    {
-      schemaVersion: REMINDER_SCHEMA_VERSION,
-      rows,
-    },
+    { schemaVersion: REMINDER_SCHEMA_VERSION, rows },
     { mode: 0o600 },
   );
 }
@@ -652,14 +635,18 @@ export async function add(
     if (rows.some((candidate) => candidate.id === row.id))
       fail(file, `duplicate reminder id ${JSON.stringify(row.id)}`);
     const reminder = assertReminder(file, row);
-    if (file === reminderFile()) {
-      const contents = readReminderContents(dirname(file));
-      if (input.content === "text") {
-        await saveJsonAtomic(reminderContentFile(dirname(file)), { ...contents, [reminder.id]: "text" }, { mode: 0o600 });
-      } else if (Object.hasOwn(contents, reminder.id)) {
-        delete contents[reminder.id];
-        await saveJsonAtomic(reminderContentFile(dirname(file)), contents, { mode: 0o600 });
-      }
+    const contents = readReminderContents(dirname(file));
+    if (input.content === "text") {
+      await saveJsonAtomic(
+        reminderContentFile(dirname(file)),
+        { ...contents, [reminder.id]: "text" },
+        { mode: 0o600 },
+      );
+    } else if (Object.hasOwn(contents, reminder.id)) {
+      delete contents[reminder.id];
+      await saveJsonAtomic(reminderContentFile(dirname(file)), contents, {
+        mode: 0o600,
+      });
     }
     rows.push(reminder);
     await saveTable(file, rows);
@@ -788,7 +775,6 @@ async function updateFiringRow(
       throw new ReminderNotFoundError(
         `${file}: reminder ${JSON.stringify(id)} not found`,
       );
-    }
     if (row.firedAt !== firedAt) {
       recordLog(options)(
         `reminders: ${id} ${what} for firedAt=${firedAt} ignored: current firedAt=${row.firedAt}`,
@@ -847,31 +833,6 @@ export async function recordTurnSession(
       row.sessionId = session.sessionId;
     },
   );
-}
-
-/** Record the cause before eve cancels the session: the fire child reads it after cancellation.
- * The row lock and session identity keep a later firing or another chat out of this write.
- */
-export async function recordReminderReset(sessionId: string): Promise<void> {
-  const file = reminderFile();
-  await mutate(file, async () => {
-    const rows = await loadTable(file);
-    const own = rows.filter(
-      (row) => isOpen(row) && row.sessionId === sessionId,
-    );
-    if (own.length === 0) return;
-    const resetsFile = reminderResetsFile(file);
-    const resets = readReminderData(resetsFile, resetsSchema, {});
-    for (const row of own) resets[row.id] = { firedAt: row.firedAt!, sessionId };
-    await saveJsonAtomic(resetsFile, resets, { mode: 0o600 });
-  });
-}
-
-/** The separate reset fact belongs to exactly this firing and its model session. */
-export function reminderWasReset(row: Reminder): boolean {
-  const resetsFile = reminderResetsFile();
-  const reset = readReminderData(resetsFile, resetsSchema, {})[row.id];
-  return reset !== undefined && reset.firedAt === row.firedAt && reset.sessionId === row.sessionId;
 }
 
 /** Журнал отброшенного результата: по умолчанию в stdout, как у планировщика. */

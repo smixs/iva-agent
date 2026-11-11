@@ -354,9 +354,9 @@ _Avoid_: event (занято eve), webhook, trigger, MCP Events
 _Avoid_: notification, напоминалка, alarm, режим доставки
 
 **Reminder content (содержимое напоминания)**:
-Поле `content` строки Reminder или Routine: `text` — готовый текст для отправки кодом;
-`task` — задание на один ход в срок. Модель выбирает его при `add`; старые строки
-без поля читаются как `task`.
+Поле `content` входа Reminder или Routine: `text` — готовый текст для отправки кодом;
+`task` — задание на один ход в срок. Модель выбирает его при `add`. На диске вид
+хранится отдельно в `data/reminder-content.json` как `id → "text"`; отсутствие записи означает `task`.
 _Avoid_: delivery_mode, reminder_mode, тип доставки
 
 **Routine (рутина)**:

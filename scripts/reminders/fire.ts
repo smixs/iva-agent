@@ -41,7 +41,6 @@ import {
   list,
   owesAlert,
   reminderContent,
-  reminderWasReset,
   recordDelivery,
   recordTurnSession,
   type Reminder,
@@ -208,7 +207,7 @@ function chatWatch(
   row: Reminder,
   target: Target,
   deps: Wiring,
-  onOwnerStop: () => void,
+  onRelease: (ownerStopped: boolean) => void,
 ): TurnWatch {
   const chatKey = chatKeyOf(target.chat, target.threadId);
   return {
@@ -221,8 +220,9 @@ function chatWatch(
     release: (sessionId) =>
       writeQuietly(deps.log, "release", () => {
         const current = getChatStatus(chatKey);
-        if (current?.sessionId === sessionId && current.wasCancelled === true)
-          onOwnerStop();
+        onRelease(
+          current?.sessionId === sessionId && current.wasCancelled === true,
+        );
         releaseChat(chatKey, sessionId);
       }),
   };
@@ -333,13 +333,13 @@ async function agentOutcome(
     },
     tr,
   );
-  let ownerStopped = false;
+  let ownerStopped: boolean | undefined;
   try {
     const turn = await deps.runTurn(prompt, clientFor(row, deps.env), {
       log: deps.log,
       // Пока ход идёт, чат и тема строки видят его сессию: по ней /stop гасит её.
-      watch: chatWatch(row, target, deps, () => {
-        ownerStopped = true;
+      watch: chatWatch(row, target, deps, (stopped) => {
+        ownerStopped = stopped;
       }),
     });
     const notice = stepLimitNotice(turn.failureInfo, tr);
@@ -432,19 +432,16 @@ async function fireRow(row: Reminder, deps: Wiring): Promise<void> {
     reminderContent(row) === "text"
       ? { text: row.text, error: null }
       : await agentOutcome(row, routed.target, deps);
-  if (outcome.cancelled === true && outcome.ownerStopped !== true) {
-    const current = (await deps.list()).find((entry) => entry.id === row.id);
-    if (
-      current?.firedAt === row.firedAt &&
-      reminderWasReset(current)
-    ) {
-      const tr = await deps.translator(deps.env);
-      outcome = {
-        text: `${row.text}\n\n${tr("Execution was interrupted by a conversation reset.", "Выполнение прервал сброс разговора.")}`,
-        error: "conversation reset interrupted the turn",
-      };
-    }
+  if (outcome.cancelled === true && outcome.ownerStopped === false) {
+    // /stop leaves wasCancelled in the watched Chat record before turn.cancelled.
+    // A session reset cancels the turn without that explicit owner-stop fact.
+    const tr = await deps.translator(deps.env);
+    outcome = {
+      text: `${row.text}\n\n${tr("Execution was interrupted by a conversation reset.", "Выполнение прервал сброс разговора.")}`,
+      error: "conversation reset interrupted the turn",
+    };
   }
+
   noteTurnFailure(row, outcome, deps);
   if (outcome.cancelled === true) {
     // Владелец погасил ход сам: дословный текст напоминания ему не отправляем, в строке —

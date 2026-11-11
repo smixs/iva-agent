@@ -13,9 +13,6 @@ import {
   parseTelegramResetTarget,
 } from "#lib/telegram-reset-route.ts";
 
-import { tempDir } from "../fixtures/temp-dir.ts";
-process.env.ASSISTANT_DATA_DIR = tempDir("iva-reset-route-");
-
 type FetchCall = { url: string; init: RequestInit };
 type ResetOperations = Pick<
   RouteHandlerArgs,

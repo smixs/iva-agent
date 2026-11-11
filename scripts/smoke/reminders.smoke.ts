@@ -6,13 +6,15 @@
  * AbandonedAlerted: after recovery, an abandoned firing gets one Alert fact.
  * EveryFiringConcludes: with fair completion/recovery, no capture remains open.
  * The transport double refuses BEFORE acceptance (no lost answers); therefore
- * lostText/misses are zero. /stop is ChildRefused; /new is the separate F1 TODO.
+ * lostText/misses are zero. /stop is ChildRefused; /new preserves the original text when it interrupts a task.
  */
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import fc from "fast-check";
+import { Cron } from "croner";
+import { REMINDER_TICK_CRON } from "../../agent/lib/schedule-table.ts";
 import * as store from "../../agent/lib/reminder-store.ts";
 import { chatKeyOf } from "../../agent/lib/run-status.ts";
 import { requestTurnCancel } from "../../agent/lib/telegram-stop.ts";
@@ -58,12 +60,21 @@ const tick = (h: Harness, now: number, capture = false) => {
   ]);
 };
 
-async function askReminder(h: Harness, topic = false) {
+async function askReminder(
+  h: Harness,
+  topic = false,
+  content: "text" | "task" = "task",
+) {
   h.provider.enqueue(
     {
       kind: "tool",
       name: "remind",
-      arguments: JSON.stringify({ action: "add", text: TEXT, at: "in 3s" }),
+      arguments: JSON.stringify({
+        action: "add",
+        content,
+        text: TEXT,
+        at: "in 3s",
+      }),
     },
     { kind: "text", text: "SMOKE_REMINDER_ADDED" },
   );
@@ -82,6 +93,50 @@ async function askReminder(h: Harness, topic = false) {
   });
   return row;
 }
+
+void test(
+  "S-rem-ontime: ready text reaches its topic within 15s of the stored deadline without a model turn",
+  { timeout: 120_000 },
+  async (t) => {
+    const h = await createHarness(t);
+    const row = await askReminder(h, true, "text");
+    const requests = h.provider.requests.length;
+    const cron = new Cron(REMINDER_TICK_CRON, { paused: true });
+    t.after(() => cron.stop());
+    const next = cron.nextRun(new Date(row.nextRunAtMs - 1));
+    assert.ok(next);
+    const tickDelay = next.getTime() - row.nextRunAtMs;
+    assert.ok(
+      tickDelay >= 0 && tickDelay <= 1_000,
+      "seconds cron admits within one second",
+    );
+    await tick(h, row.nextRunAtMs - 1);
+    assert.equal(texts(h, TEXT).length, 0, "not before the deadline");
+    const started = performance.now();
+    let latency = Infinity;
+    await Promise.all([
+      tick(h, next.getTime()),
+      waitFor(() => texts(h, TEXT).length === 1).then(() => {
+        latency = tickDelay + performance.now() - started;
+      }),
+    ]);
+    t.diagnostic(
+      `S-rem-ontime text deadline-to-send=${Math.round(latency)}ms (cron wait=${tickDelay}ms + child/transport wall time); bound=15000ms`,
+    );
+    assert.ok(
+      latency <= 15_000,
+      `text delivered ${Math.round(latency)}ms after deadline`,
+    );
+    assert.equal(h.provider.requests.length, requests, "TextNeverRunsTurn");
+    assert.equal(String(texts(h, TEXT)[0].chat), String(OWNER));
+    assert.equal(String(texts(h, TEXT)[0].topic), String(TOPIC));
+    assert.equal((await rows(h))[0].delivered, true);
+    await tick(h, row.nextRunAtMs + 60_000);
+    assert.equal(texts(h, TEXT).length, 1, "OneAttemptPerCapture");
+    await h.saveEvidence("reminder-ontime");
+    h.pass();
+  },
+);
 
 void test(
   "S-rem-ontime: remind add -> Schedule tick -> one reply in the originating topic",
@@ -103,7 +158,7 @@ void test(
       }),
     ]);
     t.diagnostic(
-      `S-rem-ontime deadline-to-send=${Math.round(sentAt - started)}ms; logical clock advanced to deadline; invoked runReminderTick as Schedule does; minute cron wait excluded (F4)`,
+      `S-rem-ontime deadline-to-send=${Math.round(sentAt - started)}ms; logical clock advanced to deadline; invoked runReminderTick as Schedule does; task turn latency is separate from ready text`,
     );
     assert.equal((await rows(h))[0].delivered, true);
     const requests = h.provider.requests.length;
@@ -164,8 +219,8 @@ void test(
 );
 
 void test(
-  "S-rem-reset: /new during a reminder turn delivers its text — ждёт починки F1",
-  { timeout: 90_000, todo: "F1: reset currently becomes cancelled by owner" },
+  "S-rem-reset: /new during a reminder turn delivers its text",
+  { timeout: 90_000 },
   async (t) => {
     const h = await createHarness(t);
     const row = await askReminder(h);
@@ -186,13 +241,18 @@ void test(
           .map((r) => r.body.text),
       }),
     );
-    h.pass();
+    const preserved = h.telegram.requests.filter(
+      (r) => r.method === "sendMessage" && String(r.body.text).startsWith(TEXT),
+    );
     assert.equal(
-      texts(h, TEXT).length,
+      preserved.length,
       1,
       "F1: reset must preserve the reminder text",
     );
+    assert.match(String(preserved[0].body.text), /conversation reset/u);
     assert.equal((await rows(h))[0].delivered, true);
+    await h.saveEvidence("reminder-reset");
+    h.pass();
   },
 );
 

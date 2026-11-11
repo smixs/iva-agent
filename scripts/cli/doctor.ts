@@ -1080,7 +1080,6 @@ function checkRollupStatus(ctx: DoctorContext): void {
 }
 
 type ReminderStoreModule = {
-  readReminderContents: typeof import("../../agent/lib/reminder-store.ts").readReminderContents;
   reminderFile: typeof import("../../agent/lib/reminder-store.ts").reminderFile;
   parseReminderTable: typeof import("../../agent/lib/reminder-store.ts").parseReminderTable;
   reminderPhase: typeof import("../../agent/lib/reminder-store.ts").reminderPhase;
@@ -1109,7 +1108,6 @@ async function checkReminders(ctx: DoctorContext): Promise<void> {
     // Без authored tree напоминаний на установке нет вовсе.
     return;
   }
-  store.readReminderContents(ctx.dataDirectory, (reason) => ctx.warn(reason));
   checkReminderPulse(ctx, tick);
   checkReminderFailures(ctx, store);
 }

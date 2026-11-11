@@ -397,7 +397,7 @@ test("schemaVersion новее кода — явная ошибка", async () =
   const before = `{\n  "schemaVersion": ${REMINDER_SCHEMA_VERSION + 1},\n  "rows": []\n}`;
   writeFileSync(reminderFile(), before);
 
-  await assert.rejects(list(), /schemaVersion 4.*newer/);
+  await assert.rejects(list(), /schemaVersion 3.*newer/);
   assert.equal(readFileSync(reminderFile(), "utf8"), before);
 
   await assert.rejects(
@@ -475,7 +475,7 @@ test("файл версии 1 переводится: срок и текст ж�
   assert.equal(cron.delivered, false);
   assert.equal(cron.error, "400 chat not found");
   assert.equal(cron.createdAt > 0, true);
-  // После первой мутации файл уже текущей версии.
+  // После первой мутации файл уже версии 2.
   await recordDelivery("old-cron", {
     firedAt: cron.firedAt,
     delivered: false,

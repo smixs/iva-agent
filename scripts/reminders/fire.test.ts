@@ -532,6 +532,15 @@ void test("отмена без границы сессии: текст не ух
   // доехать до кода, иначе владелец получит дословный текст, которого не просил.
   const runTurn = realTurn([{ type: "turn.cancelled" }], {
     sessionId: "sess-cut",
+    // The real /stop path records this owner fact before cancellation is emitted.
+    before: () => {
+      setChatStatusIf(
+        chatKeyOf("555", null),
+        { sessionId: "sess-cut" },
+        { wasCancelled: true },
+        { touch: false },
+      );
+    },
   });
 
   assert.equal(await runReminderFire("r1", deps({ send, runTurn })), 0);
@@ -549,6 +558,15 @@ void test("отмена, а потом обрыв стрима: текст не 
   // оборвался — признак отмены обязан пережить обрыв.
   const runTurn = realTurn([{ type: "turn.cancelled" }], {
     sessionId: "sess-cut",
+    // The real /stop path records this owner fact before cancellation is emitted.
+    before: () => {
+      setChatStatusIf(
+        chatKeyOf("555", null),
+        { sessionId: "sess-cut" },
+        { wasCancelled: true },
+        { touch: false },
+      );
+    },
     fail: "stream reset by peer",
   });
 

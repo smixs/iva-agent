@@ -27,7 +27,7 @@ Everything is read in your timezone — the one Iva is configured with, not the 
 
 ## What happens at the time
 
-A simple reminder (`content: "text"`) is ready text. Code sends it directly to the chat and topic where you asked, without a model turn. On a free dispatcher, delivery starts within five seconds of the stored due time. The existing dispatcher runs every second; it also picks up reminders created between minute boundaries.
+A simple reminder (`content: "text"`) is ready text. Code sends it directly to the chat and topic where you asked, without a model turn. The next tick is within one second of the stored due time; the isolated smoke test allows 15 seconds including child startup and local transport. Network failures and a busy dispatcher can add delay. The existing dispatcher runs every second; it also picks up reminders created between minute boundaries.
 
 A scheduled task (`content: "task"`) is a self-contained instruction for Iva. At the due time she starts one fresh session, uses her tools and returns a final answer; code sends that answer to your chat. This can take as long as the task and model need. Existing reminders without `content` retain this task behavior. Repeating reminders use the same two choices and keep their existing schedule calculation.
 
@@ -62,4 +62,6 @@ Use `remind` or `schedule` for reminders; `add` with text requires `content: "te
 
 ## Stored format and rollback
 
-The current reader accepts reminder schemas 1, 2 and 3. Old rows without `content` remain scheduled tasks. New writes use schema 3 so older versions explicitly refuse the file before treating the new fields as damaged rows. Rolling back to an older reader requires a compatible reminder-file backup. Scheduled commands keep schema 2.
+The current reader accepts reminder schemas 1 and 2. Scheduled commands keep schema 2.
+
+The reminder table keeps schema 2 and its existing row keys. `data/reminder-content.json` stores only `id → "text"`; an absent entry means task. A missing or unreadable content file preserves the original bytes and falls back to task execution, with a warning in the log for unreadable data. On rollback, older versions execute text reminders as tasks: the text arrives after a model turn.
