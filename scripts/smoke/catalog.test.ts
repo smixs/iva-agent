@@ -11,7 +11,8 @@ void test("smoke scenario ids and executable todos match the testing table", asy
   const documented = [...docs.matchAll(/^\|\s*([SP]-[\w-]+)\s*\|/gmu)].map(
     (m) => m[1],
   );
-  const implemented: string[] = [];
+  const implemented = new Set<string>();
+  const names: string[] = [];
   const pending: string[] = [];
   for (const name of await readdir(new URL("./", import.meta.url))) {
     if (!name.endsWith(".smoke.ts")) continue;
@@ -38,7 +39,8 @@ void test("smoke scenario ids and executable todos match the testing table", asy
                 ts.isIdentifier(body),
               `${id}: missing test body`,
             );
-            implemented.push(id);
+            implemented.add(id);
+            names.push(node.arguments[0].text);
             const options = node.arguments[1];
             if (
               options &&
@@ -61,14 +63,10 @@ void test("smoke scenario ids and executable todos match the testing table", asy
     documented.length,
     "duplicate table id",
   );
-  assert.equal(
-    new Set(implemented).size,
-    implemented.length,
-    "duplicate test id",
-  );
+  assert.equal(new Set(names).size, names.length, "duplicate test name");
   assert.equal(documented.length, 10);
   assert.deepEqual(
-    implemented.filter((id) => id !== "S-update-cycle-pin").sort(),
+    [...implemented].filter((id) => id !== "S-update-cycle-pin").sort(),
     documented.sort(),
   );
   assert.deepEqual(pending.sort(), ["S-rem-reset", "S-update-cycle-pin"]);
