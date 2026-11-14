@@ -5,7 +5,8 @@ import { stepLimitNotice } from "#lib/model-response.ts";
 // fired. В срок идёт один ход агента: текст напоминания — это промпт, агент выполняет его
 // свежей сессией с инструментами, а код отправляет финальный текст хода в чат и тему, где
 // напоминание попросили. Ход упал, вышел со status "failed" или промолчал — код шлёт сам
-// текст напоминания как есть; это единственная оставшаяся отправка «текста как есть».
+// начало текста напоминания (до ALERT_EXCERPT знаков) и строку «не выполнено»: короткое
+// напоминание доходит целиком, а длинное задание не уходит владельцу простынёй (14.11.2026).
 // Повторов нет по решению владельца 12.09: одна попытка хода, одна отправка. Факт
 // (delivered/error) дописывается в ту же строку; если процесс упал, не сказав факта, тик
 // запишет delivered=false с причиной по коду выхода.
@@ -255,6 +256,36 @@ function route(row: Reminder, deps: Wiring): Route {
   return { target: { token, chat: chat.id, threadId: chat.threadId } };
 }
 
+/** Начало текста строки одной строкой: задание-промпт владельцу целиком не уходит. */
+function excerpt(text: string): string {
+  const flat = text.replace(/\s+/gu, " ").trim();
+  return flat.length > ALERT_EXCERPT
+    ? `${flat.slice(0, ALERT_EXCERPT)}…`
+    : flat;
+}
+
+const isSignal = (row: { readonly id: string }) => row.id.startsWith("signal-");
+
+/**
+ * Что владелец видит от строки, когда ход её не выполнил. Строка Signal — данные плагина, она
+ * идёт целиком. Текст Reminder — задание модели: от него идёт начало.
+ */
+const subject = (row: Reminder) =>
+  isSignal(row) ? row.text : excerpt(row.text);
+
+/** Ход не дал ответа: владелец видит, о чём было напоминание и что оно не выполнено. */
+function failedText(
+  row: Reminder,
+  tr: (en: string, ru: string) => string,
+): string {
+  if (isSignal(row)) return row.text;
+  const note = tr(
+    "Not done: the turn gave no answer.",
+    "Не выполнено: ход не дал ответа.",
+  );
+  return `${subject(row)}\n\n${note}`;
+}
+
 /**
  * Пустой ответ хода — такой же провал, как упавший ход: владелец получает текст строки. Голое
  * QUIET (модель спутала ход напоминания или Signal с Watch) — тоже: слово QUIET владельцу не
@@ -312,10 +343,7 @@ function replyOf(
 
 /** Клиент хода строки: Signal называет себя своим видом, остальное — Reminder. */
 const clientFor = (row: Reminder, env: NodeJS.ProcessEnv) =>
-  reminderClientOptions(
-    env,
-    row.id.startsWith("signal-") ? "signal" : "reminder",
-  );
+  reminderClientOptions(env, isSignal(row) ? "signal" : "reminder");
 
 /** Один ход агента по тексту напоминания. Любой его провал отдаётся текстом строки. */
 async function agentOutcome(
@@ -346,13 +374,16 @@ async function agentOutcome(
     return {
       ...replyOf(
         turn,
-        notice ? `${row.text}\n${notice}` : row.text,
-        sessionLimitText(row.text, tr),
+        notice ? `${subject(row)}\n${notice}` : failedText(row, tr),
+        sessionLimitText(subject(row), tr),
       ),
       ownerStopped,
     };
   } catch (error) {
-    return { text: row.text, error: `agent turn failed: ${message(error)}` };
+    return {
+      text: failedText(row, tr),
+      error: `agent turn failed: ${message(error)}`,
+    };
   }
 }
 
@@ -437,7 +468,7 @@ async function fireRow(row: Reminder, deps: Wiring): Promise<void> {
     // A session reset cancels the turn without that explicit owner-stop fact.
     const tr = await deps.translator(deps.env);
     outcome = {
-      text: `${row.text}\n\n${tr("Execution was interrupted by a conversation reset.", "Выполнение прервал сброс разговора.")}`,
+      text: `${subject(row)}\n\n${tr("Execution was interrupted by a conversation reset.", "Выполнение прервал сброс разговора.")}`,
       error: "conversation reset interrupted the turn",
     };
   }
@@ -478,9 +509,6 @@ async function alertAbandoned(id: string, deps: Wiring): Promise<number> {
     );
     return 1;
   }
-  const flat = row.text.replace(/\s+/gu, " ").trim();
-  const excerpt =
-    flat.length > ALERT_EXCERPT ? `${flat.slice(0, ALERT_EXCERPT)}…` : flat;
   const due = formatZoned(
     row.firedAt ?? row.nextRunAtMs,
     resolveTimeZone(deps.env.ASSISTANT_TIMEZONE),
@@ -505,8 +533,8 @@ async function alertAbandoned(id: string, deps: Wiring): Promise<number> {
       target.token,
       target.chat,
       tr(
-        `The reminder "${excerpt}" due ${due} may not have reached you: its firing was cut short, most likely by an Iva restart. If it is not above in this chat, it did not arrive.`,
-        `Напоминание «${excerpt}» на ${due} могло не дойти: срабатывание оборвалось, вероятно, при перезапуске Ивы. Если его нет выше в этом чате, оно не пришло.`,
+        `The reminder "${excerpt(row.text)}" due ${due} may not have reached you: its firing was cut short, most likely by an Iva restart. If it is not above in this chat, it did not arrive.`,
+        `Напоминание «${excerpt(row.text)}» на ${due} могло не дойти: срабатывание оборвалось, вероятно, при перезапуске Ивы. Если его нет выше в этом чате, оно не пришло.`,
       ),
       {
         retryTransient: true,

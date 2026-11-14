@@ -171,7 +171,7 @@ void test("turn.failed after empty responses delivers the reminder and records f
   assert.equal(await runReminderFire("r1", deps({ send, runTurn })), 0);
   assert.deepEqual(
     calls.map((c) => c.text),
-    ["позвонить в клинику"],
+    [NOT_DONE],
   );
   const [row] = await list();
   assert.equal(row?.delivered, true);
@@ -372,7 +372,30 @@ void test("строка без чата идёт в чат владельца, �
   assert.equal(row?.error, null);
 });
 
-void test("ход упал: код шлёт текст напоминания как есть и называет причину", async () => {
+// Провал хода: короткий текст строки уходит целиком со строкой «не выполнено».
+const NOT_DONE = "позвонить в клинику\n\nNot done: the turn gave no answer.";
+
+void test("ход упал на длинном задании: уходит начало текста, не весь промпт", async () => {
+  const prompt = `Ловушка договорённостей (каждый час). ${"Загрузи скиллы и проверь чаты. ".repeat(60)}`;
+  await add({ id: "r1", text: prompt, schedule: { kind: "at", atMs: NOW } });
+  await fireDue(NOW, 10);
+  const { calls, send } = makeSend();
+
+  assert.equal(
+    await runReminderFire(
+      "r1",
+      deps({ send, runTurn: () => Promise.reject(new Error("HTTP 503")) }),
+    ),
+    0,
+  );
+
+  assert.equal(calls.length, 1);
+  const [head, note] = calls[0].text.split("\n\n");
+  assert.equal(head, `${prompt.trim().slice(0, 200)}…`);
+  assert.equal(note, "Not done: the turn gave no answer.");
+});
+
+void test("ход упал: код шлёт текст напоминания со строкой «не выполнено» и называет причину", async () => {
   await firedRow();
   const { calls, send } = makeSend();
 
@@ -388,7 +411,7 @@ void test("ход упал: код шлёт текст напоминания к
   );
 
   assert.equal(calls.length, 1, "страховка шлёт один раз");
-  assert.equal(calls[0].text, "позвонить в клинику");
+  assert.equal(calls[0].text, NOT_DONE);
   const [row] = await list();
   assert.equal(row?.delivered, true, "текст дошёл, хоть ход и упал");
   assert.match(
@@ -405,7 +428,7 @@ void test("ход вернул пустой текст: уходит текст 
   assert.equal(await runReminderFire("r1", deps({ send, runTurn })), 0);
 
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].text, "позвонить в клинику");
+  assert.equal(calls[0].text, NOT_DONE);
   const [row] = await list();
   assert.equal(row?.delivered, true);
   assert.match(String(row?.error), /no text/u);
@@ -418,7 +441,7 @@ void test("status failed: текст напоминания и причина п
 
   assert.equal(await runReminderFire("r1", deps({ send, runTurn })), 0);
 
-  assert.equal(calls[0].text, "позвонить в клинику");
+  assert.equal(calls[0].text, NOT_DONE);
   const [row] = await list();
   assert.match(String(row?.error), /agent turn failed: turn timed out/u);
 });
@@ -697,7 +720,7 @@ void test("оба шва сломаны: в строке причина хода
     0,
   );
 
-  assert.equal(calls[0].text, "позвонить в клинику");
+  assert.equal(calls[0].text, NOT_DONE);
   const [row] = await list();
   assert.equal(row?.delivered, false);
   assert.match(String(row?.error), /agent turn failed: turn timed out/u);
