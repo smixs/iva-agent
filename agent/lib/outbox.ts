@@ -40,6 +40,7 @@ import {
   toTelegramHtmlChunks,
 } from "./telegram-format.ts";
 import {
+  noteWidgetRefusal,
   splitWidgets,
   widgetProblem,
   type ReplyPart,
@@ -204,6 +205,7 @@ async function deliverWidget(
       result.ok = false;
       return true;
     }
+    noteWidgetRefusal(sent.error);
     result.fellBack = true;
     if (!result.error) result.error = `widget dropped: ${sent.error}`;
   }
