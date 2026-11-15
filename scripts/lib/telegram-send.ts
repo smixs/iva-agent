@@ -510,6 +510,13 @@ const definitiveRefusal = (ack: PostAck) =>
   ack.status !== 408 &&
   ack.status !== 429;
 
+const notModified = (ack: PostAck) =>
+  !ack.ok && /message is not modified/iu.test(ack.error);
+
+/** Keep text literal in rich markdown. */
+const literalMarkdown = (text: string) =>
+  text.replace(/[\\`*_{}[\]()#+.!|<>~=$-]/gu, "\\$&");
+
 /**
  * Close the recorded Watch messages: the first one is edited to the close text (empty markup
  * removes any classic buttons), the others of the same signal are deleted, so one signal never
@@ -525,27 +532,46 @@ export async function closeTelegramWatchSignal(
   { fetchImpl = fetch }: Pick<TelegramSendOptions, "fetchImpl"> = {},
 ): Promise<{ ok: boolean; error: string; refused?: string }> {
   let refused = "";
+  const closeText = redactNotice(text);
+  const edit = (extra: Record<string, unknown>, message_id: number) =>
+    post(
+      bot,
+      "editMessageText",
+      {
+        chat_id: chat,
+        message_id,
+        ...extra,
+        reply_markup: { inline_keyboard: [] },
+      },
+      fetchImpl,
+    );
   for (const [index, message_id] of messageIds.entries()) {
-    const ack =
-      index === 0
-        ? await post(
-            bot,
-            "editMessageText",
-            {
-              chat_id: chat,
-              message_id,
-              text: redactNotice(text),
-              reply_markup: { inline_keyboard: [] },
-            },
-            fetchImpl,
-          )
-        : await post(
-            bot,
-            "deleteMessage",
-            { chat_id: chat, message_id },
-            fetchImpl,
-          );
-    if (ack.ok || /message is not modified/iu.test(ack.error)) continue;
+    let ack: PostAck;
+    if (index === 0) {
+      ack = await edit({ text: closeText }, message_id);
+      // The receipt does not say how the message went out. A rich message refuses a plain
+      // `text` edit, so one definitive refusal is retried once in the rich form.
+      if (definitiveRefusal(ack) && !notModified(ack)) {
+        const plainRefusal = ack.ok ? "" : ack.error;
+        ack = await edit(
+          { rich_message: { markdown: literalMarkdown(closeText) } },
+          message_id,
+        );
+        if (!ack.ok && definitiveRefusal(ack))
+          ack = {
+            ...ack,
+            error: `plain edit: ${plainRefusal}; rich edit: ${ack.error}`,
+          };
+      }
+    } else {
+      ack = await post(
+        bot,
+        "deleteMessage",
+        { chat_id: chat, message_id },
+        fetchImpl,
+      );
+    }
+    if (ack.ok || notModified(ack)) continue;
     if (!definitiveRefusal(ack)) return { ok: false, error: ack.error };
     refused ||= ack.error;
   }

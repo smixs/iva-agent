@@ -493,10 +493,11 @@ test("a definitive refusal of the close ends the signal; a 502 keeps it closing"
       status: readProactiveState(h.statePath)?.signals?.[KEY].status,
     };
   };
+  // Both the plain and the rich form of the edit are refused: two requests, then closed.
   assert.deepEqual(await run(400, "Bad Request: message to edit not found"), {
     first: 0,
     second: 0,
-    requests: 1,
+    requests: 2,
     status: "closed",
   });
   assert.deepEqual(await run(502, "Bad Gateway"), {
@@ -512,6 +513,67 @@ test("a definitive refusal of the close ends the signal; a 502 keeps it closing"
     requests: 2,
     status: "closing",
   });
+});
+
+test("a rich Watch message closes through the rich edit after the plain edit is refused", async (t) => {
+  const { closeTelegramWatchSignal } = await import("../lib/telegram-send.ts");
+  const run = async (answers: Response[]) => {
+    const h = harness(t);
+    await seed(h);
+    await runProactiveTick(NOW, h.deps);
+    h.owner = NOW + MIN;
+    h.now += 30 * MIN;
+    const bodies: Record<string, unknown>[] = [];
+    const deps = {
+      ...h.deps,
+      closeSignal: (ids: readonly number[], text: string) =>
+        closeTelegramWatchSignal(
+          "fixture",
+          "owner",
+          { messageIds: ids, text },
+          {
+            fetchImpl: (_url, init) => {
+              bodies.push(JSON.parse(init?.body as string) as never);
+              return Promise.resolve(
+                answers[bodies.length - 1] ?? answers[answers.length - 1],
+              );
+            },
+          },
+        ),
+    };
+    await runProactiveTick(h.now, deps);
+    return {
+      bodies,
+      status: readProactiveState(h.statePath)?.signals?.[KEY].status,
+    };
+  };
+  const refused = () =>
+    new Response("Bad Request: message can't be edited", { status: 400 });
+  const okay = () => new Response(JSON.stringify({ ok: true, result: true }));
+
+  const rich = await run([refused(), okay()]);
+  assert.equal(rich.status, "closed");
+  assert.equal(rich.bodies.length, 2);
+  assert.equal("rich_message" in rich.bodies[0], false);
+  assert.equal(typeof rich.bodies[0].text, "string");
+  assert.equal("text" in rich.bodies[1], false);
+  assert.equal(
+    typeof (rich.bodies[1].rich_message as { markdown: unknown }).markdown,
+    "string",
+  );
+  assert.deepEqual(rich.bodies[1].reply_markup, { inline_keyboard: [] });
+
+  const both = await run([refused(), refused()]);
+  assert.deepEqual([both.status, both.bodies.length], ["closed", 2]);
+
+  const flaky = await run([
+    refused(),
+    new Response("Bad Gateway", { status: 502 }),
+  ]);
+  assert.deepEqual([flaky.status, flaky.bodies.length], ["closing", 2]);
+
+  const plain = await run([okay()]);
+  assert.deepEqual([plain.status, plain.bodies.length], ["closed", 1]);
 });
 
 test("history failure leaves a Telegram candidate quiet", async (t) => {
