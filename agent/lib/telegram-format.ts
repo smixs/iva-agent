@@ -138,8 +138,11 @@ const tableCells = (line: string): string[] =>
 // абзацах, а длинная режется по строкам, и каждый кусок остаётся самостоятельной цитатой.
 // Цитата в цитате в Telegram невозможна, поэтому «>» внутри тела срезается. Не закрытый
 // <details> берёт всё до конца текста, лишний </details> и вложенный <details> просто
-// пропадают. Фенсы кода не трогаем.
+// пропадают. Фенс кода внутри складки теряет строки-ограды, а каждая его строка несёт
+// CODE_MARK: нарезка может разрезать код, и каждый кусок сам знает, какие строки - код
+// (<pre> без разбора markdown), а какие - текст цитаты.
 const FOLD_MARK = "\u0001";
+const CODE_MARK = "\u0004";
 const FENCE_OPEN = "\u0002";
 const FENCE_CLOSE = "\u0003";
 const FENCE_REF = new RegExp(`${FENCE_OPEN}(\\d+)${FENCE_CLOSE}`, "g");
@@ -157,15 +160,21 @@ function foldToQuote(rawBody: string): string {
     body = body.slice(0, sm.index) + body.slice(sm.index + sm[0].length);
   }
   body = body.replace(/<\/?summary\b[^>]*>/gi, "");
-  const lines = body
-    .replace(/^\n+|\s+$/g, "")
-    .split("\n")
-    .map((l) =>
-      l
-        .replace(/^\s*(?:>\s?)+/, "")
-        .replace(/^\s*[-*+]\s+/, "• ")
-        .replace(/^#{1,6}\s+(.*)$/, "**$1**"),
-    );
+  let inCode = false;
+  const lines: string[] = [];
+  for (const l of body.replace(/^\n+|\s+$/g, "").split("\n")) {
+    if (inCode) {
+      if (/^```\s*$/.test(l)) inCode = false;
+      else lines.push(`${CODE_MARK}${l}`);
+    } else if (/^```\w*\s*$/.test(l)) inCode = true;
+    else
+      lines.push(
+        l
+          .replace(/^\s*(?:>\s?)+/, "")
+          .replace(/^\s*[-*+]\s+/, "• ")
+          .replace(/^#{1,6}\s+(.*)$/, "**$1**"),
+      );
+  }
   if (lines.length === 1 && lines[0] === "") lines.length = 0;
   if (title) lines.unshift(`**${title.replace(/\*\*/g, "")}**`);
   return lines.length ? lines.map((l) => `>${FOLD_MARK}${l}`).join("\n") : "";
@@ -174,6 +183,9 @@ function foldToQuote(rawBody: string): string {
 export function foldsToQuotes(md: unknown): string {
   const text = String(md);
   if (!/<\/?(?:details|summary)\b/i.test(text)) return text;
+  // Уже сложено (второй проход по куску): буквальный <details> в коде не должен
+  // стереть метки настоящей складки.
+  if (new RegExp(`^>${FOLD_MARK}`, "m").test(text)) return text;
   try {
     // Фенсы прячем под метки, чтобы теги внутри кода остались буквами.
     const fences: string[] = [];
@@ -182,6 +194,8 @@ export function foldsToQuotes(md: unknown): string {
     for (const line of text
       .replace(/\r\n/g, "\n")
       .split(FOLD_MARK)
+      .join("")
+      .split(CODE_MARK)
       .join("")
       .split(FENCE_OPEN)
       .join("")
@@ -303,9 +317,12 @@ function convert(md: unknown): string {
     // blockquote (grouped, multi-line); leading "!" on first line → expandable
     if (/^>\s?/.test(line)) {
       const ql = [];
+      const isFold = (l: string) => l.startsWith(`>${FOLD_MARK}`);
+      const foldGroup = isFold(line);
       while (i < lines.length) {
         const mm = /^>\s?(.*)$/.exec(lines[i]);
-        if (!mm) break;
+        // Цитата и складка рядом - две отдельные цитаты, иначе складка теряет «expandable».
+        if (!mm || isFold(lines[i]) !== foldGroup) break;
         ql.push(mm[1]);
         i++;
       }
@@ -320,7 +337,20 @@ function convert(md: unknown): string {
         expandable = true;
         ql[0] = ql[0].replace(/^!\s?/, "");
       }
-      const inner = ql.map(inlineHtml).join("\n");
+      let inner = "";
+      let prevText = false;
+      for (let k = 0; k < ql.length;) {
+        if (expandable && ql[k].startsWith(CODE_MARK)) {
+          const code = [];
+          while (k < ql.length && ql[k].startsWith(CODE_MARK))
+            code.push(ql[k++].slice(1));
+          inner += `<pre>${escHtml(code.join("\n"))}</pre>`;
+          prevText = false;
+        } else {
+          inner += (prevText ? "\n" : "") + inlineHtml(ql[k++]);
+          prevText = true;
+        }
+      }
       out.push(
         expandable
           ? `<blockquote expandable>${inner}</blockquote>`
@@ -556,9 +586,7 @@ export function sanitizeTelegramHtml(input: unknown): string {
 // ── public converter ──────────────────────────────────────────────────────────────
 export function mdToTelegramHtml(md: unknown): string {
   try {
-    return sanitizeTelegramHtml(
-      convert(foldsToQuotes(md)).split(FOLD_MARK).join(""),
-    );
+    return sanitizeTelegramHtml(convert(foldsToQuotes(md)));
   } catch {
     try {
       return escHtml(md);

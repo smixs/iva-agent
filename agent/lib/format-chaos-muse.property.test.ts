@@ -197,6 +197,10 @@ test(`folds in any arrangement never leave literal tags or unbalanced quotes (se
     "**b**",
     "<",
     "&",
+    "\n```\n",
+    "```js\n",
+    "```",
+    "*_`",
   );
   fc.assert(
     fc.property(
@@ -205,7 +209,14 @@ test(`folds in any arrangement never leave literal tags or unbalanced quotes (se
       (text, limit) => {
         for (const chunk of toTelegramHtmlChunks(text, limit)) {
           assert.ok(chunk.length <= limit);
-          assert.doesNotMatch(chunk, /&lt;\/?(?:details|summary)/);
+          // Литерал в коде легитимен, а длинный <pre> режется по атомам HTML:
+          // буквы тега проверяем только там, где кода нет.
+          if (!text.includes("```"))
+            assert.doesNotMatch(chunk, /&lt;\/?(?:details|summary)/);
+          assert.equal(
+            (chunk.match(/<pre>/g) ?? []).length,
+            (chunk.match(/<\/pre>/g) ?? []).length,
+          );
           assert.equal(
             (chunk.match(/<blockquote[ >]/g) ?? []).length,
             (chunk.match(/<\/blockquote>/g) ?? []).length,
