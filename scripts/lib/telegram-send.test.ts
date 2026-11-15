@@ -593,6 +593,33 @@ void test("beforeAttempt is asked before every attempt, and false after the back
   }
 });
 
+void test("a withdrawn rich attempt is latched: no HTML fallback, nothing is sent", async () => {
+  const { sendTelegramHtml } = await import("./telegram-send.ts");
+  const asked: boolean[] = [];
+  let calls = 0;
+  const result = await sendTelegramHtml(
+    "test-bot",
+    "test-chat",
+    'Question\n\n<tg-button data="ok">ok</tg-button>',
+    {
+      rich: true,
+      beforeAttempt: () => {
+        // The first answer is false (e.g. a failed dialog read), a second one would pass.
+        asked.push(asked.length > 0);
+        return Promise.resolve(asked.length > 1);
+      },
+      fetchImpl: () => {
+        calls += 1;
+        return Promise.resolve(new Response("{}", { status: 200 }));
+      },
+    },
+  );
+  assert.equal(result.ok, false);
+  assert.match(result.error, /withdrawn before the attempt/u);
+  assert.equal(calls, 0);
+  assert.deepEqual(asked, [false]);
+});
+
 void test("omitted and false retryTransient preserve the original single attempt", async () => {
   const { sendTelegramHtml } = await import("./telegram-send.ts");
   for (const retryTransient of [undefined, false] as const) {
@@ -752,4 +779,141 @@ void test("sendTelegramScreen reports a refusal instead of falling back to text 
 
   assert.equal(result.ok, false);
   assert.match(result.error, /^400/u);
+});
+
+/* eslint-disable @typescript-eslint/require-await -- Async transport fixtures return deterministic acknowledgements. */
+void test("Watch cron Outbox retains every Telegram message_id, including fallback chunks", async () => {
+  const { sendTelegramHtml } = await import("./telegram-send.ts");
+  let id = 10;
+  const ack = await sendTelegramHtml("fixture", "owner", "a".repeat(5000), {
+    fetchImpl: async () =>
+      new Response(JSON.stringify({ ok: true, result: { message_id: ++id } })),
+  });
+  assert.equal(ack.ok, true);
+  assert.deepEqual(ack.messageIds, [11, 12]);
+});
+
+void test("Watch close uses editMessageText with empty inline keyboard", async () => {
+  const { closeTelegramWatchSignal } = await import("./telegram-send.ts");
+  const requests: CapturedRequest[] = [];
+  const ack = await closeTelegramWatchSignal(
+    "fixture",
+    "owner",
+    { messageIds: [123], text: "✅ ответил в 15:02" },
+    {
+      fetchImpl: async (url, options) => {
+        requests.push(captureRequest(url, options));
+        return new Response(
+          JSON.stringify({ ok: true, result: { message_id: 123 } }),
+        );
+      },
+    },
+  );
+  assert.equal(ack.ok, true);
+  assert.ok(requests[0].url.endsWith("/editMessageText"));
+  assert.deepEqual(requests[0].body, {
+    chat_id: "owner",
+    message_id: 123,
+    text: "✅ ответил в 15:02",
+    reply_markup: { inline_keyboard: [] },
+  });
+});
+
+void test("Watch close of a three-message signal edits the first and deletes the others", async () => {
+  const { closeTelegramWatchSignal } = await import("./telegram-send.ts");
+  const requests: CapturedRequest[] = [];
+  const ack = await closeTelegramWatchSignal(
+    "fixture",
+    "owner",
+    { messageIds: [11, 12, 13], text: "✅ ответил в 15:02" },
+    {
+      fetchImpl: async (url, options) => {
+        requests.push(captureRequest(url, options));
+        // 12 is already gone: a definitive refusal of a delete counts as done.
+        return requests.length === 2
+          ? new Response("Bad Request: message to delete not found", {
+              status: 400,
+            })
+          : new Response(JSON.stringify({ ok: true, result: true }));
+      },
+    },
+  );
+  assert.equal(ack.ok, true);
+  assert.deepEqual(
+    requests.map((r) => [r.url.split("/").pop(), r.body.message_id]),
+    [
+      ["editMessageText", 11],
+      ["deleteMessage", 12],
+      ["deleteMessage", 13],
+    ],
+  );
+  assert.deepEqual(requests[1].body, { chat_id: "owner", message_id: 12 });
+});
+
+void test("Watch receipt failure stops fallback and exposes delivery failure", async () => {
+  const { sendTelegramHtml } = await import("./telegram-send.ts");
+  let calls = 0;
+  const ack = await sendTelegramHtml(
+    "fixture",
+    "owner",
+    '<tg-button data="ok">ok</tg-button>',
+    {
+      rich: true,
+      retryTransient: true,
+      onAcknowledged: () => {
+        throw new Error("disk full");
+      },
+      fetchImpl: async () => {
+        calls++;
+        return new Response(
+          JSON.stringify({ ok: true, result: { message_id: 91 } }),
+        );
+      },
+    },
+  );
+  assert.equal(ack.ok, false);
+  assert.equal(calls, 1);
+  assert.match(ack.error, /receipt not durable/);
+});
+
+void test("I5 UNKNOWN Watch send never retries or falls back before a durable receipt", async () => {
+  const { sendTelegramHtml } = await import("./telegram-send.ts");
+  for (const mode of ["network", "body", "missing-id", "503", "408"] as const) {
+    for (const rich of [false, true]) {
+      let calls = 0;
+      let receipts = 0;
+      let sleeps = 0;
+      const ack = await sendTelegramHtml(
+        "fixture",
+        "owner",
+        "Question\n".repeat(1000),
+        {
+          rich,
+          retryTransient: true,
+          onAcknowledged: () => {
+            receipts++;
+          },
+          sleep: async () => {
+            sleeps++;
+          },
+          fetchImpl: async () => {
+            calls++;
+            if (mode === "network") throw new Error("response lost after send");
+            if (mode === "body") return new Response("invalid success body");
+            if (mode === "missing-id")
+              return new Response(JSON.stringify({ ok: true, result: {} }));
+            return new Response("ambiguous server outcome", {
+              status: Number(mode),
+            });
+          },
+        },
+      );
+      assert.equal(ack.ok, false, mode);
+      assert.equal(calls, 1, `${mode}: no retry, fallback or next chunk`);
+      assert.equal(sleeps, 0, mode);
+      assert.equal(receipts, 0, mode);
+      assert.match(ack.error, /delivery outcome unknown:/, mode);
+      assert.equal(ack.messageIds, undefined, mode);
+    }
+  }
 });
