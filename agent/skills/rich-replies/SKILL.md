@@ -200,6 +200,7 @@ text and no Open chat URL button; `tg://user?id=...` mentions depend on privacy.
 - Old Telegram clients (before August 2026) don't show buttons; everything else
   degrades to text.
 - The operator can set `TELEGRAM_RICH_REPLIES=never` (`/menu` → Rich replies):
-  then tables, folds and pictures go as plain formatted text — but a reply with
-  a button is still sent rich, buttons have no other form.
+  then tables and pictures go as plain formatted text, and a fold becomes an
+  expandable quote (its title in bold) — but a reply with a button is still
+  sent rich, buttons have no other form.
 - Don't repeat the same reply as `iva post`: the rich reply already rendered.
