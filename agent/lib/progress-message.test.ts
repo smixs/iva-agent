@@ -144,6 +144,34 @@ await test("no patch that clears the turn fields removes progressMessageId (seed
   );
 });
 
+await test("startup recovery of a retired compacting record keeps progressMessageId (seed 1115007)", async () => {
+  const { rewriteRunStatusesForUpdate } =
+    await import("../../scripts/lib/wf-store.ts");
+  fc.assert(
+    fc.property(
+      fc.integer({ min: 1, max: 2 ** 31 }),
+      fc.boolean(),
+      (id, claimed) => {
+        const key = `recover-${id}-${claimed}:`;
+        runStatus.setChatStatus(key, {
+          status: "running",
+          sessionId: "s",
+          compacting: true,
+          ...(claimed ? { progressClaimed: true } : {}),
+          progressMessageId: id,
+        });
+        rewriteRunStatusesForUpdate(dataDir, true);
+        const after = runStatus.getChatStatus(key);
+        assert.equal(after?.status, "idle");
+        assert.equal(after?.compacting, undefined);
+        assert.equal(after?.progressMessageId, id);
+        assert.equal(runStatus.progressMessageOf(after), "stale");
+      },
+    ),
+    { seed: 1115007, numRuns: 40 },
+  );
+});
+
 await test("a change of the pair keeps the id while the legacy indicator traces are dropped", () => {
   const key = "pair-change:";
   runStatus.setChatStatus(key, {
