@@ -10,6 +10,7 @@ import {
   deleteStatusThroughOutbox,
   editStatusThroughOutbox,
   postStatusThroughOutbox,
+  type StatusAck,
   type StatusTransport,
 } from "./outbox.ts";
 import { scanOutbound } from "./security-gate.ts";
@@ -35,11 +36,17 @@ export type TelegramDraftHandle = {
     body?: Record<string, unknown>,
   ): Promise<{ ok: boolean; body: unknown }>;
 };
-/** What traceOutbox reads: one status call is one Outbox event. */
+/**
+ * What one status call did. `sent` is true only when a request really went to Telegram: a call
+ * skipped for any reason (closed, same text, throttle, pause, another state) is not an event.
+ * Not an Outbox result: a status post, edit or delete is never the turn's delivery (traceStatus).
+ */
 export type StatusResult = {
+  sent: boolean;
+  op: "" | "post" | "edit";
   ok: boolean;
-  delivered: number;
-  fellBack: boolean;
+  /** Telegram's answer: ok, gone, wait or error; "" when nothing was sent. */
+  answer: "" | "ok" | "gone" | "wait" | "error";
   error: string;
 };
 type Identity = { sessionId: string; turnId: string; draftId: number };
@@ -166,11 +173,20 @@ function toolHint(action: Action, cleanArgs: string): string {
 }
 
 const STATUS_IDLE: StatusResult = {
+  sent: false,
+  op: "",
   ok: true,
-  delivered: 0,
-  fellBack: false,
+  answer: "",
   error: "",
 };
+
+const sentResult = (op: "post" | "edit", ack: StatusAck): StatusResult => ({
+  sent: !(ack.kind === "error" && ack.unsent),
+  op,
+  ok: ack.kind === "ok",
+  answer: ack.kind,
+  error: ack.kind === "error" ? ack.error : "",
+});
 
 // The id leaves the record only by value and only after Telegram's definitive answer.
 // A clear is not a heartbeat: it does not say the turn is alive.
@@ -380,7 +396,13 @@ export class TelegramDraftStream {
     const run: Promise<StatusResult> = this.#status(step, text, t)
       .catch((error: unknown) => {
         console.error("[telegram] status message failed:", error);
-        return { ...STATUS_IDLE, ok: false, error: String(error) };
+        return {
+          ...STATUS_IDLE,
+          sent: true,
+          ok: false,
+          answer: "error" as const,
+          error: String(error),
+        };
       })
       .finally(() => {
         if (this.#statusFlight === run) this.#statusFlight = undefined;
@@ -411,12 +433,8 @@ export class TelegramDraftStream {
     if (!identity) return STATUS_IDLE;
     this.#statusAt = this.#now();
     const ack = await postStatusThroughOutbox(text, t);
-    if (ack.kind !== "ok" || ack.messageId === undefined)
-      return {
-        ...STATUS_IDLE,
-        ok: ack.kind === "ok",
-        error: ack.kind === "error" ? ack.error : "",
-      };
+    const result = sentResult("post", ack);
+    if (ack.kind !== "ok" || ack.messageId === undefined) return result;
     const id = ack.messageId;
     let recorded = false;
     try {
@@ -439,11 +457,11 @@ export class TelegramDraftStream {
     }
     if (recorded) {
       this.#statusText = text;
-      return { ...STATUS_IDLE, delivered: 1 };
+      return result;
     }
     // The record moved on (steer, reset, takeover): this frame alone knows the id.
     await deleteStatusThroughOutbox(id, t).catch(() => undefined);
-    return { ...STATUS_IDLE, delivered: 1 };
+    return result;
   }
 
   async #edit(
@@ -474,11 +492,7 @@ export class TelegramDraftStream {
     else if (ack.kind === "wait")
       this.#statusPauseUntil = this.#now() + ack.retryAfterMs;
     else if (ack.kind === "gone") clearProgressId(this.chatKey, id);
-    return {
-      ...STATUS_IDLE,
-      ok: ack.kind === "ok",
-      error: ack.kind === "error" ? ack.error : "",
-    };
+    return sentResult("edit", ack);
   }
 
   requested(step: number, actions: readonly Action[]): void {

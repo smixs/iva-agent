@@ -44,7 +44,7 @@ import {
   type TelegramInboundMessage,
 } from "../lib/telegram-inbound.js";
 import { mediaFromRaw } from "../lib/telegram-parts.js";
-import { traceOutbox } from "../lib/trace.js";
+import { traceOutbox, traceStatus } from "../lib/trace.js";
 import { chatModelSeesImages, describeImage } from "../vision.js";
 import { transcribe } from "../transcribe.js";
 import {
@@ -723,7 +723,7 @@ const telegram = telegramChannel({
         const progress = draftText(redactNotice(text), true);
         stream?.completeStep(data.stepIndex, data.message ?? "");
         if (stream && progress)
-          await traceOutbox(
+          await traceStatus(
             { turn: data.turnId, session: ctx.session.id, source: "telegram" },
             progress,
             () =>

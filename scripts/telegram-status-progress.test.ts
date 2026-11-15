@@ -1541,3 +1541,83 @@ test("status: a secret in the step text reaches neither the post nor the edit", 
   for (const text of texts) assert.doesNotMatch(text, /sk-ant/u);
   await emit("turn.cancelled", { turnId: "turn_1" }, chat.pair);
 });
+
+// ── The Trace: a status call is not the turn's delivery ───────────────────────────────────
+const { parseTraceLine, stitchTurns, turnOutcome } =
+  await import("./cli/trace.ts");
+const { failureCause } = await import("./lib/turn-failures.ts");
+
+function outcomeOf(sessionId: string, turnId: string) {
+  const lines = traceEvents()
+    .filter((event) => event.session === sessionId)
+    .map((event, index) => parseTraceLine(JSON.stringify(event), index))
+    .filter((line) => line !== null);
+  const turn = stitchTurns(lines).find(
+    (candidate) => candidate.turnId === turnId,
+  );
+  return {
+    events: lines,
+    outcome: turn ? turnOutcome(turn) : "none",
+  };
+}
+
+test("status: skipped status calls write no Outbox event, and the turn does not read as delivered", async (t) => {
+  const chat = statusChat(t, "240");
+  t.after(() => chat.end());
+  await chat.start();
+  await chat.step("turn_1", "Too early."); // under the threshold
+  chat.age();
+  await chat.step("turn_1", "One."); // the post
+  await chat.step("turn_1", "Two."); // throttled
+  chat.advance(STATUS_EDIT_MIN_MS);
+  await chat.step("turn_1", "One."); // the same text as the post
+  const { events, outcome } = outcomeOf(chat.pair.sessionId, "turn_1");
+  assert.deepEqual(
+    events.filter((e) => e.kind === "outbox"),
+    [],
+    "no outbox event for a status call",
+  );
+  assert.deepEqual(
+    events.filter((e) => e.kind === "status").map((e) => e.name),
+    ["post"],
+    "only the request that was sent is an event",
+  );
+  assert.equal(outcome, "open", "an unanswered turn is not delivered");
+});
+
+for (const [name, answer] of [
+  [
+    "429",
+    () => reject(429, "Too Many Requests", { parameters: { retry_after: 1 } }),
+  ],
+  ["gone", () => reject(400, "Bad Request: message to edit not found")],
+  ["5xx", () => reject(502, "Bad Gateway")],
+] as const)
+  test(`status: an edit that got ${name} does not fail the turn whose final was delivered`, async (t) => {
+    const chat = statusChat(
+      t,
+      `24${name.length}${name === "429" ? 1 : name === "gone" ? 2 : 3}`,
+      {
+        onCall: (call) => (call.method === "editMessageText" ? answer() : null),
+      },
+    );
+    t.after(() => chat.end());
+    await chat.start();
+    chat.age();
+    await chat.step("turn_1", "One.");
+    chat.advance(STATUS_EDIT_MIN_MS);
+    await chat.step("turn_1", "Two.");
+    await chat.step("turn_1", "Done.", 1, "stop");
+    await emit("turn.completed", { turnId: "turn_1" }, chat.pair);
+    const { events, outcome } = outcomeOf(chat.pair.sessionId, "turn_1");
+    const edit = events.find((e) => e.kind === "status" && e.name === "edit");
+    assert.equal(
+      edit?.data.ok,
+      false,
+      "the failed edit stays visible in the trace",
+    );
+    assert.equal(outcome, "delivered");
+    for (const event of events)
+      assert.equal(failureCause(event), null, `${event.kind}.${event.name}`);
+  });
+

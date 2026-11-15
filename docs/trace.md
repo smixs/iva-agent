@@ -18,7 +18,7 @@ Exactly seven fields, always in this order:
 | `turn`    | turn key — three cases, see below                                                             |
 | `session` | Eve session id (empty until the turn starts)                                                  |
 | `source`  | `telegram`, `bridge`, `web`, `http`, `rollup`, `watch`, `brief`, `insight`, `cron`, `unknown` |
-| `kind`    | group: `bridge`, `inbound`, `gate`, `context`, `turn`, `eve`, `outbox`, `stop`                |
+| `kind`    | group: `bridge`, `inbound`, `gate`, `context`, `turn`, `eve`, `outbox`, `status`, `stop`      |
 | `name`    | the specific event inside the group                                                           |
 | `data`    | object: names, timings, sizes, content                                                        |
 
@@ -98,6 +98,7 @@ Native draft stops (`stopped_message_generation`) use `tg:<chatId>:stop:<update_
 | Eve events inside a subagent                                      | the same fields plus `subagent`, `parentCallId`                                                                                                                                                                                                                 |
 | `gate.outbound`                                                   | `clean`, `findings[]` (`type:name`, no secret preview), `chars`; content: `text` — already **after** redaction                                                                                                                                                  |
 | `outbox.delivered` / `outbox.failed`                              | `ok`, `delivered`, `fellBack`, `error`, `chars`, `ms`                                                                                                                                                                                                           |
+| `status.post` / `status.edit`                                     | the progress message of a long turn, only when a request went to Telegram: `ok`, `answer` (`ok`, `gone`, `wait`, `error`), `error`, `chars`, `ms`. Never the turn's delivery or failure: `iva trace` and `iva diagnose` skip it                                 |
 | `stop.requested` / `stop.idle` / `stop.failed`                    | `chatKey`, `outcome`                                                                                                                                                                                                                                            |
 
 Any Eve event may also carry `sessionId` in `data` (whenever its payload has one) and

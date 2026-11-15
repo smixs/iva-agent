@@ -292,7 +292,7 @@ export type StatusAck =
   | { kind: "ok"; messageId?: number }
   | { kind: "gone" }
   | { kind: "wait"; retryAfterMs: number }
-  | { kind: "error"; error: string };
+  | { kind: "error"; error: string; unsent?: true };
 
 const STATUS_LIMIT = 4096;
 
@@ -340,7 +340,7 @@ async function sendStatusBody(
   edit: boolean,
 ): Promise<StatusAck> {
   const html = statusHtml(text);
-  if (!html) return { kind: "error", error: "empty rendering" };
+  if (!html) return { kind: "error", error: "empty rendering", unsent: true };
   try {
     const reply = await call(html, "html");
     if (!markupRefusal(reply)) return classify(reply, edit);

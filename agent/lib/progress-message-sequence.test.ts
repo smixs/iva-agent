@@ -617,3 +617,4 @@ await test("a status is never posted over an id that is still in the record", as
   assert.equal(run.getChatStatus(key)?.progressClaimed, undefined);
   await draft.closeTelegramDraftTurn(session, undefined, 0, true);
 });
+

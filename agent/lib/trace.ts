@@ -3,7 +3,7 @@
 // и швы Ивы. Файл дня — data/trace/YYYY-MM-DD.jsonl, append-only. Читают вьюер плагина
 // `trace` и `iva trace`, поэтому схема события фиксирована и мала:
 //   { ts, turn, session, source, kind, name, data }
-// `kind` — группа шва (bridge, inbound, gate, turn, eve, outbox, stop, tool, guard), `name` — конкретное
+// `kind` — группа шва (bridge, inbound, gate, turn, eve, outbox, status, stop, tool, guard), `name` — конкретное
 // событие внутри группы. Всё остальное живёт в `data`, у полей содержимого свой потолок.
 //
 // Три правила, из которых всё остальное следует:
@@ -820,6 +820,45 @@ export async function traceOutbox<T extends OutboxResultLike>(
       ok: result.ok,
       delivered: result.delivered,
       fellBack: result.fellBack,
+      error: result.error,
+      chars: text.length,
+      ms: Date.now() - startedAt,
+    },
+  }));
+  return result;
+}
+
+type StatusResultLike = {
+  readonly sent: boolean;
+  readonly op: string;
+  readonly ok: boolean;
+  readonly answer: string;
+  readonly error: string;
+};
+
+/**
+ * Шов сообщения-статуса долгого хода: пост или правка, реально ушедшие в Telegram. Это не
+ * доставка ответа: событие своего вида `status`, которое ни `iva trace` (исход хода), ни
+ * `iva diagnose` (сбои) не читают как доставку или сбой хода. Пропущенный вызов (троттлинг,
+ * тот же текст, порог, чужое состояние) не пишет ничего. `name` — `post` или `edit`, итог в `ok`.
+ */
+export async function traceStatus<T extends StatusResultLike>(
+  scope: TraceScope,
+  text: string,
+  send: () => Promise<T>,
+): Promise<T> {
+  const startedAt = Date.now();
+  const result = await traceWithScope(scope, send);
+  if (!result.sent) return result;
+  emit(() => ({
+    kind: "status",
+    name: result.op,
+    turn: scope.turn,
+    session: scope.session,
+    source: scope.source,
+    data: {
+      ok: result.ok,
+      answer: result.answer,
       error: result.error,
       chars: text.length,
       ms: Date.now() - startedAt,
