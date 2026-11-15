@@ -8,8 +8,8 @@ import { pathToFileURL } from "node:url";
 import fc from "fast-check";
 
 import { localStamp } from "#lib/vault-daily.ts";
-import { resolveTimeZone as resolveAuthoredTimeZone } from "#lib/timezone.ts";
-import { resolveTimeZone as resolveOperationalTimeZone } from "./lib/timezone.ts";
+import { resolveTimeZone as resolveAuthoredTimeZone } from "@iva/timezone";
+import { resolveTimeZone as resolveOperationalTimeZone } from "../packages/timezone/index.ts";
 
 const ROOT = process.cwd();
 

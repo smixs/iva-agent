@@ -4,7 +4,12 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { button, buttonRow, escapeRichText } from "./buttons.ts";
+import {
+  button,
+  buttonRow,
+  escapeRichText,
+  menuBackLine,
+} from "../telegram-buttons.ts";
 
 const PER_PAGE = 8;
 
@@ -44,13 +49,6 @@ function displayText(value: unknown, fallback: string): string {
   return String(value);
 }
 
-function backLine(T: (en: string, ru: string) => string) {
-  return `${button(T("‹ Menu", "‹ Меню"), "iva_menu:r:o")} — ${T(
-    "back to the settings.",
-    "вернуться в настройки.",
-  )}`;
-}
-
 export default {
   parent: "r",
   render(st: SkillsState, ctx: SkillsContext) {
@@ -73,7 +71,7 @@ export default {
             "Skill list is unavailable — .eve/agent-summary.json not found (it appears after a build).",
             "Список недоступен — .eve/agent-summary.json не найден (появляется после сборки).",
           ),
-          backLine(T),
+          menuBackLine({ tr: T }, "r"),
         ].join("\n\n"),
       };
     }
@@ -82,7 +80,7 @@ export default {
         text: [
           `# ${T("🧩 Skills", "🧩 Скиллы")}`,
           T("No skills registered.", "Скиллов не зарегистрировано."),
-          backLine(T),
+          menuBackLine({ tr: T }, "r"),
         ].join("\n\n"),
       };
     }
@@ -119,7 +117,7 @@ export default {
         ]),
       );
     }
-    lines.push(backLine(T));
+    lines.push(menuBackLine({ tr: T }, "r"));
     return { text: lines.join("\n\n") };
   },
   on(...args: unknown[]) {

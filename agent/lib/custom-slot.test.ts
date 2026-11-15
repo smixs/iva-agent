@@ -5,12 +5,12 @@
 // скиллов с диска, пустой каталог — null.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { tempDir } from "../../scripts/fixtures/temp-dir.ts";
 
-const root = mkdtempSync(join(tmpdir(), "iva-custom-slot-"));
+const root = tempDir("iva-custom-slot-");
 const DATA_DIR = join(root, "data");
 process.env.ASSISTANT_DATA_DIR = DATA_DIR;
 process.env.ASSISTANT_VAULT_DIR = join(root, "vault");

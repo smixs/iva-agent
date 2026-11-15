@@ -110,7 +110,6 @@ void test(
           notices.push(text);
           return Promise.resolve();
         },
-        deleteMessageImpl: () => Promise.resolve(),
         logImpl: () => {},
       }),
       1,

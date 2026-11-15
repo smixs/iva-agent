@@ -117,6 +117,28 @@ export async function resolveUpdateTarget({
   };
 }
 
+/**
+ * Одна запись решает, какую версию ставит обновление (specs/UpdateBranch.tla): выбор
+ * владельца живёт в репозитории установки, зеркало - его кэш, из которого обновление
+ * берёт ветку. Оборванная или неудавшаяся запись `iva beta`/`iva stable` оставляла кэш на
+ * прежней ветке, и установка получала не то, что выбрал владелец; поэтому чтение сверяет
+ * кэш с записью и чинит расхождение.
+ */
+export async function syncUpdateBranch(
+  git: Git,
+  record: Git,
+): Promise<"same" | "repaired" | "no-record"> {
+  const read = async (at: Git): Promise<string> => {
+    const result = await at("config", "--local", "--get", UPDATE_BRANCH_CONFIG);
+    return result.code === 0 ? output(result) : "";
+  };
+  const wanted = await read(record);
+  if (!wanted) return "no-record"; // Ничего не выбрано: ветка остаётся той, что в кэше.
+  if ((await read(git)) === wanted) return "same";
+  await persistUpdateBranch(git, wanted);
+  return "repaired";
+}
+
 export async function persistUpdateBranch(
   git: Git,
   branch: string,
@@ -124,25 +146,18 @@ export async function persistUpdateBranch(
   await requireGit(git, "config", "--local", UPDATE_BRANCH_CONFIG, branch);
 }
 
-/** Beta updates — Update branch `beta` (ADR-0018); флаг `iva.beta` — для прежних бета-сборок:
- * при main или без ветки уводит на beta, при своей ветке ставит её вершину. */
-export const BETA_CONFIG = "iva.beta";
+/** Флаг бета-сборок до 0.5.0. Beta updates — Update branch `beta` (ADR-0018): флаг не
+ * читается, `iva beta` и `iva stable` его снимают, чтобы откат на прежнюю сборку не
+ * увёл установку обратно на бету. */
+const RETIRED_BETA_FLAG = "iva.beta";
 const RELEASE_TAG = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u;
 
-/** Включены ли бета-обновления; чужое значение — нет, и строка-предупреждение. */
-async function readBeta(git: Git): Promise<boolean> {
-  const value = output(await git("config", "--local", "--get", BETA_CONFIG));
-  if (value && value !== "true" && value !== "false")
-    console.warn(`⚠️ ${BETA_CONFIG}=${value}: not true, installing releases`);
-  return value === "true";
-}
-
-/** Ставится ли вершина ветки: ветка beta или флаг iva.beta. */
+/** Ставится ли вершина ветки: Update branch `beta`. */
 export async function betaChannel(git: Git): Promise<boolean> {
   const branch = output(
     await git("config", "--local", "--get", UPDATE_BRANCH_CONFIG),
   );
-  return (await readBeta(git)) || branch === BETA_BRANCH;
+  return branch === BETA_BRANCH;
 }
 
 /** Активный коммит в зеркале. Нет его — безопасность перехода не доказать: отказ. */
@@ -180,25 +195,10 @@ async function isAncestor(git: Git, older: string, newer: string) {
 
 type UpdateTarget = Awaited<ReturnType<typeof resolveUpdateTarget>>;
 
-/** Бета-цель или null; прежний opt-in (флаг при main) переходит на beta один раз. */
-async function betaTarget(
-  git: Git,
-  remote: string,
-  resolved: UpdateTarget,
-  installed?: string,
-) {
-  let target = resolved;
-  const flag = await readBeta(git);
-  const migrate =
-    flag && (!target.configured || target.branch === DEFAULT_UPDATE_BRANCH);
-  if (migrate) {
-    const targetHead = await fetchBranch(git, remote, BETA_BRANCH);
-    target = { ...target, branch: BETA_BRANCH, configured: true, targetHead };
-  }
-  if (!flag && target.branch !== BETA_BRANCH) return null;
+/** Бета-цель — вершина Update branch `beta` — или null. */
+async function betaTarget(git: Git, target: UpdateTarget, installed?: string) {
+  if (target.branch !== BETA_BRANCH) return null;
   const head = await notBelow(git, target.targetHead, installed);
-  // Ветка переписывается, только когда цель получена и проверена.
-  if (migrate) await persistUpdateBranch(git, BETA_BRANCH);
   return { ...target, beta: true, targetHead: head };
 }
 
@@ -213,7 +213,7 @@ export async function resolveReleaseTarget(
   const git = options.git!;
   const remote = options.remote ?? "origin";
   const target = await resolveUpdateTarget(options);
-  const beta = await betaTarget(git, remote, target, options.installed);
+  const beta = await betaTarget(git, target, options.installed);
   if (beta) return beta;
   // --prune: метка, удалённая из origin (отозванный выпуск), уходит и отсюда.
   await requireGit(git, "fetch", "--prune", remote, "+refs/tags/*:refs/tags/*");
@@ -246,7 +246,7 @@ export async function resolveReleaseTarget(
   };
 }
 
-/** Где лежит iva.beta: git установки и её зеркало (обновление читает зеркало). */
+/** Где лежит выбор: git установки и её зеркало (обновление читает зеркало). */
 function betaRepos(root: string): string[] {
   const install = classifyRoot(root);
   const repos = new Set([install.home, gitRootFor(install)]);
@@ -255,20 +255,31 @@ function betaRepos(root: string): string[] {
   return [...repos].filter(isRepo);
 }
 
-/** Бета для показа (iva version, status, меню): ветка beta или флаг при main/без ветки. */
-export function betaOf(root: string): boolean {
-  const repo = gitRootFor(classifyRoot(root));
-  const get = (key: string) =>
-    spawnSync("git", ["-C", repo, "config", "--local", "--get", key], {
-      encoding: "utf8",
-    }).stdout?.trim() ?? "";
-  const branch = get(UPDATE_BRANCH_CONFIG);
-  const legacy = [DEFAULT_UPDATE_BRANCH, ""].includes(branch);
-  return branch === BETA_BRANCH || (legacy && get(BETA_CONFIG) === "true");
+/** Ветка из репозитория: пусто - ключа нет. */
+function branchAt(repo: string): string {
+  return (
+    spawnSync(
+      "git",
+      ["-C", repo, "config", "--local", "--get", UPDATE_BRANCH_CONFIG],
+      { encoding: "utf8" },
+    ).stdout?.trim() ?? ""
+  );
 }
 
-/** iva beta / stable и меню: ветка и флаг во всех репозиториях установки. Любая запись не
- * прошла — прежние значения возвращаются везде, false. */
+/**
+ * Бета для показа (iva version, status, меню): Update branch `beta`. Отвечает запись
+ * владельца - тот же репозиторий установки, из которого обновление берёт ветку
+ * (specs/UpdateBranch.tla, OneRecord); кэш зеркала спрашивается, только если в записи
+ * ключа нет.
+ */
+export function betaOf(root: string): boolean {
+  const install = classifyRoot(root);
+  const branch = branchAt(install.home) || branchAt(gitRootFor(install));
+  return branch === BETA_BRANCH;
+}
+
+/** iva beta / stable и меню: ветка во всех репозиториях установки, прежний флаг снят. Любая
+ * запись не прошла — прежние значения возвращаются везде, false. */
 export function setBeta(
   root: string,
   on: boolean,
@@ -277,8 +288,8 @@ export function setBeta(
     spawnSync("git", ["-C", repo, "config", "--local", ...args], {
       encoding: "utf8",
     });
-  const keys = [UPDATE_BRANCH_CONFIG, BETA_CONFIG];
-  const want = [on ? BETA_BRANCH : DEFAULT_UPDATE_BRANCH, on ? "true" : ""];
+  const keys = [UPDATE_BRANCH_CONFIG, RETIRED_BETA_FLAG];
+  const want = [on ? BETA_BRANCH : DEFAULT_UPDATE_BRANCH, ""];
   const repos = betaRepos(root);
   const before = repos.map((repo) =>
     keys.map((key) => git(repo, ["--get", key]).stdout.trim()),

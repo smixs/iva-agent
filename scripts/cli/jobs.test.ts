@@ -4,6 +4,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { tempDir } from "../fixtures/temp-dir.ts";
 import { createJobsCommand } from "./jobs.ts";
 
 function harness(closed: number) {
@@ -244,4 +245,55 @@ test("skip replaces the night completion marker with an explicit owner skip", as
     readFileSync(raw, "utf8"),
     /<!-- processed: skipped by owner .*-->\s*$/u,
   );
+});
+
+test("status names the state of each schedule from its record and last fact", async () => {
+  const dir = tempDir("iva-cli-jobs-status-");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, "rollup-status.json"),
+    JSON.stringify({
+      "memory-night": {
+        inProgressSince: Date.parse("2026-11-10T04:00:00Z"),
+        ownerPid: 2_147_483_647,
+        ownerStartedAt: 1,
+      },
+    }),
+  );
+  writeFileSync(
+    join(dir, "jobs.json"),
+    JSON.stringify([
+      {
+        name: "jobs-watchdog",
+        startedAt: 1,
+        finishedAt: Date.parse("2026-11-09T07:17:05Z"),
+        ok: false,
+        error: "exited 1",
+        exitCode: 1,
+        tail: "",
+        acked: false,
+        wake: null,
+      },
+    ]),
+  );
+  const ok: string[] = [];
+  const cmd = createJobsCommand(
+    {
+      ENV_PATH: join(dir, ".env"),
+      ok: (message: string) => ok.push(message),
+      bad: () => {},
+      dataDirAbs: () => dir,
+    } as never,
+    {
+      readEnv: () => Promise.resolve({}),
+      now: () => new Date("2026-11-10T04:30:00Z"),
+    },
+  );
+  await cmd(["status"]);
+  assert.deepEqual(ok, [
+    "memory-night: owner-dead since 2026-11-10T04:00:00.000Z (pid 2147483647); no fact",
+    "jobs-watchdog: free; last failure (exited 1) at 2026-11-09T07:17:05.000Z",
+    "proactive: free; no fact",
+  ]);
+  await assert.rejects(cmd(["status", "extra"]), /usage: iva jobs/u);
 });

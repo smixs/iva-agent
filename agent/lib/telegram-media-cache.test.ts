@@ -1,21 +1,21 @@
 /* eslint-disable @typescript-eslint/no-floating-promises -- Node's test runner owns registrations. */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   getTelegramMediaCacheEntry,
   saveTelegramMediaCacheEntry,
   TELEGRAM_MEDIA_CACHE_LIMIT,
 } from "./telegram-media-cache.ts";
+import { tempDir } from "../../scripts/fixtures/temp-dir.ts";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function fixture() {
-  const root = mkdtempSync(join(tmpdir(), "iva-media-cache-test-"));
+  const root = tempDir("iva-media-cache-test-");
   const dataDir = join(root, "data");
   const vaultDir = join(root, "vault");
   const attachment = join(vaultDir, "attachments", "2026-08-04", "photo.jpg");

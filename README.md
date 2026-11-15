@@ -145,7 +145,7 @@ Install as a normal user, not as root — Iva's shell tool runs as whoever insta
 - `iva update` installs releases only (`vX.Y.Z` tags) — the default.
 - `main` holds releases only; every accepted change lands in the `beta` branch first.
 - `iva beta` turns on beta updates: the tip of the `beta` branch; `iva stable` turns them off and goes back to `main` (nothing is rolled back — the next release catches up). Then run `iva update`.
-- Any installation, 0.4.8 included, switches to beta with one command: `curl -fsSL https://raw.githubusercontent.com/smixs/iva-agent/beta/beta.sh | bash`. A new installation on beta: `curl -fsSL https://raw.githubusercontent.com/smixs/iva-agent/beta/install.sh | IVA_BETA=1 bash`.
+- A new installation on beta: `curl -fsSL https://raw.githubusercontent.com/smixs/iva-agent/beta/install.sh | IVA_BETA=1 bash`.
 - The same switch is in Telegram: `/menu` → 🛠 Maintenance → 🧪 Updates. `iva version` shows which one is on.
 
 ### The first minute
@@ -198,7 +198,23 @@ Iva carries eve 0.51.1 sources from vercel/eve in `eve/`, with our changes under
 ## What's New
 
 <details>
-<summary><b>v0.5.9 · 03.11.2026 — expand the latest releases</b></summary>
+<summary><b>v0.5.12 · 10.11.2026 — expand the latest releases</b></summary>
+
+### 10.11.2026
+
+#### v0.5.12
+
+- 🧩 **Widget code stays hidden in live drafts**: Iva no longer shows raw widget code in the reply draft while it is being typed.
+
+#### v0.5.11
+
+- 📊 **Lighter, more exact widgets**: Iva starts from Telegram's native unstyled card: a heading, a list, a table and buttons look like ordinary messages and weigh under a kilobyte. New patterns: a helper's steps with marks, rings, sparklines and receipts; a card fills the bubble to the edge, and a log grows upward.
+- 🔧 **Widgets go through the main Bot API address**: Bot API 10.4 is out, and Iva no longer uses the beta address.
+
+#### v0.5.10
+
+- 🧠 **Fable 5.2 on the Claude model screen**: the first button in `/model` → Claude and in setup is now Fable 5.2, and it is the default Claude model. It needs Claude Code CLI 2.1.290 or newer; Fable 5.1 stays available through `CLAUDE_MODEL=claude-fable-5-1` in `.env`.
+- 📊 **Widgets in replies**: Iva draws a live card right in the message instead of lines of text wherever there is something to show: a calendar by day, week and month, the weather, a countdown while you wait, task and reminder lists, a chart with tabs, progress, a checklist. Turn them off in /menu → 💬 Rich replies.
 
 ### 03.11.2026
 
@@ -218,22 +234,13 @@ Iva carries eve 0.51.1 sources from vercel/eve in `eve/`, with our changes under
 
 - 🔧 **Telegram shows the model context window**: `/new` and status use the same window as Iva. Claude model selection saves its window, and helpers respect their own model window.
 
-### 25.10.2026
-
-#### v0.5.7
-
-- 🔧 **Quotes survive rich-message rejection**: HTML delivery preserves quoted text and button labels containing markup characters.
-- 🔧 **Iva offers useful next steps on her own**: she can bring a useful proposal without a request.
-- 🧠 **Conflicting events stay dated**: contradictory events about a person remain separate dated facts.
-- 🔧 **Long helper commands wait for results**: helpers set the command timeout to cover the expected duration.
-
 </details>
 
 Full history — [CHANGELOG.md](CHANGELOG.md).
 
 ## Built on
 
-[eve](https://eve.dev/docs/introduction) 0.51.1-iva.5, Vercel's agent framework, runs the agent; Node 24's built-in SQLite runs the search index — no separate database. Iva grew out of [agent-second-brain](https://github.com/smixs/agent-second-brain) and [autograph](https://github.com/smixs/autograph) — that story is in [docs/memory.md](docs/memory.md).
+[eve](https://eve.dev/docs/introduction) 0.51.1-iva.7, Vercel's agent framework, runs the agent; Node 24's built-in SQLite runs the search index — no separate database. Iva grew out of [agent-second-brain](https://github.com/smixs/agent-second-brain) and [autograph](https://github.com/smixs/autograph) — that story is in [docs/memory.md](docs/memory.md).
 
 ## Thanks
 

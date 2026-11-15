@@ -145,4 +145,4 @@ Userbot-режим - работа от вашего личного аккаун�
 curl -fsSL https://raw.githubusercontent.com/smixs/iva-agent/main/install.sh | bash
 ```
 
-[Быстрый старт](../../README.ru.md#быстрый-старт) · [Что умеет](../../README.ru.md#что-умеет) · [Документация](README.md)
+[Установка](../../README.ru.md#установка) · [Что умеет](../../README.ru.md#что-умеет) · [Документация](README.md)

@@ -67,6 +67,7 @@ function completeEnv(): Record<string, string> {
     TELEGRAM_ALLOWED_USER_IDS: "1",
     ASSISTANT_BEARER: "b".repeat(43),
     TAVILY_API_KEY: "tavily-key",
+    IVA_PORT: "8723",
   };
 }
 
@@ -78,9 +79,6 @@ function lifecycle(
     writeUnits: () => [],
     activateUnits: () => undefined,
     removeUnits: () => [],
-    retireDeferredBrainUnits: () => [],
-    retireLegacyMemoryUnits: () => [],
-    migrateEnv: () => false,
     restartServices: () => undefined,
     ...overrides,
   };
@@ -195,7 +193,13 @@ async function systemdDoctorEvents(
     messagePrefix?: string;
     statuses?: Array<{
       chatKey: string;
-      status: { status?: string; updatedAt?: number };
+      status: {
+        status?: "idle" | "running";
+        updatedAt?: number;
+        ingressId?: string;
+        sessionId?: string;
+        compacting?: true;
+      };
     }>;
   },
 ): Promise<Array<[string, string]>> {
@@ -245,7 +249,8 @@ async function systemdDoctorEvents(
     now: () => now,
     telegramInboxFile: join(data, "telegram-inbox.json"),
     telegramQueueFile: join(data, "telegram-queue.json"),
-    listChatStatusesImpl: () => statuses,
+    // Доктор читает и записи, каких писатели не оставляют (running без владельца).
+    listChatStatusesImpl: () => statuses as never,
     log: () => undefined,
     exit: () => undefined,
   })();
@@ -389,6 +394,9 @@ test("doctor показывает провалы напоминаний за с�
         error: "agent wake failed: boom",
         delivered: true,
       },
+      // Агент упал между взятием строки и фактом: причины в строке ещё нет.
+      { id: "r6", firedAt: now - 45 * 60_000, error: null, delivered: null },
+      { id: "r7", firedAt: now - 60_000, error: null, delivered: null },
     ],
   });
   assert.ok(
@@ -430,6 +438,19 @@ test("doctor показывает провалы напоминаний за с�
     /did not go out/u.test(marker[1]),
     false,
     "невидимый факт назван провалом доставки",
+  );
+  // Брошенное срабатывание видно и без причины в строке (ReminderLifecycle, BoundedOutcome):
+  // доктор запускают и при лежащем агенте. Идущее срабатывание провалом не названо.
+  const abandoned = fresh.find(([, message]) => message.includes(hash8("r6")));
+  assert.ok(abandoned, JSON.stringify(fresh));
+  assert.match(
+    abandoned[1],
+    /fired 45m ago and the delivery fact was not recorded/u,
+  );
+  assert.equal(
+    fresh.some(([, message]) => message.includes(hash8("r7"))),
+    false,
+    "идущее срабатывание названо провалом",
   );
   // А записанный факт с ошибкой позднего шага — не «не дошло».
   const later = fresh.find(([, message]) => message.includes(hash8("r5")));
@@ -705,6 +726,40 @@ test("doctor treats a running chat without updatedAt as stuck", async (t) => {
   );
 });
 
+test("doctor names what each busy chat is doing, in the words of the chat record", async (t) => {
+  const root = await sandbox(t);
+  writeFileSync(join(root, ".env"), "present=true\n");
+  const now = 100_000_000;
+  const live = { status: "running", updatedAt: now - 1_000 } as const;
+
+  assert.deepEqual(
+    await systemdDoctorEvents(root, {
+      now,
+      messagePrefix: "chats busy:",
+      statuses: [
+        { chatKey: "1:", status: { ...live, ingressId: "i" } },
+        { chatKey: "2:", status: { ...live, sessionId: "s" } },
+        { chatKey: "3:", status: { ...live, sessionId: "s" } },
+        {
+          chatKey: "4:",
+          status: { ...live, sessionId: "s", compacting: true },
+        },
+        { chatKey: "5:", status: { status: "running", sessionId: "s" } },
+        { chatKey: "6:", status: { status: "idle", updatedAt: now } },
+      ],
+    }),
+    [["ok", "chats busy: 1 accepted, 2 turn, 1 compacting, 1 stale"]],
+  );
+  assert.deepEqual(
+    await systemdDoctorEvents(root, {
+      now,
+      messagePrefix: "chats busy:",
+      statuses: [{ chatKey: "6:", status: { status: "idle", updatedAt: now } }],
+    }),
+    [],
+  );
+});
+
 test("doctor keeps workflow counts when one run file is unreadable", async (t) => {
   const root = await sandbox(t);
   writeFileSync(join(root, ".env"), "present=true\n");
@@ -897,7 +952,7 @@ test("missing env remains a failure while the systemd warning stays uncounted", 
   assert.deepEqual(exitCodes, [1]);
 });
 
-test("doctor keeps the initial env snapshot but reads the migrated listener port fresh", async (t) => {
+test("doctor keeps the initial env snapshot but reads the listener port fresh", async (t) => {
   const root = await sandbox(t);
   const unitDir = join(root, "units");
   const vault = join(root, "vault-initial");
@@ -911,7 +966,7 @@ test("doctor keeps the initial env snapshot but reads the migrated listener port
     ASSISTANT_DATA_DIR: "data-initial",
     ASSISTANT_VAULT_DIR: "vault-initial",
   };
-  const migratedEnv = { IVA_PORT: "9123" };
+  const freshEnv = { IVA_PORT: "9123" };
   const calls: string[] = [];
   const dataDirInputs: Array<Partial<Record<string, string>>> = [];
   const listenerArgs: Array<readonly string[]> = [];
@@ -940,7 +995,7 @@ test("doctor keeps the initial env snapshot but reads the migrated listener port
     readEnv: () => {
       readCount++;
       calls.push(readCount === 1 ? "read-initial" : "read-fresh");
-      return readCount === 1 ? initialEnv : migratedEnv;
+      return readCount === 1 ? initialEnv : freshEnv;
     },
     dataDirAbs: (env = initialEnv) => {
       dataDirInputs.push(env);
@@ -968,10 +1023,6 @@ test("doctor keeps the initial env snapshot but reads the migrated listener port
       calls.push("ensure-bearer");
       return false;
     },
-    migrateEnv: () => {
-      calls.push("migrate-env");
-      return true;
-    },
     writeUnits: () => {
       calls.push("write-units");
       return [];
@@ -985,8 +1036,7 @@ test("doctor keeps the initial env snapshot but reads the migrated listener port
   })();
 
   assert.equal(readCount, 2);
-  assert.ok(calls.indexOf("read-initial") < calls.indexOf("migrate-env"));
-  assert.ok(calls.indexOf("migrate-env") < calls.indexOf("read-fresh"));
+  assert.ok(calls.indexOf("read-initial") < calls.indexOf("read-fresh"));
   assert.ok(calls.indexOf("read-fresh") < calls.indexOf("inspect-listener"));
   assert.deepEqual(listenerArgs, [["-H", "-ltn", "sport", "=", ":9123"]]);
   assert.equal(dataDirInputs.length, 1);

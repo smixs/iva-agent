@@ -19,43 +19,45 @@ This skill is about the reply in the **current chat**. A post to another chat
 
 Use them when they carry meaning the reader would otherwise have to dig out:
 
-| Reader's need                           | Use                                          | Don't                              |
-| --------------------------------------- | -------------------------------------------- | ---------------------------------- |
-| Compare 3+ things by 2+ attributes      | table                                        | a table for two numbers            |
-| Long answer with sections               | `##` headings                                | headings in a three-line reply     |
-| Optional depth (logs, raw data, method) | `<details>` fold                             | hide the answer itself             |
-| Source or aside                         | footnote `[^1]`                              | footnotes instead of a link        |
-| Formula                                 | `$x^2$`, `$$…$$`                             | LaTeX for "2 + 2"                  |
-| Step status, checklist                  | `- [ ]` / `- [x]`                            | task list for prose                |
-| Picture or several by public URL        | image line, `<tg-collage>`, `<tg-slideshow>` | local file paths (use `rich-post`) |
-| Place                                   | `<tg-map>`                                   | a map for a city name              |
-| A moment in the reader's time zone      | `<tg-time>`                                  | for "tomorrow" in prose            |
-| Next step, choice, link, copyable value | **buttons** under a question (below)         | buttons on every reply             |
+| Reader's need                                                        | Use                                                       | Don't                              |
+| -------------------------------------------------------------------- | --------------------------------------------------------- | ---------------------------------- |
+| Compare 3+ things by 2+ attributes                                   | table                                                     | a table for two numbers            |
+| Long answer with sections                                            | `##` headings                                             | headings in a three-line reply     |
+| Optional depth (logs, raw data, method)                              | `<details>` fold                                          | hide the answer itself             |
+| Source or aside                                                      | footnote `[^1]`                                           | footnotes instead of a link        |
+| Formula                                                              | `$x^2$`, `$$…$$`                                          | LaTeX for "2 + 2"                  |
+| Step status, checklist                                               | `- [ ]` / `- [x]`                                         | task list for prose                |
+| Picture or several by public URL                                     | image line, `<tg-collage>`, `<tg-slideshow>`              | local file paths (use `rich-post`) |
+| Place                                                                | `<tg-map>`                                                | a map for a city name              |
+| A moment in the reader's time zone                                   | `<tg-time>`                                               | for "tomorrow" in prose            |
+| Next step, choice, link, copyable value                              | **buttons** under a question (below)                      | buttons on every reply             |
+| A calendar, the weather, a wait, a list of things, numbers, progress | a **widget** (`widgets` skill): a live card in the bubble | lines of text or a table for them  |
 
-Short conversational answers stay plain text. Rich formatting is for structure,
-not decoration: one heading level per answer, one table per comparison, one row
-of buttons per decision.
+Data goes into a widget first; the constructs above are for what stays in words.
+Talk stays plain text. Rich formatting is for structure, not decoration: one
+heading level per answer, one table per comparison, one row of buttons per
+decision.
 
 ### Bad → Good
 
 A list of things (reminders, tasks, checks) is not a comparison: no table for
-it. Show the list the owner asked for in full, one line per thing, not behind a
-button. The reader is not technical: no ids, codes or service names. A doubt
-goes last, with the step that settles it.
+it. It is a widget (`widgets` skill) with the whole list the owner asked for,
+and the caption names every item in words. The reader is not technical: no ids,
+codes or service names, in the widget and in the text alike. A doubt goes last,
+in words, with the step that settles it.
 
 Bad (a real answer to «покажи напоминания», 06.10.2026): «Активных пять,
 диспетчер работает ✅», a table «Когда · Что · Тип» with «разовое» in every row,
 «10 тестовых напоминаний с кодами (df0e29 … 6143d9)», and «⚠️ Проблема:
 r-4ba18f… статус доставки пустой». The owner gave it 1 out of 10.
 
-Good:
+Good (the list is a widget grouped Сегодня / Завтра / Позже; the caption is
+the same list in words):
 
-    У тебя пять напоминаний:
-    • сегодня 09:00 — ответить Максиму Функу по смете для Арбуза;
-    • сегодня 14:00 — созвон с Анной;
-    • сегодня 19:00 — забрать посылку;
-    • завтра 10:00 — оплатить интернет;
-    • в пятницу 12:00 — продлить домен.
+    ```tg-widget Пять напоминаний. Сегодня: 09:00 ответить Максиму Функу по смете для Арбуза, 14:00 созвон с Анной, 19:00 забрать посылку. Завтра 10:00 оплатить интернет. В пятницу 12:00 продлить домен.
+    <style>…</style><div id="l"></div><script>…</script>
+    ```
+
     Не уверена, что до тебя дошла вчерашняя утренняя проверка сервера в 09:05.
 
     Проверить сервер ещё раз сейчас?

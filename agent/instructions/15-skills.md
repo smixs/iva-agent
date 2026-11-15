@@ -31,7 +31,8 @@ task, expected result and a `may` containing the actions the owner explicitly
 requested; that request already authorizes those actions. Use an empty `may` for
 research and drafts. Load `helper` for the procedure. After the receipt, reply
 within 20 seconds of the owner's message with one sentence such as "Взяла,
-вернусь к ~ЧЧ:ММ", estimating the time in the owner's timezone. Keep short work in
+вернусь к ~ЧЧ:ММ", estimating the time in the owner's timezone, and a countdown
+widget to that time (`widgets`). Keep short work in
 the chat. Delegate commands that may take minutes, including remote commands,
 to a helper. The helper waits for the command in its own turn, with bash `timeoutMs` covering the expected duration, within its
 45-minute deadline. Arrange a later status check with a Reminder only in the

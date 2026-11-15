@@ -5,21 +5,32 @@ import { stepLimitNotice } from "#lib/model-response.ts";
 // fired. В срок идёт один ход агента: текст напоминания — это промпт, агент выполняет его
 // свежей сессией с инструментами, а код отправляет финальный текст хода в чат и тему, где
 // напоминание попросили. Ход упал, вышел со status "failed" или промолчал — код шлёт сам
-// текст напоминания как есть; это единственная оставшаяся отправка «текста как есть».
+// начало текста напоминания (до ALERT_EXCERPT знаков) и строку «не выполнено»: короткое
+// напоминание доходит целиком, а длинное задание не уходит владельцу простынёй (14.11.2026).
 // Повторов нет по решению владельца 12.09: одна попытка хода, одна отправка. Факт
 // (delivered/error) дописывается в ту же строку; если процесс упал, не сказав факта, тик
 // запишет delivered=false с причиной по коду выхода.
 //
+// Вызов `fire.ts <id> abandoned` хода не ведёт: тик закрыл срабатывание, оставшееся без исхода
+// (агент упал между взятием строки и фактом), и ребёнок шлёт владельцу Alert с причиной. Строка
+// перечитывается перед каждой попыткой транспорта, повтором после паузы тоже: опоздавший факт
+// доставки Alert снимает. Факт «Alert
+// отправлен» пишет дроссель Alert (alertOnce): тик зовёт ребёнка, пока факта нет. Текст
+// напоминания заново не отправляется: успел ли его отправить умерший ребёнок, таблица не знает
+// (specs/ReminderLifecycle.tla, OneAttemptPerCapture, NoFalseAlert, AbandonedAlerted).
+//
 // Живёт в scripts/, а не в agent/: выталкивание наружу идёт через Telegram и клиента eve
 // (scripts/authored-tree-guard.test.ts: agent/ не импортирует scripts/).
-// Коды выхода: 0 — срабатывание отработало; 2 — вызов без id или неизвестный id.
+// Коды выхода: 0 — срабатывание отработало, Alert ушёл или уже не нужен; 1 — Alert не ушёл;
+// 2 — вызов без id, с чужим режимом или неизвестный id.
 import { isEntrypoint } from "../lib/version-layout.ts";
-import { notificationChat } from "../lib/notification-chat.ts";
+import { notificationChat } from "../../packages/notification-chat/index.ts";
 import {
   RUN_STALE_MS,
   chatKeyOf,
   getChatStatus,
   setChatStatusIf,
+  TURN_FIELDS_CLEARED,
 } from "#lib/run-status.ts";
 import {
   chatTakeOverPatch,
@@ -27,13 +38,19 @@ import {
   takeOverTelegramChat,
 } from "#lib/telegram-turn-start.ts";
 import {
+  abandonedAlertKey,
   list,
+  owesAlert,
+  reminderContent,
   recordDelivery,
   recordTurnSession,
   type Reminder,
   type ReminderChat,
 } from "#lib/reminder-store.ts";
-import { resolveTimeZone } from "#lib/timezone.ts";
+import { dataDir } from "#lib/data-dir.ts";
+import { alertOnce } from "../lib/notice-policy.ts";
+import { alertDue } from "../../packages/alert-state/index.ts";
+import { resolveTimeZone } from "../../packages/timezone/index.ts";
 import { formatZoned } from "#lib/zoned-time.ts";
 import { noticeTranslator } from "../lib/notice-policy.ts";
 import {
@@ -45,7 +62,9 @@ import {
 } from "../lib/reminder-turn.ts";
 import { sendTelegramHtml } from "../lib/telegram-send.ts";
 
-const USAGE = "usage: fire.ts <reminder id>";
+const USAGE = "usage: fire.ts <reminder id> [abandoned]";
+/** Сколько текста строки называет Alert: по нему владелец узнаёт напоминание. */
+const ALERT_EXCERPT = 200;
 
 export type ReminderFireDependencies = {
   readonly env?: NodeJS.ProcessEnv;
@@ -92,6 +111,7 @@ type Outcome = {
   readonly error: string | null;
   /** Ход погашен снаружи (/stop): отправлять нечего и не нужно. */
   readonly cancelled?: boolean;
+  readonly ownerStopped?: boolean;
 };
 
 /** Итог отправки: причина есть, только если Telegram отказал. */
@@ -157,7 +177,7 @@ function releaseChat(chatKey: string, sessionId: string): void {
   setChatStatusIf(
     chatKey,
     { sessionId },
-    { status: "idle", sessionId: null, turnId: null, draftId: null },
+    { status: "idle", ...TURN_FIELDS_CLEARED },
   );
 }
 
@@ -184,7 +204,12 @@ async function stampSession(
 }
 
 /** Присмотр чата за ходом срабатывания: чат и тема — из строки. */
-function chatWatch(row: Reminder, target: Target, deps: Wiring): TurnWatch {
+function chatWatch(
+  row: Reminder,
+  target: Target,
+  deps: Wiring,
+  onRelease: (ownerStopped: boolean) => void,
+): TurnWatch {
   const chatKey = chatKeyOf(target.chat, target.threadId);
   return {
     claim: async (sessionId) => {
@@ -194,7 +219,13 @@ function chatWatch(row: Reminder, target: Target, deps: Wiring): TurnWatch {
     pulse: (sessionId) =>
       writeQuietly(deps.log, "pulse", () => pulseChat(chatKey, sessionId)),
     release: (sessionId) =>
-      writeQuietly(deps.log, "release", () => releaseChat(chatKey, sessionId)),
+      writeQuietly(deps.log, "release", () => {
+        const current = getChatStatus(chatKey);
+        onRelease(
+          current?.sessionId === sessionId && current.wasCancelled === true,
+        );
+        releaseChat(chatKey, sessionId);
+      }),
   };
 }
 
@@ -223,6 +254,36 @@ function route(row: Reminder, deps: Wiring): Route {
         "no owner chat: set TELEGRAM_DIGEST_CHAT_ID or TELEGRAM_ALLOWED_USER_IDS",
     };
   return { target: { token, chat: chat.id, threadId: chat.threadId } };
+}
+
+/** Начало текста строки одной строкой: задание-промпт владельцу целиком не уходит. */
+function excerpt(text: string): string {
+  const flat = text.replace(/\s+/gu, " ").trim();
+  return flat.length > ALERT_EXCERPT
+    ? `${flat.slice(0, ALERT_EXCERPT)}…`
+    : flat;
+}
+
+const isSignal = (row: { readonly id: string }) => row.id.startsWith("signal-");
+
+/**
+ * Что владелец видит от строки, когда ход её не выполнил. Строка Signal — данные плагина, она
+ * идёт целиком. Текст Reminder — задание модели: от него идёт начало.
+ */
+const subject = (row: Reminder) =>
+  isSignal(row) ? row.text : excerpt(row.text);
+
+/** Ход не дал ответа: владелец видит, о чём было напоминание и что оно не выполнено. */
+function failedText(
+  row: Reminder,
+  tr: (en: string, ru: string) => string,
+): string {
+  if (isSignal(row)) return row.text;
+  const note = tr(
+    "Not done: the turn gave no answer.",
+    "Не выполнено: ход не дал ответа.",
+  );
+  return `${subject(row)}\n\n${note}`;
 }
 
 /**
@@ -282,10 +343,7 @@ function replyOf(
 
 /** Клиент хода строки: Signal называет себя своим видом, остальное — Reminder. */
 const clientFor = (row: Reminder, env: NodeJS.ProcessEnv) =>
-  reminderClientOptions(
-    env,
-    row.id.startsWith("signal-") ? "signal" : "reminder",
-  );
+  reminderClientOptions(env, isSignal(row) ? "signal" : "reminder");
 
 /** Один ход агента по тексту напоминания. Любой его провал отдаётся текстом строки. */
 async function agentOutcome(
@@ -303,20 +361,29 @@ async function agentOutcome(
     },
     tr,
   );
+  let ownerStopped: boolean | undefined;
   try {
     const turn = await deps.runTurn(prompt, clientFor(row, deps.env), {
       log: deps.log,
       // Пока ход идёт, чат и тема строки видят его сессию: по ней /stop гасит её.
-      watch: chatWatch(row, target, deps),
+      watch: chatWatch(row, target, deps, (stopped) => {
+        ownerStopped = stopped;
+      }),
     });
     const notice = stepLimitNotice(turn.failureInfo, tr);
-    return replyOf(
-      turn,
-      notice ? `${row.text}\n${notice}` : row.text,
-      sessionLimitText(row.text, tr),
-    );
+    return {
+      ...replyOf(
+        turn,
+        notice ? `${subject(row)}\n${notice}` : failedText(row, tr),
+        sessionLimitText(subject(row), tr),
+      ),
+      ownerStopped,
+    };
   } catch (error) {
-    return { text: row.text, error: `agent turn failed: ${message(error)}` };
+    return {
+      text: failedText(row, tr),
+      error: `agent turn failed: ${message(error)}`,
+    };
   }
 }
 
@@ -392,7 +459,20 @@ async function fireRow(row: Reminder, deps: Wiring): Promise<void> {
     );
     return;
   }
-  const outcome = await agentOutcome(row, routed.target, deps);
+  let outcome: Outcome =
+    reminderContent(row) === "text"
+      ? { text: row.text, error: null }
+      : await agentOutcome(row, routed.target, deps);
+  if (outcome.cancelled === true && outcome.ownerStopped === false) {
+    // /stop leaves wasCancelled in the watched Chat record before turn.cancelled.
+    // A session reset cancels the turn without that explicit owner-stop fact.
+    const tr = await deps.translator(deps.env);
+    outcome = {
+      text: `${subject(row)}\n\n${tr("Execution was interrupted by a conversation reset.", "Выполнение прервал сброс разговора.")}`,
+      error: "conversation reset interrupted the turn",
+    };
+  }
+
   noteTurnFailure(row, outcome, deps);
   if (outcome.cancelled === true) {
     // Владелец погасил ход сам: дословный текст напоминания ему не отправляем, в строке —
@@ -407,6 +487,75 @@ async function fireRow(row: Reminder, deps: Wiring): Promise<void> {
   }
   const sent = await deliver(row, routed.target, outcome.text, deps);
   await recordFact(row, sent, reason(outcome, sent), deps);
+}
+
+/**
+ * Alert о брошенном срабатывании: напоминание названо отрывком и сроком, причина и действие —
+ * словами. В таблицу ребёнок не пишет: причину в строку уже записал тик. Строка читается после
+ * всех приготовлений, прямо перед отправкой.
+ */
+async function alertAbandoned(id: string, deps: Wiring): Promise<number> {
+  const tr = await deps.translator(deps.env);
+  const row = await loadRow(id, deps);
+  if (typeof row === "number") return row;
+  if (!owesAlert(row)) {
+    deps.log(`reminders: ${row.id} has an outcome now, no alert`);
+    return 0;
+  }
+  const routed = route(row, deps);
+  if (!("target" in routed)) {
+    deps.log(
+      `reminders: ${row.id} abandoned, alert not sent: ${routed.reason}`,
+    );
+    return 1;
+  }
+  const due = formatZoned(
+    row.firedAt ?? row.nextRunAtMs,
+    resolveTimeZone(deps.env.ASSISTANT_TIMEZONE),
+  );
+  const { target } = routed;
+  const { key, essence } = abandonedAlertKey(row, false);
+  // Перед каждой попыткой: факт, который лёг, пока транспорт ждал повтора, или Alert, который
+  // записал другой ребёнок, снимают эту отправку (NoFalseAlert).
+  let withdrawn = false;
+  const stillOwed = async (): Promise<boolean> => {
+    const now = await loadRow(id, deps);
+    if (typeof now === "number") return false;
+    withdrawn =
+      now.firedAt !== row.firedAt ||
+      !owesAlert(now) ||
+      !alertDue(dataDir(), key, essence);
+    return !withdrawn;
+  };
+  let refusal = "";
+  const outcome = await alertOnce(dataDir(), key, essence, async () => {
+    const result = await deps.send(
+      target.token,
+      target.chat,
+      tr(
+        `The reminder "${excerpt(row.text)}" due ${due} may not have reached you: its firing was cut short, most likely by an Iva restart. If it is not above in this chat, it did not arrive.`,
+        `Напоминание «${excerpt(row.text)}» на ${due} могло не дойти: срабатывание оборвалось, вероятно, при перезапуске Ивы. Если его нет выше в этом чате, оно не пришло.`,
+      ),
+      {
+        retryTransient: true,
+        threadId: target.threadId ?? undefined,
+        trace: { source: "reminder" },
+        beforeAttempt: stillOwed,
+      },
+    );
+    refusal = result.error;
+    return result.ok;
+  });
+  if (withdrawn) {
+    deps.log(`reminders: ${row.id} has an outcome now, no alert`);
+    return 0;
+  }
+  deps.log(
+    outcome === "failed"
+      ? `reminders: ${row.id} abandoned, alert not sent: ${refusal}`
+      : `reminders: ${row.id} abandoned, alert ${outcome}`,
+  );
+  return outcome === "failed" ? 1 : 0;
 }
 
 /** Строка срабатывания или код выхода: чужой id и нечитаемая таблица заканчивают ребёнка. */
@@ -431,12 +580,14 @@ async function loadRow(id: string, deps: Wiring): Promise<Reminder | number> {
 export async function runReminderFire(
   id: string,
   dependencies?: ReminderFireDependencies,
+  mode?: string,
 ): Promise<number> {
-  if (id.trim() === "") {
+  if (id.trim() === "" || (mode !== undefined && mode !== "abandoned")) {
     console.error(USAGE);
     return 2;
   }
   const deps: Wiring = { ...DEFAULTS, ...dependencies };
+  if (mode === "abandoned") return alertAbandoned(id, deps);
   const row = await loadRow(id, deps);
   if (typeof row === "number") return row;
   await fireRow(row, deps);
@@ -444,4 +595,6 @@ export async function runReminderFire(
 }
 
 if (isEntrypoint(import.meta.url))
-  process.exit(await runReminderFire(process.argv[2] ?? ""));
+  process.exit(
+    await runReminderFire(process.argv[2] ?? "", undefined, process.argv[3]),
+  );

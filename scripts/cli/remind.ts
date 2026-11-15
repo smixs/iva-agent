@@ -1,7 +1,7 @@
 // One Reminder, judged by an eve turn and delivered by the CLI. The command keeps every
 // authored-tree import lazy so repair and doctor still load on a partial installation.
 import { readEnvFresh } from "../lib/env-file.ts";
-import { notificationChat } from "../lib/notification-chat.ts";
+import { notificationChat } from "../../packages/notification-chat/index.ts";
 import {
   reminderClientOptions,
   reminderPrompt,

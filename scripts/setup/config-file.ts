@@ -6,7 +6,7 @@ import {
   parseEnvText,
   writeEnvAtomicSync,
 } from "../lib/env-file.ts";
-import { resolveDataDir } from "../lib/data-dir.ts";
+import { resolveDataDir } from "../../packages/data-dir/index.ts";
 import type { Env, ThrownSetupError } from "./steps.ts";
 
 /** Абсолютный каталог data настройки (тот же, что видит агент из cwd=root): там codex-auth.json. */

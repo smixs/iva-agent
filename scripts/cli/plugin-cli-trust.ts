@@ -12,7 +12,7 @@ import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import type { PluginReport } from "#lib/plugin-reader.ts";
-import type { PluginsState } from "#lib/plugin-store.ts";
+import type { PluginMode, PluginsState } from "#lib/plugin-store.ts";
 import {
   canonicalPluginScope,
   pluginUnitPlan,
@@ -47,6 +47,7 @@ export function createPluginTrustCommands(context: PluginCliContext) {
     assignPluginPorts,
     findPlugin,
     pluginDataDir,
+    pluginMode,
     pluginRoot,
     pluginTokenFile,
     readPluginsState,
@@ -75,12 +76,15 @@ export function createPluginTrustCommands(context: PluginCliContext) {
   }
 
   /**
-   * Есть ли у плагина то, что живёт в версии: код или connection-файлы. Сервисы в
-   * версию не попадают вовсе — они запускаются из стора юнитом (ADR-0009), поэтому
-   * плагин с одними сервисами ничего не пересобирает.
+   * Есть ли у плагина в этом режиме то, что живёт в версии: код — у включённого,
+   * connection-файлы — только в режиме `full`. Сервисы в версию не попадают вовсе — они
+   * запускаются из стора юнитом (ADR-0009), поэтому плагин с одними сервисами ничего не
+   * пересобирает.
    */
-  function inVersion(report: PluginReport, trusted: boolean): boolean {
-    return report.code || (trusted && Object.keys(report.mcp).length > 0);
+  function inVersion(report: PluginReport, mode: PluginMode): boolean {
+    if (mode === "full")
+      return report.code || Object.keys(report.mcp).length > 0;
+    return mode === "no-processes" && report.code;
   }
 
   /** Серверы, которым нужен MCP proxy: только `stdio`, остальные ходят напрямую. */
@@ -153,7 +157,8 @@ export function createPluginTrustCommands(context: PluginCliContext) {
   ): Promise<PluginUnitSource[]> {
     const sources: PluginUnitSource[] = [];
     for (const entry of state.plugins) {
-      if (!entry.enabled || !entry.trusted) continue;
+      const mode = pluginMode(entry);
+      if (mode !== "full") continue;
       const root = pluginRoot(data, entry.name);
       if (!existsSync(root)) continue;
       const report = await readPlugin(root);
@@ -161,8 +166,7 @@ export function createPluginTrustCommands(context: PluginCliContext) {
       const paths = { root, data: pluginDataDir(data, entry.name) };
       sources.push({
         name: entry.name,
-        enabled: entry.enabled,
-        trusted: entry.trusted,
+        mode,
         root,
         data: paths.data,
         mcp: proxiedServers(report).map((server) => ({
@@ -266,7 +270,7 @@ export function createPluginTrustCommands(context: PluginCliContext) {
   ): void {
     if (names.length === 0 || !hasSystemd()) return;
     const entries = state.plugins.filter(
-      (entry) => entry.enabled && entry.trusted && names.includes(entry.name),
+      (entry) => pluginMode(entry) === "full" && names.includes(entry.name),
     );
     const live = runningPluginUnits({
       scope: canonicalPluginScope(data),
@@ -284,6 +288,28 @@ export function createPluginTrustCommands(context: PluginCliContext) {
         `${live.join(", ")} did not restart onto the new code: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
+  }
+
+  /**
+   * Вернуть один тумблер после сборки, которая не прошла. Запись берётся из состояния,
+   * прочитанного под этим же замком: пока шла сборка, плагин могли выключить, лишить
+   * доверия или снять, и запись, прочитанная до сборки, вернула бы всё это обратно.
+   * Юниты сверяются, как после любой записи (`specs/PluginMode.tla`: `UndoRereads`,
+   * `UndoStops`).
+   */
+  async function undo(
+    data: string,
+    name: string,
+    back: { readonly enabled: false } | { readonly trusted: false },
+  ): Promise<void> {
+    await locked(data, async () => {
+      const state = await readPluginsState(data);
+      const now = findPlugin(state, name);
+      if (!now) return;
+      const next = upsertPlugin(state, { ...now, ...back });
+      await writePluginsState(data, next);
+      await reconcileUnits(data, next);
+    });
   }
 
   async function setTrusted(trusted: boolean): Promise<void> {
@@ -322,12 +348,7 @@ export function createPluginTrustCommands(context: PluginCliContext) {
       const { failure } = await buildCode(entry.name, trusted);
       if (failure !== null) {
         if (trusted) {
-          await locked(data, async () => {
-            const state = await readPluginsState(data);
-            const back = upsertPlugin(state, { ...entry, trusted: false });
-            await writePluginsState(data, back);
-            await reconcileUnits(data, back);
-          });
+          await undo(data, entry.name, { trusted: false });
           throw new Error(`${entry.name} stays untrusted: ${failure}`);
         }
         warn(failure);
@@ -360,7 +381,11 @@ export function createPluginTrustCommands(context: PluginCliContext) {
       const report = await readPlugin(pluginRoot(data, found.name));
       // Выключенный плагин ничего не запускает: `enabled` гасит и юниты тоже.
       await reconcileUnits(data, next);
-      return { entry: found, code: inVersion(report, found.trusted) };
+      // Что тумблер меняет в версии: то, что в ней есть у включённого плагина.
+      return {
+        entry: found,
+        code: inVersion(report, pluginMode({ ...found, enabled: true })),
+      };
     });
     if (entry.enabled === enabled) {
       ok(`${entry.name} is already ${enabled ? "enabled" : "disabled"}`);
@@ -373,13 +398,7 @@ export function createPluginTrustCommands(context: PluginCliContext) {
       const { failure } = await buildCode(entry.name, enabled);
       if (failure !== null) {
         if (enabled) {
-          await locked(data, async () => {
-            const state = await readPluginsState(data);
-            await writePluginsState(
-              data,
-              upsertPlugin(state, { ...entry, enabled: false }),
-            );
-          });
+          await undo(data, entry.name, { enabled: false });
           throw new Error(`${entry.name} stays disabled: ${failure}`);
         }
         warn(failure);

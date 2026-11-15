@@ -26,7 +26,6 @@ function createBootstrapOptions(overrides = {}) {
     postBuildScriptPaths: overrides.postBuildScriptPaths ?? [
       resolve(packageRoot, "scripts", "copy-compiled-assets.mjs"),
       resolve(packageRoot, "scripts", "copy-runtime-assets.mjs"),
-      resolve(packageRoot, "scripts", "copy-docs.mjs"),
       resolve(packageRoot, "scripts", "stamp-version-tokens.mjs"),
     ],
     tscCliPath: overrides.tscCliPath,

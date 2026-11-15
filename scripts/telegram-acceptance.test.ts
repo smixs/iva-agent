@@ -34,6 +34,7 @@ import {
 } from "#lib/telegram-acceptance.ts";
 import { TELEGRAM_QUEUE_RECEIPT_FIELD } from "#lib/telegram-parts.ts";
 import { setChatStatus } from "#lib/run-status.ts";
+import { tempDir } from "./fixtures/temp-dir.ts";
 
 const WEBHOOK_SECRET = "test-secret";
 
@@ -296,7 +297,7 @@ function productionTelegramDelivery(
     sessionEventStreamError,
     onSessionEventStream,
     completedUpdatesFile = join(
-      mkdtempSync(join(tmpdir(), "iva-completed-updates-test-")),
+      tempDir("iva-completed-updates-test-"),
       "completed-updates.json",
     ),
   }: DeliveryOptions = {},
@@ -658,7 +659,7 @@ test("the same in-flight update waits for one acceptance instead of starting a s
 });
 
 test("a completed update is handled from disk without invoking the authored handler", async () => {
-  const root = mkdtempSync(join(tmpdir(), "iva-completed-ledger-test-"));
+  const root = tempDir("iva-completed-ledger-test-");
   const completedUpdatesFile = join(root, "completed-updates.json");
   let handlerCalls = 0;
   const first = productionTelegramDelivery(
@@ -717,7 +718,7 @@ test("a completed update is handled from disk without invoking the authored hand
 });
 
 test("an update is recorded only after successful acceptance", async () => {
-  const root = mkdtempSync(join(tmpdir(), "iva-completed-ledger-reject-test-"));
+  const root = tempDir("iva-completed-ledger-reject-test-");
   const completedUpdatesFile = join(root, "completed-updates.json");
   let handlerCalls = 0;
   const rejected = productionTelegramDelivery(
@@ -761,7 +762,7 @@ test("an update is recorded only after successful acceptance", async () => {
 });
 
 test("the completed-update ledger keeps the latest 200 ids", async () => {
-  const root = mkdtempSync(join(tmpdir(), "iva-completed-ledger-bound-test-"));
+  const root = tempDir("iva-completed-ledger-bound-test-");
   const completedUpdatesFile = join(root, "completed-updates.json");
   writeFileSync(
     completedUpdatesFile,
@@ -787,7 +788,7 @@ test("the completed-update ledger keeps the latest 200 ids", async () => {
 });
 
 test("a completed-update ledger is isolated by Telegram bot id", async () => {
-  const root = mkdtempSync(join(tmpdir(), "iva-completed-ledger-bot-test-"));
+  const root = tempDir("iva-completed-ledger-bot-test-");
   const completedUpdatesFile = join(root, "completed-updates.json");
   let sends = 0;
   const delivery = productionTelegramDelivery(
@@ -816,7 +817,7 @@ test("a completed-update ledger is isolated by Telegram bot id", async () => {
 });
 
 test("an invalid completed-update schema is recovered after acceptance", async () => {
-  const root = mkdtempSync(join(tmpdir(), "iva-completed-ledger-schema-test-"));
+  const root = tempDir("iva-completed-ledger-schema-test-");
   const completedUpdatesFile = join(root, "completed-updates.json");
   writeFileSync(completedUpdatesFile, JSON.stringify({ updates: "broken" }));
   let sends = 0;
@@ -835,7 +836,7 @@ test("an invalid completed-update schema is recovered after acceptance", async (
 });
 
 test("missing webhook secret disables deduplication and reports it once", async () => {
-  const root = mkdtempSync(join(tmpdir(), "iva-completed-ledger-secret-test-"));
+  const root = tempDir("iva-completed-ledger-secret-test-");
   const completedUpdatesFile = join(root, "completed-updates.json");
   const priorSecret = process.env.TELEGRAM_WEBHOOK_SECRET_TOKEN;
   const priorError = console.error;

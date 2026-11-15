@@ -9,6 +9,10 @@ import {
   clearTelegramResetIntent,
   loadTelegramResetIntents,
   persistTelegramResetIntent,
+  RESET_INTENT_PHASES,
+  resetIntentFences,
+  resetIntentPhase,
+  resetIntentRetryPending,
 } from "./telegram-reset-intent.ts";
 
 async function intentDirectory(t: TestContext): Promise<string> {
@@ -34,7 +38,6 @@ void test("reset intent persists, loads, clears, and tolerates missing paths", a
   });
   assert.deepEqual(await loadTelegramResetIntents(directory), [intent]);
 
-  const retiredField = "continuationToken";
   assert.deepEqual(
     JSON.parse(
       await readFile(
@@ -47,7 +50,6 @@ void test("reset intent persists, loads, clears, and tolerates missing paths", a
       chatKey: "42:",
       requestedAt: 1234,
       discardThroughUpdateId: 88,
-      [retiredField]: "42::",
     },
   );
 
@@ -69,6 +71,7 @@ void test("reset intent loader skips invalid records", async (t) => {
   assert.match(errors[0], /cannot load Telegram reset intent .*bad\.json/u);
 });
 
+// Releases through 0.5.11 wrote this field into every intent.
 void test("reset intent loader accepts and strips the retired routing field", async (t) => {
   const directory = await intentDirectory(t);
   const chatKey = "7:";
@@ -109,4 +112,31 @@ void test("reset intent loader skips a filename that does not match the chat", a
   });
   assert.deepEqual(await loadTelegramResetIntents(directory), []);
   assert.match(errors[0], /filename does not match its chat key/u);
+});
+
+// Соответствие оператору Phase модели specs/ResetIntent.tla: каждая комбинация записи и памяти.
+void test("ResetIntent Phase: the phase of every record and memory combination matches the model", () => {
+  const model = (
+    recorded: boolean,
+    retryPending: boolean,
+    escalated: boolean,
+  ) =>
+    !recorded
+      ? retryPending
+        ? "blocked"
+        : "none"
+      : !retryPending
+        ? "recorded"
+        : escalated
+          ? "escalated"
+          : "waiting";
+  for (const recorded of [false, true])
+    for (const retryPending of [false, true])
+      for (const escalated of [false, true]) {
+        const phase = resetIntentPhase({ recorded, retryPending, escalated });
+        assert.equal(phase, model(recorded, retryPending, escalated));
+        assert.ok(RESET_INTENT_PHASES.includes(phase));
+        assert.equal(resetIntentFences(phase), recorded, "Fence is the record");
+        assert.equal(resetIntentRetryPending(phase), retryPending);
+      }
 });

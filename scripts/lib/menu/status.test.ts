@@ -1,9 +1,9 @@
 /* eslint-disable @typescript-eslint/no-floating-promises, @typescript-eslint/require-await -- Node's test runner owns registrations and test doubles return promises. */
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
+import { tempDir } from "../../fixtures/temp-dir.ts";
 
 type StatusState = { chatId: number; userId: string; screen: string };
 type View = { text: string };
@@ -40,7 +40,7 @@ function deferred<T>() {
 }
 
 async function fixture() {
-  const root = await mkdtemp(join(tmpdir(), "iva-menu-status-"));
+  const root = tempDir("iva-menu-status-");
   const envPath = join(root, ".env");
   await Promise.all([
     writeFile(join(root, "package.json"), '{"version":"0.3.11"}\n'),

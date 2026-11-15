@@ -11,12 +11,11 @@
 // и прогон повторится байт в байт, включая shrink.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import fc from "fast-check";
+import { tempDir } from "../fixtures/temp-dir.ts";
 
-const root = mkdtempSync(join(tmpdir(), "iva-ingress-pbt-"));
+const root = tempDir("iva-ingress-pbt-");
 process.env.ASSISTANT_DATA_DIR = join(root, "data");
 process.env.TELEGRAM_ALLOWED_USER_IDS = "42";
 process.env.AGENT_LANGUAGE = "en";
@@ -56,7 +55,7 @@ async function run(
   offsets: number[] = [],
   lines: string[] = [],
 ): Promise<{ offset: number; ingressBlocked: boolean }> {
-  return processTelegramUpdate(update, OFFSET, null, {
+  return processTelegramUpdate(update, OFFSET, {
     handleControlImpl: () => Promise.resolve(false),
     saveOffsetImpl: (nextOffset) => {
       offsets.push(nextOffset);
@@ -208,7 +207,6 @@ await test("контроль: отказ записи (ENOSPC) по-прежне
   const result = await processTelegramUpdate(
     messageUpdate(401, { text: "не записалось" }),
     OFFSET,
-    null,
     {
       handleControlImpl: () => Promise.resolve(false),
       admitImpl: () => Promise.resolve("write-failed"),

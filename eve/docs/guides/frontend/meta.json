@@ -1,5 +1,0 @@
-{
-  "title": "Frontend Frameworks",
-  "defaultOpen": false,
-  "pages": ["overview", "nextjs", "nuxt", "sveltekit", "use-eve-agent-vue", "use-eve-agent-svelte"]
-}

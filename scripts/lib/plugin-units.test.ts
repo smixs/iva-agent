@@ -24,6 +24,7 @@ import {
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import fc from "fast-check";
+import { pluginMode } from "#lib/plugin-store.ts";
 import {
   pluginUnitPayload,
   markPluginUnit,
@@ -39,11 +40,9 @@ import {
 import { SAFE_PLUGIN_PART } from "#lib/plugin-store.ts";
 import { createSystemdControl } from "./systemd-control.ts";
 import {
-  installedPluginUnits,
   mcpProxyUnitBody,
   mcpUnitName,
   pluginServiceUnitBody,
-  pluginUnitNames,
   pluginUnitPlan,
   reconcilePluginUnits,
   runningPluginUnits,
@@ -148,8 +147,7 @@ const scoped = (text: string) =>
 function source0(overrides: Partial<PluginUnitSource> = {}): PluginUnitSource {
   return {
     name: "trace",
-    enabled: true,
-    trusted: true,
+    mode: "full",
     root: `${DATA}/custom/plugins/trace`,
     data: `${DATA}/plugin-data/trace`,
     mcp: [],
@@ -286,7 +284,7 @@ test("a plugin service gets its port, its paths, and nothing of the agent's", ()
   );
 });
 
-test("only an enabled and trusted plugin has units at all", () => {
+test("PluginMode ProcessesNeedTrust, DisabledIsStopped: of the four modes only full has units", () => {
   const mcp = [
     {
       server: "viewer",
@@ -294,12 +292,23 @@ test("only an enabled and trusted plugin has units at all", () => {
       tokenFile: `${DATA}/plugin-data/trace/mcp-viewer.token`,
     },
   ];
-  assert.deepEqual(
-    plan([source0({ mcp })]).units.map((unit) => unit.unit),
-    [scoped("iva-mcp-trace-viewer.service")],
+  const services = [
+    { service: "web", command: "node", args: ["server.mjs"], port: 8732 },
+  ];
+  // Режим берётся из пары тумблеров той же функцией, что и в командах: тест держит и
+  // таблицу режимов, и то, что план смотрит на режим, а не на один тумблер.
+  const planned = [true, false].flatMap((enabled) =>
+    [true, false].map((trusted) => {
+      const mode = pluginMode({ enabled, trusted });
+      return [mode, plan([source0({ mode, mcp, services })]).units.length];
+    }),
   );
-  assert.deepEqual(plan([source0({ mcp, trusted: false })]).units, []);
-  assert.deepEqual(plan([source0({ mcp, enabled: false })]).units, []);
+  assert.deepEqual(planned, [
+    ["full", 2],
+    ["no-processes", 0],
+    ["paused", 0],
+    ["off", 0],
+  ]);
 });
 
 test("a name or a port that cannot make a unit is named instead of guessed", () => {
@@ -426,10 +435,6 @@ test("reconcile writes what belongs, starts it, and takes away what does not", (
       "iva.service",
       "unrelated.service",
     ].sort(),
-  );
-  assert.deepEqual(
-    installedPluginUnits({ scope, unitDir, systemd: control }),
-    [],
   );
 });
 
@@ -662,11 +667,6 @@ test("the units of one plugin resolve to owned running representations", () => {
     name: "trace",
     services: { web: { port: 8726 }, gone: { port: 8727 } },
   };
-  assert.deepEqual(pluginUnitNames(entry, scope), [
-    scoped("iva-plugin-trace-web.service"),
-    scoped("iva-plugin-trace-gone.service"),
-  ]);
-  assert.deepEqual(pluginUnitNames({ name: "bare" }, scope), []);
   assert.deepEqual(
     runningPluginUnits({
       scope,

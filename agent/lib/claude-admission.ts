@@ -30,6 +30,7 @@ import { request as httpsRequest } from "node:https";
 import { StringDecoder } from "node:string_decoder";
 import { setTimeout as delay } from "node:timers/promises";
 import { isDeepStrictEqual } from "node:util";
+import { isRecord } from "../../packages/guards/index.ts";
 
 /** Блок ответа модели в форме Anthropic Messages API — как он пришёл от api.anthropic.com. */
 export type NativeBlock = Record<string, unknown> & { type: string };
@@ -178,9 +179,6 @@ function parseSse(data: string): Record<string, unknown> | null {
 }
 
 /** Чужой JSON: дальше по коду обращаемся к полям события только через эту проверку. */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 /** Строковое поле чужого JSON: не строка — пустая строка, а не «[object Object]». */
 function text(value: unknown): string {

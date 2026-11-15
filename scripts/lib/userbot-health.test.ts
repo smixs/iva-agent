@@ -2,10 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createServer } from "node:http";
 
+import { readFileSync } from "node:fs";
+
 import {
   probeUserbotHealth,
   awaitUserbotHealth,
   USERBOT_HEALTH_TIMEOUT_MS,
+  USERBOT_LOGIN_PHASES,
 } from "./userbot-health.ts";
 
 const activeSystemd = (args: string[]) => {
@@ -275,4 +278,56 @@ void test("readiness waits out Telethon's own connect budget before giving up", 
     elapsed += 200;
   }
   assert.deepEqual(await pending, { state: "ready", reason: "ok" });
+});
+
+const answered = (body: unknown) =>
+  probeUserbotHealth({
+    runSystemctl: activeSystemd,
+    readToken: () => Promise.resolve("local-token"),
+    fetchImpl: () => Promise.resolve(response(200, body)),
+  });
+
+void test("userbot login phases on the wire are the list onboarding.py sends", async () => {
+  const source = readFileSync(
+    new URL("../../services/telegram-userbot/onboarding.py", import.meta.url),
+    "utf8",
+  );
+  const members = /^class Phase\(str, Enum\):\n([\s\S]*?)\n\n\n/mu.exec(source);
+  assert.ok(members, "class Phase is missing in onboarding.py");
+  const sent = [
+    ...(members[1] ?? "").matchAll(/^ {4}[A-Z_]+ = "([a-z_]+)"$/gmu),
+  ];
+  assert.deepEqual(
+    sent.map((member) => member[1]),
+    [...USERBOT_LOGIN_PHASES],
+  );
+  // Login.health(): `ready` goes with `authorized` and only with it.
+  for (const login of USERBOT_LOGIN_PHASES) {
+    const ready = login === "authorized";
+    assert.deepEqual(
+      await answered({ state: ready ? "ready" : "unauthorized", login }),
+      ready
+        ? { state: "ready", reason: "ok", login }
+        : { state: "unauthorized", reason: "telegram_login_required", login },
+    );
+    assert.deepEqual(
+      await answered({ state: ready ? "unauthorized" : "ready", login }),
+      { state: "unreachable", reason: "invalid_proxy_response" },
+    );
+  }
+});
+
+void test("userbot health reads a proxy that names no login phase or an unknown one", async () => {
+  for (const login of [undefined, null, 7, "", "later_phase", ["idle"]]) {
+    assert.deepEqual(await answered({ state: "unauthorized", login }), {
+      state: "unauthorized",
+      reason: "telegram_login_required",
+    });
+  }
+  for (const body of [null, "ready", 7, [], { state: "authorized" }, {}]) {
+    assert.deepEqual(await answered(body), {
+      state: "unreachable",
+      reason: "invalid_proxy_response",
+    });
+  }
 });

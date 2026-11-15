@@ -8,17 +8,11 @@
 import "./lib/ts-esm-hooks.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import {
-  mkdtempSync,
-  mkdirSync,
-  readFileSync,
-  symlinkSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ToolContext } from "eve/tools";
 import { settled } from "./fixtures/tool-result.ts";
+import { tempDir } from "./fixtures/temp-dir.ts";
 
 const { default: writeFile } = await import("../agent/tools/write_file.ts");
 
@@ -48,7 +42,7 @@ function scaffoldVault({ withCards = true } = {}): {
   vault: string;
   card: string;
 } {
-  const vault = mkdtempSync(join(tmpdir(), "iva-card-guard-vault-"));
+  const vault = tempDir("iva-card-guard-vault-");
   if (withCards) mkdirSync(join(vault, "cards"), { recursive: true });
   const card = join(withCards ? join(vault, "cards") : vault, "botir.md");
   writeFileSync(card, CARD_BODY, "utf8");
@@ -81,7 +75,7 @@ test("вольт не резолвится (относительный путь 
   const { card } = scaffoldVault();
   const vaultDir = process.env.ASSISTANT_VAULT_DIR;
   delete process.env.ASSISTANT_VAULT_DIR;
-  const restoreCwd = useCwd(mkdtempSync(join(tmpdir(), "iva-card-guard-cwd-")));
+  const restoreCwd = useCwd(tempDir("iva-card-guard-cwd-"));
   t.after(() => {
     restoreCwd();
     if (vaultDir === undefined) delete process.env.ASSISTANT_VAULT_DIR;
@@ -114,7 +108,7 @@ test("вольт не резолвится: причина попадает в �
   const { card } = scaffoldVault();
   const vaultDir = process.env.ASSISTANT_VAULT_DIR;
   delete process.env.ASSISTANT_VAULT_DIR;
-  const restoreCwd = useCwd(mkdtempSync(join(tmpdir(), "iva-card-guard-cwd-")));
+  const restoreCwd = useCwd(tempDir("iva-card-guard-cwd-"));
   t.after(() => {
     restoreCwd();
     if (vaultDir === undefined) delete process.env.ASSISTANT_VAULT_DIR;
@@ -132,7 +126,7 @@ test("вольт не резолвится: причина попадает в �
 // «не смог посмотреть» расходятся: первое разрешает запись, второе обязано её запретить.
 test("cards/ нечитаем (петля симлинков) при живом вольте: отказ, а не тихое разрешение", async (t) => {
   const { card } = scaffoldVault();
-  const vault = mkdtempSync(join(tmpdir(), "iva-card-guard-loop-"));
+  const vault = tempDir("iva-card-guard-loop-");
   const loop = join(vault, "cards");
   symlinkSync(loop, loop);
   const vaultDir = process.env.ASSISTANT_VAULT_DIR;

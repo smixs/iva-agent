@@ -19,7 +19,7 @@ import {
   isInstructionSlotPath,
   isLivePath,
 } from "./authored-paths.ts";
-import { resolveDataDir } from "./data-dir.ts";
+import { resolveDataDir } from "../../packages/data-dir/index.ts";
 import { gitAt, updaterCompat } from "./update-check.ts";
 import { loadVaultPair } from "./vault-pair.ts";
 import {
@@ -60,6 +60,7 @@ import {
   versionName,
   writeJson,
 } from "./version-store.ts";
+import { markUpdateRun } from "./update-run-journal.ts";
 
 export type CommandResult = { readonly code: number; readonly output: string };
 export type Runner = (
@@ -117,8 +118,6 @@ type FinishOptions = {
   readonly startCandidate?: (root: string) => Promise<void>;
   /** Whether the restarted service answers on the port the installation runs on. */
   readonly serving?: (port: number) => Promise<Health>;
-  /** Retire recovery writers only after live health durably commits the candidate. */
-  readonly retireCommittedWriters?: (root: string) => Promise<void>;
   /** Layout changes the installation itself needs: the shim, the old checkout. */
   readonly adopt?: () => void;
   readonly notify?: Say;
@@ -401,7 +400,6 @@ interface UpdateRun {
   readonly quiesce: () => Promise<void>;
   readonly requirePlugins: boolean;
   readonly resumeOldWriters: (root: string) => Promise<void>;
-  readonly retireCommittedWriters: (root: string) => Promise<void>;
   readonly run: Runner;
   readonly serving: (port: number) => Promise<Health>;
   readonly settledBefore: string | null;
@@ -433,7 +431,6 @@ function writerSteps(options: FinishOptions) {
 
 function flipSteps(options: FinishOptions) {
   return {
-    retireCommittedWriters: options.retireCommittedWriters ?? (async () => {}),
     serving: options.serving ?? ((port: number) => awaitServing({ port })),
     startCandidate: options.startCandidate ?? (async () => {}),
   };
@@ -781,8 +778,13 @@ async function migrateAndFlip(
       log,
     });
     await cleanVault(run);
+    // Журнал хода пишется на диск до переезда и после каждого шага: процесс умирает
+    // вместе с версией, а повтор и Bridge читают фазу оттуда (specs/UpdateRun.tla).
+    markUpdateRun(store.layout.data, name, "migrated");
     if (store.currentName() !== name) store.activate(name);
+    markUpdateRun(store.layout.data, name, "flipped");
     await startCandidate(store.layout.current);
+    markUpdateRun(store.layout.data, name, "started");
     return migrations;
   } catch (error) {
     // Every recoverable fault restores the Version that served before this run.
@@ -831,6 +833,9 @@ async function goBack(
         run.log(`the restart onto ${rollback} failed: ${String(error)}`),
       );
     store.settle(rollback);
+    markUpdateRun(store.layout.data, name, "rolledback", {
+      outcome: { status: "unhealthy", before: rollback, after: rollback },
+    });
   }
   notify(
     `${name} did not answer on port ${port} after the restart; ` +
@@ -873,18 +878,25 @@ async function serveAndFinish(
     return await goBack(run, { tree, rollback, port, log: live.log });
   // Served: whatever this code did to the installation before, it does not now.
   store.recordLive(name, true);
+  // Commit active.json before publishing success to UpdateJob (FinalOnlyWhenPinned).
   // Service state commits before every optional cleanup. A crash or cleanup
   // fault leaves explicit debt, never a healthy update reported as unfinished.
   store.settle(name, {
     cleanupPending: true,
     previous: run.active !== name ? run.active : rollback,
   });
+  markUpdateRun(store.layout.data, name, "settled", {
+    outcome: {
+      status: "updated",
+      ...(rollback ? { before: rollback } : {}),
+      after: name,
+    },
+  });
   // After the service is up: until it runs the new version, the old checkout is
   // what a failed restart falls back to, so it is not ours to remove any earlier.
   const removed = await runPostHealthCleanup({
     name,
     run: run.run,
-    retireCommittedWriters: run.retireCommittedWriters,
     adopt: run.adopt,
     log,
     store,
@@ -911,7 +923,6 @@ export async function finishVersionUpdate(
     await runPostHealthCleanup({
       name: run.name,
       run: run.run,
-      retireCommittedWriters: run.retireCommittedWriters,
       adopt: run.adopt,
       log: run.log,
       store: run.store,
@@ -932,14 +943,12 @@ export async function finishVersionUpdate(
 async function runPostHealthCleanup({
   name,
   run,
-  retireCommittedWriters,
   adopt,
   log,
   store,
 }: {
   readonly name: string;
   readonly run: Runner;
-  readonly retireCommittedWriters: (root: string) => Promise<void>;
   readonly adopt: () => void;
   readonly log: Say;
   readonly store: Store;
@@ -952,12 +961,6 @@ async function runPostHealthCleanup({
   } catch (error) {
     complete = false;
     log(`version cleanup remains pending: ${String(error)}`);
-  }
-  try {
-    await retireCommittedWriters(store.layout.current);
-  } catch (error) {
-    complete = false;
-    log(`writer retirement remains pending: ${String(error)}`);
   }
   try {
     adopt();

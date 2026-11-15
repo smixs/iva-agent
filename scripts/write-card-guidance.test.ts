@@ -1,7 +1,8 @@
 /* eslint-disable @typescript-eslint/require-await -- Model doubles implement the SDK Promise interface. */
 // The live Standard Schema survives Eve compilation/hydration and reaches model history.
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { join, relative } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import test from "node:test";
 import { asSchema } from "ai";
@@ -108,9 +109,49 @@ function strings(value: unknown): string[] {
   return [];
 }
 
+const ROOT = fileURLToPath(new URL("../", import.meta.url));
+
+/**
+ * Why `.output` cannot answer for this tree, or false when it can. The test below compares
+ * the schema in the build with the schema in the source, so the build is judged by what
+ * made it and when - never by that schema: a build left over from another day would
+ * otherwise fail the test for a difference nobody introduced.
+ */
+function unusableBuild(): string | false {
+  if (!existsSync(compiled) || !existsSync(moduleMapPath))
+    return "no .output build - run `npm run build`";
+  const read = (path: string): unknown =>
+    JSON.parse(readFileSync(join(ROOT, path), "utf8"));
+  const metadata = join(ROOT, ".output/.eve/compile/compile-metadata.json");
+  const builtBy = existsSync(metadata)
+    ? (
+        read(".output/.eve/compile/compile-metadata.json") as {
+          generator?: { version?: string };
+        }
+      ).generator?.version
+    : undefined;
+  const installed = (
+    read("node_modules/eve/package.json") as { version: string }
+  ).version;
+  if (builtBy !== installed)
+    return `.output was built by eve ${builtBy ?? "unknown"}, node_modules has ${installed} - run \`npm run build\``;
+  const builtAt = statSync(compiled).mtimeMs;
+  const agent = join(ROOT, "agent");
+  for (const entry of readdirSync(agent, {
+    recursive: true,
+    withFileTypes: true,
+  })) {
+    if (!entry.isFile() || entry.name.endsWith(".test.ts")) continue;
+    const file = join(entry.parentPath, entry.name);
+    if (statSync(file).mtimeMs > builtAt)
+      return `.output is older than ${relative(ROOT, file)} - run \`npm run build\``;
+  }
+  return false;
+}
+
 void test(
   "built Eve resolves write_card's live validator and gives the model a corrected shape after the first schema refusal",
-  { skip: !existsSync(compiled) || !existsSync(moduleMapPath) },
+  { skip: unusableBuild() },
   async (t) => {
     const manifest = JSON.parse(
       readFileSync(compiled, "utf8"),

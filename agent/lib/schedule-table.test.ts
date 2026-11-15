@@ -65,7 +65,7 @@ void test("the table uses the compiled night clock and retains other shipped cro
   );
   // Диспетчер напоминаний стоит вне SCHEDULE_CRON: у него нет ни записи статуса, ни
   // точки догона, а его состояние - сама таблица напоминаний.
-  assert.equal(REMINDER_TICK_CRON, "* * * * *");
+  assert.equal(REMINDER_TICK_CRON, "* * * * * *");
   // Тик Watch и Brief — тоже вне таблицы, но с записью статуса: живым его делает отдельная
   // строка isLiveSchedule, и его провал виден как открытый.
   assert.equal(PROACTIVE_TICK_CRON, "0,30 * * * *");

@@ -15,7 +15,8 @@ export function dataDirSetting(configured: string | undefined): string {
   return configured?.trim() || "data";
 }
 
-function physical(path: string): string {
+/** The real path, or the path itself when it does not exist yet. */
+export function physical(path: string): string {
   try {
     return realpathSync(path);
   } catch {

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { setTimeout as pause } from "node:timers/promises";
 import { streamText } from "ai";
 import type { ZodType } from "zod";
 import { makeTextModel, providerConfig, providerName } from "#provider.ts";
@@ -18,13 +19,35 @@ import { parseJson } from "./night-input.ts";
 // Один способ вызова модели для всей ночи у всех провайдеров: формат ответа словами и
 // примером в инструкции шага, ответ — JSON в тексте, разбор мягкий. Инструментов нет. Не
 // прошёл схему — один повтор с текстом ошибки, потом NightSchemaError. Сетевой
-// отказ классифицируется для следующей попытки дня. Ceiling проверяется до вызова; неизвестный usage
+// отказ классифицируется для повтора дня или периода. Ceiling проверяется до вызова; неизвестный usage
 // закрывает следующие вызовы.
 
 export class NightCeilingError extends Error {}
 export class NightSchemaError extends Error {}
 class NightNetworkError extends Error {}
 export class NightTransientError extends NightNetworkError {}
+
+/** Day checkpoints and period calls share the same bounded night recovery. */
+export async function withNightRetry<T>(
+  run: () => Promise<T>,
+  label: string,
+  signal: AbortSignal,
+): Promise<T> {
+  for (let reconnect = 0; ; reconnect++) {
+    signal.throwIfAborted();
+    try {
+      return await run();
+    } catch (error) {
+      if (!(error instanceof NightTransientError)) throw error;
+      const delay = [5_000, 30_000, 120_000][Math.min(reconnect, 2)];
+      // Recovery diagnostics do not mean an unsaved change in the owner's Report.
+      console.error(
+        `memory-night: ${label}: временный сбой модели; продолжаю через ${delay / 1_000} с: ${error.message}`,
+      );
+      await pause(delay, undefined, { signal });
+    }
+  }
+}
 
 function failureText(error: unknown): string {
   const { message, code } = (error ?? {}) as {
@@ -59,7 +82,8 @@ function transient(error: unknown): boolean {
           typeof status === "number" &&
           status >= 400 &&
           status < 500 &&
-          status !== 408,
+          status !== 408 &&
+          status !== 429,
       ) ||
       /account.{0,40}(?:terminated|suspended|disabled|deactivated|blocked)|(?:invalid|incorrect|expired|revoked).{0,20}(?:api.?key|token|credentials)|insufficient[_ ]quota|exceeded.{0,30}quota|quota.{0,30}(?:exceeded|exhausted)|payment required/iu.test(
         text,
@@ -71,9 +95,10 @@ function transient(error: unknown): boolean {
       statuses.some(
         (status) =>
           status === 408 ||
+          status === 429 ||
           (typeof status === "number" && status >= 500 && status < 600),
       ) ||
-      /connection .{0,40}lost|ECONNRESET|ECONNREFUSED|EPIPE|ETIMEDOUT|EAI_AGAIN|UND_ERR|socket hang up|fetch failed|other side closed|^(?:TypeError: )?terminated$|network request failed|(?:connect|body) timeout|model produced no output/iu.test(
+      /overloaded|connection .{0,40}lost|ECONNRESET|ECONNREFUSED|EPIPE|ETIMEDOUT|EAI_AGAIN|UND_ERR|socket hang up|fetch failed|other side closed|^(?:TypeError: )?terminated$|network request failed|(?:connect|body) timeout|model produced no output/iu.test(
         text,
       );
     error = row.cause;

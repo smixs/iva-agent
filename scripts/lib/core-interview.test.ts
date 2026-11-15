@@ -1,7 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { CORE_CAP } from "#lib/core-cap.ts";
 import {
@@ -9,6 +8,7 @@ import {
   saveInterview,
   buildDistillMessage,
 } from "./core-interview.ts";
+import { tempDir } from "../fixtures/temp-dir.ts";
 
 // Полный набор ответов на все 6 тем — общий для двух групп тестов.
 const QA = [
@@ -32,7 +32,7 @@ void test("INTERVIEW — ровно 6 вопросов с id и двумя яз�
 });
 
 void test("saveInterview пишет сырой архив в tmp-vault со всеми ответами", async () => {
-  const vault = mkdtempSync(join(tmpdir(), "iva-core-interview-"));
+  const vault = tempDir("iva-core-interview-");
   const file = await saveInterview(vault, QA);
   assert.equal(file, join(vault, "core-interview.md"));
   const md = readFileSync(file, "utf8");
@@ -44,7 +44,7 @@ void test("saveInterview пишет сырой архив в tmp-vault со вс
 });
 
 void test("saveInterview создаёт отсутствующий каталог vault и перезаписывает файл", async () => {
-  const base = mkdtempSync(join(tmpdir(), "iva-core-interview-"));
+  const base = tempDir("iva-core-interview-");
   const vault = join(base, "nested", "vault"); // ещё не существует
   await saveInterview(vault, [{ q: "первый", a: "старый ответ" }]);
   const file = await saveInterview(vault, [{ q: "второй", a: "новый ответ" }]);
@@ -57,7 +57,7 @@ void test("saveInterview создаёт отсутствующий катало�
 });
 
 void test("saveInterview показывает пропущенный ответ прочерком, не роняясь", async () => {
-  const vault = mkdtempSync(join(tmpdir(), "iva-core-interview-"));
+  const vault = tempDir("iva-core-interview-");
   const file = await saveInterview(vault, [{ q: "пропущено", a: "" }]);
   const md = readFileSync(file, "utf8");
   assert.ok(md.includes("пропущено"));

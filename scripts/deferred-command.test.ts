@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { after } from "node:test";
@@ -38,6 +38,7 @@ import {
   deferCommand,
   deferrable,
   executeDeferred as executeClaimed,
+  fromTurn,
   reconcileDeferred,
 } from "./lib/deferred-command.ts";
 
@@ -255,6 +256,46 @@ void test("command selection preserves arbitrary argument tails and excludes rea
     ),
     { seed, numRuns: 100 },
   );
+});
+
+void test("PluginMode TrustIsOwners, EnableIsOwners: a model turn is refused trust and enable, and writes nothing", async (t) => {
+  const dir = fixture(t);
+  const before = { turn: process.env.IVA_AGENT_TURN, code: process.exitCode };
+  const error = t.mock.method(console, "error", () => {});
+  t.after(() => {
+    if (before.turn === undefined) delete process.env.IVA_AGENT_TURN;
+    else process.env.IVA_AGENT_TURN = before.turn;
+    process.exitCode = before.code;
+  });
+  const files = () => readdirSync(dir).sort();
+  const untouched = files();
+
+  process.env.IVA_AGENT_TURN = "1";
+  for (const verb of [
+    "trust",
+    "enable",
+    "update",
+    "sync",
+    "install-proposal",
+  ]) {
+    process.exitCode = 0;
+    const refused = fromTurn(dir, ["plugin", verb, "trace"]);
+    assert.ok(refused, `plugin ${verb} must stop at the turn boundary`);
+    await refused;
+    assert.equal(process.exitCode, 1, verb);
+    assert.match(
+      String(error.mock.calls.at(-1)?.arguments[0]),
+      /iva plugin propose/u,
+    );
+  }
+  // Убавить может и ход: эти команды идут дальше, к самой команде.
+  for (const verb of ["disable", "untrust", "remove", "list", "propose"])
+    assert.equal(fromTurn(dir, ["plugin", verb, "trace"]), null, verb);
+  assert.deepEqual(files(), untouched);
+
+  // Вне хода граница молчит: владелец у терминала и Bridge по тапу.
+  process.env.IVA_AGENT_TURN = "";
+  assert.equal(fromTurn(dir, ["plugin", "trust", "trace"]), null);
 });
 
 void test("restart requested through bash lets the reply finish before service execution", async (t) => {

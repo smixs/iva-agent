@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   realpathSync,
   rmSync,
   writeFileSync,
@@ -142,13 +143,10 @@ void test("status preserves command order and ignores non-zero command results",
   ]);
 });
 
-void test("status lists and flags a pre-rename nightly timer the migration had to keep", () => {
-  // The install where the Brain rename could not finish: iva-memory-doctor.timer is still the
-  // unit doing the nightly vault care. A status that lists only the units this version ships
-  // shows an empty timer table and hides exactly the night this migration must not cost.
+// UpdateFloor.NoSilentLoss: a unit of a release below the floor is not this CLI's to list.
+void test("NoSilentLoss: status names only the timers this release installs and leaves an older one as it was", () => {
   const unitDir = mkdtempSync(join(tmpdir(), "iva-services-units-"));
   writeFileSync(join(unitDir, "iva-memory-doctor.timer"), "[Timer]\n");
-  writeFileSync(join(unitDir, "iva-memory-doctor.service"), "[Service]\n");
   const events: string[] = [];
   const commands = createServiceCommands(
     runtimeFixture(events, { unitDir }),
@@ -157,6 +155,10 @@ void test("status lists and flags a pre-rename nightly timer the migration had t
 
   try {
     commands.cmdStatus();
+    assert.equal(
+      readFileSync(join(unitDir, "iva-memory-doctor.timer"), "utf8"),
+      "[Timer]\n",
+    );
   } finally {
     rmSync(unitDir, { recursive: true, force: true });
   }
@@ -164,8 +166,7 @@ void test("status lists and flags a pre-rename nightly timer the migration had t
   assert.deepEqual(events, [
     "runtime.requireSystemd",
     "runtime.run:systemctl:--user|status|--no-pager|-n|5|iva.service|iva-telegram-poll.service",
-    "runtime.warn:iva-memory-doctor.timer still installed — the Brain rename did not finish; run: iva doctor",
-    "runtime.run:systemctl:--user|list-timers|--no-pager|iva-brain.timer|iva-update-check.timer|iva-memory-doctor.timer",
+    "runtime.run:systemctl:--user|list-timers|--no-pager|iva-brain.timer|iva-update-check.timer",
   ]);
 });
 

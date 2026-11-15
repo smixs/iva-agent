@@ -86,6 +86,8 @@ The **🔍 Search** screen lists the four providers — Tavily, Brave, Exa, Para
 
 The **💬 Rich replies** screen is the switch for `TELEGRAM_RICH_REPLIES`. On **Auto** (the default) a reply carrying a table, a task list, a fold (`<details>`) or a block formula goes out as a Telegram rich message and renders natively; on **Plain text** every reply stays on the ordinary HTML/plain path. The menu, Stop and update buttons work either way — only a button Iva writes inside a reply needs the rich path, and on the plain path it reaches the chat as its literal tag. The mode is read as the agent starts, so the screen offers the same `iva.service` restart. A value in `.env` that is neither `auto` nor `never` stops the agent from starting; the screen names it and lets you pick one of the two.
 
+The same screen holds the second switch, **Widgets on / Widgets off**, for `TELEGRAM_WIDGETS`. With widgets on, Iva may answer with a live card drawn in the message — a chart with tabs, a sortable list, a checklist — and its caption tells the same in words for Telegram apps without widgets. It is read as the agent starts, so the screen offers the same restart.
+
 ## Voice
 
 The **🎤 Voice** screen holds the Deepgram key that transcribes voice notes, video circles and audio files, plus the recognition language. It says whether `DEEPGRAM_API_KEY` is set (and that voice notes are not transcribed without it), and shows the current `DEEPGRAM_LANGUAGE`: **Auto** detects the language per message, while **Русский**, **English** and **Oʻzbek** pin a single one if auto-detection trips on your mix. **🔑 Set the key** takes the key in the next message and deletes it from the chat, exactly like the search key. **✏️ Names and terms** takes a comma-separated list of names and words Deepgram should spell your way (`DEEPGRAM_KEYTERMS`, Latin letters only, up to 50 terms and 500 characters in all); a single `-` clears it. All three values come from the environment, so the screen offers a restart. Free tier: [providers.md](providers.md).
@@ -98,7 +100,7 @@ A status card built from the shared CLI/Telegram health probe plus the presence 
 - **Credentials, not running** → **Enable**, which launches `iva userbot setup` detached (the venv build is slow, so the screen shows a spinner and refreshes when it's done).
 - **Starting** → a bounded waiting state with **Disable** and **Refresh**.
 - **Unreachable** → the service is active but the bearer-protected proxy health route did not answer.
-- **Login required** → the existing proxy session is reachable but Telethon is not authorized yet.
+- **Login required** → the existing proxy session is reachable but Telethon is not authorized yet. The card names the next step for the login phase: scan the QR, send the two-step verification password (a wrong one can be sent again), or start again after an expired QR, a failure or a proxy restart.
 - **Ready** → both the proxy and the personal Telegram account are healthy.
 
 Setup failures are shown in the menu instead of collapsing back to an inactive card. The

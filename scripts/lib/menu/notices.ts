@@ -24,7 +24,7 @@ import {
   type InsightState,
 } from "../../proactive/state.ts";
 import { memoryReportsEnabled } from "../notice-policy.ts";
-import { button, buttonRow } from "./buttons.ts";
+import { button, buttonRow } from "../telegram-buttons.ts";
 
 const PARENT = "r";
 

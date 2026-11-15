@@ -55,6 +55,7 @@ test("addFieldsRefusal без text называет поле и берёт пр�
   assert.ok(withCron.includes('got cron="0 9 * * *"'), withCron);
   assert.deepEqual(example(withCron), {
     action: "add",
+    content: "task",
     text: "<what to do at the due time>",
     cron: "0 9 * * *",
   });
@@ -63,6 +64,7 @@ test("addFieldsRefusal без text называет поле и берёт пр�
   assert.ok(bare.includes("got only action"), bare);
   assert.deepEqual(example(bare), {
     action: "add",
+    content: "task",
     text: "<what to do at the due time>",
     at: "in 30m",
   });
@@ -75,6 +77,7 @@ test("addFieldsRefusal без расписания называет at и cron, 
   assert.ok(refusal.includes("got text"), refusal);
   assert.deepEqual(example(refusal), {
     action: "add",
+    content: "task",
     text: "call mom",
     at: "in 30m",
   });
@@ -90,6 +93,7 @@ test("addFieldsRefusal при at и cron сразу оставляет то по
   assert.ok(keepCron.includes("Keep cron"), keepCron);
   assert.deepEqual(example(keepCron), {
     action: "add",
+    content: "task",
     text: "standup",
     cron: "0 9 * * 1-5",
   });
@@ -102,6 +106,7 @@ test("addFieldsRefusal при at и cron сразу оставляет то по
   assert.ok(keepAt.includes("Keep at"), keepAt);
   assert.deepEqual(example(keepAt), {
     action: "add",
+    content: "task",
     text: "standup",
     at: "14:30",
   });
@@ -111,6 +116,7 @@ test("addFieldsRefusal при at и cron сразу оставляет то по
   assert.ok(neither.includes('at: unsupported form "soon"'), neither);
   assert.deepEqual(example(neither), {
     action: "add",
+    content: "task",
     text: "standup",
     at: "in 30m",
   });
@@ -151,6 +157,7 @@ test("planSchedule на негодный at отвечает отказом с �
   assert.ok(form.refusal.includes("Put the user's own time"), form.refusal);
   assert.deepEqual(example(form.refusal), {
     action: "add",
+    content: "task",
     text: "x",
     at: "in 30m",
   });
@@ -178,6 +185,7 @@ test("planSchedule на негодный cron называет cron и знач�
   assert.ok(!fields.refusal.includes("schedule:"), fields.refusal);
   assert.deepEqual(example(fields.refusal), {
     action: "add",
+    content: "task",
     text: "x",
     cron: "0 9 * * 1-5",
   });

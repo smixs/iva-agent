@@ -1,7 +1,7 @@
 import {
   claudeContextWindow,
   providerContextWindow,
-} from "./lib/context-window.ts";
+} from "../packages/context-window/index.ts";
 import { usesHelperModel } from "./lib/eve-auth.ts";
 import { MODEL_PROVIDERS } from "./lib/model-provider.ts";
 import { defineAgent, defineDynamic } from "eve";

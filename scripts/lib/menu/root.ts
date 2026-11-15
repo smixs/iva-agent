@@ -6,7 +6,7 @@
 //
 // Правило репо: ни одной module-level const с переведённой строкой — все подписи собираются
 // в render() через ctx.tr, иначе язык замёрзнет до рестарта.
-import { button, type RichButtonStyle } from "./buttons.ts";
+import { button, type RichButtonStyle } from "../telegram-buttons.ts";
 import { menuStyle } from "../telegram-buttons.ts";
 
 interface RootContext {

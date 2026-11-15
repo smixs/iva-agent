@@ -186,3 +186,13 @@ test("helper text is skipped and an ordinary chat still writes", (t) => {
   completed("chat reply");
   assert.match(daily(), /chat reply/);
 });
+
+test("a widget reaches the day as its caption, not its code", (t) => {
+  resetDaily(t);
+  completed(
+    "Итог недели.\n\n```tg-widget Расходы: 32 тыс.\n<div>x</div><script>1</script>\n```",
+  );
+  const day = daily();
+  assert.match(day, /Итог недели\.\n\n\[widget\] Расходы: 32 тыс\./);
+  assert.ok(!day.includes("<script>"), day);
+});

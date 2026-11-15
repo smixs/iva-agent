@@ -115,7 +115,12 @@ for (const id of ["r-failure", "signal-failure"]) {
       log: () => {},
     });
     assert.equal(exit, 0);
-    assert.deepEqual(sent, [text]);
+    // Строка Signal — данные, идёт как есть; Reminder — задание, к нему строка «не выполнено».
+    assert.deepEqual(sent, [
+      id.startsWith("signal-")
+        ? text
+        : `${text}\n\nНе выполнено: ход не дал ответа.`,
+    ]);
     const row = (await list()).find((row) => row.id === id);
     assert.equal(row?.delivered, true); // The fallback itself was delivered.
     assert.equal(row?.error, `agent turn failed: ${failure}`);

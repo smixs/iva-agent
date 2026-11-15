@@ -35,8 +35,9 @@ const cache: { lang: Language | null; mtimeMs: number; checkedAt: number } = {
 };
 
 // settings.language ("ru"|"en") → env AGENT_LANGUAGE → "ru". Незнакомые значения
-// в settings проваливаются к env, незнакомый env — к дефолту "ru".
-function resolveLang(): Language {
+// в settings проваливаются к env, незнакомый env — к дефолту "ru". Читает файл на каждом
+// вызове: инструкции зовут его раз в ход, остальным — getLang с дросселем.
+export function resolveLang(): Language {
   const fromSettings = readSettings().language;
   if (fromSettings === "ru" || fromSettings === "en") return fromSettings;
   return process.env.AGENT_LANGUAGE === "en" ? "en" : "ru";

@@ -92,7 +92,8 @@ interface TelegramReplyItem {
   author: ReplyAuthor | SenderChatAuthor | null;
   text: string;
   truncated: boolean;
-  untrusted: true;
+  untrusted: boolean;
+  source?: "assistant";
   media?: ReplyMedia;
 }
 
@@ -310,13 +311,15 @@ function readMedia(
 /**
  * Return one sanitized JSON context item for Telegram's quoted message.
  *
- * The raw reply is untrusted. Only bounded text and inert metadata cross the
- * boundary; file IDs and download URLs are deliberately excluded.
+ * Only bounded text and inert metadata cross the boundary. Original messages
+ * from this bot are assistant history; foreign and forwarded quotes remain
+ * untrusted. File IDs and download URLs are deliberately excluded.
  */
 export function buildTelegramReplyContext(
   rawMessage: unknown,
   sanitizeText: SanitizeText,
   hasAttackSignal: HasAttackSignal,
+  ownBotId?: string,
 ): TelegramReplyContextResult | null {
   if (!isRecord(rawMessage) || !isRecord(rawMessage.reply_to_message))
     return null;
@@ -364,6 +367,17 @@ export function buildTelegramReplyContext(
   // placeholder. A validated chat ID identifies the real author; malformed
   // sender_chat metadata cannot replace a valid from identity.
   const author = senderChat.validIdentity ? senderChat : fromAuthor;
+  // Telegram supplies the author identity. A username or is_bot alone is not
+  // proof: other bots and forwarded content retain the foreign-data boundary.
+  const own =
+    ownBotId !== undefined &&
+    isRecord(reply.from) &&
+    reply.from.is_bot === true &&
+    boundedTelegramUserId(reply.from.id) === ownBotId &&
+    reply.sender_chat === undefined &&
+    reply.forward_origin === undefined &&
+    reply.forward_from === undefined &&
+    reply.forward_from_chat === undefined;
   const item: TelegramReplyItem = {
     type: "telegram_reply",
     messageId,
@@ -374,15 +388,17 @@ export function buildTelegramReplyContext(
       Boolean(messageText.rich?.truncated) ||
       author.truncated ||
       Boolean(media?.truncated),
-    untrusted: true,
+    untrusted: !own,
+    ...(own ? { source: "assistant" as const } : {}),
   };
   if (media !== null) item.media = media.value;
   return {
     item: JSON.stringify(item),
     flagged:
-      hasAttackSignal(textSecurity) ||
-      hasAttackSignal(captionSecurity) ||
-      author.warned ||
-      Boolean(media?.warned),
+      !own &&
+      (hasAttackSignal(textSecurity) ||
+        hasAttackSignal(captionSecurity) ||
+        author.warned ||
+        Boolean(media?.warned)),
   };
 }

@@ -24,7 +24,12 @@ import { createHash } from "node:crypto";
 import type { Dirent } from "node:fs";
 import { lstat, readdir, readFile } from "node:fs/promises";
 import { isAbsolute, join, posix, relative, resolve, sep } from "node:path";
-import { listPluginSkills, type PluginSkillRef } from "./plugin-skills.ts";
+import {
+  errorCode,
+  listPluginSkills,
+  type PluginSkillRef,
+} from "./plugin-skills.ts";
+import { isRecord } from "../../packages/guards/index.ts";
 
 export const PLUGIN_SCHEMA_URL =
   "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json";
@@ -130,18 +135,8 @@ export type PluginFile = {
   readonly mode: number;
 };
 
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function reason(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function errorCode(error: unknown): string | undefined {
-  return typeof error === "object" && error !== null && "code" in error
-    ? String(error.code)
-    : undefined;
 }
 
 /** Проверка имени плагина по §5.5 спеки. Возвращает причину отказа или null. */
@@ -277,7 +272,7 @@ function parsePluginManifest(
   raw: unknown,
   diagnostics: string[],
 ): PluginManifest {
-  if (!isPlainObject(raw))
+  if (!isRecord(raw))
     throw new Error(`${PLUGIN_MANIFEST_FILE} must be a JSON object`);
 
   if (raw.$schema !== PLUGIN_SCHEMA_URL)
@@ -302,7 +297,7 @@ function parsePluginManifest(
       );
   }
   if (raw.author !== undefined) {
-    if (!isPlainObject(raw.author))
+    if (!isRecord(raw.author))
       throw new Error(`${PLUGIN_MANIFEST_FILE} author must be an object`);
     for (const [key, value] of Object.entries(raw.author)) {
       if (!AUTHOR_FIELDS.has(key))
@@ -319,17 +314,14 @@ function parsePluginManifest(
   // §5.2 и §8.1 — ровно два нефатальных нарушения: сообщить и проигнорировать.
   let extensions: Record<string, unknown> = {};
   if (raw.extensions !== undefined) {
-    if (isPlainObject(raw.extensions)) extensions = raw.extensions;
+    if (isRecord(raw.extensions)) extensions = raw.extensions;
     else
       diagnostics.push(
         `${PLUGIN_MANIFEST_FILE}: extensions is not an object; ignored`,
       );
   }
   // Чужой namespace не валидируем вовсе (§8.1), свой — обязан быть объектом.
-  if (
-    IVA_NAMESPACE in extensions &&
-    !isPlainObject(extensions[IVA_NAMESPACE])
-  ) {
+  if (IVA_NAMESPACE in extensions && !isRecord(extensions[IVA_NAMESPACE])) {
     diagnostics.push(
       `${PLUGIN_MANIFEST_FILE}: extensions["${IVA_NAMESPACE}"] is not an object; ignored`,
     );
@@ -405,7 +397,7 @@ function parseMcpServer(
   root: string,
   entry: unknown,
 ): PluginMcpServer | string {
-  if (!isPlainObject(entry)) return "not an object";
+  if (!isRecord(entry)) return "not an object";
   const type = entry.type;
   if (type !== "stdio" && type !== "streamable-http" && type !== "sse")
     return 'type must be "stdio", "streamable-http" or "sse"';
@@ -440,8 +432,7 @@ function parseMcpServer(
       return "http is allowed only for loopback URLs";
     const headers = entry.headers;
     if (headers !== undefined) {
-      if (!isPlainObject(headers))
-        return "headers must be an object of strings";
+      if (!isRecord(headers)) return "headers must be an object of strings";
       const seen = new Set<string>();
       for (const [key, value] of Object.entries(headers)) {
         if (typeof value !== "string")
@@ -455,7 +446,7 @@ function parseMcpServer(
     return {
       type,
       url: entry.url,
-      ...(isPlainObject(headers)
+      ...(isRecord(headers)
         ? { headers: headers as Record<string, string> }
         : {}),
     };
@@ -472,7 +463,7 @@ function parseMcpServer(
   }
   const env = entry.env;
   if (env !== undefined) {
-    if (!isPlainObject(env)) return "env must be an object of strings";
+    if (!isRecord(env)) return "env must be an object of strings";
     for (const [key, value] of Object.entries(env)) {
       if (typeof value !== "string")
         return `env ${JSON.stringify(key)} must be a string`;
@@ -504,7 +495,7 @@ function parseMcpServer(
     type,
     command,
     ...(Array.isArray(args) ? { args } : {}),
-    ...(isPlainObject(env) ? { env: env as Record<string, string> } : {}),
+    ...(isRecord(env) ? { env: env as Record<string, string> } : {}),
     ...(typeof cwd === "string" ? { cwd } : {}),
   };
 }
@@ -534,7 +525,7 @@ async function readMcp(
   } catch (error) {
     return skip(`not valid JSON (${reason(error)})`);
   }
-  if (!isPlainObject(raw)) return skip("not a JSON object");
+  if (!isRecord(raw)) return skip("not a JSON object");
   if (raw.$schema !== MCP_SCHEMA_URL)
     return skip(`$schema must be ${JSON.stringify(MCP_SCHEMA_URL)}`);
   const unknown = Object.keys(raw).find(
@@ -544,8 +535,7 @@ async function readMcp(
     return skip(
       `allows exactly $schema and mcpServers (found ${JSON.stringify(unknown)})`,
     );
-  if (!isPlainObject(raw.mcpServers))
-    return skip("mcpServers must be an object");
+  if (!isRecord(raw.mcpServers)) return skip("mcpServers must be an object");
 
   const servers: Record<string, PluginMcpServer> = {};
   for (const [name, entry] of Object.entries(raw.mcpServers)) {
@@ -561,7 +551,7 @@ async function readMcp(
 
 /** Разбор одного `service.json`: сервис или причина пропуска строкой. */
 function parseService(folder: string, raw: unknown): PluginService | string {
-  if (!isPlainObject(raw)) return "not a JSON object";
+  if (!isRecord(raw)) return "not a JSON object";
   for (const key of Object.keys(raw)) {
     if (!SERVICE_FIELDS.has(key)) return `unknown field ${JSON.stringify(key)}`;
   }

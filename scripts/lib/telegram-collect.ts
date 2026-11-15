@@ -3,6 +3,7 @@ import type {
   TelegramQueueMessage,
   TelegramQueueUpdate,
 } from "./telegram-queue.ts";
+import { isSafeInteger } from "../../packages/guards/index.ts";
 
 export const COLLECT_QUIET_MS = 800;
 export const COLLECT_MEDIA_QUIET_MS = 1500;
@@ -26,7 +27,6 @@ interface CollectorEntry {
   chars: number;
   firstAt: number;
   lastAt: number;
-  forced: boolean;
 }
 
 export interface TelegramCollector {
@@ -42,10 +42,6 @@ export type CollectorOfferResult =
   | { status: "passthrough"; update: TelegramCollectUpdate }
   | { status: "buffered" }
   | { status: "ready"; update: TelegramCollectUpdate };
-
-function isSafeInteger(value: unknown): value is number {
-  return Number.isSafeInteger(value);
-}
 
 function finiteNonNegative(value: unknown, fallback: number) {
   return Number.isFinite(value) && (value as number) >= 0
@@ -213,7 +209,6 @@ export function collectorOffer(
     chars: 0,
     firstAt: now,
     lastAt: now,
-    forced: false,
   };
   entry.updates.push(update);
   entry.chars += messageChars(update.message);
@@ -237,7 +232,6 @@ export function collectorTakeExpired(
   const ready: TelegramCollectUpdate[] = [];
   for (const [key, entry] of collector.entries) {
     if (
-      !entry.forced &&
       now - entry.lastAt < entryQuietMs(collector, entry) &&
       now - entry.firstAt < collector.maxAgeMs
     ) {
@@ -247,22 +241,6 @@ export function collectorTakeExpired(
     ready.push(mergeParts(entry.updates));
   }
   return ready;
-}
-
-export function collectorRestore(
-  collector: TelegramCollector,
-  update: TelegramCollectUpdate,
-) {
-  const key = collectorKeyFor(update);
-  if (key === null) return false;
-  collector.entries.set(key, {
-    updates: [update],
-    chars: messageChars(update.message),
-    firstAt: 0,
-    lastAt: 0,
-    forced: true,
-  });
-  return true;
 }
 
 export function collectorPending(collector: TelegramCollector) {

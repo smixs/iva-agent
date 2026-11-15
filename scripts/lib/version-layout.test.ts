@@ -60,7 +60,7 @@ test("a shim without `current` runs the version the installation settled on", (t
   // `current` is lost - the state the shim exists to survive.
   writeFileSync(
     join(home, "data/active.json"),
-    `${JSON.stringify({ schema: "iva-active/v1", version: "0.3.14-aaaaaaaaaaaa" })}\n`,
+    `${JSON.stringify({ schema: "iva-active/v2", version: "0.3.14-aaaaaaaaaaaa", settledAt: "2026-08-16T00:00:00.000Z" })}\n`,
   );
   assert.equal(run(), "0.3.14-aaaaaaaaaaaa");
 
@@ -81,7 +81,7 @@ test("a shim reads active state from the canonical custom data directory", (t) =
   mkdirSync(dataDir, { recursive: true });
   writeFileSync(
     join(dataDir, "active.json"),
-    `${JSON.stringify({ schema: "iva-active/v1", version: "0.3.9-bbbbbbbbbbbb" })}\n`,
+    `${JSON.stringify({ schema: "iva-active/v2", version: "0.3.9-bbbbbbbbbbbb", settledAt: "2026-08-16T00:00:00.000Z" })}\n`,
   );
   const shim = join(home, "iva");
   writeFileSync(shim, shimScript(home, process.execPath, dataDir));
@@ -198,6 +198,7 @@ test("a foreign link moved into a claim by an interrupted run goes back on the p
   mkdirSync(join(home, ".local/bin"), { recursive: true });
   const outside = join(dirname(home), `${basename(home)}-cmd`);
   mkdirSync(outside, { recursive: true });
+  t.after(() => rmSync(outside, { recursive: true, force: true }));
   writeFileSync(join(outside, "foreign"), "#!/bin/sh\n");
   const dead = execFileSync(process.execPath, ["-p", "process.pid"], {
     encoding: "utf8",

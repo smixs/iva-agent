@@ -10,7 +10,6 @@
   "exclude": [
     "src/**/*.test.ts",
     "src/**/*.integration.test.ts",
-    "src/internal/testing/**/*.ts",
-    "src/setup/build.ts"
+    "src/internal/testing/**/*.ts"
   ]
 }

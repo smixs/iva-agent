@@ -1,19 +1,20 @@
-// T20 п.1-2: каждый запуск расписания оставляет факт, а после факта зовётся пробуждение.
+// T20 п.1-2: запуск расписания оставляет факт по политике задания (по умолчанию каждый), а
+// после факта зовётся пробуждение.
 // Прогон интеграционный, как в schedule-runner.test.ts: настоящий ребёнок-node с
 // --env-file=.env, а пробуждение подменено шпионом.
 import { strict as assert } from "node:assert";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import test from "node:test";
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { readFacts } from "./job-facts.ts";
 import { runScheduledJob } from "./schedule-runner.ts";
+import { tempDir } from "../../scripts/fixtures/temp-dir.ts";
 
 async function scaffold(): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), "iva-runner-facts-"));
+  const root = tempDir("iva-runner-facts-");
   await writeFile(join(root, ".env"), "", "utf8");
   return root;
 }

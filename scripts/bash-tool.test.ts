@@ -7,7 +7,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { spawn, spawnSync } from "node:child_process";
@@ -20,6 +20,7 @@ const {
   deadlineWorkerRuntime,
   MAX_TIMEOUT_MS,
   MIN_TIMEOUT_MS,
+  normalizeCwd,
   selectCommandShell,
 } = await import("../agent/tools/bash.ts");
 
@@ -323,6 +324,25 @@ test("a foreign owner of the group id counts as a dead group, other errors are t
   assert.equal(isGone({ code: "EINVAL" }), false);
   assert.equal(isGone(new Error("boom")), false);
   assert.throws(() => isGroupAlive(Number.MAX_SAFE_INTEGER));
+});
+
+test("normalizeCwd expands ~ and names a bad directory before exec", () => {
+  // Пусто или не задан — без cwd и без ошибки: exec возьмёт process.cwd().
+  assert.deepEqual(normalizeCwd(undefined), {});
+  assert.deepEqual(normalizeCwd(""), {});
+  assert.deepEqual(normalizeCwd("   "), {});
+  assert.equal(normalizeCwd("~").cwd, homedir());
+  assert.equal(normalizeCwd("~/").cwd, homedir());
+  assert.deepEqual(normalizeCwd(tmpdir()), { cwd: tmpdir() });
+
+  const missing = normalizeCwd("/workspace/definitely-missing-xyz");
+  assert.equal(missing.cwd, undefined);
+  assert.match(missing.error ?? "", /не существует/);
+  assert.ok(missing.error?.includes(process.cwd()));
+
+  const file = normalizeCwd(import.meta.filename);
+  assert.equal(file.cwd, undefined);
+  assert.ok(file.error);
 });
 
 test("bash preserves stdout, stderr and the effective cwd", async () => {

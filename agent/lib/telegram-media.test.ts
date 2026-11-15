@@ -1,14 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { tempDir } from "../../scripts/fixtures/temp-dir.ts";
 
 // Медиа-шаг живёт БЕЗ eve и без сети: Bot API, зрение и транскрипция приходят
 // эффектами, скачивание блоба — глобальным fetch. Окружение выставляем до
 // импорта: i18n и пути к vault читаются на загрузке модуля.
-const root = mkdtempSync(join(tmpdir(), "iva-telegram-media-"));
+const root = tempDir("iva-telegram-media-");
 process.env.ASSISTANT_DATA_DIR = join(root, "data");
 process.env.ASSISTANT_VAULT_DIR = join(root, "vault");
 process.env.ASSISTANT_TIMEZONE = "UTC";

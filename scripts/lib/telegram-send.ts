@@ -13,6 +13,8 @@
 //     5xx, 408, 425 и 429; по умолчанию повторов нет;
 //     Watch с onAcknowledged останавливается при UNKNOWN (сеть/5xx/408/нет ID),
 //     до durable receipt повторять неопределённую отправку запрещено;
+//   • beforeAttempt (по умолчанию нет) спрашивается перед каждой попыткой, повторы после паузы
+//     тоже: false — попытки нет, отправка кончается отказом без повтора;
 //   • пустой отчёт — тоже ok=false: слать нечего, и молчать об этом нельзя;
 //   • НИКОГДА не бросает — на любую ошибку возвращает { ok:false, error }.
 // Возвращает { ok, fellBack, error } — вызывающий cron-скрипт по fellBack даёт агенту
@@ -25,6 +27,7 @@ import {
 } from "../../agent/lib/outbox.ts";
 import { traceOutbox, type TraceScope } from "../../agent/lib/trace.ts";
 import { parseTelegramDelivery } from "../../agent/lib/telegram-delivery.ts";
+import { TELEGRAM_WIDGETS } from "../../agent/lib/telegram-widget.ts";
 import { classifyDeliverStatus } from "./deliver-policy.ts";
 import { screenPayload } from "./telegram-buttons.ts";
 
@@ -40,8 +43,6 @@ type PostAck = OutboxAck & {
 };
 
 export type TelegramSendOptions = {
-  /** Watch checks fresh state before every actual POST, including retries/fallback chunks. */
-  readonly beforeAttempt?: () => Promise<boolean>;
   /** Persist the received ID before this delivery is acknowledged by Outbox. */
   readonly onAcknowledged?: (messageId: number) => void;
   readonly caption?: boolean;
@@ -62,6 +63,12 @@ export type TelegramSendOptions = {
    * По умолчанию выключено: ночные отчёты идут прежним HTML-путём.
    */
   readonly rich?: boolean;
+  /**
+   * Проверка перед каждой попыткой, включая повтор после паузы: false — сообщение больше не
+   * нужно, попытки нет. Alert о брошенном напоминании перечитывает здесь факт доставки;
+   * Watch — свежее состояние диалога (живое окно владельца).
+   */
+  readonly beforeAttempt?: () => Promise<boolean>;
 };
 
 // Rich-пост (`iva post`): те же гейт и фолбэки, плюс два поля Bot API, которых у
@@ -108,6 +115,21 @@ function telegramRetryAfterMs(text: string): number | undefined {
   }
 }
 
+/** beforeAttempt сказал «не слать»: попытки не было, и повторять её незачем. */
+class AttemptWithdrawn extends Error {}
+
+function checkedFetch(
+  fetchImpl: FetchImpl,
+  beforeAttempt: (() => Promise<boolean>) | undefined,
+): FetchImpl {
+  if (beforeAttempt === undefined) return fetchImpl;
+  return async (...request) => {
+    if (!(await beforeAttempt()))
+      throw new AttemptWithdrawn("not sent: withdrawn before the attempt");
+    return fetchImpl(...request);
+  };
+}
+
 async function post(
   bot: string,
   method: string,
@@ -151,8 +173,8 @@ async function post(
       ok: false,
       error: errorMessage(e),
       retryPlain: false,
-      retryable: true,
-      outcomeUnknown: true,
+      retryable: !(e instanceof AttemptWithdrawn),
+      outcomeUnknown: !(e instanceof AttemptWithdrawn),
     };
   }
 }
@@ -185,14 +207,12 @@ function poster(
   const attempt: SendPost = async (method, body) => {
     if (stopError)
       return { ok: false, error: stopError, retryPlain: false, stop: true };
-    if (options.beforeAttempt && !(await options.beforeAttempt()))
-      return {
-        ok: false,
-        error: "delivery admission changed",
-        retryPlain: false,
-        stop: true,
-      };
-    const ack = await post(bot, method, body, options.fetchImpl);
+    const ack = await post(
+      bot,
+      method,
+      body,
+      checkedFetch(options.fetchImpl, options.beforeAttempt),
+    );
     if (
       options.onAcknowledged &&
       (ack.ok ? ack.messageId === undefined : ack.outcomeUnknown)
@@ -251,6 +271,24 @@ function messageTransport(
       });
       return ack.ok || ack.retryPlain ? ack : { ...ack, stop: true };
     },
+    // Виджет Watch, Brief, Insight. Отказ по самому виджету (400, нет метода) — шов шлёт
+    // подпись текстом; сеть, 429 и 5xx после повторов обрывают отчёт, как у HTML-пути.
+    ...(TELEGRAM_WIDGETS === "auto"
+      ? {
+          sendWidget: async (html: string, caption: string) => {
+            const ack = await sendPost("sendWidget", {
+              chat_id: chat,
+              html,
+              ...(caption ? { caption } : {}),
+              ...extra,
+            });
+            if (ack.ok) return ack;
+            return ack.retryable
+              ? { ...ack, stop: true }
+              : { ...ack, retryPlain: false };
+          },
+        }
+      : {}),
     // Повтор без разметки — последний шанс этого чанка. Не вышел и он: дальше по
     // отчёту идти не с чем, каким бы кодом Telegram ни ответил.
     sendPlain: async (text) => {

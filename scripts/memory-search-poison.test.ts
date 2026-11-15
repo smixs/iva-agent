@@ -10,16 +10,16 @@
 import "./lib/ts-esm-hooks.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ToolContext } from "eve/tools";
 import { settled } from "./fixtures/tool-result.ts";
+import { tempDir } from "./fixtures/temp-dir.ts";
 
-const vault = mkdtempSync(join(tmpdir(), "pbt-opus-vault-"));
+const vault = tempDir("pbt-opus-vault-");
 mkdirSync(join(vault, "cards"), { recursive: true });
 process.env.ASSISTANT_VAULT_DIR = vault;
-process.env.ASSISTANT_DATA_DIR = mkdtempSync(join(tmpdir(), "pbt-opus-data-"));
+process.env.ASSISTANT_DATA_DIR = tempDir("pbt-opus-data-");
 
 const { default: memorySearch } =
   await import("../agent/tools/memory_search.ts");

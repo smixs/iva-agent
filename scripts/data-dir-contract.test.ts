@@ -16,7 +16,7 @@ import test from "node:test";
 import { pathToFileURL } from "node:url";
 import fc from "fast-check";
 import { resolveDataDir as resolveAuthoredDataDir } from "#lib/data-dir.ts";
-import { resolveDataDir as resolveOperationalDataDir } from "./lib/data-dir.ts";
+import { resolveDataDir as resolveOperationalDataDir } from "../packages/data-dir/index.ts";
 import { resolveDataDir as canonicalDataDir } from "@iva/data-dir";
 import { imageRoots } from "./cli/post.ts";
 import { systemdExecArgument } from "./cli/systemd.ts";
@@ -25,7 +25,9 @@ import { commandRunner } from "./lib/version-update.ts";
 
 const ROOT = process.cwd();
 const AUTHORED = pathToFileURL(join(ROOT, "agent/lib/data-dir.ts")).href;
-const OPERATIONAL = pathToFileURL(join(ROOT, "scripts/lib/data-dir.ts")).href;
+const OPERATIONAL = pathToFileURL(
+  join(ROOT, "packages/data-dir/index.ts"),
+).href;
 const CONNECTION = pathToFileURL(
   join(ROOT, "agent/connections/telegram-userbot.ts"),
 ).href;

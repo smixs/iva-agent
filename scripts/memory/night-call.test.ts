@@ -324,7 +324,7 @@ void test("HTTP status classification preserves key/quota stops (seed 20261020)"
       await assert.rejects(callBySchema(ask()), (error: unknown) => {
         assert.equal(
           error instanceof NightTransientError,
-          value === 408 || value >= 500,
+          value === 408 || value === 429 || value >= 500,
         );
         return true;
       });
@@ -369,17 +369,19 @@ void test("#341: classify every cause level and keep account refusals permanent 
       }),
       false,
     ],
+    [new Error("The inference service is overloaded"), true],
+    [new Error("HTTP 429: insufficient_quota"), false],
     [new Error("Invalid API key"), false],
     [new Error("insufficient_quota"), false],
     [new Error("You exceeded your current quota"), false],
-    [new Error("HTTP 429"), false],
+    [new Error("HTTP 429"), true],
     [
       Object.assign(new Error("fetch failed"), { cause: { status: 401 } }),
       false,
     ],
     [
       Object.assign(new Error("fetch failed"), { cause: { statusCode: 429 } }),
-      false,
+      true,
     ],
     [
       Object.assign(new Error("HTTP 529"), {

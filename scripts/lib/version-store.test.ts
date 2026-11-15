@@ -436,6 +436,26 @@ test("a corrupt active marker blocks healing without changing its bytes", (t) =>
   assert.equal(existsSync(store.layout.current), false);
 });
 
+// UpdateFloor.NoSilentLoss: releases before 0.3.24 wrote the marker as iva-active/v1. It is
+// not converted: every reader refuses it by the file's name and the bytes stay.
+test("NoSilentLoss: an active.json of schema iva-active/v1 is refused by name and its bytes stay", (t) => {
+  const root = home(t);
+  const store = createVersionStore(root);
+  install(store, "0.3.14-aaaaaaaaaaaa");
+  store.activate("0.3.14-aaaaaaaaaaaa");
+  const marker = join(store.layout.data, "active.json");
+  const v1 = `${JSON.stringify({ schema: "iva-active/v1", version: "0.3.14-aaaaaaaaaaaa" })}\n`;
+  writeFileSync(marker, v1);
+
+  for (const read of [
+    () => store.settled(),
+    () => store.heal(),
+    () => store.activate("0.3.14-aaaaaaaaaaaa"),
+  ])
+    assert.throws(read, /active\.json.*corrupt|corrupt.*active\.json/u);
+  assert.equal(readFileSync(marker, "utf8"), v1);
+});
+
 test("a valid current link cannot hide a corrupt active marker from healing", (t) => {
   const store = createVersionStore(home(t));
   install(store, "0.3.14-aaaaaaaaaaaa");
@@ -485,7 +505,7 @@ test("a symlinked active marker is corrupt even when its target is valid", (t) =
   const marker = join(store.layout.data, "active.json");
   const target = join(root, "active-target.json");
   const bytes = Buffer.from(
-    '{"schema":"iva-active/v1","version":"0.3.14-aaaaaaaaaaaa"}\n',
+    '{"schema":"iva-active/v2","version":"0.3.14-aaaaaaaaaaaa","settledAt":"2026-01-01T00:00:00.000Z"}\n',
   );
   writeFileSync(target, bytes);
   symlinkSync(target, marker);
@@ -530,7 +550,7 @@ test("invalid UTF-8 is rejected before JSON schema validation", (t) => {
   const marker = join(store.layout.data, "active.json");
   const corrupt = Buffer.concat([
     Buffer.from(
-      '{"schema":"iva-active/v1","version":"0.3.14-aaaaaaaaaaaa","x":"',
+      '{"schema":"iva-active/v2","version":"0.3.14-aaaaaaaaaaaa","x":"',
     ),
     Buffer.from([0xff]),
     Buffer.from('"}\n'),
@@ -629,7 +649,7 @@ test("garbage collection preserves the settled rollback regardless of mtime", (t
   writeFileSync(
     join(store.layout.data, "active.json"),
     `${JSON.stringify({
-      schema: "iva-active/v1",
+      schema: "iva-active/v2",
       version: rollback,
       settledAt: "2026-01-01T00:00:00.000Z",
     })}\n`,
@@ -826,9 +846,13 @@ test("semantic-invalid v1 and v2 active markers fail closed", (t) => {
   const invalid = [
     {},
     { schema: "iva-active/v0", version: "0.3.14-aaaaaaaaaaaa" },
-    { schema: "iva-active/v1", version: "not-a-version" },
-    { schema: "iva-active/v1", version: "0.3.14-aaaaaaaaaaaa", settledAt: 1 },
-    { schema: "iva-active/v1", version: "0.3.14-aaaaaaaaaaaa", extra: true },
+    // specs/UpdateFloor.tla, NoSilentLoss: the marker of releases before 0.3.24.
+    { schema: "iva-active/v1", version: "0.3.14-aaaaaaaaaaaa" },
+    {
+      schema: "iva-active/v1",
+      version: "0.3.14-aaaaaaaaaaaa",
+      settledAt: "2026-08-16T00:00:00.000Z",
+    },
     { schema: "iva-active/v2", version: "0.3.14-aaaaaaaaaaaa" },
     {
       schema: "iva-active/v2",
@@ -845,12 +869,14 @@ test("semantic-invalid v1 and v2 active markers fail closed", (t) => {
   ];
 
   for (const value of invalid) {
-    writeFileSync(marker, `${JSON.stringify(value)}\n`);
+    const bytes = `${JSON.stringify(value)}\n`;
+    writeFileSync(marker, bytes);
     assert.throws(
       () => store.settled(),
       /active\.json.*corrupt|corrupt.*active\.json/u,
       JSON.stringify(value),
     );
+    assert.equal(readFileSync(marker, "utf8"), bytes);
   }
 });
 
@@ -883,18 +909,15 @@ test("valid active state survives JSON roundtrip", (t) => {
     fc.property(
       fc.constantFrom(...versions),
       fc.boolean(),
-      fc.boolean(),
-      (version, v2, cleanupPending) => {
+      (version, cleanupPending) => {
         const previous = versions.find((name) => name !== version);
-        const state = v2
-          ? {
-              schema: "iva-active/v2" as const,
-              version,
-              previous,
-              settledAt: "2026-08-16T00:00:00.000Z",
-              ...(cleanupPending ? { cleanupPending: true } : {}),
-            }
-          : { schema: "iva-active/v1" as const, version };
+        const state = {
+          schema: "iva-active/v2" as const,
+          version,
+          previous,
+          settledAt: "2026-08-16T00:00:00.000Z",
+          ...(cleanupPending ? { cleanupPending: true } : {}),
+        };
         writeFileSync(marker, `${JSON.stringify(state)}\n`);
         assert.deepEqual(readActiveState(marker), { kind: "valid", state });
       },
@@ -1051,30 +1074,24 @@ test("state directories are shared into a version instead of copied", (t) => {
   assert.equal(readFileSync(join(dir, "data/state.json"), "utf8"), "{}");
 });
 
-test("the workflow store older installs kept is shared where it exists, never created", (t) => {
+// specs/UpdateFloor.tla, NoSilentLoss: builds before 0.3.15 kept the workflow store at the root.
+test("NoSilentLoss: a workflow store at the installation root is neither linked nor touched", (t) => {
   const root = home(t);
   const store = createVersionStore(root);
-  const fresh = store.stage("0.3.15-bbbbbbbbbbbb");
-  store.linkState(fresh);
-  // A box installed after the move never had one, and an empty directory that
-  // only means "this install is old" is not something to hand a new one.
-  assert.equal(existsSync(join(root, ".workflow-data")), false);
-  assert.equal(existsSync(join(fresh, ".workflow-data")), false);
-
   mkdirSync(join(root, ".workflow-data"), { recursive: true });
   writeFileSync(join(root, ".workflow-data/run.json"), '{"run":1}\n');
-  const legacy = store.stage("0.3.16-cccccccccccc");
-  store.linkState(legacy);
-  assert.equal(
-    readFileSync(join(legacy, ".workflow-data/run.json"), "utf8"),
-    '{"run":1}\n',
-  );
-  // And a probe reaches scratch through it, not the store the service is using.
+  const dir = store.stage("0.3.16-cccccccccccc");
+  store.linkState(dir);
   const scratch = store.sandboxState("0.3.16-cccccccccccc");
   t.after(() => rmSync(scratch, { recursive: true, force: true }));
-  writeFileSync(join(legacy, ".workflow-data/probe.json"), "{}");
-  assert.equal(existsSync(join(scratch, ".workflow-data/probe.json")), true);
-  assert.equal(existsSync(join(root, ".workflow-data/probe.json")), false);
+
+  assert.equal(existsSync(join(dir, ".workflow-data")), false);
+  assert.equal(existsSync(join(scratch, ".workflow-data")), false);
+  assert.deepEqual(readdirSync(join(root, ".workflow-data")), ["run.json"]);
+  assert.equal(
+    readFileSync(join(root, ".workflow-data/run.json"), "utf8"),
+    '{"run":1}\n',
+  );
 });
 
 test("a version being probed writes to scratch state, not the installation's", (t) => {

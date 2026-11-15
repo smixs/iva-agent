@@ -1,14 +1,14 @@
 /* eslint-disable @typescript-eslint/no-floating-promises -- Node's test runner owns registration promises. */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import skills from "./skills.ts";
+import { tempDir } from "../../fixtures/temp-dir.ts";
 
 function makeRoot() {
-  return mkdtempSync(join(tmpdir(), "iva-menu-skills-"));
+  return tempDir("iva-menu-skills-");
 }
 
 function writeSummary(root: string, value: string) {

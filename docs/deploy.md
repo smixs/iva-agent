@@ -57,7 +57,7 @@ unset ASSISTANT_BEARER IVA_PORT
 | `iva.service`                  | always                       | the agent (`eve start`), `Restart=always`                     |
 | `iva-telegram-poll.service`    | always                       | the long-polling bridge                                       |
 | `iva-telegram-userbot.service` | opt-in (`iva userbot setup`) | Telethon userbot MCP proxy — see [userbot.md](userbot.md)     |
-| `iva-brain.timer`              | 05:00 nightly                | schema/health/decay/MOC checks + vault `git push`             |
+| `iva-brain.timer`              | 05:00 nightly                | owner-edit commit, link graph, CORE size, vault `git push`    |
 | `iva-update-check.timer`       | 10:00 daily                  | check for a newer stable Iva version; notify once per version |
 
 The Brain and update-check timers stay on systemd on purpose: they're watchdogs that must keep running even if the agent process itself is wedged. `iva-brain.timer` embeds `ASSISTANT_TIMEZONE` directly, so its 05:00 schedule remains correct even when the server clock uses UTC — as do the eve schedules below (`Environment=TZ` in `iva.service`). Setting the server's own system timezone to match is therefore optional, not required for anything in this doc to work correctly:

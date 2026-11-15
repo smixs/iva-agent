@@ -6,11 +6,14 @@ pipeline at 04:00, the half-hourly
 minute. Each scheduled job is a thin spawner — the work itself lives in
 `scripts/` (see `docs/deploy.md`).
 
-## Every run leaves a fact
+## Every run leaves a trace, a fact by its policy
 
-One row per run, in `data/jobs.json` (except the half-hourly `proactive` tick: it
-writes only a failure and the first success after it, so 48 rows a day do not crowd
-out the rest): name, started/finished time, ok, the reason
+One row per run in `data/jobs.json`, written by the schedule's fact policy: a failure is
+always a row, a success is a row under `factOnSuccess: "always"` (the default) and only
+closes a failure under `"after-failure"` (the half-hourly `proactive` tick: it writes a
+failure and the first success after it, so 48 rows a day do not crowd out the rest; a
+success without a failure on top leaves no row and is recorded in
+`data/rollup-status.json` only). A row holds: name, started/finished time, ok, the reason
 of a failure, the exit code, and the tail of the run's error output (last 20 lines
 of `stderr`, cut by the same rule the evidence package uses — the report a script
 prints to `stdout` stays out of the row and out of the agent's turn). Rows older than seven days are

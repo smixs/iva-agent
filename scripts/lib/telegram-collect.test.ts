@@ -5,7 +5,6 @@ import {
   collectorKeyFor,
   collectorOffer,
   collectorPending,
-  collectorRestore,
   collectorTakeExpired,
   createCollector,
   deliveredAlone,
@@ -137,17 +136,6 @@ void test("part, character and age caps force a ready update", () => {
   const byAge = createCollector({ maxAgeMs: 10 });
   collectorOffer(byAge, update(5, "old"), 0);
   assert.equal(collectorOffer(byAge, update(6, "new"), 10).status, "ready");
-});
-
-void test("an enqueue failure can restore the exact flushed update for immediate retry", () => {
-  const collector = createCollector();
-  collectorOffer(collector, update(1, "first"), 0);
-  collectorOffer(collector, update(2, "second"), 1);
-  const [flushed] = collectorTakeExpired(collector, 801);
-
-  assert.equal(collectorRestore(collector, flushed), true);
-  assert.equal(collectorPending(collector), 1);
-  assert.equal(collectorTakeExpired(collector, 801)[0], flushed);
 });
 
 void test("quietMs zero disables collection and returns the untouched update", () => {

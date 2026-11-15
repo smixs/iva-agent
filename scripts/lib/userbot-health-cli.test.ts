@@ -77,32 +77,30 @@ void test("iva userbot diagnose --json returns the shared ready state without se
   );
   await chmod(systemctl, 0o755);
 
+  let body = '{"state":"ready","login":"authorized"}';
   const server = createServer((request, response) => {
     assert.equal(request.url, "/healthz");
     assert.equal(request.headers.authorization, `Bearer ${token}`);
     response.writeHead(200, { "content-type": "application/json" });
-    response.end('{"state":"ready"}');
+    response.end(body);
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   t.after(() => server.close());
   const port = (server.address() as AddressInfo).port;
   await writeFile(join(project, ".env"), `TELEGRAM_MCP_PORT=${port}\n`);
 
-  const diagnose = () =>
-    run(
-      process.execPath,
-      [join(project, "bin/iva.mjs"), "userbot", "diagnose", "--json"],
-      {
-        cwd: project,
-        env: {
-          ...process.env,
-          HOME: join(dir, "home"),
-          NO_COLOR: "1",
-          PATH: `${fakeBin}:/usr/bin:/bin`,
-        },
-        encoding: "utf8",
+  const cli = (...args: string[]) =>
+    run(process.execPath, [join(project, "bin/iva.mjs"), "userbot", ...args], {
+      cwd: project,
+      env: {
+        ...process.env,
+        HOME: join(dir, "home"),
+        NO_COLOR: "1",
+        PATH: `${fakeBin}:/usr/bin:/bin`,
       },
-    );
+      encoding: "utf8",
+    });
+  const diagnose = () => cli("diagnose", "--json");
   // The probe gives a local service 1500 ms. A machine busy running the rest of
   // this suite can stall that long on its own, and a starved event loop is not
   // the thing under test - so one timeout is retried, anything else is a failure.
@@ -110,7 +108,19 @@ void test("iva userbot diagnose --json returns the shared ready state without se
   if (/probe_timeout/u.test(result.stdout)) result = await diagnose();
 
   assert.equal(result.code, 0, result.stderr || result.stdout);
-  assert.deepEqual(JSON.parse(result.stdout), { state: "ready", reason: "ok" });
+  assert.deepEqual(JSON.parse(result.stdout), {
+    state: "ready",
+    reason: "ok",
+    login: "authorized",
+  });
+  // The login phase the proxy names reaches `iva userbot status` word for word.
+  body = '{"state":"unauthorized","login":"password_needed"}';
+  let status = await cli("status");
+  if (/unreachable/u.test(status.stdout)) status = await cli("status");
+  assert.match(
+    status.stdout,
+    /iva-telegram-userbot\.service: unauthorized\nвход: password_needed\n/u,
+  );
   await writeFile(interpreter, "#!/bin/sh\nexit 1\n");
   const damaged = await diagnose();
   assert.deepEqual(JSON.parse(damaged.stdout), {

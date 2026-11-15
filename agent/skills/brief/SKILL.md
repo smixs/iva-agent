@@ -106,9 +106,15 @@ existing overview or action message.
   рабочей папки?», the unit name stays in the button `data`) and one «Починить»
   button (see the watch skill). In a chat turn their question lines and buttons
   close the one message.
-- The first message is the overview: greeting in one line, the day in 5–7 points,
-  one sentence with the focus of the day. Too many tasks — the important ones and
+- The first message is the overview: greeting in one line, up to 5 points that
+  need words, one sentence with the focus of the day. Too many tasks — the important ones and
   how many more there are.
+- Whatever the day has as data goes into widgets (the `widgets` skill), not
+  into lines of the overview: the calendar as the day's timeline with Week and
+  Month tabs, the weather as a card, tasks and Reminders as a list, money and a
+  goal's progress as a chart or a ring. The widgets follow the overview, each
+  caption saying the same in words. The overview keeps what needs words: the
+  greeting, who waits and what broke, the focus of the day.
 - An item already reported in a previous Brief (read its answer in the daily file)
   that still waits for the owner gets one line in the overview with the day of waiting. Leave
   completed items out; do not repeat the earlier item in full.
@@ -162,11 +168,16 @@ Good (the overview, then the failure as its own message):
 
     Доброе утро! Сегодня одна поломка и одно срочное дело.
     • Ночная копия рабочей папки не сделалась: на диске кончилось место. Как починить — ниже.
-    • 09:00 — ответить Максиму Функу по смете для Арбуза.
-    • 14:00 — созвон с Анной, ссылка в календаре.
-    • Ещё три напоминания на вечер, срочного среди них нет.
-    • Погода: +18, без дождя.
+    • Максим Функ ждёт ответа по смете для Арбуза.
     Главное сегодня — ответ Максиму.
+
+    ```tg-widget Сегодня: 09:00 ответить Максиму Функу по смете, 14:00 созвон с Анной, вечером три напоминания, срочного среди них нет.
+    <style>…</style>…<script>…</script>
+    ```
+
+    ```tg-widget Ташкент: +18°, без дождя.
+    <style>…</style>…<script>…</script>
+    ```
     <!-- iva:next -->
     Ночная копия рабочей папки не сделалась: на диске кончилось место.
     Поправлю её, чтобы она хранила копии только за последний месяц, — тогда места хватит.
@@ -192,9 +203,12 @@ the bill gets one the same way):
 
     Доброе утро! Сегодня три дела.
     • Юрий ждёт ответа про смету на ремонт.
-    • 14:00 — созвон с Анной, ссылка в календаре.
     • Счёт Билайна, оплатить до пятницы.
     Главное сегодня — ответ Юрию.
+
+    ```tg-widget Сегодня в календаре одно событие: 14:00 созвон с Анной.
+    <style>…</style>…<script>…</script>
+    ```
     <!-- iva:next -->
     Юрий спрашивает про смету на ремонт: сколько стоит и когда начнём. Письмо пришло вчера вечером.
 

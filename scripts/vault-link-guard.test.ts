@@ -9,6 +9,7 @@ import "./lib/ts-esm-hooks.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  chmodSync,
   cpSync,
   existsSync,
   mkdirSync,
@@ -24,6 +25,8 @@ import { fileURLToPath } from "node:url";
 import type { ToolContext } from "eve/tools";
 import { settled } from "./fixtures/tool-result.ts";
 import { unresolvedLinkTargets } from "../agent/lib/vault-links.ts";
+import { tempDir } from "./fixtures/temp-dir.ts";
+import { buildVaultGraph, writeVaultGraph } from "./memory/graph.ts";
 
 const REPO = fileURLToPath(new URL("..", import.meta.url));
 const VAULT = mkdtempSync(join(tmpdir(), "iva-links-"));
@@ -136,8 +139,7 @@ test("вложение: существующий файл с любым расш
 test("вложение: отсутствующий файл, выход за корень и симлинк — битые", () => {
   const dir = join(VAULT, "attachments", "2026-09-23");
   mkdirSync(dir, { recursive: true });
-  const outside = mkdtempSync(join(tmpdir(), "iva-links-out-"));
-  process.on("exit", () => rmSync(outside, { recursive: true, force: true }));
+  const outside = tempDir("iva-links-out-");
   writeFileSync(join(outside, "secret.custombin"), "x");
   symlinkSync(join(outside, "secret.custombin"), join(dir, "link.custombin"));
   symlinkSync(outside, join(dir, "linked-dir"));
@@ -227,6 +229,62 @@ test("родитель роллапа: не просрочен — норма, �
     ["weekly/2026-W38"],
     "чужая неделя родителем не считается",
   );
+});
+
+// Запись и ночной граф читают один индекс: ссылка, принятая на записи, в графе не битая, а
+// отклонённая — битая. Каждая строка — свой класс входа; до общего индекса шесть из них
+// расходились (суффикс пути, двойник stem, регистр, `vault/`, медиа, родитель роллапа).
+test("ночной граф и запись выносят ссылке один вердикт", (t) => {
+  const vault = mkdtempSync(join(tmpdir(), "iva-links-graph-"));
+  t.after(() => rmSync(vault, { recursive: true, force: true }));
+  const put = (rel: string, text: string) => {
+    mkdirSync(join(vault, rel, ".."), { recursive: true });
+    writeFileSync(join(vault, rel), text);
+  };
+  put("a/projects/foo.md", "# Foo Project\n");
+  put("x/dup.md", "# Dup one\n");
+  put("y/dup.md", "# Dup two\n");
+  put("Notes/Case.md", "# Case note\n");
+  put("attachments/pic.png", "png");
+  put("attachments/doc.docx", "docx");
+  const accepted = [
+    "projects/foo",
+    "Case",
+    "vault/Notes/Case",
+    "Notes/Case.md",
+    "pic.png",
+    "attachments/pic.png",
+    "attachments/doc.docx",
+    "Foo Project",
+    "foo project",
+    "weekly/2026-W46",
+  ];
+  const rejected = ["dup", "case", "missing"];
+  const source = "summaries/daily/2026-11-10";
+  const today = Date.UTC(2026, 10, 10);
+  put(
+    `${source}.md`,
+    `# Day\n\n${[...accepted, ...rejected].map((link) => `[[${link}]]`).join("\n")}\n`,
+  );
+
+  assert.deepEqual(
+    unresolvedLinkTargets([...accepted, ...rejected], {
+      vaultDir: vault,
+      source,
+      today,
+    }),
+    rejected,
+  );
+  const graph = buildVaultGraph(vault, today);
+  assert.deepEqual(
+    graph.broken,
+    rejected.map((target) => ({ source, target })),
+  );
+  assert.deepEqual(graph.nodes[source].outgoing, [
+    "a/projects/foo",
+    "Notes/Case",
+  ]);
+  assert.deepEqual(graph.nodes["Notes/Case"].incoming, [source]);
 });
 
 // ─── write_card: битые ссылки — отказ, поиск Card по имени ──────────────────
@@ -320,10 +378,7 @@ test("write_file: summaries/ закрыт", async () => {
 });
 
 test("write_file: файл вне вольта не проверяется", async () => {
-  const outside = join(
-    mkdtempSync(join(tmpdir(), "iva-links-out-")),
-    "note.md",
-  );
+  const outside = join(tempDir("iva-links-out-"), "note.md");
   const result = await callFile(outside, "ссылка [[никуда-не-ведёт]]\n");
   assert.equal(result.ok, true, result.error);
   assert.equal(existsSync(outside), true);
@@ -334,3 +389,44 @@ test("write_file: не-markdown внутри вольта не проверяе�
   const result = await callFile(path, "ссылка [[никуда-не-ведёт]]\n");
   assert.equal(result.ok, true, result.error);
 });
+
+// Проба слепого критика F1: ночь не публикует неполный граф как полный. Права 000 root не
+// останавливают, под root проба ничего не доказывает.
+test(
+  "graph: an unreadable folder keeps last night's graph byte for byte and names the folder; the write check stays tolerant",
+  { skip: process.getuid?.() === 0 && "root reads a folder with mode 000" },
+  (t) => {
+    const vault = tempDir("iva-graph-unreadable-");
+    mkdirSync(join(vault, "cards/locked"), { recursive: true });
+    writeFileSync(join(vault, "cards/ok.md"), "# OK\n\n[[secret]]\n");
+    writeFileSync(join(vault, "cards/locked/secret.md"), "# Secret\n");
+    const file = writeVaultGraph(vault);
+    const complete = readFileSync(file, "utf8");
+    assert.match(complete, /cards\/locked\/secret/u);
+
+    chmodSync(join(vault, "cards/locked"), 0);
+    t.after(() => chmodSync(join(vault, "cards/locked"), 0o700));
+    assert.throws(() => writeVaultGraph(vault), /cards\/locked/u);
+    assert.equal(readFileSync(file, "utf8"), complete);
+
+    // Проверка ссылки при записи карточки нечитаемого каталога не боится.
+    assert.deepEqual(
+      unresolvedLinkTargets(["ok"], { vaultDir: vault, source: "cards/new" }),
+      [],
+    );
+  },
+);
+
+test(
+  "graph: a card that cannot be read stops the graph instead of reading as empty",
+  { skip: process.getuid?.() === 0 && "root reads a file with mode 000" },
+  (t) => {
+    const vault = tempDir("iva-graph-unreadable-card-");
+    mkdirSync(join(vault, "cards"), { recursive: true });
+    writeFileSync(join(vault, "cards/a.md"), "# A\n\n[[b]]\n");
+    writeFileSync(join(vault, "cards/b.md"), "# B\n");
+    chmodSync(join(vault, "cards/a.md"), 0);
+    t.after(() => chmodSync(join(vault, "cards/a.md"), 0o600));
+    assert.throws(() => buildVaultGraph(vault), /EACCES/u);
+  },
+);

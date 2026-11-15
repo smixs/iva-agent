@@ -6,7 +6,7 @@
 // настройки или неверный вход — отказ с кодом 1, файл на месте. Импорты authored tree —
 // ленивые: команда грузится и на установке без agent/ (scripts/authored-tree-guard.test.ts).
 import { join } from "node:path";
-import { resolveTimeZone } from "../lib/timezone.ts";
+import { resolveTimeZone } from "../../packages/timezone/index.ts";
 import type { createCliRuntime } from "./runtime.ts";
 
 type CliRuntime = ReturnType<typeof createCliRuntime>;

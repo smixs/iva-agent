@@ -8,21 +8,12 @@ import { registerBuildCommand, type BuildHost } from "#cli/commands/build.js";
 import type { DevBootProgressReporter } from "#internal/dev-boot-progress.js";
 import { resolveApplicationRoot } from "#internal/application/paths.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
-import { isCodingAgentLaunch } from "#cli/agent-detection.js";
 import type { CliApplicationContext } from "#cli/application-command.js";
 import { agentCommand } from "#cli/agent-command.js";
 import { findCliApplicationRoot, resolveCliApplicationProject } from "#cli/application-root.js";
 import { eveCliBanner } from "#cli/banner.js";
-import { registerIntegrationCommands } from "#cli/commands/register-integration-commands.js";
-import { registerProjectCommands } from "#cli/commands/register-project-commands.js";
-import { registerRegistryCommands } from "#cli/commands/register-registry-commands.js";
 import { runInteractiveDevelopmentUi } from "#cli/dev/run-interactive-ui.js";
 import { resolveDevUiMode, resolveTuiDisplayOptions } from "#cli/dev/ui-options.js";
-import {
-  registerAcpCommand,
-  type ResolveVerifiedRemoteDevelopmentClient,
-  type RunAcpServer,
-} from "#cli/acp/command.js";
 import {
   FORCED_EXIT_BACKSTOP_MS,
   installShutdownSignal,
@@ -38,15 +29,12 @@ import {
   type InvokeCliRuntimeDependencies,
 } from "#cli/invoke/command.js";
 import {
-  parseAgentNamesOption,
   parseContextSizeOption,
   parseDisplayMode,
   parseLogsMode,
   parsePortOption,
-  parseReasoningOption,
   parseStatsMode,
 } from "#cli/option-parsers.js";
-import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
 import { findEveProjectContext, resolveEveProjectContext } from "#internal/project-context.js";
 import { parseDevelopmentServerUrl } from "#cli/dev/url.js";
 import { startCliLiveRow } from "#cli/ui/live-row.js";
@@ -66,15 +54,12 @@ interface CliLogger {
 }
 
 interface CliRuntimeDependencies {
-  isCodingAgentLaunch(): Promise<boolean>;
   findApplicationRoot(cwd: string): Promise<string | undefined>;
   isActiveDevelopmentServerForApp(input: {
     readonly appRoot: string;
     readonly serverUrl: string;
   }): Promise<boolean>;
   buildHost: BuildHost;
-  resolveVerifiedRemoteDevelopmentClient: ResolveVerifiedRemoteDevelopmentClient;
-  runAcpServer: RunAcpServer;
   printApplicationInfo(
     logger: CliLogger,
     appRoot: string,
@@ -170,7 +155,7 @@ function createCliProgram(
     .exitOverride()
     .hook("preAction", (_program, actionCommand) => {
       const { json } = actionCommand.opts<{ json?: boolean }>();
-      if (["info", "init"].includes(actionCommand.name()) && !json) logger.log(eveCliBanner());
+      if (actionCommand.name() === "info" && !json) logger.log(eveCliBanner());
     })
     .configureOutput({
       writeErr: (message) => {
@@ -194,8 +179,6 @@ function createCliProgram(
       const { runChannelsListCommand } = await import("#cli/commands/channels.js");
       await runChannelsListCommand(logger, applicationContext.project!, options);
     });
-
-  registerIntegrationCommands({ program, logger, applicationContext });
 
   const extension = program
     .command("extension")
@@ -227,65 +210,6 @@ function createCliProgram(
       await runExtensionBuildCommand(logger, applicationContext.root);
     });
 
-  registerRegistryCommands({ program, logger, applicationContext });
-
-  program
-    // Optional: a missing target scaffolds or updates the current directory,
-    // matching `eve init .`.
-    .command("init [target]")
-    .description("Create a new eve agent, or add one to an existing project directory.")
-    .option("--channel-web-nextjs", "Add the Web Chat application (Next.js)")
-    .option(
-      "--agents <names>",
-      "Create an agents/ workspace with comma-separated agent names",
-      parseAgentNamesOption,
-    )
-    .option("--model <model>", "Set the agent model (provider/model-id)")
-    .option(
-      "--reasoning <effort>",
-      "Set reasoning (provider-default|none|minimal|low|medium|high|xhigh)",
-      parseReasoningOption,
-    )
-    .option("-y, --yes", "Accepted for compatibility; has no effect")
-    .action(
-      async (
-        target: string | undefined,
-        options: {
-          agents?: string[];
-          channelWebNextjs?: boolean;
-          model?: string;
-          reasoning?: AgentReasoningDefinition;
-          yes?: boolean;
-        },
-      ) => {
-        if (options.yes) {
-          logger.error("warning: --yes has no effect for eve init.");
-        }
-
-        const { runInitCommand } = await import("#cli/commands/init.js");
-        await runInitCommand(logger, applicationContext.root, target, {
-          agents: options.agents,
-          channelWebNextjs: options.channelWebNextjs,
-          model: options.model,
-          reasoning: options.reasoning,
-        });
-      },
-    );
-
-  agentCommand(program.command("set"), applicationContext)
-    .description("Change root agent model settings.")
-    .option("--model <model>", "Set the agent model (provider/model-id)")
-    .option(
-      "--reasoning <effort>",
-      "Set reasoning (provider-default|none|minimal|low|medium|high|xhigh)",
-      parseReasoningOption,
-    )
-    .action(async (options: { model?: string; reasoning?: AgentReasoningDefinition }) => {
-      const { runSetCommand } = await import("#cli/commands/set.js");
-      await runSetCommand(logger, applicationContext.root, options);
-    });
-
-  registerProjectCommands({ program, logger, applicationContext });
 
   registerBuildCommand({
     applicationContext,
@@ -321,15 +245,6 @@ function createCliProgram(
     });
 
   registerRuntimeInvokeCommand({ applicationContext, logger, program, runtime });
-
-  registerAcpCommand({
-    applicationContext,
-    eveVersion: packageVersion,
-    program,
-    resolveVerifiedRemoteDevelopmentClient: runtime.resolveVerifiedRemoteDevelopmentClient,
-    runAcpServer: runtime.runAcpServer,
-    startHost: runtime.startHost,
-  });
 
   agentCommand(program.command("dev"), applicationContext, (command) => {
     const options = command.opts<DevelopmentCliOptions>();
@@ -658,7 +573,7 @@ export async function runCli(
     const appRoot = await findApplicationRoot(applicationContext.root);
     if (appRoot === undefined) {
       const projectContext = await findEveProjectContext(applicationContext.root);
-      input = projectContext?.kind === "workspace" ? ["dev"] : ["init"];
+      input = projectContext?.kind === "workspace" ? ["dev"] : ["help"];
     } else {
       applicationContext.root = appRoot;
       input = ["dev"];
@@ -673,18 +588,6 @@ export async function runCli(
     if (error instanceof CommanderError) {
       if (error.exitCode === 0) {
         return;
-      }
-
-      // A coding agent that fumbles `eve init` can trip commander before the
-      // init action runs, so the action's own agent detection never fires.
-      // Commander has already written its usage error to stderr; add the setup
-      // guide on stdout so the agent gets actionable next steps, but still fall
-      // through to throw so the malformed invocation keeps its nonzero exit.
-      const detectCodingAgentLaunch = runtime.isCodingAgentLaunch ?? isCodingAgentLaunch;
-      const agentLaunched = await detectCodingAgentLaunch();
-      if (input[0] === "init" && agentLaunched) {
-        const { initAgentInstructions } = await import("#cli/commands/agent-instructions.js");
-        logger.log(initAgentInstructions());
       }
 
       throw new Error(error.message);

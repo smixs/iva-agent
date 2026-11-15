@@ -1,6 +1,15 @@
 # TLA+ models
 
-The repository keeps bounded models of the lock, the night writer, restart recovery, proactive notices, plugin proposals, idle compaction, the tap on a model's button and the drain of the Bridge queue in batches. Run them from a temporary directory because TLC writes state files beside the model.
+The repository keeps bounded models, one per section below: the directory lock (`FileLock`), the night writer
+(`NightWriter`), the update lock, the update run, the update job of the menu, the update branch and the update
+floor (`UpdateLock`, `UpdateRun`, `UpdateJob`, `UpdateBranch`, `UpdateFloor`), restart recovery (`RestartRecovery`),
+the half-hourly proactive run (`Proactive`), plugin proposals and plugin modes (`PluginProposal`, `PluginMode`),
+the nightly backup against an oversized vault file and the commit of the vault (`BrainOversize`, `VaultCommit`),
+the draft stop of a turn, the compaction between turns, the tap on a model's button and the drain of the Bridge
+queue in batches (`DraftStop`, `IdleCompaction`, `ButtonTap`, `QueueDrain`), the userbot login (`UserbotLogin`),
+the launchd unit (`LaunchdUnit`), the helper run, its outcome and the goal check (`Helpers`, `GoalCheck`), the chat
+record (`ChatRecord`), the reminder row and its turn (`ReminderLifecycle`, `TurnLifecycle`), the reset intent of a
+private chat (`ResetIntent`) and the run of a schedule (`JobRun`). Run them from a temporary directory because TLC writes state files beside the model. Every `*-check.sh` takes `tlc` from `PATH`, and `~/.local/bin/tlc` otherwise; `TLC=` names another path, `TLC_TIMEOUT` and `JAVA_TOOL_OPTIONS` set the time and the heap.
 
 ## FileLock
 
@@ -60,6 +69,73 @@ and a third contender in the restore window. Run `sh specs/update-lock-check.sh`
 Actual milliseconds, process liveness and crashes during displacement are covered
 by executable tests and the accepted residual windows in `docs/tech-debt.md` §18.
 
+## UpdateRun
+
+`UpdateRun.tla` models one update run as the steps of `scripts/update-finish.ts` and `scripts/lib/version-update.ts`: the journal written before the first stop, the stop of every writer, the quarantine of session state, migrations and the vault cleanup, the flip of `current`, the candidate's start with the units handed back from the snapshot, the answer on the installation's port, the settle of `active.json` and the final cleanup. The process can be killed between any two steps (`Kill`) and started again (`Retry`): with the journal on disk a retry continues at the phase written there and takes the unit snapshot and the quarantine paths from it, without it (the code before the repair) a retry snapshots the stopped units as "how it was". The lock is `UpdateLock.tla` and exact unit restoration is `LaunchdUnit.tla` (`RestoreExact` assumes the snapshot survived, which is what this model is about); neither is repeated here.
+
+Checked invariants, by the numbering of the task that produced them:
+
+1. `AnswersAtRest`: after any break and retry either the previous or the new version answers.
+2. `UnitsReturn`: a unit that ran before the update runs after it — on success, on a rollback and on a break with a retry — or the owner was told why it stays off (a userbot whose environment cannot be rebuilt).
+3. `SessionsAccounted`: session state is either back in place or moved to a path that is written down.
+4. `PinnedAnswered`: `active.json` names only a version that answered.
+5. `FinalOnlyWhenPinned`: the journal publishes `settled` only after `active.json` names the candidate. These are separate disk writes; UpdateJob can observe either boundary.
+
+`update-run-check.sh` checks the green configuration and one witness per invariant:
+
+- `UpdateRun-memory-units.cfg`: the snapshot of the units lives in the memory of the process (the code before the repair) — `UnitsReturn`; the same run loses the quarantine paths.
+- `UpdateRun-retry-forgets.cfg`: the journal is written and the retry does not read it — `UnitsReturn`.
+- `UpdateRun-unrecorded-trash.cfg`: the quarantine moves state and writes no path — `SessionsAccounted`.
+- `UpdateRun-journal-first.cfg`: the journal publishes `settled` before `active.json` — `FinalOnlyWhenPinned` (R1). `scripts/update-pin.test.ts` exercises the same boundary through the real UpdateJob consumer.
+- `UpdateRun-settle-first.cfg`: `active.json` is written before the candidate answered — `PinnedAnswered`.
+- `UpdateRun-rollback.cfg`: the candidate does not come up and the userbot's environment cannot be rebuilt — no error: the units that ran come back, and the userbot stays off with a reason.
+
+Outside the model: the lock itself and the takeover of an abandoned one (`UpdateLock.tla`); what "a unit runs" means on systemd and launchd and how `restore` sets exactly what was captured (`LaunchdUnit.tla`); building and probing the candidate, which happens before the move and touches no shared state; the removal of old versions and of the retired checkout after the answer. `scripts/update-run-kill.test.ts` runs the real updater in a hermetic installation, kills it with `SIGKILL` from inside the step it interrupts (the fake `systemctl`, a migration and the vault cleanup of the candidate), starts it again and checks the units, the quarantine and the version. The fix ships in the release that carries it and runs in the new half of the update, so it acts from the update that installs 0.5.12 on: `update-finish` of the version being installed is the process that writes the journal, and the retry after a break runs the same version's file again. A run started by the CLI of 0.5.0–0.5.11 leaves no journal for the versions before 0.5.12 and is covered by the executable test alone.
+
+## UpdateJob
+
+`UpdateJob.tla` models the update job of the menu: the tap writes the job, the updater flips `current`, starts the candidate, settles `active.json` and writes its outcome, and can be killed between any two of those. The Bridge — the process the restart brings up — watches the job and says the final: from the run's journal (`UpdateRun.tla`; the "settled" phase is written after the answer and after the settle), from the four sources for a run started by a version without a journal (the `current` symlink with `active.json` and the failure list, an update from 0.5.0 to 0.5.11), or, when the deadline runs out, with "did not finish".
+
+Checked invariants:
+
+1. `FinalOnlyWhenPinned`: "✅ old → new" appears only when the new version is pinned and answered.
+2. `NoEndlessWatch`: every job gets a final within a bounded time and the watch never outlives it.
+3. `ShownOnce`: the final is shown once.
+
+`update-job-check.sh` checks the green configuration, `UpdateJob-no-journal.cfg` (a run started by a version without a journal: the four sources, no error), and two witnesses: `UpdateJob-symlink-only.cfg` draws the final from the `current` symlink alone — `FinalOnlyWhenPinned`; `UpdateJob-shown-twice.cfg` lets the job file outlive the final — `ShownOnce`.
+
+Outside the model: the liveness of the Bridge itself (systemd restarts it), delivery to Telegram and its retries (`reporter.complete`), the exact wording of the screen, and the TTL in milliseconds, which is the model's `Deadline` in ticks. `scripts/poller/update-reconcile.test.ts` covers the journal verdict, the "did not finish" screen and the unproved move on the real Bridge code.
+
+## UpdateBranch
+
+`UpdateBranch.tla` models the Update branch of ADR-0018: the owner's choice written into the install repository and the mirror every update reads its branch from, a break between the two writes, a rollback that fails, and a read that reconciles. The record is the installation's own repository; the mirror is its cache, and reading reconciles the cache with the record.
+
+Checked invariants:
+
+1. `OneRecord`: the branch read for the update is the owner's choice.
+2. `AgreeAfterRead`: after a read the install repository and the mirror agree — a divergence does not outlive the next read.
+3. `NotBelow`: an update never moves the installation to an older release (ADR-0018).
+
+`update-branch-check.sh` checks `UpdateBranch.cfg`, `UpdateBranch-partial.cfg` (a failed rollback that the next read repairs: no error), and witnesses: `UpdateBranch-one-sided.cfg` (a write to the installation only, no repair at read — `OneRecord` and `AgreeAfterRead`) and `UpdateBranch-back.cfg` (`NotBelow`). Outside the model: the network and the availability of the branch (`BranchUnavailableError`), tag selection, and that one `git config` write is atomic while two are not — that window is the model. `scripts/lib/update-channel.test.ts` covers the reconciliation on the real reader.
+
+## UpdateFloor
+
+`UpdateFloor.tla` models one installation and a tree that names the oldest release an update is taken from (`minUpdater` in `update-compat.json`). The updater already on disk is one of three classes: from 0.3.30 it reads the marker before its first write; 0.3.15 to 0.3.29 unpack the new tree and hand off to its new half without knowing the marker; 0.3.7 to 0.3.14 build a candidate of the new tree beside the checkout, where `npm ci` is the first code of the new tree to run. An update aims at the newest release, or at the step release while `repair.sh` has the Update branch pinned to it: the last release that takes an update from every release below the floor. Once the new tree serves, it meets one file that only releases below the floor wrote and one that a release at the floor or above wrote, and two forms the step release reads but turns over only lazily, when its Bridge starts or a chat first writes: "kept" the new code reads itself (the reminder table of schema 1), "turned" it refuses by name, so repair runs the step release's own conversion of it before the next update (the queue of strings, the shared `run-status.json`). The step is a tag on origin: its branch exists only for the update repair runs, so no other update aims at it.
+
+`update-floor-check.sh` checks `UpdateFloor.cfg` and eleven mutants:
+
+- `StaysOnItsRelease`: the new release is put in place only by an updater at the floor or above, so an installation below the floor reaches it through the step release alone. `UpdateFloor-no-finish-check.cfg` drops the check in the new half and a CLI that does not read the marker lands on the new tree; `UpdateFloor-no-install-check.cfg` drops the check in `npm ci` and an in-place updater does.
+- `NothingWritten`: a CLI that reads the marker stops before it unpacks anything, and an in-place updater has removed its candidate by the time it reports. `UpdateFloor-late-check.cfg` moves the marker check after the unpack.
+- `OnlyTheVersionDirectory`: 0.3.15 to 0.3.29 are refused after the unpack, so the unpacked version directory is the one thing written and what serves is what served. `UpdateFloor-finish-after-stop.cfg` moves the new half's check after services are stopped.
+- `RefusedIsTold`: a refusal names the release and the way out (`UpdateFloor-mute.cfg`).
+- `NoSilentLoss`: a file only releases below the floor wrote is refused by name or left as it was (`UpdateFloor-silent-drop.cfg`).
+- `SupportedIsServed`: a file a release at the floor or above wrote is read and served as before; moving its record out of the working file is a violation (`UpdateFloor-quarantine.cfg`). No lazy form is refused: `UpdateFloor-lazy-unread.cfg` takes the reader of "kept" out of the new code, `UpdateFloor-lazy-unturned.cfg` takes the step's conversion of "turned" out of repair.
+- `BranchKept`: `repair.sh` records the owner's Update branch before it pins the step release, and the branch is back once repair is over, killed in between or not (`UpdateFloor-no-saved-branch.cfg`).
+- `Served`: at the floor and above the update ends on the new release.
+- `Repaired`: repair, killed once between its two updates or not, ends on the new release with the owner's branch back. `UpdateFloor-no-step.cfg` runs the installed updater straight at the newest release and it is refused for good.
+
+Outside the model: the updater of 0.3.0 to 0.3.6, which moves the checkout and replaces `node_modules` before any code of the new tree runs; a failed fetch or build, which is the updater's own rollback; a kill in the middle of one update; that the step's own tree has its dependencies before its CLI runs on a checkout (`repair.sh` stops before the first update when its `npm ci` fails); that the step exists on origin, which `repair.sh` takes from the tag `v<step>`. `scripts/repair-shell.test.ts` covers these with an origin that has the tag and no branch, a checkout with the dependencies of its own lock, and repair killed before each of its commands.
+
 ## RestartRecovery
 
 `RestartRecovery.cfg` checks restart, quarantine, failures, notification and queue
@@ -75,7 +151,7 @@ assumption as `FileLock`; a stalled live writer exceeding it can lose its lock.
 
 ## Proactive
 
-`Proactive.tla` models the half-hourly proactive run before its code exists (`scripts/proactive/tick.ts`): a no-wait lock that expires `staleMs` after it is taken, the state file `data/proactive.json` written whole from the run's memory, the Brief claim and turn, the Insight claim and turn (a run with an Insight ends after it, without Watch), the Watch claim before the turn, delivery and the `wakes` write after it, a crash or a failed write at any step and the runner's deadline. One `Tick` is 8 minutes: a 40-minute `staleMs` gives `Stale = 5`, a run that lives at most `timeoutMs + killGraceMs` (31 min 30 s, at most 4 boundaries) gives `MaxRun = 4`; the run itself cancels a turn at `IVA_JOB_STOP_AT`, and after a Brief that ran past its deadline Watch does not go. A comment in the model maps every action to its future file and function.
+`Proactive.tla` models the half-hourly proactive run (`scripts/proactive/tick.ts`): a no-wait lock that expires `staleMs` after it is taken, the state file `data/proactive.json` written whole from the run's memory, the Brief claim and turn, the Insight claim and turn (a run with an Insight ends after it, without Watch), the Watch claim before the turn, delivery and the `wakes` write after it, a crash or a failed write at any step and the runner's deadline. One `Tick` is 8 minutes: a 40-minute `staleMs` gives `Stale = 5`, a run that lives at most `timeoutMs + killGraceMs` (31 min 30 s, at most 4 boundaries) gives `MaxRun = 4`; the run itself cancels a turn at `IVA_JOB_STOP_AT`, and after a Brief that ran past its deadline Watch does not go. A comment in the model maps every action to its future file and function.
 
 Checked invariants:
 
@@ -107,6 +183,72 @@ Witnesses must fail: `PluginProposal-norename.cfg` (the tap copies the proposal 
 
 ```sh
 specs/plugin-proposal-check.sh
+```
+
+## BrainOversize
+
+`BrainOversize.tla` models the nightly backup of the vault against a file over 90 MB (decision of the owner, 10.11.2026). GitHub refuses a blob from 100 MB, and one such blob stops the whole push. Sizes are two values, `small` and `big`; the starting history already holds one big blob written before the guard. The owner, the agent or an attachment writes files at any moment; Brain commits what changed and then tells the owner. The comment in the model maps every action to its function.
+
+The threshold sits in `commitPaths` (`agent/lib/vault-commit.ts`), which every commit of the vault goes through: the writers of the day, the sweep of the night before it starts, and Brain. A file can grow between the size check and the moment git reads it, so the model has two steps. `Check` is the `lstat` before `git add`: a path over `VAULT_BLOB_LIMIT_BYTES` does not go to `git add`, and its blob never enters the object store. `Store` decides: `commitFitting` measures each blob `git add` put in the index (`stagedBlobs`), takes one over the threshold back off the index, and `commitWith` commits exactly the remaining blobs from its own index, so the commit does not read the working tree again. Both sets come back as `oversize`; Brain names them in one Alert (`scripts/memory/brain.ts`, `alertOversize`).
+
+Checked invariants:
+
+1. `BigNeverCommitted`: no version over the threshold reaches the history.
+2. `SkippedIsTold`: after the night, the last Alert names the skipped set, or its send failed and the next night repeats it. `OneAlertPerSet`: the same set is not told twice in a row (the week of the throttle in `packages/alert-state` is outside the model).
+3. `OthersGo`: a commit takes every changed file under the threshold.
+4. `HistoryKept`: what the backup already holds stays; a tracked file that grew keeps its last committed version.
+
+Mutants must fail: `BrainOversize-no-threshold.cfg` (`BigNeverCommitted`), `BrainOversize-silent.cfg` (a skip without an Alert, `SkippedIsTold`), `BrainOversize-abort.cfg` (a skip stops the whole commit, `OthersGo`), `BrainOversize-every-night.cfg` (`OneAlertPerSet`), `BrainOversize-unstage.cfg` (a skip takes a tracked file out of the index, `HistoryKept`), `BrainOversize-check-before-add.cfg` (only the check before `git add` decides, so a file grown before git reads it is committed, `BigNeverCommitted`). The tests named `BrainOversize` in `scripts/memory/brain.test.ts` and `scripts/vault-commit.test.ts` run the real Brain and the real seam on a git repository with sparse 91 MB files; two of them grow the file through a wrapper around git, just before `git add` and just before the write of HEAD (`update-ref`).
+
+Outside the model: a commit that git refuses (no Alert that night, the next one repeats), a blob over the limit already in the history before the guard (the push keeps failing, and the Alert about the backup says so), Git LFS, and the 100 MB limit of other hosts.
+
+```sh
+specs/brain-oversize-check.sh
+```
+
+## VaultCommit
+
+`VaultCommit.tla` models one commit of the memory seam (`commitWith` in `agent/lib/vault-commit.ts`) against a second writer of the same vault: the nightly Brain in its own process, or the owner's own git. The model was written after the code and checks a defect the blind critic found on 10.11.2026 (B3-R).
+
+`commitWith` builds a throwaway index from a snapshot of HEAD plus the blobs `git add` staged, and the commit is built from that tree. A plain `git commit` takes the HEAD of the moment as its parent, so a neighbour commit of another file that landed between the snapshot and the write came back to its old blob: the working file stayed new, but HEAD and the next push carried the old content. The seam now writes with `git write-tree` → `git commit-tree -p <snapshot>` → `git update-ref HEAD <new> <snapshot>`, and the comparison with the old value is what keeps the neighbour's commit. `Retry` rebuilds the snapshot from the new HEAD (up to `HEAD_MOVES`, three attempts in the code), `GiveUp` is the usual write error after that. `CompareHead = FALSE` is the old `git commit`.
+
+Checked invariants:
+
+1. `ForeignKept`: a foreign commit of a neighbouring file stays in HEAD; our commit never brings back a blob the other writer replaced.
+2. `OursStored`: the blob of our own path that went into the commit stays in HEAD.
+
+Mutants must fail: `VaultCommit-no-head-compare.cfg` writes HEAD from the snapshot without comparing it, the old `git commit`, and breaks `ForeignKept`. The tests named `VaultCommit ForeignKept` in `scripts/vault-commit.test.ts` run the real seam on a git repository with a real second writer inside a wrapper around git, between the snapshot and the write of HEAD; one of them moves HEAD on every attempt and checks that our commit refuses after three snapshots and loses nothing.
+
+Outside the model: a crash between `commit-tree` and `update-ref` (an unreferenced commit object, the next write repeats the work), the size threshold of a blob (`BrainOversize.tla`), the reflog, and a hook in the vault (the seam runs `pre-commit`, `prepare-commit-msg`, `commit-msg` and `post-commit` itself, because `write-tree` and `commit-tree` do not run hooks).
+
+```sh
+specs/vault-commit-check.sh
+```
+
+## PluginMode
+
+`PluginMode.tla` models the two switches of one plugin entry in `data/custom/plugins.json`, `enabled` and `trusted` (ADR-0009), and the units that follow them. It was written after the code and checks the code. The four pairs are four named modes, read in the code by `pluginMode` (`agent/lib/plugin-store.ts`): `full`, `no-processes`, `paused` (switched off, the trust is remembered) and `off`. The plugin of the model has processes: a `stdio` server in `mcp.json` or a service in `sh.iva/services/`.
+
+Three actors write the entry: the owner (a terminal, or a tap that the Bridge carries out outside a model turn), a model turn (`bash` with `IVA_AGENT_TURN=1`) and `iva update`. One `iva plugin` command writes the file and reconciles the units under the update lock, which is one step of the model. `enable`, `trust` and `update` then build a version outside that lock, so any other command fits between their write and the undo of a build that failed. The undo of `update` (`undoInstalls`) puts back the folder and the code and version fields of the entry it replaced; both switches come from the entry read under the lock of the undo, and a plugin removed meanwhile stays removed, folder included. The comment in the model maps every action to its function.
+
+Checked invariants:
+
+1. `ProcessesNeedTrust`: the processes of a plugin run only while it is trusted.
+2. `DisabledIsStopped`: no unit of a switched-off plugin runs.
+3. `TrustIsOwners`: the trust in the entry was given by the owner.
+4. `UpdateGrantsNothing`: an update of Iva enables nothing and trusts nothing.
+5. `EnableIsOwners`: a plugin is on by the owner's action only; neither a turn nor the undo of another command's build switches it on.
+
+Mutants must fail: `PluginMode-enabled-only.cfg` (the unit plan looks at `enabled` alone, `ProcessesNeedTrust`), `PluginMode-disable-keeps-units.cfg` (`disable` writes the state without reconciling the units, `DisabledIsStopped`), `PluginMode-turn-trusts.cfg` (`iva plugin trust` passes inside a model turn, `TrustIsOwners`), `PluginMode-update-reenables.cfg` (the update switches a plugin back on, `UpdateGrantsNothing`), `PluginMode-update-off.cfg` (`settlePlugins` in `scripts/lib/version-update.ts` switches the entry off and the run reconciles no units, `DisabledIsStopped`).
+
+Witnesses of the code before the repair must fail too. `PluginMode-undo-keeps-units.cfg`: the undo of an `enable` that did not build wrote "disabled" and left the units running (`DisabledIsStopped`). `PluginMode-stale-undo.cfg`: the undo wrote the entry it had read before the build, so a plugin switched off, untrusted or removed while the build ran came back (`EnableIsOwners`, and `TrustIsOwners` once the first is left out). `PluginMode-update-undo-whole.cfg`: the undo of a failed `iva plugin update` wrote back the whole entry it replaced, so a trust given while the build ran was taken away under running units (`ProcessesNeedTrust`), a revoked trust came back without a new tap (`TrustIsOwners`) and so did a switch-off or a removal (`EnableIsOwners`). Each has a test in `scripts/cli/plugin.test.ts` that carries the invariant in its name.
+
+`UpdateOff` is the update that switches off a plugin whose code no longer builds, and `UpdateOffStops` is the repair it got in this work: `scripts/update-finish.ts:restartPluginUnits` reads the entries back after the update, stops the units of the entries that are no longer `full` and restarts the units of the entries that are, so the switch-off reaches the processes. The clean configuration has `UpdateOff = TRUE` and `UpdateOffStops = TRUE`; `PluginMode-update-off.cfg` keeps `UpdateOffStops = FALSE` and is the updater before the repair.
+
+Outside the model: a crash between the write and the unit reconcile (the next `iva plugin` command reconciles again), a unit that systemd refuses to stop, a plugin of skills alone (a model turn installs it itself), `sync` (it writes and reconciles under one lock and builds nothing), the units after the undo of `update` (they follow switches the undo leaves as they are, and keep running the process `update` restarted onto the new code until the next command), a `plugins.json` edited by hand or by a model past the CLI (the honest caveat of ADR-0009), and the connection files inside a built version.
+
+```sh
+specs/plugin-mode-check.sh
 ```
 
 ## DraftStop
@@ -216,6 +358,37 @@ Witnesses must fail: `-staleack` (the removal writes the snapshot of the pass wi
 specs/queue-drain-check.sh
 ```
 
+## UserbotLogin
+
+`UserbotLogin.tla` models the QR login of the userbot proxy (`services/telegram-userbot/onboarding.py`): one account, one process, one Telegram auth key. The proxy holds the phase in memory (`idle`, `starting`, `waiting`, `password_needed`, `authorized`, `expired`, `error`, `interrupted`) and one marker file on disk, `telegram-userbot.login`, beside the session file. Telegram holds its own side of the login for the auth key. The owner scans the QR, may be asked for the cloud password and may mistype it, the QR expires, Telegram names a flood wait, the session file disappears, the owner signs the session out from another device, and the unit restarts the proxy at any step. The phase that is told is `Login.phase()`: Telegram's answer first, the phase in memory otherwise. Every call of `qr_login_password` reaches Trace (`agent/hooks/trace.ts`) before the proxy answers it.
+
+`userbot-login-check.sh` checks `UserbotLogin.cfg` (866 distinct states), eight mutants and one witness:
+
+- `WrongPasswordKeepsAsking`: a refused password, wrong or too early, leaves the phase `password_needed`. `UserbotLogin-wrong-password-ends.cfg` is the code before the model: the refusal ends the login in `error`, and the owner starts from the QR.
+- `NoSilentIdle`: a login cut by a restart reads `interrupted`, unless Telegram already let the account in or the session file is gone; it never reads as a login that was not begun. `UserbotLogin-no-marker.cfg` keeps the phase in memory only.
+- `AuthorizedHasSession`: `authorized` is told only while the session file is on disk. `UserbotLogin-no-session-check.cfg` trusts Telegram's answer alone.
+- `NoSecretLeaves`: the password, the login token and the bot token stay out of the journal, the disk, Trace and the tool replies — everything Iva and the proxy write. `UserbotLogin-raw-error.cfg` tells a failure in the words of the exception. `UserbotLogin-trace-args.cfg` writes the call to Trace with the password in its arguments; the code writes `<redacted>` in place of every argument the connection names secret (`SECRET_ARGUMENTS` in `agent/connections/telegram-userbot.ts`). The owner's own message with the password is outside the invariant: it is the owner's text, kept in the day's `daily/` file and in the session history of eve (`.eve/.workflow-data`), and that history keeps the call as the model made it beside that message.
+- `WaitRespected`: no password goes to Telegram before the wait it named has passed. `UserbotLogin-no-wait.cfg` forgets the wait. The proxy knows the wait in memory only: the first password after a restart reaches Telegram, which names the wait again.
+- `ReadEndsLogin`: a read that saw the account let in ended the login, so no marker stays on disk and no old `interrupted` comes back after a sign-out elsewhere. `UserbotLogin-read-keeps-marker.cfg` tells `authorized` and leaves the phase and the marker of a process that died between Telegram's yes and its own.
+- `SuccessIsTheRead`: the right password is answered "connected" only when the read says `authorized`. `UserbotLogin-success-unread.cfg` answers in fixed words while the session file is gone.
+- `UserbotLogin-retry-witness.cfg` must fail on `NoLoginAfterWrongPassword`: a login that got a wrong password still ends `authorized` without a second QR.
+
+| Model action                                                                         | Code                                                                  |
+| ------------------------------------------------------------------------------------ | --------------------------------------------------------------------- |
+| `StartLogin`                                                                         | `Login.start`: the marker is written before the login task exists     |
+| `QrSent`, `ProxySeesLogin`, `ProxySeesPasswordAsked`, `QrExpires`                    | `Login._run`                                                          |
+| `LoginFails`, `PasswordCheckFails`                                                   | `Login._fail`: fixed words and the class of the exception             |
+| `PasswordHeldBack`, `WrongPassword`, `TelegramNamesWait`, `RightPassword`            | `Login.password`                                                      |
+| `Restart`                                                                            | `Login.__init__`: the marker decides between `interrupted` and `idle` |
+| `ReadSeesLogin`                                                                      | `Login._read`: the read that sees the account let in ends the login   |
+| `Traced`                                                                             | `agent/hooks/trace.ts`: `<redacted>` in place of a secret argument    |
+| `Reported`                                                                           | `Login.phase`, sent by `/healthz` as `login`                          |
+| `OwnerScans`, `TooManyChecks`, `WaitPasses`, `SessionFileLost`, `SignedOutElsewhere` | Telegram, the clock, the disk and the owner                           |
+
+`services/telegram-userbot/test_onboarding.py` replays the counterexamples against the code with Telegram replaced and walks random sequences of the model's actions, checking the invariants after every step; each test names its invariant. `agent/lib/trace-hook.test.ts` feeds the call to the real Trace hook and holds the secret arguments to the parameters of `qr_login_password` in `onboarding.py`. `scripts/lib/userbot-health.test.ts` holds the list of phases in TypeScript to the list `onboarding.py` sends.
+
+Outside the model: the session history of eve and the owner's message (above), a QR scanned after the restart that cut its login, a marker file that cannot be written (the login is refused before it begins), the flood wait of up to sixty seconds that Telethon sleeps through by itself, a second account.
+
 ## LaunchdUnit
 
 `LaunchdUnit.tla` models the units of Iva under launchd on macOS (spec `.scratch/macos-install/spec.md` v3, sections 3.1, 3.3 and 7) and was written before the code: it checks the design of the seam that maps `systemctl --user` verbs to `launchctl`. Two labels: a KeepAlive service (`Restart=always`, for example the userbot) and a oneshot with a calendar, where `iva-brain.timer` and `iva-brain.service` share one label `app.iva.iva-brain`. A label is `unloaded`, `idle`, `running`, `throttled` or `stopping` (`state = SIGTERMed`: `bootout` and `kill` are asynchronous, `bootout` returns 0 while the process still exits, and `bootstrap` in this window gives 5 while `print` still shows the job, so the label vanishes afterwards), has the `enabled` flag and a `stale` flag for a plist rewritten after the last `bootstrap` (launchd reads the plist only there). launchd itself crashes and respawns the KeepAlive process (`throttleExpire` and `processExit` are weakly fair), fires the calendar, bootstraps every plist at login and boots everything out at logout. Writers: `stop`, `start`, `restart`, `enable --now`, `disable --now`, `is-active`, cancel and start of the night from the menu, `restart` of a plugin timer, and the update path `captureOptionalWriterState` + `stopWriterUnits`, a body that may change `enabled`, and `restoreOptionalWriterState` one unit name per step. Writers and launchd events other than `throttleExpire` do not interleave with the update; plists are always present; process exit codes, `SuccessfulExit`, the launcher's process group and the 10 s wait are abstracted.
@@ -256,8 +429,8 @@ deadline=2, grace=1. `TickStart` фиксирует строки прохода,
 а не безусловное eventual завершение ядра. Отдельное `NoSilentEnd` проверяется
 под справедливостью Clock и действий тика помощников, независимо от хода напоминания.
 `reminderBusy = TRUE` остаётся во всех состояниях: задача напоминаний может
-ожидать бесконечно, а отдельное расписание `agent/schedules/helpers.ts`
-продолжает исполнять тик. `shared-schedule` возвращает ожидание напоминания
+ожидать бесконечно, а тик помощников в `agent/schedules/reminders.ts` стартует
+отдельным шагом, вне ожидания напоминаний, и продолжает исполняться. `shared-schedule` возвращает ожидание напоминания
 и нарушает `NoSilentEnd` даже со справедливостью доступных действий. Справедливость End, успешного снимка,
 доставки cancel, reset или появления событий не предполагается.
 
@@ -302,17 +475,18 @@ offline-события — ожидаемые красные свидетели 
 свойств чтения по находкам FN4–FN5 ночи остаётся отдельной работой этой модели.
 
 ```sh
-PATH=/opt/homebrew/opt/openjdk@25/bin:$PATH JAVA_TOOL_OPTIONS=-Xmx3g sh specs/helper-check.sh
+JAVA_TOOL_OPTIONS=-Xmx3g sh specs/helper-check.sh
 ```
 
 Load <20 перед каждым cfg, workers 1..4, heap по умолчанию 3 GiB; BFS
 seed 20261013/fingerprint 1. Simulation отделена от полного перебора.
 Trap удаляет metadir/states; LOG_DIR сохраняет журналы и results.tsv.
+Срок на конфигурацию — `TLC_TIMEOUT`, по умолчанию 1800 с: на стенде WSL2 (8 потоков, 7,8 ГБ, TLC 1.7.4, Java 21) самая долгая, `HelperRun-v72-run`, идёт 699 с, весь скрипт — 859 с (замер 10.11.2026).
 Ожидаемый invariant отказ требует exit12 и точное имя; temporal отказ — exit13
 и единственное свойство конфигурации. Инфраструктурная ошибка не убивает мутант.
-Всего 48 конфигураций: 24 HelperRun (10 зелёных, 12 разных мутантов,
-дополнительная temporal проверка «нет потолка», свидетель durable-хвоста)
-и 24 HelperOutcome, включая семь проверок освобождения мест. Все прогоны выполняются на Mac mini.
+Всего 54 конфигурации: 27 HelperRun (11 зелёных и 16 красных — мутанты, temporal проверка «нет
+потолка» и свидетель durable-хвоста) и 27 HelperOutcome (3 зелёных и 24 красных, включая семь
+проверок освобождения мест). Прогон идёт там, где запущен скрипт.
 
 | Конфигурация                                                                   | Ожидаемый результат       |
 | ------------------------------------------------------------------------------ | ------------------------- |
@@ -389,12 +563,12 @@ Insight, Reminder, Signal или Alert действует по скиллу `goa
 Охрана `Claim` с `ownerPending=0` сохраняется как требование к коду, С4.
 
 ```sh
-PATH=/opt/homebrew/opt/openjdk@25/bin:$PATH sh specs/goal-check.sh
+sh specs/goal-check.sh
 ```
 
 Скрипт последовательно выполняет полный BFS девяти штатных конфигураций,
 17 мутантов и одного свидетеля достижимости. Предел всего набора составляет
-600 секунд, каждого запуска 150 секунд; `WORKERS` принимает 1–4, умолчание 4.
+595 секунд, каждого запуска 150 секунд; `WORKERS` принимает 1–4, умолчание 4.
 Каждый JVM получает отдельный `java.io.tmpdir`. Рабочее дерево TLC и `states`
 живут в `.scratch/goal-tla` и удаляются при выходе. `LOG_DIR=/absolute/path`
 сохраняет журналы и `results.tsv`. `TLC`, `TIMEOUT`, `TLC_TIMEOUT` и
@@ -498,3 +672,165 @@ Id строки используется один раз на трассу; уб
 Модель проверяет атомарные записи и порядок событий. Реальные миллисекунды,
 матрица `goalActor`, транспорт Telegram, права файлов, текст заданий и соответствие
 фактическому коду G1 проверяются при реализации и общей приёмке.
+
+## ChatRecord
+
+`ChatRecord.tla` models the chat record, the file `data/run-status.d/<chat>.json`, as
+one state machine. Two processes write it under one lock with compare-and-set: the
+agent (Channel, draft, hooks) and the Bridge; a Reminder turn writes from its own
+process. A restart of the agent forgets every process memory and keeps the file;
+recovery before the start may mark the record or fail. The Bridge can crash and
+come back.
+
+A chat is in one of eight states. Busy: `accepted` (a message is accepted, the
+turn has not started), `turn`, `compacting`. `stale` is a busy record without a
+write for the stale interval, or marked by recovery; the Bridge no longer waits
+for it and the reaper frees it. Free: `free`, and three marked free states read by
+precedence — `retiring` (the session leaves after its turn), `retry-offered`
+(the reaper offered a retry), `awaiting-owner` (a question to the owner is open).
+`chatState` in `agent/lib/run-status.ts` is the same function in the code, and
+`rowRules` there holds the row invariants: which turn fields each state owns.
+
+Checked invariants:
+
+1. `OneState`: every reachable record satisfies exactly one of eight
+   independent state predicates.
+2. `TurnFieldsOnlyWhenBusy`: `ingress`, `session`, `turn` and `compacting` are
+   filled only while the record is busy; a compaction has a session and no turn;
+   a turn id needs a session.
+3. `ReleasedByOwnerOrReaper`: a busy record becomes free through its owner (the
+   turn by session and turn, the session by itself, an accepted message by its
+   ingress id), through the reaper after the deadline, or through a reset.
+4. `FreeAfterRestart`: after any restart the chat becomes free in finite time.
+   Fairness: every started step ends, time passes, the Bridge comes back.
+
+Mutants that must fail: a turn's terminal write that compares the session
+without the turn (`ReleasedByOwnerOrReaper`); the reaper that frees a live
+record (`ReleasedByOwnerOrReaper`); a release that leaves `compacting` on a
+free chat (`TurnFieldsOnlyWhenBusy`, and `OneState` in a second
+configuration); the reaper switched off (`FreeAfterRestart`).
+
+Run `sh specs/chat-record-check.sh`. `scripts/chat-record.test.ts` replays
+each counterexample on the real writers and names the invariant in the test
+title.
+
+Outside the model: the queued sign (`queued*`), the Stop mark, the turn
+question and latency stamps, which do not decide the state; the Bridge queue
+and its in-flight phases (`QueueDrain.tla`); the two awaits inside one session
+retirement and the choice of the reset target; the file lock (`FileLock.tla`);
+wall-clock values. The model assumes that eve handles the events of one session
+in order, so a session-level release never overlaps a turn of that session.
+`IdleCompaction`, `RestartRecovery`, `DraftStop`, `DeferredRestart` and
+`TurnLifecycle` keep their own scenarios over the same record.
+
+## ReminderLifecycle
+
+`ReminderLifecycle.tla` models one row of `data/reminders.json` through its firings: a Reminder (`Kind = "at"`) or a Routine (`Kind = "cron"`). The processes that share the row: the minute tick inside the agent (`agent/lib/reminder-tick.ts`, in order: `fireDue`, `sweepFired`, `closeAbandoned`, then the owed Alerts), the fire child (`scripts/reminders/fire.ts`), the Alert children (the same script called with `abandoned`, two slots per firing, so that a child which outlived the agent can meet a new one) and the tick's in-memory continuations, which die with the agent. The agent may crash and restart at any step; a child may die at any step and may also outlive the agent. The liveness window of a firing (`reminderPhase` says `running` until it passes) is one `Expire` step that may happen while the child is still alive. `firing` stands for `firedAt`, the identity every `recordDelivery` compares before it writes. Sending is two steps: Telegram accepts the message, then the sender gets the answer; a lost answer or a transient refusal makes the transport (`scripts/lib/telegram-send.ts`) wait and send the same message again, and the turn never runs again.
+
+The decisions the model carries:
+
+1. A firing left with neither a fact nor a reason is closed by the tick with a reason, and the owner gets an Alert. The row text is not sent again, because the table cannot tell whether the dead child had already sent it.
+2. A firing whose child this agent still runs (`TickMemory`) is not closed by the window: a turn without the chat watch sends no pulse. After a restart the agent knows no children, and the window applies.
+3. The Alert is owed while the row is closed with `REMINDER_ABANDONED`, has no late fact, and the Alert throttle (`packages/alert-state`) holds no fact "Alert sent" for this firing. Every tick pass hands an owed Alert to a child, unless a child this agent runs already has it. A crash erases no debt, and neither does the table: while the row owes its Alert, `fireDue` does not take it again and `sweepFired` does not remove it. A Routine fires its next due after the Alert about the previous one.
+4. The Alert child reads the row and the Alert fact before every attempt of the transport, the repeats after a backoff included (`beforeAttempt`): a fact that landed while the transport waited stops the Alert.
+5. Delivery at the transport is at least once: a lost reminder is worse than a doubled one. One capture is one delivery attempt; the text, or the Alert, goes out again only when Telegram accepted it and the answer was lost, or when its sender died or was forgotten before it recorded the fact.
+
+Checked properties:
+
+1. `DeliveredOrReason`: a firing that is over went out or carries its reason.
+2. `BoundedOutcome`: no tick walks past an open firing whose window has passed and whose child this agent does not run. `EveryFiringConcludes` (liveness, weak fairness on the tick, the restart, the clock and the children): every taken row gets its outcome, across crashes and restarts too.
+3. `FactOfThisFiring`: the fact in the row is the fact of the firing the row shows; a late result of an older firing is dropped.
+4. `OncePerDue`: one due, one firing.
+5. `OneAttemptPerCapture`: the text of one firing reaches the chat once, and again only after a lost answer.
+6. `AlertOnce`: one abandoned firing, one Alert; a repeat only when a sender lost track of an Alert it had sent (lost answer, death after Telegram accepted, or an agent crash under a running sender).
+7. `NoFalseAlert`: no attempt of an Alert child, first or repeated, goes out for a firing whose fact the row already holds or whose child this agent still runs.
+8. `AlertBeforeDrop`: an abandoned firing does not leave the row before its Alert: neither the next firing of a Routine nor the sweep takes away a firing that still owes it.
+9. `AbandonedAlerted` (liveness): the Alert about an abandoned firing goes out after any crash, unless a late fact of that firing lands first.
+
+| Config                            | Mutation                                                | Fails                  |
+| --------------------------------- | ------------------------------------------------------- | ---------------------- |
+| `ReminderLifecycle-nopickup`      | the tick does not close abandoned firings               | `BoundedOutcome`       |
+| `ReminderLifecycle-nopickup-live` | the same, checked as liveness                           | `EveryFiringConcludes` |
+| `ReminderLifecycle-resend`        | the Alert child sends the row text as is                | `OneAttemptPerCapture` |
+| `ReminderLifecycle-stale`         | a result is written without comparing `firedAt`         | `FactOfThisFiring`     |
+| `ReminderLifecycle-recapture`     | taking the row leaves it on the same due                | `OncePerDue`           |
+| `ReminderLifecycle-sweepopen`     | the sweep removes a row that has no outcome             | `DeliveredOrReason`    |
+| `ReminderLifecycle-closelive`     | the window closes a firing whose child this agent runs  | `NoFalseAlert`         |
+| `ReminderLifecycle-alertblind`    | the Alert child does not read the row before sending    | `NoFalseAlert`         |
+| `ReminderLifecycle-nofact`        | the fact "Alert sent" is never recorded                 | `AlertOnce`            |
+| `ReminderLifecycle-forget`        | the Alert goes out only in the pass that closed the row | `AbandonedAlerted`     |
+| `ReminderLifecycle-sweepfirst`    | the sweep removes a row that still owes its Alert       | `AlertBeforeDrop`      |
+| `ReminderLifecycle-takefirst`     | a Routine is taken again while it owes its Alert        | `AlertBeforeDrop`      |
+| `ReminderLifecycle-retryblind`    | a repeat of the transport goes without the check        | `NoFalseAlert`         |
+
+`ReminderLifecycle.cfg` checks a Reminder with two crashes and `ReminderLifecycle-routine.cfg` a Routine with two dues and one crash (two crashes give 759 429 states and ten minutes); both allow one transport or sender fault (`MaxFaults`). The conformance tests in `scripts/reminders/lifecycle.test.ts` carry the property names and replay the counterexamples on the real store, tick, child and transport.
+
+Outside the model: `move` and `run_now` (`ScheduleTool`), the turn itself (`TurnLifecycle`, `ReminderSilence`), the per-tick claim limit, a damaged table, a Telegram answer that lies about delivery, the weekly throttle of command Alerts, and the milliseconds between the Alert child's check and the attempt it lets through: a fact that lands there is the same case as a text that went out before its fact was written, and the Alert says so ("if it is not above in this chat, it did not arrive").
+
+```sh
+specs/reminder-lifecycle-check.sh
+```
+
+## TurnLifecycle
+
+`TurnLifecycle.tla` models the outcome of one Reminder turn and its two guards (`scripts/lib/reminder-turn.ts`: `settleTurn`, `readTurnStream`, `stopParkedTurn`, `resetSession`) together with the identity check of the owner's stop (`agent/lib/telegram-stop.ts`, `scripts/poller/control.ts`). Time is three abstract stages: inactivity, bounded cancel, bounded reset. `ReminderSilence` refines the guard of `Expire`.
+
+Checked invariants:
+
+1. `OwnerFirst`: a turn the owner stopped ends as cancelled, whatever else happened.
+2. `LimitFirst`: without a stop, the session limit decides the outcome.
+3. `FailurePreserved`: a failed turn ends as failed, not as text.
+4. `CancelBeforeStart`: the silence watchdog requests the cancel also when the turn has not started.
+5. `ResetReached`: the watchdog returns only after the reset.
+6. `OldTurnStopped`: a stop aimed at a turn that has been replaced does not wait for the new one.
+
+| Config                   | Mutation                                            | Fails               |
+| ------------------------ | --------------------------------------------------- | ------------------- |
+| `TurnLifecycle-failure`  | a failed turn is settled as text                    | `FailurePreserved`  |
+| `TurnLifecycle-silence`  | the watchdog cancels only a turn that has started   | `CancelBeforeStart` |
+| `TurnLifecycle-identity` | the stop observes the turn without comparing its id | `OldTurnStopped`    |
+
+The tests named `TurnLifecycle …` in `scripts/lib/reminder-turn.test.ts` and `agent/lib/telegram-stop.test.ts` hold the invariants on the real turn. Outside the model: durable server execution, helper completion and the effects of tools.
+
+```sh
+specs/turn-lifecycle-check.sh
+```
+
+## ResetIntent
+
+`ResetIntent.tla` models the reset intent of a private chat (`/new` and `/restart`) and was written after the code: `scripts/lib/telegram-reset-intent.ts` (the intent file with `discardThroughUpdateId`), `scripts/poller/queue.ts` (`performScopedReset`, `reconcileScopedResetIntents`, the Bridge memory read by `privateResetIntentPhase`), `scripts/poller/control.ts` (`startReset`, `holdForPendingRetry`, `finishReset`) and `agent/lib/telegram-reset-route.ts` (the reset route the agent serves). One private chat, updates `1..N` with `/new` among them, the chat queue and the intent file on disk, the Bridge memory (the record mirror that fences the queue, the backoff, the failure count, the delivered escalation, the request the main loop and the reconciliation each await), the agent session as a generation, the reset requests the agent has accepted and not yet finished (with their acceptance order, address or session-id target, and the fixed generation selected by session id), the main loop that handles `/new` step by step, the reconciliation task with the chat reset queue (`chatResetTails`: the main path of a chat and its reconciliation never run at once, and the queue delivery of that chat waits while either holds it) and a Bridge restart between any two steps that empties the memory. The operator `Phase` is `resetIntentPhase`: `none`, `blocked`, `recorded`, `waiting`, `escalated`. Time is a step `Expire`; group chats, the edit of the pending message, `/restart`'s service restart, a second Bridge process and read errors at startup are outside the model.
+
+Checked invariants:
+
+1. `ExactCut`: after `/new` the chat queue is cleared exactly through the recorded `update_id`; a message before it never reaches the new session, a message after it is kept, goes to the new session and is not wiped by a late reset.
+2. `IntentUntilClean`: without the intent file no message before a reset `/new` is left in the queue.
+3. `ConfirmOnce`: the owner sees "conversation reset" at most once per `/new`; `EscalationOnce`: one escalation per process.
+4. `Finished` (liveness): every `/new` gets an answer, and the intent is removed after the session reset and the cleanup, or the owner is told to run `iva reset`.
+
+The base configuration has the reconciliation pass interleaving with the main loop (`RecInterleave = TRUE`): the scan of the intent directory may happen before a whole `/new` and its next message. What keeps `ExactCut` green is the chat reset queue and `RecTake`, the step that re-reads the intent from disk after taking the queue: without an intent file, or with a different `discardThroughUpdateId`, the reconciliation does nothing.
+
+The agent is not restarted with the Bridge: `Remote` and `RecRemote` only accept the request into `pending`, and `AgentDone` finishes it — possibly after the Bridge restart, with the address resolved at that moment. `AgentStale = TRUE` guards the session: a request whose chat was already reset after its acceptance (`doneSeq`) does nothing, so the late resolve preserves the session the new Bridge has already filled. `doneSeq` retains the greatest acceptance number of completed resets, even when an older reset finishes later. Recovery can finish while the old request still awaits `resolveSession`; `-agent-outlives` shows the loss with this guard disabled (`AgentStale = FALSE`). The conformance tests in `scripts/telegram-reset-restart.test.ts` use two Bridge processes and SIGKILL; `scripts/lib/telegram-reset.test.ts` also covers completion order across the asynchronous `reset()` boundary. Resets by `sessionId` keep their fixed session handle; recovery from a reset intent always uses the chat address. `Remote` can accept either target, so an older address request can finish after a newer session-id request and delivery. Both target kinds record completion for the chat (`SessionCompletion = TRUE`), including when the fixed session has already retired. The Bridge supplies an optional `chatKey` alongside `sessionId`, because eve's fixed session handle exposes no address. Address resolution still uses the full conversation address; completion is scoped by chat and topic, including group replies. Old session-id bodies without `chatKey` retain their fixed-id reset behavior; malformed keys return HTTP 400. Different chats and topics have independent completion records.
+
+Witnesses must fail: `-clear-first` (the intent is removed before the queue is cleared, `IntentUntilClean`), `-clear-all` (the queue is cleared through its last item, not the recorded `update_id`, `ExactCut`), `-confirm-recovery` (the reconciliation also confirms, `ConfirmOnce`). One accepted window fails and stays as a witness: `-confirm-window` (a restart between "conversation reset" and the saved offset: Telegram hands `/new` out again and the owner sees a second confirmation, `ConfirmOnce`). Two mutants of the fix, not witnesses: `-interleave` (the reconciliation takes the chat reset queue but does not re-read the intent, `RecReread = FALSE`, so its late remote reset wipes the session `/new` and the queue delivery already filled) and `-agent-outlives` (the late request of a dead Bridge resets whatever session it resolves, `AgentStale = FALSE`, so the message the recovery delivered is wiped); both fail `ExactCut`. The `-session-completion` mutant records only address completions (`SessionCompletion = FALSE`); an older address request wipes post-cut delivery after a newer session-id reset, violating `ExactCut`. Conformance tests named after the invariants: `scripts/telegram-poll-reset.test.ts` (`ResetIntent …`), `scripts/lib/telegram-reset-intent.test.ts` and `scripts/telegram-reset-restart.test.ts` (`ResetIntent ExactCut …`: two Bridge processes, the request of the killed one finishing after the recovery), and `scripts/telegram-reset-mixed.test.ts` (both R1-M orders from the critic: the direct route and the Bridge group reply with a timed-out request, plus independent chat/topic completion).
+
+```sh
+specs/reset-intent-check.sh
+```
+
+## JobRun
+
+`JobRun.tla` models a Job — a scheduled run through `runScheduledJob` — and was written after the code: the reservation of a schedule name in `data/rollup-status.json` (`admitUnderLock`, `completeUnderLock`, `clearReservation` in `agent/lib/schedule-runner.ts`, read by `jobState` in `agent/lib/job-state.ts`), its fact in `data/jobs.json` (`recordJobFact`), the agent wake and the Job watchdog (`scripts/lib/job-watchdog.ts`). One name, Iva processes as slots that die and come back as a new incarnation, admission under the status lock as one step, the child, the fact under the schedule's fact policy (or a failed write that rejects the run's promise), completion and the `finally` cleanup that release only their own reservation, the reservation deadline (`timeoutMs`, `Deadline = FALSE` for none) and the watchdog's daily message. `PidReuse` gives a new incarnation the old pid, so `process.kill(pid, 0)` sees an old reservation alive; `SelfCheck` is the v5 fix that treats this process's pid with another `ownerStartedAt` as dead. The guard on the last success, seeding by the migration, the status lock's steal, flock around the child and the fact's text are outside the model. The fact policy is a constant: under `factOnSuccess: "after-failure"` (the half-hourly `proactive` tick, `agent/schedules/proactive.ts`) a successful run whose name has no failed fact on top writes no row at all — the run is left in the status (`lastFinishedAt`, `lastSuccessAt`), and `job-facts.ts` `recordFact` returns false; a failure is always written, and a success closes a failure.
+
+Checked invariants:
+
+1. `OneLive`: at most one live child per schedule name.
+2. `DeadFreed`: a reservation of a dead owner never blocks an admission.
+3. `FactKept`: a run that wrote its outcome to the status left a fact — unless the fact policy skipped it (a success with no failed fact on top, which the status records as a success), — or its promise was rejected with "fact not recorded".
+4. `NoForeignClear`: completion and cleanup never remove another run's reservation.
+5. `WatchOnce`: one watchdog message per day.
+
+`JobRun.cfg` (two processes, deadline, `after-failure`), `-nodeadline`, `-selfreuse` (one process that gets its pid back) and `-always` (the `always` fact policy) pass. Mutants must fail: `-foreign-clear` (`NoForeignClear`), `-over-live` (admission over a live reservation, `OneLive`), `-no-fact` (`FactKept`), `-sparse-nostatus` (a policy-skipped success reaches the status only as "finished", never as a success, `FactKept`), `-ignore-death` (`DeadFreed`), `-selfreuse-nocheck` (the code before v5, `DeadFreed`). Accepted windows stay as witnesses: `-pidreuse` (another process took the dead owner's pid: the reservation holds until its deadline, `DeadFreed`), `-grace` (the child lives up to `killGraceMs` past the deadline while a second run starts, `OneLive`; flock on `.memory.lock` serializes the night) and `-orphan` (the child outlives Iva; `KillMode=control-group` of `iva.service` rules it out on Linux, `OneLive`). Conformance tests: `agent/lib/job-state.test.ts` (`JobRun …`, with a differential property against the admission condition before v5).
+
+```sh
+specs/job-run-check.sh
+```

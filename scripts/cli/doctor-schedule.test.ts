@@ -3,13 +3,13 @@
 // незакрытые провалы. Пульс минутного диспетчера говорит раздел напоминаний той же
 // команды (scripts/cli/doctor.ts), второго источника об одном mtime нет.
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 
 import { jobFactsFile, recordFact, type JobFact } from "#lib/job-facts.ts";
 import { scheduleFactsReport } from "./doctor.ts";
+import { tempDir } from "../fixtures/temp-dir.ts";
 
 const NOW = Date.UTC(2026, 8, 13, 12, 0, 0);
 const HOUR = 60 * 60 * 1000;
@@ -30,7 +30,7 @@ function fact(overrides: Partial<JobFact> = {}): JobFact {
 }
 
 test("последний запуск каждого имени: ok и провал с причиной", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "t20-doctor-"));
+  const dir = tempDir("t20-doctor-");
   await recordFact(jobFactsFile(dir), fact(), NOW);
   await recordFact(
     jobFactsFile(dir),
@@ -49,7 +49,7 @@ test("последний запуск каждого имени: ok и пров�
 });
 
 test("закрытый провал не считается открытым, имя без фактов не выводится", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "t20-doctor-"));
+  const dir = tempDir("t20-doctor-");
   await recordFact(
     jobFactsFile(dir),
     fact({ ok: true, error: null, exitCode: 0 }),
@@ -63,7 +63,7 @@ test("закрытый провал не считается открытым, и
 // Снятые расписания (memory-daily, -weekly, -monthly, -yearly ушли в ночь, digest — в Brief):
 // их последний провал в jobs.json остаётся навсегда, и доктор не говорит о том, чего больше нет.
 test("снятое расписание не выводится и не считается открытым провалом", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "t20-doctor-"));
+  const dir = tempDir("t20-doctor-");
   for (const name of [
     "memory-daily",
     "memory-weekly",
@@ -86,7 +86,7 @@ test("снятое расписание не выводится и не счит
 // iva jobs ack закрывает провал: строка остаётся, но без «: провал», по которой доктор
 // предупреждает.
 test("провал, закрытый iva jobs ack, не предупреждает", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "t20-doctor-"));
+  const dir = tempDir("t20-doctor-");
   await recordFact(jobFactsFile(dir), fact({ acked: true }), NOW);
   const report = await scheduleFactsReport(dir);
   assert.deepEqual(report.lastRuns, [
@@ -99,13 +99,13 @@ test("провал, закрытый iva jobs ack, не предупреждае
 // Тик proactive пишет факт успеха только после провала (48 строк в сутки вытеснили бы остальные
 // факты): время последнего успешного прогона — из rollup-status.json (lastSuccessAt раннера).
 test("proactive: последний запуск виден — провал из фактов, успех из статуса раннера", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "t20-doctor-"));
+  const dir = tempDir("t20-doctor-");
   await recordFact(jobFactsFile(dir), fact({ name: "proactive" }), NOW);
   assert.deepEqual((await scheduleFactsReport(dir)).lastRuns, [
     "proactive: провал (exited 1), 2026-09-13T10:00:01.000Z",
   ]);
 
-  const healthy = mkdtempSync(join(tmpdir(), "t20-doctor-"));
+  const healthy = tempDir("t20-doctor-");
   writeFileSync(
     join(healthy, "rollup-status.json"),
     JSON.stringify({ proactive: { lastSuccessAt: NOW - HOUR } }),

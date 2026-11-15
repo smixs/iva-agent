@@ -51,7 +51,7 @@ if (mode === "probe") {
   if (mode === "hold-after-drop") {
     writeFileSync(join(directory, "drop-attempted"), "attempted\n");
   } else if (mode === "hold-after-offset") {
-    await saveOffset(101, null, { file: offsetFile });
+    await saveOffset(101, { file: offsetFile });
   } else if (mode !== "hold-before-marker" && mode !== "hold-after-marker") {
     throw new Error(`unknown mode: ${mode}`);
   }

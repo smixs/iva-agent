@@ -70,7 +70,7 @@ void test("/new deletes the queued sign together with the status message", async
   });
 
   await queue.completeScopedResetState(chatKey, {});
-  const after = getChatStatus(chatKey);
+  const after: Record<string, unknown> | null = getChatStatus(chatKey);
   assert.equal(after?.status, "idle");
   for (const field of SIGN_FIELDS)
     assert.equal(after?.[field], undefined, field);

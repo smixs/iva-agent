@@ -22,7 +22,6 @@ import {
   type PluginUnitScope,
   resolvedPluginUnitName,
 } from "../lib/plugin-units.ts";
-import { LEGACY_BRAIN_UNITS } from "../lib/legacy-memory-units.ts";
 import {
   classifyAgentListeners,
   classifyLsofListeners,
@@ -41,6 +40,7 @@ import {
   type UpdateLock,
 } from "../lib/version-store.ts";
 import { hasEmbeddingSource } from "../lib/memory-mode.ts";
+import { readUpdateRun } from "../lib/update-run-journal.ts";
 import { ambiguousEnvLines } from "../lib/env-file.ts";
 // `import type` стирается при компиляции, значения authored tree грузятся динамически
 // внутри вызова: `iva doctor` работает и на установке, где agent/ нет
@@ -102,7 +102,7 @@ export function authoredTreeMissing(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   // Своя ошибка называет `#lib/`-алиас или путь в `agent/`; чужой пакет (`packages/…`)
   // сюда не попадает и доктор о нём предупреждает.
-  return /#lib\/|#evals\/|agent[\\/]/u.test(message);
+  return /#lib\/|agent[\\/]/u.test(message);
 }
 
 /**
@@ -114,8 +114,8 @@ export function authoredTreeMissing(error: unknown): boolean {
 export async function scheduleFactsReport(
   dataDirectory: string,
 ): Promise<ScheduleFactsReport> {
-  const { jobFactsFile, latestFact, readFactsSync } =
-    await import("#lib/job-facts.ts");
+  const { jobFactsFile, readFactsSync } = await import("#lib/job-facts.ts");
+  const { jobState } = await import("#lib/job-state.ts");
   const { openJobFailures } = await import("#lib/open-failures.ts");
   const { PROACTIVE_SCHEDULE, SCHEDULE_CRON } =
     await import("#lib/schedule-table.ts");
@@ -125,7 +125,11 @@ export async function scheduleFactsReport(
   const names = [...Object.keys(SCHEDULE_CRON), PROACTIVE_SCHEDULE].sort();
   const lastRuns: string[] = [];
   for (const name of names) {
-    const line = lastRunLine(name, latestFact(facts, name), succeeded[name]);
+    const line = lastRunLine(
+      name,
+      jobState(name, { facts }).last,
+      succeeded[name],
+    );
     if (line !== null) lastRuns.push(line);
   }
   return { lastRuns, openFailures: openJobFailures(facts), facts };
@@ -314,7 +318,6 @@ type DoctorRun = {
   readonly ensureAssistantBearer: SystemdLifecycle["ensureAssistantBearer"];
   readonly writeUnits: SystemdLifecycle["writeUnits"];
   readonly activateUnits: SystemdLifecycle["activateUnits"];
-  readonly migrateEnv: SystemdLifecycle["migrateEnv"];
   readonly now: () => number;
   readonly sleep: (milliseconds: number) => Promise<void>;
   readonly exit: (code: number) => unknown;
@@ -485,8 +488,7 @@ function createDoctorRun(
     readEnv,
     dataDirAbs,
   } = runtime;
-  const { ensureAssistantBearer, writeUnits, activateUnits, migrateEnv } =
-    systemdLifecycle;
+  const { ensureAssistantBearer, writeUnits, activateUnits } = systemdLifecycle;
   // Одна выкладка данных на весь прогон: каталог не меняется под ногами, а
   // каждый лишний вызов — это ещё одно чтение .env ради того же ответа.
   const env = readEnv();
@@ -521,7 +523,6 @@ function createDoctorRun(
     ensureAssistantBearer,
     writeUnits,
     activateUnits,
-    migrateEnv,
     install: null,
     readOnly: dependencies.readOnly === true,
   };
@@ -625,7 +626,7 @@ async function checkClaudeCli(ctx: DoctorContext): Promise<void> {
   ctx.fail(status.hint);
 }
 
-/** Хвост раздела .env: двусмысленные строки, миграция порта, необязательные поиск и память. */
+/** Хвост раздела .env: двусмысленные строки, порт, необязательные поиск и память. */
 function checkEnvOptions(ctx: DoctorContext): void {
   // Значение вне безопасного подмножества сервис и команда могут прочитать
   // по-разному: юнит несёт `EnvironmentFile=`, а CLI читает тем же parseEnv, что и
@@ -641,9 +642,11 @@ function checkEnvOptions(ctx: DoctorContext): void {
       `.env lines the service and the CLI may read differently: ${ambiguous.join(", ")} — re-enter them: iva config`,
     );
   }
-  // old .env without IVA_PORT (or with :3000) — migrate right here
-  if (ctx.repair("add IVA_PORT to .env if missing", () => ctx.migrateEnv()))
-    ctx.fix();
+  // A .env written before 0.3.15 names no port. Nothing rewrites it: the owner adds the line.
+  if (!(ctx.env.IVA_PORT || "").trim())
+    ctx.fail(
+      `${ctx.envPath} has no IVA_PORT (a .env of Iva older than 0.3.15) — add the line IVA_PORT=<port>, or run: iva config`,
+    );
   // voice is optional: without the key voice notes are saved but not transcribed
   if (!(ctx.env.DEEPGRAM_API_KEY || "").trim())
     ctx.warn(
@@ -714,7 +717,12 @@ function checkVersionState(
   if (active) {
     try {
       if (store.settled() !== active) {
-        ctx.warn(`update to ${active} never finished — run: iva update`);
+        // Журнал хода называет шаг, на котором обновление оборвалось (UpdateRun.tla):
+        // его читают повтор, Bridge и эта строка одной функцией.
+        const run = readUpdateRun(store.layout.data);
+        const step =
+          run && run.version === active ? ` at its ${run.phase} step` : "";
+        ctx.warn(`update to ${active} never finished${step} — run: iva update`);
       }
     } catch {
       // Corrupt state is reported by the version cleanup below, which reads
@@ -1004,14 +1012,8 @@ function enableTimer(ctx: DoctorContext, timer: string): boolean {
 
 // A oneshot service can be inactive and still healthy; its persistent failed state is the
 // signal that the last nightly run broke. Query each one only if it is installed here.
-// The legacy pre-rename service counts too: a migration that had to keep it (see
-// removeLegacyBrainUnits) leaves it carrying the nightly vault care, and a failure there
-// costs exactly the same night as a failure of the new one.
 function checkNightlyServices(ctx: DoctorContext): void {
-  const nightlyServices = [
-    ctx.brainService,
-    ...LEGACY_BRAIN_UNITS.filter((unit) => unit.endsWith(".service")),
-  ].filter((unit) =>
+  const nightlyServices = [ctx.brainService].filter((unit) =>
     existsSync(unitPath(unit, ctx.unitDir, ctx.systemd.manager)),
   );
   for (const service of nightlyServices) {
@@ -1080,6 +1082,7 @@ function checkRollupStatus(ctx: DoctorContext): void {
 type ReminderStoreModule = {
   reminderFile: typeof import("../../agent/lib/reminder-store.ts").reminderFile;
   parseReminderTable: typeof import("../../agent/lib/reminder-store.ts").parseReminderTable;
+  reminderPhase: typeof import("../../agent/lib/reminder-store.ts").reminderPhase;
 };
 
 type ReminderTickModule = {
@@ -1144,22 +1147,26 @@ function checkReminderFailures(
           ctx.now(),
         )
       : [];
-    const failed = rows.filter(
-      (row) =>
-        row.error !== null &&
-        row.firedAt !== null &&
-        ctx.now() - row.firedAt <= dayMs,
-    );
-    for (const row of failed.slice(0, 5)) {
-      // Три состояния строки, а не одно: установленный провал, невидимый факт
-      // (текст мог уйти, запись не состоялась) и провал позднего шага после
-      // отправки. «Не дошло» — только первое; в строке — хеш id и код ошибки.
+    // Фазу строки выводит стор, тем же кодом, что у тика и инструментов. Брошенная строка
+    // видна и до того, как тик записал ей причину: доктор запускают и при лежащем агенте.
+    const failed = rows
+      .map((row) => ({ row, phase: store.reminderPhase(row, ctx.now()) }))
+      .filter(
+        ({ row, phase }) =>
+          (row.error !== null || phase === "abandoned") &&
+          row.firedAt !== null &&
+          ctx.now() - row.firedAt <= dayMs,
+      );
+    for (const { row, phase } of failed.slice(0, 5)) {
+      // Три исхода, а не один: установленный провал, брошенное срабатывание (текст мог
+      // уйти, факта нет) и провал позднего шага после отправки. «Не дошло» — только
+      // первое; в строке — хеш id и код ошибки.
       const code =
         row.error === null ? "error text omitted" : errorCode(row.error);
       const verdict =
-        row.delivered === false
+        phase === "failed"
           ? `did not go out: ${code}`
-          : row.delivered === null
+          : phase === "abandoned"
             ? "the delivery fact was not recorded"
             : `went out, a later step failed: ${code}`;
       // Печать на каждый провал, счёт — один на весь список: сводка считает раздел,
@@ -1187,10 +1194,8 @@ type BridgeState = {
   readonly unreadable: boolean;
 };
 
-type ChatStatusesReport = {
-  readonly statuses: ReturnType<typeof listChatStatuses>;
-  readonly staleRunMs: number | null;
-};
+/** Состояния чатов словами (agent/lib/run-status.ts chatState); пусто, если записи недоступны. */
+type ChatStates = readonly string[];
 
 /**
  * Очереди моста. Загрузчик при обычной работе чинит pending/corrupt-файлы, а доктор
@@ -1248,34 +1253,29 @@ async function loadBridgeState(ctx: DoctorContext): Promise<BridgeState> {
   return { module, documents, unreadable };
 }
 
-async function readChatStatuses(
+async function readChatStates(
   ctx: DoctorContext,
-): Promise<ChatStatusesReport> {
+  checkedAt: number,
+): Promise<ChatStates> {
   try {
     const runStatus = await import("../../agent/lib/run-status.ts");
-    return {
-      statuses: (ctx.listChatStatuses ?? runStatus.listChatStatuses)(),
-      staleRunMs: runStatus.RUN_STALE_MS,
-    };
+    return (ctx.listChatStatuses ?? runStatus.listChatStatuses)().map(
+      ({ status }) => runStatus.chatState(status, checkedAt),
+    );
   } catch {
     // Authored tree или run-status каталог недоступны (CLI обязан грузиться
     // и без них) — протухшие чаты в этой среде проверить нечем.
-    return { statuses: [], staleRunMs: null };
+    return [];
   }
 }
 
-function countStuckChats(
-  statuses: ReturnType<typeof listChatStatuses>,
-  staleRunMs: number | null,
-  checkedAt: number,
-): number {
-  if (staleRunMs === null) return 0;
-  return statuses.filter(
-    ({ status }) =>
-      status.status === "running" &&
-      (typeof status.updatedAt !== "number" ||
-        checkedAt - status.updatedAt > staleRunMs),
-  ).length;
+/** Чем заняты чаты: «1 turn, 1 compacting»; пусто — все свободны. */
+function busyChatsLine(states: ChatStates): string {
+  return ["accepted", "turn", "compacting", "stale"]
+    .map((name) => [name, states.filter((state) => state === name).length])
+    .filter(([, count]) => count !== 0)
+    .map(([name, count]) => `${count} ${name}`)
+    .join(", ");
 }
 
 function countQueueItems(
@@ -1304,9 +1304,9 @@ function countQueueItems(
 
 async function checkBridge(ctx: DoctorContext): Promise<void> {
   const { module, documents, unreadable } = await loadBridgeState(ctx);
-  const { statuses, staleRunMs } = await readChatStatuses(ctx);
   const checkedAt = ctx.now();
-  const stuckChats = countStuckChats(statuses, staleRunMs, checkedAt);
+  const states = await readChatStates(ctx, checkedAt);
+  const stuckChats = states.filter((state) => state === "stale").length;
   const { itemCount, oldestEnqueuedAt } = countQueueItems(module, documents);
   const oldestAgeMs =
     itemCount > 0 && oldestEnqueuedAt !== null
@@ -1325,6 +1325,8 @@ async function checkBridge(ctx: DoctorContext): Promise<void> {
   } else if (!unreadable) {
     ctx.ok("bridge backlog: clear");
   }
+  const busy = busyChatsLine(states);
+  if (busy !== "") ctx.ok(`chats busy: ${busy}`);
 }
 
 // 6. Vault + git origin (report only — we don't initiate git operations)
@@ -1498,7 +1500,7 @@ async function checkPluginEntry(
 ): Promise<void> {
   const { readPlugin } = core.reader;
   const { readPluginConfigState } = core.config;
-  const { pluginConfigFile, pluginRoot } = core.store;
+  const { pluginConfigFile, pluginMode, pluginRoot } = core.store;
   const root = pluginRoot(ctx.dataDirectory, entry.name);
   if (!existsSync(root)) {
     ctx.fail(
@@ -1531,7 +1533,7 @@ async function checkPluginEntry(
   ctx.ok(
     `plugin ${entry.name}${entry.enabled ? "" : " (disabled)"}: ${parts.join(", ")}`,
   );
-  if (entry.enabled && entry.trusted)
+  if (pluginMode(entry) === "full")
     expectPluginUnits(report, entry, inspection);
   // Код плагина живёт в версии, а не в папке (ADR-0009): запись «включён» без
   // сборки в работающей версии значит, что тулов плагина у агента нет.

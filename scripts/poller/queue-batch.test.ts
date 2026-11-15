@@ -24,7 +24,6 @@ const {
   enqueueQueueFile,
   isTelegramQueueUpdate,
   loadQueueFile,
-  normalizeQueueDocument,
   queueCount,
   removeQueueItems,
   TELEGRAM_QUEUE_ACK_ROLLED_BACK,
@@ -93,10 +92,10 @@ function bench(document: Doc) {
   const options = (overrides: Partial<DrainOptions> = {}): DrainOptions => ({
     loadImpl: () => Promise.resolve(state.document),
     runningImpl: () => state.running,
-    statusImpl: () => ({
-      status: state.running ? "running" : "idle",
-      generation: state.generation,
-    }),
+    statusImpl: () =>
+      state.running
+        ? { status: "running", sessionId: "s", generation: state.generation }
+        : { status: "idle", generation: state.generation },
     deliverImpl: (update) => {
       state.deliveries.push(update);
       const verdict = state.verdicts.shift() ?? true;
@@ -652,18 +651,6 @@ await test("a reply to Iva bypasses a non-empty queue in steer mode", async () =
   assert.deepEqual(delivered, [101]);
 });
 
-await test("an undeliverable legacy item in the queue holds steer like any other item", async () => {
-  const legacy = normalizeQueueDocument({ "1:": ["old text"] }).document;
-  const result = await routing.routeMessageUpdate(
-    text(101, "new"),
-    routeOptions({
-      loadQueueImpl: () => Promise.resolve(legacy),
-      deliverImpl: () => assert.fail("the queue is not empty"),
-    }),
-  );
-  assert.equal(result, "queued");
-});
-
 await test("queue mode keeps its decision: free chat with an empty queue goes direct, a running turn queues", async () => {
   assert.equal(
     await routing.routeMessageUpdate(
@@ -746,6 +733,48 @@ await test("bridge.queued is traced once per new queue item and never breaks the
     "queued",
   );
   assert.equal(noticed, 1);
+});
+
+await test("a queued message names why it waits: the chat record state, a pending reset or the queue", async () => {
+  const reasons: string[] = [];
+  const logged: string[] = [];
+  const at = Date.now();
+  const route = (overrides: Partial<RouteOptions>) =>
+    routing.routeMessageUpdate(
+      text(103 + reasons.length, "new"),
+      routeOptions({
+        turnPolicyImpl: () => "queue",
+        traceQueuedImpl: (_update, _count, reason) => reasons.push(reason),
+        logImpl: (...parts) => logged.push(parts.join(" ")),
+        ...overrides,
+      }),
+    );
+  const busy = { status: "running", sessionId: "s", updatedAt: at } as const;
+  for (const statusImpl of [
+    () => ({ ...busy, turnId: "t" }),
+    () => ({ ...busy, compacting: true as const }),
+    () => ({ status: "running" as const, ingressId: "i", updatedAt: at }),
+  ])
+    assert.equal(
+      await route({ runningImpl: () => true, statusImpl }),
+      "queued",
+    );
+  assert.equal(await route({ resetPendingImpl: () => true }), "queued");
+  assert.equal(
+    await route({ loadQueueImpl: () => Promise.resolve(waiting) }),
+    "queued",
+  );
+  assert.deepEqual(reasons, [
+    "chat busy: turn",
+    "chat busy: compacting",
+    "chat busy: accepted",
+    "reset pending",
+    "earlier messages wait",
+  ]);
+  assert.deepEqual(
+    logged,
+    reasons.map((reason, index) => `queued update ${103 + index}: ${reason}`),
+  );
 });
 
 // --- Пометка тапа ---

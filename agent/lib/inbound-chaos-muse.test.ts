@@ -7,13 +7,12 @@
 //
 // КАК ВОСПРОИЗВЕСТИ: тесты детерминированы, seed не нужен - вход фиксирован.
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import test from "node:test";
+import { tempDir } from "../../scripts/fixtures/temp-dir.ts";
 
-const root = mkdtempSync(join(tmpdir(), "iva-inbound-chaos-"));
+const root = tempDir("iva-inbound-chaos-");
 process.env.ASSISTANT_DATA_DIR = join(root, "data");
 process.env.ASSISTANT_VAULT_DIR = join(root, "vault");
 process.env.ASSISTANT_TIMEZONE = "UTC";

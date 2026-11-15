@@ -101,7 +101,7 @@ function printHelp(C: ReturnType<typeof createCliRuntime>["C"]): void {
 ${C.b}Iva CLI${C.x} — manage your personal agent
 
 ${C.b}Commands:${C.x}
-  ${C.c}iva update${C.x}         update: git pull + build + restart
+  ${C.c}iva update${C.x}         update: build the new release beside this one, check it starts, restart
   ${C.c}iva beta${C.x} / ${C.c}stable${C.x}   updates: every accepted change (beta) / releases only
   ${C.c}iva config${C.x}         configure: model, Telegram, Deepgram, TZ, vault
   ${C.c}iva login${C.x} [--browser]  sign in to an OpenAI subscription (ChatGPT) for MODEL_PROVIDER=codex
@@ -117,6 +117,7 @@ ${C.b}Commands:${C.x}
   ${C.c}iva trace${C.x} <cmd>      the turn journal: tail|show [<session>/<turn>|last]|open
   ${C.c}iva notify${C.x} <text>    send one Telegram message verbatim
   ${C.c}iva jobs ack${C.x} <name>  close an open schedule failure
+  ${C.c}iva jobs status${C.x}  state of each schedule: reservation and last fact
   ${C.c}iva jobs skip memory-night${C.x} <date>  close a night-memory day without processing it
   ${C.c}iva remind${C.x} <text>    let the agent judge one Reminder, then send it to Telegram
   ${C.c}iva proactive${C.x} show|on|off|set <key> <value>  Watch, Brief and Insight settings

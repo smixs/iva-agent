@@ -23,9 +23,9 @@ import {
 } from "#lib/schedule-table.ts";
 import { REMINDER_TICK_STALE_MS, readTickPulse } from "#lib/reminder-tick.ts";
 import { list } from "#lib/reminder-store.ts";
-import { resolveTimeZone } from "#lib/timezone.ts";
+import { resolveTimeZone } from "../../../packages/timezone/index.ts";
 import { formatZoned } from "#lib/zoned-time.ts";
-import { button, buttonRow, escapeRichText } from "./buttons.ts";
+import { button, buttonRow, escapeRichText } from "../telegram-buttons.ts";
 
 const PER_PAGE = 8;
 const CACHE_TTL_MS = 60_000;

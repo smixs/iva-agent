@@ -2,15 +2,16 @@
 // Guard for the authored tree: eve rebuilds `agent/` at service start, so any module
 // specifier there that resolves outside `agent/` drags `scripts/` into the bundle — the
 // failure that produced the 0.3.14 crash loop (issue #176). agent/ never imports
-// scripts/; the only exits are shared packages via @iva/*, and the explicit edge
-// list is pinned by the test below — a new edge out of `agent/` is red on sight.
+// scripts/; its only exits are the shared packages in `packages/`, named as `@iva/<name>`
+// or by relative path, and the explicit edge list is pinned by the test below — a new
+// edge out of `agent/` is red on sight.
 //
 // What replaced the last of them is the seam: the half the authored tree needs lives in
 // `agent/lib`, the half `iva` loads on an install whose `agent/` is missing stays in
 // `scripts/`, and neither reaches the other at load time. Where the two halves must know
-// the same thing anyway — an env-var name, the OAuth constants, the reasoning vocabulary —
-// each side is deliberately self-contained and a test pins the copies together, the way
-// `usage` shares only its log path (docs/tech-debt.md §3).
+// the same thing — the reasoning vocabulary, the Codex token file, the secret rule, the
+// claude command, the vault walk — it lives once in a package both import, and the edge
+// list names it (docs/tech-debt.md §3).
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
@@ -144,32 +145,58 @@ test("the authored tree has only its explicit shared-package edges", () => {
   assert.deepEqual(
     escapes(),
     [
-      "agent/instructions/05-language.ts -> @iva/data-dir",
+      "agent/agent.ts -> ../packages/context-window/index.ts",
+      "agent/hooks/trace.ts -> ../../packages/guards/index.ts",
+      "agent/hooks/trace.ts -> ../../packages/secret-redaction/index.ts",
       "agent/instructions/20-core.ts -> @iva/vault-dir",
       "agent/instructions/25-persona.ts -> @iva/vault-dir",
-      "agent/instructions/now.ts -> @iva/data-dir",
       "agent/instructions/now.ts -> @iva/timezone",
+      "agent/instrumentation.ts -> ../packages/timezone/index.ts",
+      "agent/lib/claude-admission.ts -> ../../packages/guards/index.ts",
       "agent/lib/claude-cli.ts -> ../../packages/claude-command/index.ts",
-      "agent/lib/context-window.ts -> ../../packages/context-window/index.ts",
+      "agent/lib/claude-cli.ts -> ../../packages/context-window/index.ts",
+      "agent/lib/claude-cli.ts -> ../../packages/reasoning-levels/index.ts",
+      "agent/lib/codex-auth.ts -> ../../packages/codex-auth/index.ts",
       "agent/lib/data-dir.ts -> ../../packages/data-dir/index.ts",
+      "agent/lib/job-facts.ts -> ../../packages/guards/index.ts",
       "agent/lib/job-facts.ts -> ../../packages/secret-redaction/index.ts",
       "agent/lib/model-auth-alert.ts -> ../../packages/alert-state/index.ts",
+      "agent/lib/model-auth-alert.ts -> ../../packages/timezone/index.ts",
       "agent/lib/model-provider.ts -> @iva/opencode-protocol",
+      "agent/lib/plugin-reader.ts -> ../../packages/guards/index.ts",
+      "agent/lib/plugin-store.ts -> ../../packages/guards/index.ts",
+      "agent/lib/reminder-store.ts -> ../../packages/alert-state/index.ts",
+      "agent/lib/reminder-store.ts -> ../../packages/guards/index.ts",
+      "agent/lib/reminder-time.ts -> ../../packages/timezone/index.ts",
       "agent/lib/security-gate.ts -> ../../packages/secret-redaction/index.ts",
+      "agent/lib/telegram-acceptance.ts -> ../../packages/guards/index.ts",
+      "agent/lib/telegram-failure-notice.ts -> ../../packages/notification-chat/index.ts",
       "agent/lib/telegram-media-cache.ts -> @iva/vault-dir",
       "agent/lib/telegram-media.ts -> @iva/vault-dir",
+      "agent/lib/telegram-reset-route.ts -> ../../packages/guards/index.ts",
+      "agent/lib/telegram-rich-message.ts -> ../../packages/guards/index.ts",
       "agent/lib/telegram-turn-start.ts -> @iva/vault-dir",
-      "agent/lib/timezone.ts -> @iva/timezone",
+      "agent/lib/trace.ts -> ../../packages/timezone/index.ts",
+      "agent/lib/vault-daily.ts -> ../../packages/timezone/index.ts",
       "agent/lib/vault-daily.ts -> @iva/vault-dir",
       "agent/lib/vault-error.ts -> @iva/vault-dir",
       "agent/lib/vault-file-search.ts -> @iva/vault-dir",
+      "agent/lib/vault-links.ts -> ../../packages/timezone/index.ts",
+      "agent/lib/vault-links.ts -> ../../packages/vault-walk/index.ts",
+      "agent/provider.ts -> ../packages/context-window/index.ts",
+      "agent/provider.ts -> ../packages/guards/index.ts",
+      "agent/provider.ts -> ../packages/reasoning-levels/index.ts",
       "agent/provider.ts -> @iva/opencode-protocol",
+      "agent/tools/memory_search.ts -> ../../packages/guards/index.ts",
+      "agent/tools/memory_search.ts -> ../../packages/vault-walk/index.ts",
       "agent/tools/memory_search.ts -> @iva/vault-dir",
+      "agent/tools/remind.ts -> ../../packages/notification-chat/index.ts",
+      "agent/tools/send_file.ts -> ../../packages/notification-chat/index.ts",
       "agent/tools/send_file.ts -> ../../packages/secret-redaction/index.ts",
       "agent/tools/write_card.ts -> @iva/vault-dir",
       "agent/tools/write_file.ts -> @iva/vault-dir",
     ],
-    "agent/ may leave its tree only for the shared packages Eve bundles: @iva/data-dir, @iva/vault-dir, @iva/timezone, @iva/context-window and @iva/opencode-protocol, plus the one rule that cuts secrets for both `iva diagnose` and the schedule log tail the agent reads (a second copy of that rule is how a token inside `bot<token>` stayed in data/jobs.json), and the one rule that finds the claude CLI for both the runtime and `iva doctor` (two copies let the doctor pass a command the runtime could not start)",
+    "agent/ may leave its tree only for packages/, the home both trees share (by package name or by relative path): data-dir, vault-dir, timezone, context-window, opencode-protocol, notification-chat, reasoning-levels, guards, vault-walk and codex-auth (the token file both the login and the runtime write), plus the one rule that cuts secrets for both `iva diagnose` and the schedule log tail the agent reads (a second copy of that rule is how a token inside `bot<token>` stayed in data/jobs.json), and the one rule that finds the claude CLI for both the runtime and `iva doctor` (two copies let the doctor pass a command the runtime could not start)",
   );
 });
 
@@ -433,10 +460,6 @@ test("the guard resolves #-aliases through package.json instead of trusting the 
   assert.equal(
     targetOf("#lib/i18n.ts", "agent/agent.ts"),
     join(AUTHORED, "lib/i18n.ts"),
-  );
-  assert.equal(
-    targetOf("#evals/smoke.ts", "agent/agent.ts"),
-    join(ROOT, "evals/smoke.ts"),
   );
   assert.equal(targetOf("eve/channels", "agent/agent.ts"), null);
 });

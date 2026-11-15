@@ -17,10 +17,14 @@ import { join } from "node:path";
 import test, { type TestContext } from "node:test";
 import { writeFileAtomic } from "#lib/fs-atomic.ts";
 import { createVersionStore } from "../lib/version-store.ts";
+import {
+  beginUpdateRun,
+  closeUpdateRun,
+  markUpdateRun,
+} from "../lib/update-run-journal.ts";
+import { tempDir } from "../fixtures/temp-dir.ts";
 
-const dataDir = realpathSync(
-  mkdtempSync(join(tmpdir(), "iva-update-reconcile-")),
-);
+const dataDir = realpathSync(tempDir("iva-update-reconcile-"));
 process.env.ASSISTANT_DATA_DIR = dataDir;
 writeFileSync(
   join(dataDir, "settings.json"),
@@ -182,14 +186,10 @@ const outcome = (before: string | undefined, after: string) => ({
 const minutesAgo = (minutes: number): string =>
   new Date(Date.now() - minutes * 60_000).toISOString();
 
-const settleMarker = (version: string, settledAt?: string): void =>
+const settleMarker = (version: string, settledAt: string): void =>
   writeFileSync(
     join(dataDir, "active.json"),
-    JSON.stringify({
-      schema: "iva-active/v1",
-      version,
-      ...(settledAt ? { settledAt } : {}),
-    }),
+    JSON.stringify({ schema: "iva-active/v2", version, settledAt }),
   );
 
 const finals = (calls: readonly Call[]): string[] =>
@@ -403,8 +403,8 @@ test(
 );
 
 test("a job killed after the flip is answered from what the installation says", async (t) => {
-  for (const settledAt of [minutesAgo(1), undefined]) {
-    await t.test(`settle marker time: ${settledAt ?? "absent"}`, async (st) => {
+  for (const settledAt of [minutesAgo(1)]) {
+    await t.test(`settle marker time: ${settledAt}`, async (st) => {
       clean(st);
       const root = install(st);
       settleMarker(NEW, settledAt);
@@ -1046,4 +1046,121 @@ test("a retry whose launch fails says nothing and is not tried again", async (t)
   // Заявка израсходована: следующий старт моста не запускает обновление второй раз.
   assert.equal(existsSync(`${path}.retried`), true);
   assert.equal(existsSync(path), true);
+});
+
+// ── исход из журнала хода (specs/UpdateJob.tla) ─────────────────────────────
+// The journal of the run (UpdateRun.tla) names the step the updater reached before it
+// died. Its "settled" phase is written after the candidate answered and active.json
+// named it, so the bridge reads a ✅ from that one record; a run that closed by going
+// back hands the owner "did not finish" instead of a spinner; a run still standing at
+// the flip says nothing at all, because nothing yet proves what to say.
+const runJournal = (
+  phase: Parameters<typeof markUpdateRun>[2],
+  outcome?: Parameters<typeof closeUpdateRun>[2],
+): void => {
+  rmSync(join(dataDir, "update-run.json"), { force: true });
+  beginUpdateRun(dataDir, {
+    version: NEW,
+    from: OLD,
+    units: [
+      {
+        unit: "iva-brain.timer",
+        loadState: "loaded",
+        active: true,
+        enabled: true,
+      },
+    ],
+    quarantine: [],
+  });
+  markUpdateRun(dataDir, NEW, phase, outcome ? { outcome } : {});
+  writeFileSync(join(dataDir, "active.json"), JSON.stringify({ version: OLD }));
+};
+
+test("UpdateJob FinalOnlyWhenPinned: the journal's settled phase is the ✅, with both versions", async (t) => {
+  clean(t);
+  const { store, root } = installation(t);
+  store.activate(NEW); // The flip happened; the updater died before the job's outcome.
+  runJournal("settled", { status: "updated", before: OLD, after: NEW });
+  const calls = telegram(t);
+  const path = job("journal-settled", {
+    chatId: 1,
+    messageId: 100,
+    locale: "en",
+    startedAt: minutesAgo(2),
+    currentAtStart: OLD,
+  });
+
+  await Promise.all(
+    await reconcileUpdateJobs({
+      launchImpl: refuseLaunch,
+      root,
+      tickMs: 5,
+      graceMs: 10,
+    }),
+  );
+
+  assert.equal(existsSync(path), false, "the answered job is gone");
+  assert.match(finals(calls)[0] ?? "", /Iva updated/u);
+  assert.match(finals(calls)[0] ?? "", new RegExp(`${OLD} → ${NEW}`, "u"));
+});
+
+test("UpdateJob NoEndlessWatch: a run that closed by going back says it did not finish, and names the version that runs", async (t) => {
+  clean(t);
+  const root = install(t);
+  runJournal("rolledback", {
+    status: "unhealthy",
+    before: OLD,
+    after: OLD,
+    message: "0.3.18-bbbbbbbbbbbb did not answer on port 8443",
+  });
+  const calls = telegram(t);
+  const path = job("journal-rolled-back", {
+    chatId: 1,
+    messageId: 100,
+    locale: "en",
+    startedAt: minutesAgo(2),
+    currentAtStart: OLD,
+  });
+
+  await Promise.all(
+    await reconcileUpdateJobs({
+      launchImpl: refuseLaunch,
+      root,
+      tickMs: 5,
+      graceMs: 10,
+    }),
+  );
+
+  assert.equal(existsSync(path), false, "the job got its final and left");
+  assert.equal(finals(calls).length, 1, calls.map((c) => c.text).join(" | "));
+  assert.doesNotMatch(finals(calls)[0], /Iva updated/u);
+  assert.match(finals(calls)[0], /did not finish/iu);
+  assert.match(finals(calls)[0], new RegExp(OLD, "u"));
+});
+
+test("UpdateJob FinalOnlyWhenPinned: a run standing at the flip says nothing yet, and the job waits", async (t) => {
+  clean(t);
+  const { store, root } = installation(t);
+  store.activate(NEW); // The symlink moved; no answer and no settle are on record.
+  runJournal("flipped");
+  const calls = telegram(t);
+  const path = job("journal-flipped", {
+    chatId: 1,
+    messageId: 100,
+    locale: "en",
+    startedAt: minutesAgo(2),
+    currentAtStart: OLD,
+  });
+
+  await Promise.all(
+    await reconcileUpdateJobs({
+      launchImpl: refuseLaunch,
+      root,
+      tickMs: 5,
+      graceMs: 10,
+    }),
+  );
+
+  assert.equal(existsSync(path), true, "an unproved move is not answered");
+  assert.deepEqual(finals(calls), []);
 });
