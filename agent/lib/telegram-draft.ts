@@ -455,13 +455,35 @@ export class TelegramDraftStream {
     } catch (error) {
       console.error("[telegram] status id was not recorded:", error);
     }
-    if (recorded) {
-      this.#statusText = text;
-      return result;
-    }
-    // The record moved on (steer, reset, takeover): this frame alone knows the id.
-    await deleteStatusThroughOutbox(id, t).catch(() => undefined);
+    if (recorded) this.#statusText = text;
+    else await this.#dropFrameMessage(id, t);
     return result;
+  }
+
+  /**
+   * The record moved on (steer, reset, takeover) and this frame alone knows the id. Delete it.
+   * Without Telegram's definitive answer nobody else knows it: when the record holds neither a
+   * claim nor an id, keep the id there as a stale mark (the record-based deleter removes it at
+   * the next terminal event or turn.started). When the record already holds a claim or an id of
+   * another message there is no place for it: no retry is made (a sleep would hold the handler),
+   * so that one message stays, the named residual next to a lost post reply.
+   */
+  async #dropFrameMessage(id: number, t: StatusTransport): Promise<void> {
+    const ack = await deleteStatusThroughOutbox(id, t).catch((): StatusAck => ({
+      kind: "error",
+      error: "delete failed",
+    }));
+    if (ack.kind === "ok" || ack.kind === "gone") return;
+    try {
+      setChatStatusIf(
+        this.chatKey,
+        { progressClaimed: undefined, progressMessageId: undefined },
+        { progressMessageId: id },
+        { touch: false },
+      );
+    } catch (error) {
+      console.error("[telegram] status id was not kept:", error);
+    }
   }
 
   async #edit(

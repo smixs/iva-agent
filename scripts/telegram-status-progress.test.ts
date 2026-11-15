@@ -1655,3 +1655,76 @@ test("status: a group's final waits for the flood window of a status edit", asyn
   await emit("turn.completed", { turnId: "turn_1" }, chat.pair);
 });
 
+test("status: an old post that lost its CAS and could not delete its message leaves the id as a stale mark", async (t) => {
+  let release!: (response: Response) => void;
+  const held = new Promise<Response>((resolve) => {
+    release = resolve;
+  });
+  let deletes = 0;
+  const chat = statusChat(t, "251", {
+    onCall: (call) =>
+      call.method === "sendMessage"
+        ? held
+        : call.method === "deleteMessage" && ++deletes === 1
+          ? reject(429, "Too Many Requests", { parameters: { retry_after: 1 } })
+          : null,
+  });
+  t.after(() => chat.end());
+  await chat.start("turn_1");
+  chat.age();
+  const old = chat.step("turn_1", "Slow post.");
+  await pause();
+  await chat.start("turn_2");
+  release(
+    Response.json({
+      ok: true,
+      result: { message_id: 601, chat: { id: 1, type: "private" } },
+    }),
+  );
+  await old;
+  await pause();
+  assert.equal(chat.record()?.progressMessageId, 601, "kept for the deleter");
+  assert.equal(progressWord(chat.record()), "stale");
+  await emit("turn.cancelled", { turnId: "turn_2" }, chat.pair);
+  assert.equal(chat.record()?.progressMessageId, undefined);
+  assert.deepEqual(
+    callsOf("deleteMessage").map((c) => c.body?.message_id),
+    [601, 601],
+  );
+});
+
+test("status: a failed frame delete does not touch a record that already holds another claim", async (t) => {
+  let release!: (response: Response) => void;
+  const held = new Promise<Response>((resolve) => {
+    release = resolve;
+  });
+  const chat = statusChat(t, "252", {
+    onCall: (call) =>
+      call.method === "sendMessage" && !callsOf("sendMessage").slice(1).length
+        ? held
+        : call.method === "deleteMessage"
+          ? reject(500, "Internal Server Error")
+          : null,
+  });
+  t.after(() => chat.end());
+  await chat.start("turn_1");
+  chat.age();
+  const old = chat.step("turn_1", "Slow post.");
+  await pause();
+  await chat.start("turn_2");
+  chat.age();
+  const record = chat.record();
+  setChatStatus(chat.key, { progressClaimed: true });
+  release(
+    Response.json({
+      ok: true,
+      result: { message_id: 602, chat: { id: 1, type: "private" } },
+    }),
+  );
+  await old;
+  await pause();
+  assert.equal(record?.progressMessageId, undefined);
+  assert.equal(chat.record()?.progressMessageId, undefined, "no place for it");
+  assert.equal(chat.record()?.progressClaimed, true, "the claim is untouched");
+});
+

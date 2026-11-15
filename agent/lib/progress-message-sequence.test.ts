@@ -195,7 +195,13 @@ async function play(picks: readonly number[]): Promise<void> {
               return { ok: true, status: 200 };
             }
             if (outcome === "wait" || outcome === "error") {
-              if (frame) leaky = true;
+              // A frame that cannot delete its message keeps the id as a stale mark when the
+              // record is blank; only a record that already holds a claim or an id has no place for it.
+              if (
+                frame &&
+                run.progressMessageOf(run.getChatStatus(key)) !== "none"
+              )
+                leaky = true;
               return outcome === "wait" ? refuse(429) : refuse(500);
             }
             msgs.delete(messageId);
@@ -615,6 +621,38 @@ await test("a status is never posted over an id that is still in the record", as
   await stream.status(0, "new turn", t);
   assert.deepEqual(calls, []);
   assert.equal(run.getChatStatus(key)?.progressClaimed, undefined);
+  await draft.closeTelegramDraftTurn(session, undefined, 0, true);
+});
+
+await test("a frame that cannot delete its message keeps the id as a stale mark, and the deleter removes it", async () => {
+  const { key, session, stream, t } = runningStream("9105");
+  let release!: (reply: StatusReply) => void;
+  const held = new Promise<StatusReply>((resolve) => {
+    release = resolve;
+  });
+  let down = true;
+  const slow: StatusTransport = {
+    ...t,
+    send: () => held,
+    remove: () =>
+      Promise.resolve(
+        down
+          ? { ok: false, status: 429, description: "Too Many Requests" }
+          : { ok: true, status: 200 },
+      ),
+  };
+  stream.completeStep(0, "working");
+  const flight = stream.status(0, "working", slow);
+  await immediate();
+  // The Bridge frees the chat while the post is in flight: the frame's CAS loses.
+  run.setChatStatus(key, { status: "idle", ...run.TURN_FIELDS_CLEARED });
+  release({ ok: true, status: 200, result: { message_id: 77 } });
+  await flight;
+  assert.equal(run.getChatStatus(key)?.progressMessageId, 77);
+  assert.equal(run.progressMessageOf(run.getChatStatus(key)), "stale");
+  down = false;
+  await draft.retireProgressMessage(key, slow);
+  assert.equal(run.getChatStatus(key)?.progressMessageId, undefined);
   await draft.closeTelegramDraftTurn(session, undefined, 0, true);
 });
 
