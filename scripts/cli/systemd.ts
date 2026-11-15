@@ -19,6 +19,7 @@ import {
 } from "../lib/systemd-control.ts";
 import {
   resolveTimeZone,
+  systemTimeZoneName,
   validateTimeZone,
 } from "../../packages/timezone/index.ts";
 import type { createCliRuntime } from "./runtime.ts";
@@ -49,9 +50,11 @@ type RestartServicesOptions = {
 
 class CliSystemdLifecycle {
   private readonly runtime: CliRuntime;
+  private readonly zoneinfoDir: string | undefined;
 
-  constructor(runtime: CliRuntime) {
+  constructor(runtime: CliRuntime, zoneinfoDir?: string) {
     this.runtime = runtime;
+    this.zoneinfoDir = zoneinfoDir;
   }
 
   // Existing installs gain the server-side bearer on their next unit refresh/update.
@@ -109,12 +112,16 @@ class CliSystemdLifecycle {
   // local time) need — one place so the fallback/validation rule can't drift between them.
   configuredTimezone(): string {
     const raw = this.runtime.readEnv().ASSISTANT_TIMEZONE;
-    return raw?.trim() ? this.explicitTimezone(raw) : resolveTimeZone(raw);
-  }
-
-  // Only a name systemd can carry unquoted is accepted, and then only one Intl knows.
-  explicitTimezone(raw: string): string {
-    return this.shapedTimezone(raw) || this.rejectedTimezone(raw);
+    // Only a name systemd can carry unquoted is accepted, and then only one Intl knows.
+    const shaped = raw?.trim() ? this.shapedTimezone(raw) : null;
+    const zone = raw?.trim()
+      ? (shaped ?? this.rejectedTimezone(raw))
+      : resolveTimeZone(raw);
+    return systemTimeZoneName(zone, {
+      // The owner's spelling only counts once it passed that validation.
+      configured: shaped === null ? undefined : raw,
+      zoneinfoDir: this.zoneinfoDir,
+    });
   }
 
   shapedTimezone(raw: string): string | null {
@@ -368,6 +375,6 @@ class CliSystemdLifecycle {
   }
 }
 
-export function createCliSystemd(runtime: CliRuntime) {
-  return new CliSystemdLifecycle(runtime).api();
+export function createCliSystemd(runtime: CliRuntime, zoneinfoDir?: string) {
+  return new CliSystemdLifecycle(runtime, zoneinfoDir).api();
 }

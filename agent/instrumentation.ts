@@ -29,10 +29,7 @@ import { defineInstrumentation } from "eve/instrumentation";
 import { PROBE_FLAG, probeEveHealth } from "./lib/eve-health.ts";
 import { dataDir as configuredDataDir } from "./lib/data-dir.ts";
 import { runScheduleMigration } from "./lib/schedule-migration.ts";
-import {
-  resolveTimeZone,
-  validateTimeZone,
-} from "../packages/timezone/index.ts";
+import { processTimeZone } from "./lib/process-timezone.ts";
 
 const log = (...args: unknown[]) =>
   console.log(new Date().toISOString(), ...args);
@@ -50,14 +47,15 @@ export default defineInstrumentation({
     // process.env stringifies every value, and an unknown zone would make every Intl
     // consumer throw a RangeError.
     const rawTz = process.env.ASSISTANT_TIMEZONE;
-    const tz = resolveTimeZone(rawTz);
-    if (rawTz?.trim() && validateTimeZone(rawTz) === null) {
+    const { canonical: tz, exported, invalid } = processTimeZone(rawTz);
+    if (invalid) {
       log(
         `schedule-migration: invalid timezone ${rawTz} — falling back to UTC`,
       );
     }
     process.env.ASSISTANT_TIMEZONE = tz;
-    process.env.TZ = tz;
+    // Children read TZ through glibc, which needs a name with a file on this host.
+    process.env.TZ = exported;
 
     // `iva update` starts this same server from a candidate version to prove it comes
     // up, then throws the candidate away if it does not. That start must stay passive:
