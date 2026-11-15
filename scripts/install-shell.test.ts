@@ -2259,11 +2259,14 @@ void test("a pending reboot stops a first install and only warns over a configur
   writeFileSync(flag, "");
   writeFileSync(`${flag}.pkgs`, "linux-headers-6.8.0-137\n");
 
-  // Nothing is configured yet, and every package stage is still ahead: refuse.
-  const fresh = world.run({ env: { IVA_REBOOT_FLAG: flag } });
+  // Nothing is configured yet and a system package is missing, so an apt run is ahead
+  // and would hang: refuse.
+  const fresh = world.run({
+    env: { IVA_REBOOT_FLAG: flag, IVA_TEST_MISSING_COMMANDS: "pandoc" },
+  });
   assert.notEqual(fresh.status, 0, fresh.stdout + fresh.stderr);
   assert.match(fresh.stderr, /sudo reboot/u);
-  assert.doesNotMatch(world.calls(), /npm ci/u);
+  assert.doesNotMatch(world.calls(), /npm ci|apt-get/u);
 
   // Configured: unattended-upgrades raises this flag for any security update, and a re-run
   // that installs nothing must not be refused for days.
@@ -2271,7 +2274,9 @@ void test("a pending reboot stops a first install and only warns over a configur
     join(world.install, ".env"),
     "AGENT_LANGUAGE=en\nIVA_PORT=8723\n",
   );
-  const incomplete = world.run({ env: { IVA_REBOOT_FLAG: flag } });
+  const incomplete = world.run({
+    env: { IVA_REBOOT_FLAG: flag, IVA_TEST_MISSING_COMMANDS: "pandoc" },
+  });
   assert.notEqual(incomplete.status, 0);
   assert.match(incomplete.stderr, /sudo reboot/u);
   writeFileSync(
@@ -2288,6 +2293,19 @@ void test("a pending reboot stops a first install and only warns over a configur
     world.calls(join(world.dir, "rerun.log")),
     /iva _activate-units/u,
   );
+});
+
+void test("a pending reboot does not stop a first install that has no system package to install", (t) => {
+  const world = createWorld(t, { env: false });
+  const flag = join(world.dir, "reboot-required");
+  writeFileSync(flag, "");
+  writeFileSync(`${flag}.pkgs`, "linux-headers-6.8.0-137\n");
+
+  // Every system tool is already there: no apt run, nothing for needrestart to hang on.
+  const result = world.run({ env: { IVA_REBOOT_FLAG: flag } });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stderr + result.stdout, /reboot is pending/iu);
+  assert.doesNotMatch(world.calls(), /apt-get (?:-\S+ )*install/u);
 });
 
 void test("an occupied tree without git is refused with its previous build preserved", (t) => {

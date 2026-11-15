@@ -23,6 +23,7 @@
 - 💾 **Огромный файл не останавливает бэкап памяти**: файл vault больше 90 МБ в коммит не идёт, остаётся на диске и называется в одном сообщении владельцу; остальная память бэкапится как раньше. До этого GitHub отклонял такой файл, и не уходил весь push. A vault file over 90 MB stays out of every commit and is named to the owner once; the rest of the vault is still backed up.
 - 🔌 **Неудачная сборка плагина откатывает только свой тумблер**: если `iva plugin enable` или `trust` не собрались, Ива возвращает ровно этот тумблер у записи, какой она стала за время сборки, и гасит процессы выключенного плагина. Раньше откат мог вернуть доверие или включение, снятые за это время, и оставлял работать MCP-серверы выключенного плагина. The undo of a failed `enable` or `trust` flips its own switch on the current entry and stops the units of a disabled plugin.
 - 🩹 **Ход не роняет Иву, если Claude CLI вышел раньше записи**: когда Claude CLI завершался до того, как Ива передала ему запрос, падал весь процесс Ивы; теперь это ошибка одного хода, то же у проверки входа `claude auth status`. A Claude CLI that exits before Iva finishes writing to it fails the turn, not the process.
+- 🔧 **Установка не отказывает из-за ожидающей перезагрузки, когда пакеты не нужны**: при первой установке `install.sh` останавливается на `/var/run/reboot-required` только если ему предстоит ставить системные пакеты; если все нужные уже есть, он предупреждает и продолжает. A first install is refused for a pending reboot only when it has system packages to install.
 
 ## [0.5.12] - 2026-11-10
 

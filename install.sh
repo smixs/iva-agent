@@ -685,11 +685,13 @@ if [ -n "$ENV_FILE" ] && [ "$INSTALL_EXISTS" = true ]; then
   die "$(t '--env-file is for a first install only; use iva config for this installation.' '--env-file доступен только при первой установке; для этой установки выполните iva config.')"
 fi
 
-# A pending reboot after a kernel upgrade is a dead end for a first install: needrestart
-# draws its ncurses dialog inside every apt run below — including the ones agent-browser
-# makes on its own, where the environment above cannot reach — and the install stops there
-# forever. Stop now, while the fix is still one command. bootstrap.sh offers this reboot at
-# its end. Over an existing installation this is a warning instead: unattended-upgrades
+# A pending reboot after a kernel upgrade is a dead end for a first install that has system
+# packages to install: needrestart draws its ncurses dialog inside every apt run below —
+# including the ones agent-browser makes on its own, where the environment above cannot
+# reach — and the install stops there forever. Stop as soon as the missing packages are
+# known (see need_pkgs), while the fix is still one command; a first install with nothing to
+# install is only warned. bootstrap.sh offers this reboot at its end. Over an existing
+# installation this is a warning instead: unattended-upgrades
 # (which bootstrap.sh switches on) leaves the same flag behind for any security update, and
 # a re-run that installs no packages at all must not be refused for days on end.
 # needrestart only draws its dialog for a new kernel, so that is the case worth naming
@@ -697,11 +699,12 @@ fi
 reboot_needs_kernel() { grep -q '^linux-' "$1" 2>/dev/null; }
 # The path is a variable so the two answers can be tested without a real pending reboot.
 REBOOT_FLAG="${IVA_REBOOT_FLAG:-/var/run/reboot-required}"
+REBOOT_REFUSES_PACKAGES=false
 if [ -e "$REBOOT_FLAG" ]; then
   reboot_kernel=false
   if reboot_needs_kernel "$REBOOT_FLAG.pkgs"; then reboot_kernel=true; fi
   if [ "$INSTALL_EXISTS" != true ]; then
-    die "$(t "The system was updated but the server has not been rebooted, and package installs will hang. Run: sudo reboot — then reconnect and run this installer again." "Система обновилась, но сервер не перезагружен — установка пакетов зависнет. Выполните: sudo reboot — потом переподключитесь и запустите установщик снова.")"
+    REBOOT_REFUSES_PACKAGES=true
   elif [ "$reboot_kernel" = true ]; then
     warn "$(t "The kernel was updated and the server has not been rebooted. If this run installs packages, it can hang — reboot first (sudo reboot) if it does." "Ядро обновилось, а сервер не перезагружен. Если этот запуск будет ставить пакеты, он может зависнуть — тогда сначала перезагрузитесь (sudo reboot).")"
   else
@@ -859,6 +862,9 @@ if ! command -v pdftotext >/dev/null 2>&1; then
 fi
 
 if [ "${#need_pkgs[@]}" -gt 0 ]; then
+  if [ "$REBOOT_REFUSES_PACKAGES" = true ] && [ "$PM" != "none" ]; then
+    die "$(t "The system was updated but the server has not been rebooted, and package installs will hang. Run: sudo reboot — then reconnect and run this installer again." "Система обновилась, но сервер не перезагружен — установка пакетов зависнет. Выполните: sudo reboot — потом переподключитесь и запустите установщик снова.")"
+  fi
   if [ "$PM" = "none" ]; then
     warn "$(t "no package manager found — install manually: ${need_pkgs[*]}" "не найден пакетный менеджер — установи вручную: ${need_pkgs[*]}")"
     command -v git >/dev/null 2>&1 || die "$(t "git is required to install" "git обязателен для установки")"
@@ -883,6 +889,9 @@ if [ "${#need_pkgs[@]}" -gt 0 ]; then
         ;;
     esac
   fi
+fi
+if [ "$REBOOT_REFUSES_PACKAGES" = true ] && [ "${#need_pkgs[@]}" -eq 0 ]; then
+  warn "$(t "A reboot is pending after a system update, but no system packages are needed — continuing. Run sudo reboot when convenient." "После обновления системы ждёт перезагрузка, но системные пакеты не нужны — продолжаю. Выполните sudo reboot, когда будет удобно.")"
 fi
 command -v git >/dev/null 2>&1 && ok "git $(git --version | awk '{print $3}')" || die "$(t "git still not installed" "git так и не установлен")"
 if command -v gh >/dev/null 2>&1; then
