@@ -25,6 +25,7 @@
 - 🩹 **Ход не роняет Иву, если Claude CLI вышел раньше записи**: когда Claude CLI завершался до того, как Ива передала ему запрос, падал весь процесс Ивы; теперь это ошибка одного хода, то же у проверки входа `claude auth status`. A Claude CLI that exits before Iva finishes writing to it fails the turn, not the process.
 - 🔧 **Установка не отказывает из-за ожидающей перезагрузки, когда пакеты не нужны**: при первой установке `install.sh` останавливается на `/var/run/reboot-required` только если ему предстоит ставить системные пакеты; если все нужные уже есть, он предупреждает и продолжает. A first install is refused for a pending reboot only when it has system packages to install.
 - 🛠️ **Обновление из чата запускается на systemd 239**: временная служба обновления получает рабочий каталог свойством `WorkingDirectory=`, а не опцией `--working-directory`, которой нет в systemd старше 240 (RHEL и Alma 8). The chat update unit sets its working directory with a property, so it starts on systemd 239.
+- 🔧 **Шаблон `.env.example` без комментариев после значения**: комментарий к `TELEGRAM_DIGEST_CHAT_ID` и пояснение к `TELEGRAM_WEBHOOK_SECRET_TOKEN` стоят отдельной строкой выше; раньше systemd включал текст комментария в значение, а `node --env-file` обрезал его. Если id уже вписан перед таким комментарием, `iva doctor` называет эту строку. `.env.example` has no trailing comment after a value, so the service and the CLI read the same chat_id.
 
 ## [0.5.12] - 2026-11-10
 
