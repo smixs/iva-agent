@@ -31,7 +31,7 @@ const { readTickPulse } = await import("../agent/lib/reminder-tick.ts");
 
 after(() => rmSync(DATA, { recursive: true, force: true }));
 
-test("the reminders dispatcher ticks every minute through waitUntil", async () => {
+test("the reminders dispatcher ticks every second through waitUntil", async () => {
   assert.equal(schedule.cron, REMINDER_TICK_CRON);
 
   const started: Promise<unknown>[] = [];
@@ -41,14 +41,29 @@ test("the reminders dispatcher ticks every minute through waitUntil", async () =
   const result = await started[0];
   // Таблицы в свежем каталоге нет: тик ничего не забирает, но пульс о себе пишет.
   assert.ok(Array.isArray(result));
-  assert.deepEqual(
-    result.slice(1, 3),
-    Array.from({ length: 2 }, () => ({
+  assert.deepEqual(result, [
+    {
       status: "fulfilled",
       value: { claimed: 0, spawned: 0, filled: 0, swept: 0 },
-    })),
-  );
-  assert.equal(result.length, 3);
-  assert.deepEqual(result[0], { status: "fulfilled", value: undefined });
+    },
+  ]);
   assert.notEqual(readTickPulse(), null);
+});
+
+test("ReminderLifecycle OncePerDue: reminder admission remains available within and across minutes", async (t) => {
+  let now = Date.UTC(2026, 10, 10, 23, 18, 0);
+  t.mock.method(Date, "now", () => now);
+  const run = async () => {
+    const work: Promise<unknown>[] = [];
+    schedule.run({ waitUntil: (task) => work.push(task) });
+    assert.equal(work.length, 1);
+    const result = await work[0];
+    assert.ok(Array.isArray(result));
+    return result.length;
+  };
+  assert.equal(await run(), 1);
+  now += 1_000;
+  assert.equal(await run(), 1, "only reminder admission on a second tick");
+  now += 59_000;
+  assert.equal(await run(), 1, "reminder admission on the next minute");
 });

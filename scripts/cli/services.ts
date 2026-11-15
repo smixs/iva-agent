@@ -4,7 +4,6 @@ import {
   awaitHealthy as defaultAwaitHealthy,
   servicePort,
 } from "../lib/health-probe.ts";
-import { LEGACY_BRAIN_UNITS } from "../lib/legacy-memory-units.ts";
 import { SystemdControlError } from "../lib/systemd-control.ts";
 import { logPaths } from "../lib/systemd-control.ts";
 import { describeLaunchd } from "../lib/launchd.ts";
@@ -80,25 +79,8 @@ export function createServiceCommands(
       "5",
       ...SERVICES,
     ]);
-    // The exact timers this version installs, not a glob: `iva-memory-*` was written for
-    // the rollup timers that no longer exist, and it silently stopped matching the nightly
-    // unit the moment it was renamed to iva-brain.timer. A pre-rename nightly timer still on
-    // disk is listed too: when the migration had to keep it (removeLegacyBrainUnits), THAT is
-    // the unit carrying the nightly vault care, and a status hiding it hides the lost night.
-    const keptNightlyTimers = LEGACY_BRAIN_UNITS.filter(
-      (unit) => unit.endsWith(".timer") && existsSync(join(UNIT_DIR, unit)),
-    );
-    for (const unit of keptNightlyTimers)
-      warn(
-        `${unit} still installed — the Brain rename did not finish; run: iva doctor`,
-      );
-    run("systemctl", [
-      "--user",
-      "list-timers",
-      "--no-pager",
-      ...TIMERS,
-      ...keptNightlyTimers,
-    ]);
+    // The exact timers this version installs, not a glob.
+    run("systemctl", ["--user", "list-timers", "--no-pager", ...TIMERS]);
   }
 
   // Not `async`: `requireSystemd` and the restart itself must throw synchronously,

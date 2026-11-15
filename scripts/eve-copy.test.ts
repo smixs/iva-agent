@@ -22,6 +22,10 @@ import { fileURLToPath } from "node:url";
 import { hashEveTree, listEveTreeFiles } from "./lib/eve-tree-hash.ts";
 
 const ROOT = fileURLToPath(new URL("../", import.meta.url));
+
+/** Migration files this tree ships; without any the directory is absent. */
+const migrationFiles = (): Promise<string[]> =>
+  readdir(path.join(ROOT, "scripts/migrations")).catch(() => []);
 const SOURCE_ROOT = path.join(ROOT, "eve");
 const INSTALLED_ROOT = path.join(ROOT, "node_modules/eve");
 
@@ -56,6 +60,62 @@ test("eve source files match the git index", async () => {
     },
     { missing: [], untracked: [] },
     "eve source files differ from git index",
+  );
+});
+
+test("the eve copy holds no tests, documentation or dropped entry points (ADR-0027)", async () => {
+  const dropped =
+    /(?:^|\/)(?:__snapshots__|__fixtures__)\/|\.test(?:-d)?\.tsx?$|^docs\/|^packages\/eve\/(?:test|extension-contracts)\/|^packages\/eve\/scripts\/vendor-compiled\/@agentclientprotocol\/|^packages\/eve\/src\/(?:setup\/integrations\/(?!shared\/prerequisite\.ts$)|(?:internal\/testing|react|vue|svelte|self-modification|acp|cli\/acp|cli\/commands\/agent-prompt|public\/(?:next|nuxt|sveltekit|channels\/(?:slack|teams|discord|linear|twilio|chat-sdk|photon|linq|github)))\/|setup\/(?:build|channel-add-conflicts|scaffold\/channels-catalog)\.ts$|cli\/commands\/(?:init(?:-(?:agent-workspace|confirm|recovery|repl|target))?|set|link|deploy|integration-[a-z]+|register-[a-z]+-commands|setup-answers|vercel-non-interactive|channel-add-conflicts)\.ts$)/u;
+  const files = await listEveTreeFiles(SOURCE_ROOT, "source");
+  assert.deepEqual(
+    files.filter((file) => dropped.test(file)),
+    [],
+    "eve/ carries files that ADR-0027 removed",
+  );
+  const manifest = await readJson<{
+    readonly files: readonly string[];
+    readonly exports: Record<string, unknown>;
+  }>(path.join(SOURCE_ROOT, "packages/eve/package.json"));
+  assert.ok(
+    !manifest.files.includes("docs"),
+    "the eve package ships without its documentation",
+  );
+  assert.deepEqual(
+    Object.keys(manifest.exports).filter((entry) =>
+      /^\.\/(?:react|vue|svelte|next|nuxt|sveltekit|self-modification(?:\/.*)?|setup(?:\/.*)?|channels\/(?:slack|teams|discord|linear|twilio|chat-sdk|photon|linq|github))$/u.test(
+        entry,
+      ),
+    ),
+    [],
+    "the eve package exports an entry point that ADR-0027 removed",
+  );
+});
+
+test("the installed eve CLI keeps the commands Iva runs and none that ADR-0027 removed", () => {
+  const help = spawnSync(
+    process.execPath,
+    [path.join(INSTALLED_ROOT, "bin/eve.js"), "--help"],
+    { encoding: "utf8" },
+  );
+  assert.equal(help.status, 0, help.stderr);
+  const commands = new Set(
+    [...help.stdout.matchAll(/^ {2}([a-z]+)\b/gmu)].map((match) => match[1]),
+  );
+  for (const kept of ["build", "start", "dev", "extension"])
+    assert.ok(commands.has(kept), `eve ${kept} is gone`);
+  assert.deepEqual(
+    [
+      "acp",
+      "add",
+      "deploy",
+      "init",
+      "integration",
+      "link",
+      "registry",
+      "set",
+    ].filter((removed) => commands.has(removed)),
+    [],
+    "the eve CLI registers a command that ADR-0027 removed",
   );
 });
 
@@ -170,7 +230,7 @@ test("data migrations match the recorded migration file hashes", async () => {
   const baseline = await readJson<Record<string, string>>(
     path.join(ROOT, "scripts/fixtures/eve-migrations.json"),
   );
-  const current = (await readdir(path.join(ROOT, "scripts/migrations"))).sort();
+  const current = (await migrationFiles()).sort();
   assert.deepEqual(current, Object.keys(baseline).sort());
   for (const file of current)
     assert.equal(
@@ -191,9 +251,7 @@ test("migration guard works in a clone with no release tags", async (t) => {
     "scripts/eve-copy.test.ts",
     "scripts/lib/eve-tree-hash.ts",
     "scripts/fixtures/eve-migrations.json",
-    ...(await readdir(path.join(ROOT, "scripts/migrations"))).map(
-      (file) => `scripts/migrations/${file}`,
-    ),
+    ...(await migrationFiles()).map((file) => `scripts/migrations/${file}`),
   ])
     await copyFile(path.join(ROOT, file), path.join(fixture, file));
   execFileSync("git", ["init", "--quiet"], { cwd: fixture });

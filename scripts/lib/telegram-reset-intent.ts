@@ -9,11 +9,9 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { telegramAddressFromChatKey } from "./telegram-reset.ts";
+import { isRecord, isSafeInteger } from "../../packages/guards/index.ts";
 
 export const TELEGRAM_RESET_INTENT_VERSION = 1;
-// Поле нужно только для отката на 0.3.x. Удалить после стабилизации 0.4.x.
-const RETIRED_ROUTING_FIELD = "continuationToken";
 
 export interface TelegramResetIntent {
   version: typeof TELEGRAM_RESET_INTENT_VERSION;
@@ -22,18 +20,48 @@ export interface TelegramResetIntent {
   discardThroughUpdateId?: number;
 }
 
+// Фаза Интента сброса личного чата — оператор Phase модели specs/ResetIntent.tla.
+// none — намерения нет; blocked — записать намерение не удалось, /new ждёт отсрочку в
+// Telegram; recorded — намерение записано, очередь чата закрыта до очистки; waiting —
+// записано, шаг сброса отказал и ждёт повтора; escalated — то же, владелец получил
+// «запусти iva reset».
+export const RESET_INTENT_PHASES = [
+  "none",
+  "blocked",
+  "recorded",
+  "waiting",
+  "escalated",
+] as const;
+export type ResetIntentPhase = (typeof RESET_INTENT_PHASES)[number];
+
+// Запись — файл намерения (его зеркало в памяти Bridge); память — отсрочка повтора и
+// отметка о доставленной эскалации. Память не переживает перезапуск, запись переживает.
+export function resetIntentPhase({
+  recorded,
+  retryPending,
+  escalated,
+}: {
+  recorded: boolean;
+  retryPending: boolean;
+  escalated: boolean;
+}): ResetIntentPhase {
+  if (!recorded) return retryPending ? "blocked" : "none";
+  if (!retryPending) return "recorded";
+  return escalated ? "escalated" : "waiting";
+}
+
+// Очередь чата закрыта для доставки, пока намерение записано (ExactCut модели).
+export const resetIntentFences = (phase: ResetIntentPhase) =>
+  phase === "recorded" || phase === "waiting" || phase === "escalated";
+
+// Отсрочка повтора идёт: /new не начинает новый сброс.
+export const resetIntentRetryPending = (phase: ResetIntentPhase) =>
+  phase === "blocked" || phase === "waiting" || phase === "escalated";
+
 interface TelegramResetIntentOptions {
   now?: () => number;
   nonce?: () => string;
   discardThroughUpdateId?: number;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isSafeInteger(value: unknown): value is number {
-  return Number.isSafeInteger(value);
 }
 
 function hasErrorCode(error: unknown, code: string): boolean {
@@ -45,14 +73,6 @@ function intentPath(directory: string, chatKey: string) {
     directory,
     `${Buffer.from(chatKey, "utf8").toString("base64url")}.json`,
   );
-}
-
-function rollbackRoutingValue(chatKey: string): string {
-  const address = telegramAddressFromChatKey(chatKey);
-  if (address === null) {
-    throw new Error(`invalid Telegram reset intent chat key: ${chatKey}`);
-  }
-  return `${address.chatId}:${address.messageThreadId ?? ""}:`;
 }
 
 function normalizeIntent(value: unknown, source: string): TelegramResetIntent {
@@ -115,16 +135,11 @@ export async function persistTelegramResetIntent(
     },
     "new reset request",
   );
-  const diskIntent = {
-    ...intent,
-    // Older rollback code requires this inert field to parse the same v1 file.
-    [RETIRED_ROUTING_FIELD]: rollbackRoutingValue(chatKey),
-  };
   await ensureIntentDirectory(directory);
   const target = intentPath(directory, chatKey);
   const tmp = `${target}.tmp-${process.pid}-${nonce()}`;
   try {
-    await writeFile(tmp, JSON.stringify(diskIntent), {
+    await writeFile(tmp, JSON.stringify(intent), {
       encoding: "utf8",
       flag: "wx",
       mode: 0o600,

@@ -67,7 +67,7 @@ void test("the polling cycle survives a tagged control failure and holds its off
   let admitted = false;
   const saved: number[] = [];
 
-  const result = await processTelegramUpdate({ update_id: 56 }, 56, null, {
+  const result = await processTelegramUpdate({ update_id: 56 }, 56, {
     handleControlImpl: () => Promise.reject(timeout),
     admitImpl: () => {
       admitted = true;
@@ -92,7 +92,7 @@ void test("an ordinary control failure releases its offset after ten attempts an
   let result = { offset: 57, ingressBlocked: true };
 
   for (let attempt = 0; attempt < 200; attempt += 1) {
-    result = await processTelegramUpdate({ update_id: 57 }, 57, null, {
+    result = await processTelegramUpdate({ update_id: 57 }, 57, {
       handleControlImpl: () => Promise.reject(new Error("unexpected failure")),
       admitImpl: () => Promise.resolve("owned" as const),
       saveOffsetImpl: (offset: number) => {
@@ -191,9 +191,9 @@ void test("an invalid update in a batch is skipped and the message after it is p
   const processed: number[] = [];
   const saved: number[] = [];
   const lines: unknown[][] = [];
-  const result = await processTelegramBatch(items, 924152900, null, {
-    processImpl: (update, offset, delivered) =>
-      processTelegramUpdate(update, offset, delivered, {
+  const result = await processTelegramBatch(items, 924152900, {
+    processImpl: (update, offset) =>
+      processTelegramUpdate(update, offset, {
         handleControlImpl: () => Promise.resolve(false),
         admitImpl: (admitted) => {
           processed.push(admitted.update_id);
@@ -227,7 +227,7 @@ void test("a skipped update without update_id never moves the offset back or sta
   ]);
   assert.ok(items);
   const saved: number[] = [];
-  const result = await processTelegramBatch(items, 10, null, {
+  const result = await processTelegramBatch(items, 10, {
     processImpl: () => assert.fail("nothing here is a valid update"),
     saveOffsetImpl: (offset: number) => {
       saved.push(offset);

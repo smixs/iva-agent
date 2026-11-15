@@ -5,6 +5,8 @@
 // ребёнок запускается без .env и доставляет текст через локальную заглушку Telegram
 // (eve на этом порту нет, поэтому уходит страховка — текст напоминания как есть).
 import assert from "node:assert/strict";
+import { Cron } from "croner";
+import { REMINDER_TICK_CRON } from "#lib/schedule-table.ts";
 import { spawn } from "node:child_process";
 import {
   existsSync,
@@ -203,4 +205,71 @@ void test("the real fire child runs without .env and records a stubbed Telegram 
   assert.equal(calls.length, 1);
   assert.match(calls[0], /чистый сквозной текст/u);
   assert.equal(dirname(sendLog), process.env.ASSISTANT_DATA_DIR);
+});
+
+void test("ReminderLifecycle TextNeverRunsTurn: exact-second cron through a real fire child starts transport within 5s", async (t) => {
+  const due = Date.UTC(2026, 10, 10, 23, 18, 8);
+  t.mock.method(Date, "now", () => due);
+  await add({
+    id: "text-child",
+    text: "готовый текст",
+    content: "text",
+    schedule: { kind: "at", atMs: due },
+  });
+  const cron = new Cron(REMINDER_TICK_CRON, { paused: true });
+  t.after(() => cron.stop());
+  const next = cron.nextRun(new Date(due - 1));
+  assert.ok(next);
+  assert.ok(next.getTime() - due <= 1_000);
+  const data = process.env.ASSISTANT_DATA_DIR!;
+  const sendLog = join(data, "wire.jsonl");
+  const preload = join(data, "transport.ts");
+  writeFileSync(
+    preload,
+    `import { appendFileSync } from "node:fs";
+globalThis.fetch = async (input, init) => {
+  if (!String(input).startsWith("https://api.telegram.org/")) throw new Error("TextNeverRunsTurn: unexpected request: " + String(input));
+  appendFileSync(process.env.REMINDER_WIRE, JSON.stringify({ at: Number(process.hrtime.bigint()), body: JSON.parse(init.body) }) + "\\n");
+  return new Response('{"ok":true,"result":{}}', { status: 200 });
+};
+`,
+  );
+  const started = Number(process.hrtime.bigint());
+  const result = await runReminderTick({
+    nowMs: next.getTime(),
+    root: ROOT,
+    runJob: (options) =>
+      runScheduledJob({
+        ...options,
+        env: {
+          PATH: process.env.PATH,
+          HOME: process.env.HOME,
+          TMPDIR: process.env.TMPDIR,
+          ASSISTANT_DATA_DIR: data,
+          TELEGRAM_BOT_TOKEN: "fixture",
+          TELEGRAM_DIGEST_CHAT_ID: "555",
+          IVA_TEST_NOW: new Date(due).toISOString(),
+          REMINDER_WIRE: sendLog,
+          NODE_OPTIONS: `--import=${new URL("../fixtures/shifted-clock.ts", import.meta.url).href} --import=${pathToFileURL(preload).href}`,
+        },
+      }),
+    log: () => {},
+  });
+  assert.equal(result.spawned, 1);
+  const wire = readFileSync(sendLog, "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line) as { at: number; body: { text: string } });
+  assert.equal(wire.length, 1);
+  assert.equal(wire[0].body.text, "готовый текст");
+  const delay = next.getTime() - due + (wire[0].at - started) / 1_000_000;
+  t.diagnostic(`transport started ${delay.toFixed(3)}ms after the due point`);
+  assert.ok(delay >= 0 && delay <= 5_000, `delivery began after ${delay}ms`);
+  const [row] = await list();
+  assert.equal(row?.delivered, true);
+  assert.equal(
+    row?.error,
+    null,
+    "a model request would fail and leave a failure reason",
+  );
 });

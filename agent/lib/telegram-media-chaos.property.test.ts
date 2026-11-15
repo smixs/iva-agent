@@ -8,20 +8,14 @@
 // `.scratch/work/reviews/pbt-iva-deepseek-4-2026-09-12.md` (раздел «Раунд 2»).
 
 import assert from "node:assert/strict";
-import {
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  symlinkSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import fc from "fast-check";
+import { tempDir } from "../../scripts/fixtures/temp-dir.ts";
 
 // Окружение выставляем до импорта: i18n и путь вольта читаются на загрузке модуля.
-const root = mkdtempSync(join(tmpdir(), "iva-media-chaos-"));
+const root = tempDir("iva-media-chaos-");
 process.env.MODEL_PROVIDER = "ollama";
 process.env.ASSISTANT_DATA_DIR = join(root, "data");
 process.env.ASSISTANT_VAULT_DIR = join(root, "vault");
@@ -205,8 +199,8 @@ await test("НАХОДКА R2-2: нулевое изображение не вы
 // (`iva post`) от этого защищён realpath-проверкой (scripts/cli/post.ts: physical),
 // здесь защиты нет.
 await test("НАХОДКА R2-3: ссылка-симлинк не выводит за пределы attachments", () => {
-  const vault = mkdtempSync(join(tmpdir(), "iva-media-link-vault-"));
-  const outside = mkdtempSync(join(tmpdir(), "iva-media-link-outside-"));
+  const vault = tempDir("iva-media-link-vault-");
+  const outside = tempDir("iva-media-link-outside-");
   mkdirSync(join(vault, "attachments", "2026-09-12"), { recursive: true });
   const secret = join(outside, "secret.txt");
   writeFileSync(secret, "TOKEN=super-secret");
@@ -228,7 +222,7 @@ await test("НАХОДКА R2-3: ссылка-симлинк не выводит
 // Зелёные controls: находки выше - именно про пустоту и симлинк, а соседние границы
 // держатся.
 await test("зелёное: границы attachments не пропускают .., абсолютный путь и внешний корень", () => {
-  const vault = mkdtempSync(join(tmpdir(), "iva-media-bounds-"));
+  const vault = tempDir("iva-media-bounds-");
   mkdirSync(join(vault, "attachments", "2026-09-12"), { recursive: true });
   writeFileSync(join(vault, "attachments", "2026-09-12", "ok.png"), "png");
   assert.ok(resolveAttachmentPath("attachments/2026-09-12/ok.png", vault));

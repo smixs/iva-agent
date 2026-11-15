@@ -5,14 +5,12 @@ import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 import {
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   realpathSync,
   statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import fc from "fast-check";
 import {
@@ -29,6 +27,7 @@ import {
   updaterTooOldMessage,
   updaterVersion,
 } from "./update-check.ts";
+import { tempDir } from "../fixtures/temp-dir.ts";
 
 type UpdateOfferRequest = {
   token: string;
@@ -68,7 +67,7 @@ function actionCallbacks(text: string): string[] {
 }
 
 function repoFixture() {
-  const temp = mkdtempSync(join(tmpdir(), "iva-update-check-"));
+  const temp = tempDir("iva-update-check-");
   const remote = join(temp, "remote.git");
   const seed = join(temp, "seed");
   const local = join(temp, "local");
@@ -104,9 +103,9 @@ function repoFixture() {
   git(temp, "clone", "--branch", "main", remote, local);
   git(local, "config", "user.email", "test@example.com");
   git(local, "config", "user.name", "Test");
-  // Эти проверки — о вершине ветки: бета-обновления (иначе обновление ждёт выпуск,
-  // метку vX.Y.Z — update-release-git.test.ts). Прежний флаг при main уводит на beta.
-  git(local, "config", "iva.beta", "true");
+  // Эти проверки — о вершине ветки: бета-обновления, Update branch `beta` (иначе
+  // обновление ждёт выпуск, метку vX.Y.Z — update-release-git.test.ts).
+  git(local, "config", "iva.updateBranch", "beta");
   return { temp, remote, seed, local };
 }
 
@@ -167,6 +166,8 @@ test("a merged legacy feature branch discovers updates from main", async () => {
   git(seed, "push", "origin", "feat/legacy");
   git(local, "fetch", "origin", "feat/legacy");
   git(local, "switch", "-c", "feat/legacy", "FETCH_HEAD");
+  // Ветка не выбрана: решает слитая ветка checkout, цель — выпуск main.
+  git(local, "config", "--unset", "iva.updateBranch");
 
   writeFileSync(
     join(seed, "package.json"),
@@ -174,11 +175,13 @@ test("a merged legacy feature branch discovers updates from main", async () => {
   );
   git(seed, "add", "package.json");
   git(seed, "commit", "-m", "release");
+  git(seed, "tag", "v1.3.0");
   git(seed, "push");
+  git(seed, "push", "origin", "v1.3.0");
 
   const info = await inspectUpstream({ root: local });
   assert.equal(info.currentBranch, "feat/legacy");
-  assert.equal(info.branch, "beta");
+  assert.equal(info.branch, "main");
   assert.equal(info.legacyMigration, true);
   assert.equal(info.remote, git(seed, "rev-parse", "HEAD"));
   assert.equal(info.hasVersionUpdate, true);
@@ -190,7 +193,9 @@ test("an explicitly configured feature channel does not drift to main", async ()
   writeFileSync(join(seed, "beta.txt"), "beta\n");
   git(seed, "add", "beta.txt");
   git(seed, "commit", "-m", "beta");
+  git(seed, "tag", "v1.2.3");
   git(seed, "push", "-u", "origin", "feat/beta");
+  git(seed, "push", "origin", "v1.2.3");
   git(local, "fetch", "origin", "feat/beta");
   git(local, "switch", "-c", "feat/beta", "FETCH_HEAD");
   git(local, "config", "iva.updateBranch", "feat/beta");
@@ -239,14 +244,14 @@ test("installer persists the selected update channel", () => {
 });
 
 test("notification state is atomic, private and readable", async () => {
-  const data = mkdtempSync(join(tmpdir(), "iva-update-state-"));
+  const data = tempDir("iva-update-state-");
   await markVersionNotified(data, "1.2.4");
   assert.equal(await readNotifiedVersion(data), "1.2.4");
   assert.equal(statSync(join(data, "update-check.json")).mode & 0o777, 0o600);
 });
 
 test("daily check sends one offer per version and records only successful sends", async () => {
-  const root = mkdtempSync(join(tmpdir(), "iva-daily-check-"));
+  const root = tempDir("iva-daily-check-");
   const env = {
     TELEGRAM_BOT_TOKEN: "token",
     TELEGRAM_DIGEST_CHAT_ID: "42",
@@ -310,7 +315,7 @@ const WHATS_NEW_README = [
 ].join("\n");
 
 test("the daily notice says what is new, in the language of the notice", async () => {
-  const root = mkdtempSync(join(tmpdir(), "iva-daily-whats-new-"));
+  const root = tempDir("iva-daily-whats-new-");
   const asked: string[][] = [];
   const sent: UpdateOfferRequest[] = [];
   const result = await runDailyUpdateCheck({
@@ -352,7 +357,7 @@ test("the daily notice says what is new, in the language of the notice", async (
 });
 
 test("the daily notice survives a README it cannot read", async () => {
-  const root = mkdtempSync(join(tmpdir(), "iva-daily-no-readme-"));
+  const root = tempDir("iva-daily-no-readme-");
   const sent: UpdateOfferRequest[] = [];
   const logged: string[] = [];
   const consoleError = console.error;
@@ -390,7 +395,7 @@ test("the daily notice survives a README it cannot read", async () => {
 });
 
 test("daily check is silent without config, without a release, or during an update", async () => {
-  const root = mkdtempSync(join(tmpdir(), "iva-daily-silent-"));
+  const root = tempDir("iva-daily-silent-");
   assert.equal(
     (await runDailyUpdateCheck({ root, env: {} })).status,
     "not-configured",
@@ -462,7 +467,7 @@ test("systemd templates schedule a persistent 10:00 local check and lifecycle co
 });
 
 test("on the versioned layout the daily check reads the mirror and names the installed commit", async () => {
-  const home = realpathSync(mkdtempSync(join(tmpdir(), "iva-daily-layout-")));
+  const home = realpathSync(tempDir("iva-daily-layout-"));
   const sha = "a".repeat(40);
   const name = `0.3.15-${sha.slice(0, 12)}`;
   mkdirSync(join(home, "versions", name), { recursive: true });
@@ -545,7 +550,7 @@ process.stdout.write(JSON.stringify({ status: result.status, texts }));
 `;
 
 function offerProbe(settingsLanguage: string, agentLanguage: string): string[] {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), "iva-offer-lang-")));
+  const root = realpathSync(tempDir("iva-offer-lang-"));
   const data = join(root, "data");
   mkdirSync(data, { recursive: true });
   writeFileSync(
@@ -757,7 +762,7 @@ test("this checkout names its own release, and the refusal says how to repair it
     /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-beta\.(0|[1-9]\d*))?$/,
   );
   assert.throws(
-    () => updaterVersion(mkdtempSync(join(tmpdir(), "iva-no-package-"))),
+    () => updaterVersion(tempDir("iva-no-package-")),
     /no readable release/,
   );
 

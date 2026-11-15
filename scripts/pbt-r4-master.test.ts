@@ -9,11 +9,11 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { tempDir } from "./fixtures/temp-dir.ts";
 
 const INSTALL_SH = fileURLToPath(new URL("../install.sh", import.meta.url));
 
@@ -27,7 +27,7 @@ function functionBody(name: string): string {
   return source.slice(start + 1, end + 3);
 }
 
-const work = mkdtempSync(join(tmpdir(), "pbt-r4-master-"));
+const work = tempDir("pbt-r4-master-");
 const harness = join(work, "master.sh");
 writeFileSync(
   harness,

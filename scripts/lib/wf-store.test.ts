@@ -18,7 +18,6 @@ import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  quarantineDir,
   quarantinePath,
   queuedInputTargets,
   recoverInterruptedSessionState,
@@ -26,6 +25,7 @@ import {
   rewriteRunStatusesForUpdate,
   sessionStateTargets,
 } from "./wf-store.ts";
+import { tempDir } from "../fixtures/temp-dir.ts";
 
 const realOpenSync = fs.openSync;
 const realReadFileSync = fs.readFileSync;
@@ -42,12 +42,12 @@ function withFsHook(install: () => void, run: () => void): void {
   }
 }
 
-void test("quarantineDir переименовывает стор в *.trash-<штамп> с содержимым", () => {
-  const root = mkdtempSync(join(tmpdir(), "wf-store-"));
+void test("quarantinePath переименовывает стор в *.trash-<штамп> с содержимым", () => {
+  const root = tempDir("wf-store-");
   const dir = join(root, ".workflow-data");
   mkdirSync(dir);
   writeFileSync(join(dir, "run.json"), "{}");
-  const dest = quarantineDir(dir, "2026-01-01T00-00-00-000Z");
+  const dest = quarantinePath(dir, "2026-01-01T00-00-00-000Z");
   assert.equal(dest, `${dir}.trash-2026-01-01T00-00-00-000Z`);
   assert.ok(dest);
   assert.ok(!existsSync(dir), "исходная директория должна исчезнуть");
@@ -59,7 +59,7 @@ void test("quarantineDir переименовывает стор в *.trash-<ш�
 });
 
 void test("quarantinePath сохраняет файл и закрывает его права", () => {
-  const root = mkdtempSync(join(tmpdir(), "wf-store-file-"));
+  const root = tempDir("wf-store-file-");
   const file = join(root, "telegram-queue.json");
   writeFileSync(file, '{"chat":["secret"]}');
   chmodSync(file, 0o644);
@@ -73,7 +73,7 @@ void test("quarantinePath сохраняет файл и закрывает ег
 });
 
 void test("стор, который версия видит по симлинку, карантинится по-настоящему", () => {
-  const root = mkdtempSync(join(tmpdir(), "wf-store-link-"));
+  const root = tempDir("wf-store-link-");
   // Как в версионном layout: код живёт в версии, стор — в установке.
   const store = join(root, ".eve/.workflow-data");
   const version = join(root, "versions/0.3.15/.eve");
@@ -98,18 +98,18 @@ void test("стор, который версия видит по симлинк�
 });
 
 void test("quarantinePath на отсутствующем пути — null, ничего не создаёт", () => {
-  const root = mkdtempSync(join(tmpdir(), "wf-store-"));
+  const root = tempDir("wf-store-");
   const dir = join(root, ".workflow-data");
   assert.equal(quarantinePath(dir), null);
   assert.deepEqual(readdirSync(root), []);
 });
 
 void test("старые directory-карантины ротируются, свежие остаются", () => {
-  const root = mkdtempSync(join(tmpdir(), "wf-store-"));
+  const root = tempDir("wf-store-");
   const dir = join(root, "store");
   for (const stamp of ["2026-01-01", "2026-01-02", "2026-01-03"]) {
     mkdirSync(dir);
-    quarantineDir(dir, stamp);
+    quarantinePath(dir, stamp);
   }
   assert.deepEqual(readdirSync(root).sort(), [
     "store.trash-2026-01-02",
@@ -118,7 +118,7 @@ void test("старые directory-карантины ротируются, св�
 });
 
 void test("старые file-карантины ротируются по тому же правилу", () => {
-  const root = mkdtempSync(join(tmpdir(), "wf-store-file-"));
+  const root = tempDir("wf-store-file-");
   const file = join(root, "run-status.json");
   for (const stamp of ["2026-01-01", "2026-01-02", "2026-01-03"]) {
     writeFileSync(file, stamp);
@@ -131,7 +131,7 @@ void test("старые file-карантины ротируются по том
 });
 
 void test("одинаковый operation stamp не перезаписывает существующий карантин", () => {
-  const root = mkdtempSync(join(tmpdir(), "wf-store-collision-"));
+  const root = tempDir("wf-store-collision-");
   const file = join(root, "telegram-queue.json");
   writeFileSync(file, "first");
   const first = quarantinePath(file, "same-stamp");
@@ -160,13 +160,12 @@ void test("global reset plan includes workflow and all Telegram control-state ta
     "/srv/iva/.eve/.workflow-data",
     "/srv/iva/.workflow-data",
     "/var/lib/iva/run-status.d",
-    "/var/lib/iva/run-status.json",
     "/var/lib/iva/telegram-queue.json",
   ]);
 });
 
 void test("update rewrite expires running chats and preserves cleanup fields", () => {
-  const dataDir = mkdtempSync(join(tmpdir(), "wf-store-run-status-"));
+  const dataDir = tempDir("wf-store-run-status-");
   const dir = join(dataDir, "run-status.d");
   const file = join(dir, "chat.json");
   const damagedFile = join(dir, "damaged.json");
@@ -209,7 +208,7 @@ void test("update rewrite expires running chats and preserves cleanup fields", (
 });
 
 void test("startup recovery frees an interrupted compaction between turns at once, not leaving it for Bridge to close", () => {
-  const dataDir = mkdtempSync(join(tmpdir(), "wf-store-compacting-status-"));
+  const dataDir = tempDir("wf-store-compacting-status-");
   const dir = join(dataDir, "run-status.d");
   const file = join(dir, "compacting.json");
   mkdirSync(dir);
@@ -249,7 +248,7 @@ void test("startup recovery frees an interrupted compaction between turns at onc
 });
 
 void test("an update keeps an interrupted compaction marked like a turn: a rollback restores the store, and Bridge must still reset that session", () => {
-  const home = mkdtempSync(join(tmpdir(), "wf-store-compacting-rollback-"));
+  const home = tempDir("wf-store-compacting-rollback-");
   const dataDir = join(home, "data");
   const dir = join(dataDir, "run-status.d");
   const file = join(dir, "compacting.json");
@@ -285,7 +284,7 @@ void test("an update keeps an interrupted compaction marked like a turn: a rollb
 });
 
 void test("update rewrite leaves terminal chats alone and does not re-arm a notice", () => {
-  const dataDir = mkdtempSync(join(tmpdir(), "wf-store-idle-status-"));
+  const dataDir = tempDir("wf-store-idle-status-");
   const dir = join(dataDir, "run-status.d");
   mkdirSync(dir);
   const records = {
@@ -318,7 +317,7 @@ void test("update rewrite leaves terminal chats alone and does not re-arm a noti
 });
 
 void test("restart recovery retires workflow state but preserves the Telegram queue", () => {
-  const root = mkdtempSync(join(tmpdir(), "wf-store-restart-"));
+  const root = tempDir("wf-store-restart-");
   const dataDir = join(root, "data");
   const statusDir = join(dataDir, "run-status.d");
   const workflow = join(root, ".eve/.workflow-data");
@@ -367,7 +366,7 @@ void test("restart recovery retires workflow state but preserves the Telegram qu
 });
 
 void test("restart recovery leaves parked workflow state untouched", () => {
-  const root = mkdtempSync(join(tmpdir(), "wf-store-clean-restart-"));
+  const root = tempDir("wf-store-clean-restart-");
   const dataDir = join(root, "data");
   const workflow = join(root, ".eve/.workflow-data");
   mkdirSync(join(dataDir, "run-status.d"), { recursive: true });
@@ -386,7 +385,7 @@ void test("restart recovery leaves parked workflow state untouched", () => {
 });
 
 void test("second start before Bridge reaps the turn touches nothing", () => {
-  const root = mkdtempSync(join(tmpdir(), "wf-store-double-restart-"));
+  const root = tempDir("wf-store-double-restart-");
   const dataDir = join(root, "data");
   const statusDir = join(dataDir, "run-status.d");
   const workflow = join(root, ".eve/.workflow-data");
@@ -418,7 +417,7 @@ void test("second start before Bridge reaps the turn touches nothing", () => {
 });
 
 void test("update rewrite leaves a chat alone when Bridge finishes it after the scan", () => {
-  const dataDir = mkdtempSync(join(tmpdir(), "wf-store-race-"));
+  const dataDir = tempDir("wf-store-race-");
   const dir = join(dataDir, "run-status.d");
   const file = join(dir, "chat.json");
   mkdirSync(dir);
@@ -448,7 +447,7 @@ void test("update rewrite leaves a chat alone when Bridge finishes it after the 
 });
 
 void test("a failed run-status write is logged while a damaged record stays silent", () => {
-  const dataDir = mkdtempSync(join(tmpdir(), "wf-store-write-fail-"));
+  const dataDir = tempDir("wf-store-write-fail-");
   const dir = join(dataDir, "run-status.d");
   mkdirSync(dir);
   const running = JSON.stringify({ status: "running", updatedAt: Date.now() });
@@ -478,7 +477,7 @@ void test("a failed run-status write is logged while a damaged record stays sile
 });
 
 void test("startup recovery keeps the queued sign of an interrupted compaction: the next turn deletes it", () => {
-  const dataDir = mkdtempSync(join(tmpdir(), "wf-store-compacting-sign-"));
+  const dataDir = tempDir("wf-store-compacting-sign-");
   const dir = join(dataDir, "run-status.d");
   const file = join(dir, "compacting.json");
   mkdirSync(dir);

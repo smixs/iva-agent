@@ -1,0 +1,956 @@
+[
+  {
+    "tag": "v0.5.0",
+    "sources": {
+      "agent/lib/reminder-store.ts": "50d6a677349eab657858dd313e5676ff4cd22ebb",
+      "scripts/lib/telegram-queue.ts": "6b5247bd302afef0f3cfbafb4bfbfae882dcce58",
+      "agent/lib/run-status.ts": "90b8f76c03651e58cd629f9c7b924f01743fc8d6",
+      "scripts/lib/version-store.ts": "af61e21a7977b8e4d53864ec8f953d3315f10f90",
+      "scripts/lib/update-run-journal.ts": null,
+      "agent/lib/settings.ts": "9f2d67c437492f0f568c751cc4c26d0828453ee8"
+    },
+    "reminders": {
+      "schemaVersion": 2,
+      "rows": [
+        {
+          "id": "r-historical",
+          "text": "historical reminder",
+          "chat": {
+            "id": "42",
+            "threadId": null
+          },
+          "schedule": {
+            "kind": "at",
+            "atMs": 1793494800000
+          },
+          "nextRunAtMs": 1793494800000,
+          "createdAt": 1793491200000,
+          "status": "pending",
+          "firedAt": null,
+          "delivered": null,
+          "error": null,
+          "sessionId": null
+        }
+      ]
+    },
+    "queue": {
+      "version": 1,
+      "queues": {
+        "42:": [
+          {
+            "version": 1,
+            "updateId": -1599804432,
+            "legacyText": "historical legacy question",
+            "migratedFrom": "string"
+          }
+        ]
+      }
+    },
+    "chat": {
+      "status": "idle",
+      "resetAt": 2,
+      "generation": 1,
+      "updatedAt": 1793491200000
+    },
+    "active": {
+      "schema": "iva-active/v2",
+      "version": "0.5.0-aaaaaaaaaaaa",
+      "settledAt": "2026-11-01T00:00:00.000Z"
+    },
+    "journal": null,
+    "settings": {
+      "locale": "ru",
+      "telegramTurnPolicy": "queue",
+      "historicalUnknown": {
+        "kept": true
+      }
+    }
+  },
+  {
+    "tag": "v0.5.1",
+    "sources": {
+      "agent/lib/reminder-store.ts": "50d6a677349eab657858dd313e5676ff4cd22ebb",
+      "scripts/lib/telegram-queue.ts": "6b5247bd302afef0f3cfbafb4bfbfae882dcce58",
+      "agent/lib/run-status.ts": "90b8f76c03651e58cd629f9c7b924f01743fc8d6",
+      "scripts/lib/version-store.ts": "af61e21a7977b8e4d53864ec8f953d3315f10f90",
+      "scripts/lib/update-run-journal.ts": null,
+      "agent/lib/settings.ts": "9f2d67c437492f0f568c751cc4c26d0828453ee8"
+    },
+    "reminders": {
+      "schemaVersion": 2,
+      "rows": [
+        {
+          "id": "r-historical",
+          "text": "historical reminder",
+          "chat": {
+            "id": "42",
+            "threadId": null
+          },
+          "schedule": {
+            "kind": "at",
+            "atMs": 1793494800000
+          },
+          "nextRunAtMs": 1793494800000,
+          "createdAt": 1793491200000,
+          "status": "pending",
+          "firedAt": null,
+          "delivered": null,
+          "error": null,
+          "sessionId": null
+        }
+      ]
+    },
+    "queue": {
+      "version": 1,
+      "queues": {
+        "42:": [
+          {
+            "version": 1,
+            "updateId": -1599804432,
+            "legacyText": "historical legacy question",
+            "migratedFrom": "string"
+          }
+        ]
+      }
+    },
+    "chat": {
+      "status": "idle",
+      "resetAt": 2,
+      "generation": 1,
+      "updatedAt": 1793491200000
+    },
+    "active": {
+      "schema": "iva-active/v2",
+      "version": "0.5.0-aaaaaaaaaaaa",
+      "settledAt": "2026-11-01T00:00:00.000Z"
+    },
+    "journal": null,
+    "settings": {
+      "locale": "ru",
+      "telegramTurnPolicy": "queue",
+      "historicalUnknown": {
+        "kept": true
+      }
+    }
+  },
+  {
+    "tag": "v0.5.2",
+    "sources": {
+      "agent/lib/reminder-store.ts": "50d6a677349eab657858dd313e5676ff4cd22ebb",
+      "scripts/lib/telegram-queue.ts": "6b5247bd302afef0f3cfbafb4bfbfae882dcce58",
+      "agent/lib/run-status.ts": "90b8f76c03651e58cd629f9c7b924f01743fc8d6",
+      "scripts/lib/version-store.ts": "af61e21a7977b8e4d53864ec8f953d3315f10f90",
+      "scripts/lib/update-run-journal.ts": null,
+      "agent/lib/settings.ts": "9f2d67c437492f0f568c751cc4c26d0828453ee8"
+    },
+    "reminders": {
+      "schemaVersion": 2,
+      "rows": [
+        {
+          "id": "r-historical",
+          "text": "historical reminder",
+          "chat": {
+            "id": "42",
+            "threadId": null
+          },
+          "schedule": {
+            "kind": "at",
+            "atMs": 1793494800000
+          },
+          "nextRunAtMs": 1793494800000,
+          "createdAt": 1793491200000,
+          "status": "pending",
+          "firedAt": null,
+          "delivered": null,
+          "error": null,
+          "sessionId": null
+        }
+      ]
+    },
+    "queue": {
+      "version": 1,
+      "queues": {
+        "42:": [
+          {
+            "version": 1,
+            "updateId": -1599804432,
+            "legacyText": "historical legacy question",
+            "migratedFrom": "string"
+          }
+        ]
+      }
+    },
+    "chat": {
+      "status": "idle",
+      "resetAt": 2,
+      "generation": 1,
+      "updatedAt": 1793491200000
+    },
+    "active": {
+      "schema": "iva-active/v2",
+      "version": "0.5.0-aaaaaaaaaaaa",
+      "settledAt": "2026-11-01T00:00:00.000Z"
+    },
+    "journal": null,
+    "settings": {
+      "locale": "ru",
+      "telegramTurnPolicy": "queue",
+      "historicalUnknown": {
+        "kept": true
+      }
+    }
+  },
+  {
+    "tag": "v0.5.3",
+    "sources": {
+      "agent/lib/reminder-store.ts": "39566838c722ee3323ee0b30245d20111d198ab4",
+      "scripts/lib/telegram-queue.ts": "577600c47e854069383fe09fa64e060845872360",
+      "agent/lib/run-status.ts": "90b8f76c03651e58cd629f9c7b924f01743fc8d6",
+      "scripts/lib/version-store.ts": "af61e21a7977b8e4d53864ec8f953d3315f10f90",
+      "scripts/lib/update-run-journal.ts": null,
+      "agent/lib/settings.ts": "9f2d67c437492f0f568c751cc4c26d0828453ee8"
+    },
+    "reminders": {
+      "schemaVersion": 2,
+      "rows": [
+        {
+          "id": "r-historical",
+          "text": "historical reminder",
+          "chat": {
+            "id": "42",
+            "threadId": null
+          },
+          "schedule": {
+            "kind": "at",
+            "atMs": 1793494800000
+          },
+          "nextRunAtMs": 1793494800000,
+          "createdAt": 1793491200000,
+          "status": "pending",
+          "firedAt": null,
+          "delivered": null,
+          "error": null,
+          "sessionId": null
+        }
+      ]
+    },
+    "queue": {
+      "version": 1,
+      "queues": {
+        "42:": [
+          {
+            "version": 1,
+            "updateId": -1599804432,
+            "legacyText": "historical legacy question",
+            "migratedFrom": "string"
+          }
+        ]
+      }
+    },
+    "chat": {
+      "status": "idle",
+      "resetAt": 2,
+      "generation": 1,
+      "updatedAt": 1793491200000
+    },
+    "active": {
+      "schema": "iva-active/v2",
+      "version": "0.5.0-aaaaaaaaaaaa",
+      "settledAt": "2026-11-01T00:00:00.000Z"
+    },
+    "journal": null,
+    "settings": {
+      "locale": "ru",
+      "telegramTurnPolicy": "queue",
+      "historicalUnknown": {
+        "kept": true
+      }
+    }
+  },
+  {
+    "tag": "v0.5.4",
+    "sources": {
+      "agent/lib/reminder-store.ts": "39566838c722ee3323ee0b30245d20111d198ab4",
+      "scripts/lib/telegram-queue.ts": "577600c47e854069383fe09fa64e060845872360",
+      "agent/lib/run-status.ts": "90b8f76c03651e58cd629f9c7b924f01743fc8d6",
+      "scripts/lib/version-store.ts": "af61e21a7977b8e4d53864ec8f953d3315f10f90",
+      "scripts/lib/update-run-journal.ts": null,
+      "agent/lib/settings.ts": "9f2d67c437492f0f568c751cc4c26d0828453ee8"
+    },
+    "reminders": {
+      "schemaVersion": 2,
+      "rows": [
+        {
+          "id": "r-historical",
+          "text": "historical reminder",
+          "chat": {
+            "id": "42",
+            "threadId": null
+          },
+          "schedule": {
+            "kind": "at",
+            "atMs": 1793494800000
+          },
+          "nextRunAtMs": 1793494800000,
+          "createdAt": 1793491200000,
+          "status": "pending",
+          "firedAt": null,
+          "delivered": null,
+          "error": null,
+          "sessionId": null
+        }
+      ]
+    },
+    "queue": {
+      "version": 1,
+      "queues": {
+        "42:": [
+          {
+            "version": 1,
+            "updateId": -1599804432,
+            "legacyText": "historical legacy question",
+            "migratedFrom": "string"
+          }
+        ]
+      }
+    },
+    "chat": {
+      "status": "idle",
+      "resetAt": 2,
+      "generation": 1,
+      "updatedAt": 1793491200000
+    },
+    "active": {
+      "schema": "iva-active/v2",
+      "version": "0.5.0-aaaaaaaaaaaa",
+      "settledAt": "2026-11-01T00:00:00.000Z"
+    },
+    "journal": null,
+    "settings": {
+      "locale": "ru",
+      "telegramTurnPolicy": "queue",
+      "historicalUnknown": {
+        "kept": true
+      }
+    }
+  },
+  {
+    "tag": "v0.5.5",
+    "sources": {
+      "agent/lib/reminder-store.ts": "39566838c722ee3323ee0b30245d20111d198ab4",
+      "scripts/lib/telegram-queue.ts": "577600c47e854069383fe09fa64e060845872360",
+      "agent/lib/run-status.ts": "90b8f76c03651e58cd629f9c7b924f01743fc8d6",
+      "scripts/lib/version-store.ts": "af61e21a7977b8e4d53864ec8f953d3315f10f90",
+      "scripts/lib/update-run-journal.ts": null,
+      "agent/lib/settings.ts": "9f2d67c437492f0f568c751cc4c26d0828453ee8"
+    },
+    "reminders": {
+      "schemaVersion": 2,
+      "rows": [
+        {
+          "id": "r-historical",
+          "text": "historical reminder",
+          "chat": {
+            "id": "42",
+            "threadId": null
+          },
+          "schedule": {
+            "kind": "at",
+            "atMs": 1793494800000
+          },
+          "nextRunAtMs": 1793494800000,
+          "createdAt": 1793491200000,
+          "status": "pending",
+          "firedAt": null,
+          "delivered": null,
+          "error": null,
+          "sessionId": null
+        }
+      ]
+    },
+    "queue": {
+      "version": 1,
+      "queues": {
+        "42:": [
+          {
+            "version": 1,
+            "updateId": -1599804432,
+            "legacyText": "historical legacy question",
+            "migratedFrom": "string"
+          }
+        ]
+      }
+    },
+    "chat": {
+      "status": "idle",
+      "resetAt": 2,
+      "generation": 1,
+      "updatedAt": 1793491200000
+    },
+    "active": {
+      "schema": "iva-active/v2",
+      "version": "0.5.0-aaaaaaaaaaaa",
+      "settledAt": "2026-11-01T00:00:00.000Z"
+    },
+    "journal": null,
+    "settings": {
+      "locale": "ru",
+      "telegramTurnPolicy": "queue",
+      "historicalUnknown": {
+        "kept": true
+      }
+    }
+  },
+  {
+    "tag": "v0.5.6",
+    "sources": {
+      "agent/lib/reminder-store.ts": "46ff801d85749ddbefd6b3f71b60907fff3bd303",
+      "scripts/lib/telegram-queue.ts": "2f73981eeefd5163bff2ad8f8f5eb3674fe6c798",
+      "agent/lib/run-status.ts": "90b8f76c03651e58cd629f9c7b924f01743fc8d6",
+      "scripts/lib/version-store.ts": "af61e21a7977b8e4d53864ec8f953d3315f10f90",
+      "scripts/lib/update-run-journal.ts": null,
+      "agent/lib/settings.ts": "9f2d67c437492f0f568c751cc4c26d0828453ee8"
+    },
+    "reminders": {
+      "schemaVersion": 2,
+      "rows": [
+        {
+          "id": "r-historical",
+          "text": "historical reminder",
+          "chat": {
+            "id": "42",
+            "threadId": null
+          },
+          "schedule": {
+            "kind": "at",
+            "atMs": 1793494800000
+          },
+          "nextRunAtMs": 1793494800000,
+          "createdAt": 1793491200000,
+          "status": "pending",
+          "firedAt": null,
+          "delivered": null,
+          "error": null,
+          "sessionId": null
+        }
+      ]
+    },
+    "queue": {
+      "version": 1,
+      "queues": {
+        "42:": [
+          {
+            "version": 1,
+            "updateId": -1599804432,
+            "legacyText": "historical legacy question",
+            "migratedFrom": "string"
+          }
+        ]
+      }
+    },
+    "chat": {
+      "status": "idle",
+      "resetAt": 2,
+      "generation": 1,
+      "updatedAt": 1793491200000
+    },
+    "active": {
+      "schema": "iva-active/v2",
+      "version": "0.5.0-aaaaaaaaaaaa",
+      "settledAt": "2026-11-01T00:00:00.000Z"
+    },
+    "journal": null,
+    "settings": {
+      "locale": "ru",
+      "telegramTurnPolicy": "queue",
+      "historicalUnknown": {
+        "kept": true
+      }
+    }
+  },
+  {
+    "tag": "v0.5.7",
+    "sources": {
+      "agent/lib/reminder-store.ts": "46ff801d85749ddbefd6b3f71b60907fff3bd303",
+      "scripts/lib/telegram-queue.ts": "2f73981eeefd5163bff2ad8f8f5eb3674fe6c798",
+      "agent/lib/run-status.ts": "90b8f76c03651e58cd629f9c7b924f01743fc8d6",
+      "scripts/lib/version-store.ts": "af61e21a7977b8e4d53864ec8f953d3315f10f90",
+      "scripts/lib/update-run-journal.ts": null,
+      "agent/lib/settings.ts": "9f2d67c437492f0f568c751cc4c26d0828453ee8"
+    },
+    "reminders": {
+      "schemaVersion": 2,
+      "rows": [
+        {
+          "id": "r-historical",
+          "text": "historical reminder",
+          "chat": {
+            "id": "42",
+            "threadId": null
+          },
+          "schedule": {
+            "kind": "at",
+            "atMs": 1793494800000
+          },
+          "nextRunAtMs": 1793494800000,
+          "createdAt": 1793491200000,
+          "status": "pending",
+          "firedAt": null,
+          "delivered": null,
+          "error": null,
+          "sessionId": null
+        }
+      ]
+    },
+    "queue": {
+      "version": 1,
+      "queues": {
+        "42:": [
+          {
+            "version": 1,
+            "updateId": -1599804432,
+            "legacyText": "historical legacy question",
+            "migratedFrom": "string"
+          }
+        ]
+      }
+    },
+    "chat": {
+      "status": "idle",
+      "resetAt": 2,
+      "generation": 1,
+      "updatedAt": 1793491200000
+    },
+    "active": {
+      "schema": "iva-active/v2",
+      "version": "0.5.0-aaaaaaaaaaaa",
+      "settledAt": "2026-11-01T00:00:00.000Z"
+    },
+    "journal": null,
+    "settings": {
+      "locale": "ru",
+      "telegramTurnPolicy": "queue",
+      "historicalUnknown": {
+        "kept": true
+      }
+    }
+  },
+  {
+    "tag": "v0.5.8",
+    "sources": {
+      "agent/lib/reminder-store.ts": "46ff801d85749ddbefd6b3f71b60907fff3bd303",
+      "scripts/lib/telegram-queue.ts": "2f73981eeefd5163bff2ad8f8f5eb3674fe6c798",
+      "agent/lib/run-status.ts": "90b8f76c03651e58cd629f9c7b924f01743fc8d6",
+      "scripts/lib/version-store.ts": "af61e21a7977b8e4d53864ec8f953d3315f10f90",
+      "scripts/lib/update-run-journal.ts": null,
+      "agent/lib/settings.ts": "9f2d67c437492f0f568c751cc4c26d0828453ee8"
+    },
+    "reminders": {
+      "schemaVersion": 2,
+      "rows": [
+        {
+          "id": "r-historical",
+          "text": "historical reminder",
+          "chat": {
+            "id": "42",
+            "threadId": null
+          },
+          "schedule": {
+            "kind": "at",
+            "atMs": 1793494800000
+          },
+          "nextRunAtMs": 1793494800000,
+          "createdAt": 1793491200000,
+          "status": "pending",
+          "firedAt": null,
+          "delivered": null,
+          "error": null,
+          "sessionId": null
+        }
+      ]
+    },
+    "queue": {
+      "version": 1,
+      "queues": {
+        "42:": [
+          {
+            "version": 1,
+            "updateId": -1599804432,
+            "legacyText": "historical legacy question",
+            "migratedFrom": "string"
+          }
+        ]
+      }
+    },
+    "chat": {
+      "status": "idle",
+      "resetAt": 2,
+      "generation": 1,
+      "updatedAt": 1793491200000
+    },
+    "active": {
+      "schema": "iva-active/v2",
+      "version": "0.5.0-aaaaaaaaaaaa",
+      "settledAt": "2026-11-01T00:00:00.000Z"
+    },
+    "journal": null,
+    "settings": {
+      "locale": "ru",
+      "telegramTurnPolicy": "queue",
+      "historicalUnknown": {
+        "kept": true
+      }
+    }
+  },
+  {
+    "tag": "v0.5.9",
+    "sources": {
+      "agent/lib/reminder-store.ts": "46ff801d85749ddbefd6b3f71b60907fff3bd303",
+      "scripts/lib/telegram-queue.ts": "2f73981eeefd5163bff2ad8f8f5eb3674fe6c798",
+      "agent/lib/run-status.ts": "90b8f76c03651e58cd629f9c7b924f01743fc8d6",
+      "scripts/lib/version-store.ts": "af61e21a7977b8e4d53864ec8f953d3315f10f90",
+      "scripts/lib/update-run-journal.ts": null,
+      "agent/lib/settings.ts": "9f2d67c437492f0f568c751cc4c26d0828453ee8"
+    },
+    "reminders": {
+      "schemaVersion": 2,
+      "rows": [
+        {
+          "id": "r-historical",
+          "text": "historical reminder",
+          "chat": {
+            "id": "42",
+            "threadId": null
+          },
+          "schedule": {
+            "kind": "at",
+            "atMs": 1793494800000
+          },
+          "nextRunAtMs": 1793494800000,
+          "createdAt": 1793491200000,
+          "status": "pending",
+          "firedAt": null,
+          "delivered": null,
+          "error": null,
+          "sessionId": null
+        }
+      ]
+    },
+    "queue": {
+      "version": 1,
+      "queues": {
+        "42:": [
+          {
+            "version": 1,
+            "updateId": -1599804432,
+            "legacyText": "historical legacy question",
+            "migratedFrom": "string"
+          }
+        ]
+      }
+    },
+    "chat": {
+      "status": "idle",
+      "resetAt": 2,
+      "generation": 1,
+      "updatedAt": 1793491200000
+    },
+    "active": {
+      "schema": "iva-active/v2",
+      "version": "0.5.0-aaaaaaaaaaaa",
+      "settledAt": "2026-11-01T00:00:00.000Z"
+    },
+    "journal": null,
+    "settings": {
+      "locale": "ru",
+      "telegramTurnPolicy": "queue",
+      "historicalUnknown": {
+        "kept": true
+      }
+    }
+  },
+  {
+    "tag": "v0.5.10",
+    "sources": {
+      "agent/lib/reminder-store.ts": "46ff801d85749ddbefd6b3f71b60907fff3bd303",
+      "scripts/lib/telegram-queue.ts": "2f73981eeefd5163bff2ad8f8f5eb3674fe6c798",
+      "agent/lib/run-status.ts": "90b8f76c03651e58cd629f9c7b924f01743fc8d6",
+      "scripts/lib/version-store.ts": "af61e21a7977b8e4d53864ec8f953d3315f10f90",
+      "scripts/lib/update-run-journal.ts": null,
+      "agent/lib/settings.ts": "9f2d67c437492f0f568c751cc4c26d0828453ee8"
+    },
+    "reminders": {
+      "schemaVersion": 2,
+      "rows": [
+        {
+          "id": "r-historical",
+          "text": "historical reminder",
+          "chat": {
+            "id": "42",
+            "threadId": null
+          },
+          "schedule": {
+            "kind": "at",
+            "atMs": 1793494800000
+          },
+          "nextRunAtMs": 1793494800000,
+          "createdAt": 1793491200000,
+          "status": "pending",
+          "firedAt": null,
+          "delivered": null,
+          "error": null,
+          "sessionId": null
+        }
+      ]
+    },
+    "queue": {
+      "version": 1,
+      "queues": {
+        "42:": [
+          {
+            "version": 1,
+            "updateId": -1599804432,
+            "legacyText": "historical legacy question",
+            "migratedFrom": "string"
+          }
+        ]
+      }
+    },
+    "chat": {
+      "status": "idle",
+      "resetAt": 2,
+      "generation": 1,
+      "updatedAt": 1793491200000
+    },
+    "active": {
+      "schema": "iva-active/v2",
+      "version": "0.5.0-aaaaaaaaaaaa",
+      "settledAt": "2026-11-01T00:00:00.000Z"
+    },
+    "journal": null,
+    "settings": {
+      "locale": "ru",
+      "telegramTurnPolicy": "queue",
+      "historicalUnknown": {
+        "kept": true
+      }
+    }
+  },
+  {
+    "tag": "v0.5.11",
+    "sources": {
+      "agent/lib/reminder-store.ts": "46ff801d85749ddbefd6b3f71b60907fff3bd303",
+      "scripts/lib/telegram-queue.ts": "2f73981eeefd5163bff2ad8f8f5eb3674fe6c798",
+      "agent/lib/run-status.ts": "90b8f76c03651e58cd629f9c7b924f01743fc8d6",
+      "scripts/lib/version-store.ts": "af61e21a7977b8e4d53864ec8f953d3315f10f90",
+      "scripts/lib/update-run-journal.ts": null,
+      "agent/lib/settings.ts": "9f2d67c437492f0f568c751cc4c26d0828453ee8"
+    },
+    "reminders": {
+      "schemaVersion": 2,
+      "rows": [
+        {
+          "id": "r-historical",
+          "text": "historical reminder",
+          "chat": {
+            "id": "42",
+            "threadId": null
+          },
+          "schedule": {
+            "kind": "at",
+            "atMs": 1793494800000
+          },
+          "nextRunAtMs": 1793494800000,
+          "createdAt": 1793491200000,
+          "status": "pending",
+          "firedAt": null,
+          "delivered": null,
+          "error": null,
+          "sessionId": null
+        }
+      ]
+    },
+    "queue": {
+      "version": 1,
+      "queues": {
+        "42:": [
+          {
+            "version": 1,
+            "updateId": -1599804432,
+            "legacyText": "historical legacy question",
+            "migratedFrom": "string"
+          }
+        ]
+      }
+    },
+    "chat": {
+      "status": "idle",
+      "resetAt": 2,
+      "generation": 1,
+      "updatedAt": 1793491200000
+    },
+    "active": {
+      "schema": "iva-active/v2",
+      "version": "0.5.0-aaaaaaaaaaaa",
+      "settledAt": "2026-11-01T00:00:00.000Z"
+    },
+    "journal": null,
+    "settings": {
+      "locale": "ru",
+      "telegramTurnPolicy": "queue",
+      "historicalUnknown": {
+        "kept": true
+      }
+    }
+  },
+  {
+    "tag": "v0.5.12",
+    "sources": {
+      "agent/lib/reminder-store.ts": "46ff801d85749ddbefd6b3f71b60907fff3bd303",
+      "scripts/lib/telegram-queue.ts": "2f73981eeefd5163bff2ad8f8f5eb3674fe6c798",
+      "agent/lib/run-status.ts": "90b8f76c03651e58cd629f9c7b924f01743fc8d6",
+      "scripts/lib/version-store.ts": "af61e21a7977b8e4d53864ec8f953d3315f10f90",
+      "scripts/lib/update-run-journal.ts": null,
+      "agent/lib/settings.ts": "9f2d67c437492f0f568c751cc4c26d0828453ee8"
+    },
+    "reminders": {
+      "schemaVersion": 2,
+      "rows": [
+        {
+          "id": "r-historical",
+          "text": "historical reminder",
+          "chat": {
+            "id": "42",
+            "threadId": null
+          },
+          "schedule": {
+            "kind": "at",
+            "atMs": 1793494800000
+          },
+          "nextRunAtMs": 1793494800000,
+          "createdAt": 1793491200000,
+          "status": "pending",
+          "firedAt": null,
+          "delivered": null,
+          "error": null,
+          "sessionId": null
+        }
+      ]
+    },
+    "queue": {
+      "version": 1,
+      "queues": {
+        "42:": [
+          {
+            "version": 1,
+            "updateId": -1599804432,
+            "legacyText": "historical legacy question",
+            "migratedFrom": "string"
+          }
+        ]
+      }
+    },
+    "chat": {
+      "status": "idle",
+      "resetAt": 2,
+      "generation": 1,
+      "updatedAt": 1793491200000
+    },
+    "active": {
+      "schema": "iva-active/v2",
+      "version": "0.5.0-aaaaaaaaaaaa",
+      "settledAt": "2026-11-01T00:00:00.000Z"
+    },
+    "journal": null,
+    "settings": {
+      "locale": "ru",
+      "telegramTurnPolicy": "queue",
+      "historicalUnknown": {
+        "kept": true
+      }
+    }
+  },
+  {
+    "tag": "4a8ff11a3ccd4c67f1d387308a956e6d721ef15a",
+    "sources": {
+      "agent/lib/reminder-store.ts": "12a5a731689e469c9804f761309850e516e295c7",
+      "scripts/lib/telegram-queue.ts": "3b3fc04033d343b9467e8b64abafdf25c7464625",
+      "agent/lib/run-status.ts": "80f6d8ac038347ac8308ef362877e19c6da24fd9",
+      "scripts/lib/version-store.ts": "95ee1c1e27bf1252321fca88aa44543f34c3b8f8",
+      "scripts/lib/update-run-journal.ts": "9fc7d674c1bc65a63129421e06b07dbe780f6c93",
+      "agent/lib/settings.ts": "9f2d67c437492f0f568c751cc4c26d0828453ee8"
+    },
+    "reminders": {
+      "schemaVersion": 2,
+      "rows": [
+        {
+          "id": "r-historical",
+          "text": "historical reminder",
+          "chat": {
+            "id": "42",
+            "threadId": null
+          },
+          "schedule": {
+            "kind": "at",
+            "atMs": 1793494800000
+          },
+          "nextRunAtMs": 1793494800000,
+          "createdAt": 1793491200000,
+          "status": "pending",
+          "firedAt": null,
+          "delivered": null,
+          "error": null,
+          "sessionId": null
+        }
+      ]
+    },
+    "queue": {
+      "version": 1,
+      "queues": {
+        "42:": [
+          {
+            "version": 1,
+            "updateId": -1,
+            "legacyText": "historical legacy question"
+          }
+        ]
+      }
+    },
+    "chat": {
+      "status": "idle",
+      "resetAt": 2,
+      "generation": 1,
+      "updatedAt": 1793491200000
+    },
+    "active": {
+      "schema": "iva-active/v2",
+      "version": "0.5.0-aaaaaaaaaaaa",
+      "settledAt": "2026-11-01T00:00:00.000Z"
+    },
+    "journal": {
+      "schema": "iva-update-run/v1",
+      "version": "0.5.0-aaaaaaaaaaaa",
+      "from": null,
+      "phase": "prepared",
+      "attempts": 1,
+      "units": [
+        {
+          "unit": "iva.service",
+          "loadState": "loaded",
+          "active": true,
+          "enabled": true
+        }
+      ],
+      "quarantine": [],
+      "startedAt": "2026-11-01T00:00:00.000Z",
+      "updatedAt": "2026-11-01T00:00:00.000Z"
+    },
+    "settings": {
+      "locale": "ru",
+      "telegramTurnPolicy": "queue",
+      "historicalUnknown": {
+        "kept": true
+      }
+    }
+  }
+]

@@ -1,39 +1,11 @@
 import { defineDynamic, defineInstructions } from "eve/instructions";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import { resolveDataDir } from "@iva/data-dir";
+import { resolveLang } from "../lib/i18n.ts";
 
 // Язык ответов агента следует за настройкой интерфейса в /menu: кнопка пишет
 // data/settings.json на лету, поэтому язык модели пересчитывается КАЖДЫЙ турн, а не
-// захватывается на загрузке модуля (иначе замёрзнет до рестарта). Раньше это была
-// статическая defineInstructions с env, снятым один раз; теперь defineDynamic на
-// turn.started, как в 20-core.ts. Персона в instructions.md остаётся языково-нейтральной —
-// это по-прежнему единственный источник правды о языке вывода.
-//
-// Разрешение языка продублировано инлайн, а НЕ импортом agent/lib/i18n.ts:
-// инструкции зависят только от eve, @iva/data-dir и node fs/path. Прочие authored-
-// модули проекта тут не резолвятся при сборке (гоча eve 0.11.4).
-const DATA_DIR = resolveDataDir(process.cwd());
-
-// settings.language ("ru"|"en") → env AGENT_LANGUAGE → "ru". Путь относителен cwd
-// (readFileSync резолвит от process.cwd(); iva.service стартует с WorkingDirectory=
-// /home/user/iva), как VAULT в 20-core.ts. Нет файла / битый JSON / чужое значение —
-// молча падаем в env-фолбэк.
-function resolveLang(): string {
-  try {
-    const parsed: unknown = JSON.parse(
-      readFileSync(join(DATA_DIR, "settings.json"), "utf8"),
-    );
-    const language =
-      typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
-        ? (parsed as Record<string, unknown>).language
-        : undefined;
-    if (language === "ru" || language === "en") return language;
-  } catch {
-    // нет файла (меню ни разу не меняло язык) / нет доступа / битый JSON.
-  }
-  return process.env.AGENT_LANGUAGE === "en" ? "en" : "ru";
-}
+// захватывается на загрузке модуля (иначе замёрзнет до рестарта): resolveLang читает
+// файл без кэша, в отличие от getLang. Персона в instructions.md остаётся
+// языково-нейтральной — это по-прежнему единственный источник правды о языке вывода.
 
 function languageMarkdown(): string {
   const rule =

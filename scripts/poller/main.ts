@@ -1,21 +1,20 @@
 import { reconcileDeferred } from "../lib/deferred-command.ts";
-import { listChatStatuses } from "#lib/run-status.ts";
+import { chatHeld, chatState, listChatStatuses } from "#lib/run-status.ts";
 import { launchIvaCommand } from "./update-flow.ts";
 import { real } from "../lib/version-layout.ts";
 import { createHelperOutcomeScan } from "./helper-outcomes.ts";
 import { fileURLToPath } from "node:url";
 
 import { COLLECT_QUIET_MS } from "../lib/telegram-collect.ts";
-import { alreadyDelivered } from "../lib/offset-store.ts";
 import {
   invalidTelegramUpdatesDiagnostic,
-  migrateQueueFile,
+  loadQueueFile,
   parseTelegramUpdates,
   type TelegramQueueUpdate,
   type TelegramUpdateBatchItem,
 } from "../lib/telegram-queue.ts";
 import { alertOnce, alertResolved } from "../lib/notice-policy.ts";
-import { notificationChat } from "../lib/notification-chat.ts";
+import { notificationChat } from "../../packages/notification-chat/index.ts";
 import { tr } from "#lib/i18n.ts";
 import {
   ACCEPTANCE_ROUTE,
@@ -83,6 +82,7 @@ export const persistPrivateResetIntent = queue.persistPrivateResetIntent;
 export const loadPrivateResetIntents = queue.loadPrivateResetIntents;
 export const clearPrivateResetIntent = queue.clearPrivateResetIntent;
 export const hasPrivateResetIntent = queue.hasPrivateResetIntent;
+export const privateResetIntentPhase = queue.privateResetIntentPhase;
 export const releaseScopedSession = queue.releaseScopedSession;
 export const performScopedReset = queue.performScopedReset;
 export { reconcileScopedResetIntents, reapStaleRuns, retireSettledSessions };
@@ -166,7 +166,6 @@ export async function handleControlSafely(
 export async function processTelegramUpdate(
   update: Parameters<typeof handleControl>[0],
   offset: number,
-  delivered: number | null,
   {
     handleControlImpl = handleControl,
     admitImpl = admitTelegramUpdate,
@@ -175,21 +174,10 @@ export async function processTelegramUpdate(
   }: {
     handleControlImpl?: typeof handleControl;
     admitImpl?: typeof admitTelegramUpdate;
-    saveOffsetImpl?: (
-      offset: number,
-      delivered: number | null,
-    ) => Promise<void>;
+    saveOffsetImpl?: (offset: number) => Promise<void>;
     logImpl?: (...args: unknown[]) => void;
   } = {},
 ): Promise<{ offset: number; ingressBlocked: boolean }> {
-  if (alreadyDelivered(update.update_id, delivered)) {
-    logImpl(
-      `skip update ${update.update_id} — already delivered before restart`,
-    );
-    const nextOffset = update.update_id + 1;
-    await saveOffsetImpl(nextOffset, delivered);
-    return { offset: nextOffset, ingressBlocked: false };
-  }
   const controlResult = await handleControlSafely(update, {
     handleControlImpl,
     logImpl,
@@ -199,7 +187,7 @@ export async function processTelegramUpdate(
   }
   if (controlResult) {
     const nextOffset = update.update_id + 1;
-    await saveOffsetImpl(nextOffset, delivered);
+    await saveOffsetImpl(nextOffset);
     return { offset: nextOffset, ingressBlocked: false };
   }
   const admitted = await admitImpl(update);
@@ -217,7 +205,7 @@ export async function processTelegramUpdate(
   if (admitted === "terminal-drop") {
     logImpl(terminalDropLine(update));
   }
-  await saveOffsetImpl(nextOffset, delivered);
+  await saveOffsetImpl(nextOffset);
   return { offset: nextOffset, ingressBlocked: false };
 }
 
@@ -228,7 +216,6 @@ export async function processTelegramUpdate(
 export async function processTelegramBatch(
   items: readonly TelegramUpdateBatchItem[],
   offset: number,
-  delivered: number | null,
   {
     processImpl = processTelegramUpdate,
     saveOffsetImpl = saveOffset,
@@ -237,19 +224,15 @@ export async function processTelegramBatch(
     processImpl?: (
       update: TelegramQueueUpdate,
       offset: number,
-      delivered: number | null,
     ) => Promise<{ offset: number; ingressBlocked: boolean }>;
-    saveOffsetImpl?: (
-      offset: number,
-      delivered: number | null,
-    ) => Promise<void>;
+    saveOffsetImpl?: (offset: number) => Promise<void>;
     logImpl?: (...args: unknown[]) => void;
   } = {},
 ): Promise<{ offset: number; ingressBlocked: boolean }> {
   let current = offset;
   for (const item of items) {
     if ("update" in item) {
-      const processed = await processImpl(item.update, current, delivered);
+      const processed = await processImpl(item.update, current);
       current = processed.offset;
       if (processed.ingressBlocked)
         return { offset: current, ingressBlocked: true };
@@ -258,7 +241,7 @@ export async function processTelegramBatch(
     logImpl("getUpdates: skipped invalid update", JSON.stringify(item.skipped));
     if (item.updateId === null || item.updateId < current) continue;
     current = item.updateId + 1;
-    await saveOffsetImpl(current, delivered);
+    await saveOffsetImpl(current);
   }
   return { offset: current, ingressBlocked: false };
 }
@@ -320,7 +303,7 @@ const configuredCollectQuietMs =
     : COLLECT_QUIET_MS;
 
 const turnsRunning = () =>
-  listChatStatuses().some(({ status }) => status.status === "running");
+  listChatStatuses().some(({ status }) => chatHeld(chatState(status)));
 const pollTimeout = (queued: number, collected: number) =>
   queued > 0 || collected > 0 || turnsRunning() ? 1 : 30;
 
@@ -348,17 +331,10 @@ export async function main({
   const watched = await reconcileUpdateJobs({ launchImpl: launchSelfUpdate });
   if (watched.length > 0)
     log(`watching ${watched.length} unfinished update job(s)`);
-  // Upgrade the old {chatKey: string[]} queue atomically before polling. A failed
-  // migration stops the bridge, so Telegram retains new updates until the old bytes
-  // are safely represented as versioned FIFO items.
-  await migrateQueueFile(QUEUE_FILE, {
-    strict: true,
-    onLegacyQuarantine: (path) =>
-      log(
-        `legacy Telegram group messages moved to ${path}; sender identity was unavailable`,
-      ),
-  });
-  await migrateQueueFile(TELEGRAM_INBOX_FILE, { strict: true });
+  // Both files are read before polling. One that cannot be read stops the bridge, so
+  // Telegram retains new updates and the bytes on disk stay as they are.
+  await loadQueueFile(QUEUE_FILE, { strict: true });
+  await loadQueueFile(TELEGRAM_INBOX_FILE, { strict: true });
   const reconciledResets = await reconcileResetIntentsSafely();
   if (reconciledResets > 0) {
     log(
@@ -369,7 +345,6 @@ export async function main({
   // останавливают мост, пока backlog ещё цел. Только подтверждённый ENOENT означает
   // first run и разрешает drop_pending=true.
   let offset = startup.offset ?? 0;
-  const { delivered } = startup;
   // First run (no offset file) — drop the accumulated install backlog (drop_pending=true),
   // so old messages don't replay in a batch → parallel sessions on one chat (HookConflict).
   // On subsequent starts we do NOT drop the backlog (don't lose messages that arrived while the bridge was down).
@@ -495,7 +470,7 @@ export async function main({
       await sleep(3000);
       continue;
     }
-    const batch = await processTelegramBatch(items, offset, delivered);
+    const batch = await processTelegramBatch(items, offset);
     offset = batch.offset;
     if (batch.ingressBlocked) await sleep(3000);
   }

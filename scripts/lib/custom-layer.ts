@@ -85,7 +85,6 @@ const ManifestSchema = z.strictObject({
 });
 
 export type CustomManifest = z.infer<typeof ManifestSchema>;
-export type CustomEntry = z.infer<typeof EntrySchema>;
 export type MaterializedCustomLayer = {
   readonly dataDir: string;
   readonly pendingDir: string;

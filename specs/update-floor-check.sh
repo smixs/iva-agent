@@ -1,0 +1,29 @@
+#!/bin/sh
+set -u
+cd "$(dirname "$0")" || exit 2
+. ./tlc-result.sh || exit 2
+TLC=${TLC:-$(command -v tlc)}
+META=$(mktemp -d) || exit 2
+trap 'rm -rf "$META"' EXIT
+check() {
+  config=$1; expect=$2
+  "$TLC" -workers 1 -deadlock -metadir "$META/$config" -config "$config.cfg" UpdateFloor.tla >"$META/$config.log" 2>&1
+  code=$?
+  if ! tlc_expect "$META/$config.log" "$code" "$config.cfg" "$expect" ""; then
+    cat "$META/$config.log"
+    exit 1
+  fi
+  echo "OK $config: $expect"
+}
+check UpdateFloor none
+check UpdateFloor-no-finish-check StaysOnItsRelease
+check UpdateFloor-no-install-check StaysOnItsRelease
+check UpdateFloor-late-check NothingWritten
+check UpdateFloor-finish-after-stop OnlyTheVersionDirectory
+check UpdateFloor-mute RefusedIsTold
+check UpdateFloor-silent-drop NoSilentLoss
+check UpdateFloor-quarantine SupportedIsServed
+check UpdateFloor-lazy-unread SupportedIsServed
+check UpdateFloor-lazy-unturned SupportedIsServed
+check UpdateFloor-no-saved-branch BranchKept
+check UpdateFloor-no-step Repaired

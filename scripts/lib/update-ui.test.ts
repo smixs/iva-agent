@@ -6,7 +6,7 @@ import { MODEL_PROVIDER_NAMES } from "#lib/model-provider.ts";
 import {
   CONTEXT_WINDOW_CONFIGURATION_ERROR,
   ContextWindowConfigurationError,
-} from "../../agent/lib/context-window.ts";
+} from "../../packages/context-window/index.ts";
 import { SUMMARY_PROVIDER_NAMES, modelSummary } from "./model-summary.ts";
 import { createTerminalProgress } from "./progress.ts";
 import {

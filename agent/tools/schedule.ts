@@ -12,7 +12,6 @@ import {
   reminderFile,
   commandLog,
   clearCommandAlert,
-  scheduleRunning,
   type Reminder,
 } from "../lib/reminder-store.ts";
 import { ownerTimeZone } from "../lib/reminder-time.ts";
@@ -24,20 +23,9 @@ import {
 } from "../lib/reminder-tool.ts";
 
 function scheduleView(row: Reminder, tz: string, command: boolean) {
-  const status =
-    row.firedAt === null
-      ? null
-      : row.error !== null
-        ? "error"
-        : row.delivered === null
-          ? "unknown"
-          : row.delivered
-            ? "ok"
-            : "error";
   return {
-    ...describeReminder(row, tz),
+    ...describeReminder(row, tz, command),
     action_kind: command ? "command" : "prompt",
-    last_status: scheduleRunning(row, Date.now(), command) ? "running" : status,
     ...(command
       ? { log: commandLog(row.id), timeout_minutes: row.timeout_minutes ?? 2 }
       : {}),
@@ -59,9 +47,16 @@ function plannedSchedule(
 
 export default defineTool({
   description:
-    "Расписание: add, move, remove, list, run_now. Читай скилл scheduling. Текст будит Иву; command выполняется без модели. Время считает код, сообщи next_run_at.",
+    "Расписание: add, move, remove, list, run_now. Читай скилл scheduling. content=text отправляет готовый текст; content=task будит Иву; command выполняется без модели. Время считает код, сообщи next_run_at.",
   inputSchema: z.object({
     action: z.enum(["add", "move", "remove", "list", "run_now"]),
+    content: z
+      .enum(["text", "task"])
+      .optional()
+      .catch(undefined)
+      .describe(
+        "add с text: обязательно text — прислать текст, task — выполнить задание",
+      ),
     text: z.string().min(1).max(2000).optional(),
     command: z.string().min(1).max(2000).optional(),
     timeout_minutes: z.number().optional(),
@@ -138,13 +133,15 @@ export default defineTool({
         { ...planned, nowMs, timeout_minutes: input.timeout_minutes },
         file,
       );
+      const schedule = scheduleView(row, tz, command);
       return {
         ok: true,
-        schedule: scheduleView(row, tz, command),
-        next_run_at: scheduleView(row, tz, command).next_run_at,
-        message: scheduleRunning(row, nowMs, command)
-          ? "Задача сейчас выполняется, перенос применится после завершения."
-          : undefined,
+        schedule,
+        next_run_at: schedule.next_run_at,
+        message:
+          schedule.phase === "running"
+            ? "Задача сейчас выполняется, перенос применится после завершения."
+            : undefined,
       };
     } catch (error) {
       return toolFailure(error);

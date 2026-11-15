@@ -10,7 +10,7 @@ import { activeMemoryNightTime, memoryNightCron } from "./memory-night-time.ts";
 //
 // Crons fire in the PROCESS's local time — agent/instrumentation.ts sets TZ from
 // ASSISTANT_TIMEZONE at startup — so "0 4 * * *" means 04:00 local. The reminders dispatcher
-// ticks every minute on top of them; its own entry sits below.
+// ticks every second on top of them; its own entry sits below.
 // Night time is a compiled build setting: Schedule, catch-up and menu use the same
 // promoted artifact. A runtime env edit requires a rebuild before it takes effect.
 export const ACTIVE_MEMORY_NIGHT_TIME = activeMemoryNightTime();
@@ -21,17 +21,19 @@ export const SCHEDULE_CRON = {
   "jobs-watchdog": "17 7 * * *",
 } as const;
 
-// The reminders dispatcher ticks every minute. It stays out of SCHEDULE_CRON on purpose:
+// The reminders dispatcher ticks every second. It stays out of SCHEDULE_CRON on purpose:
 // that table is for schedules with a status entry and a catch-up point (parseCron demands
 // a fixed minute and hour), and the dispatcher has neither - the reminder table itself is
 // its state. Still the single place a cron string lives (schedule-table.test.ts).
-export const REMINDER_TICK_CRON = "* * * * *";
+export const REMINDER_TICK_CRON = "* * * * * *";
 
 // Тик Watch и Brief (agent/schedules/proactive.ts): каждые полчаса. Тоже вне SCHEDULE_CRON —
 // у него нет точки догона (пропущенный тик не догоняется, следующий через полчаса), но
 // запись статуса и факт в jobs.json есть, поэтому isLiveSchedule признаёт его отдельно.
 export const PROACTIVE_TICK_CRON = "0,30 * * * *";
 export const PROACTIVE_SCHEDULE = "proactive";
+// Срок тика Watch и Brief: столько же держится его бронь.
+export const PROACTIVE_TIMEOUT_MS = 30 * 60_000;
 
 export type ScheduleName = keyof typeof SCHEDULE_CRON;
 

@@ -1,4 +1,4 @@
-// Минутный тик диспетчера напоминаний: забрать созревшие строки таблицы и отдать каждую
+// Тик диспетчера напоминаний: забрать созревшие строки таблицы и отдать каждую
 // своему ребёнку scripts/reminders/fire.ts. Ход агента и отправка живут в
 // scripts/: authored tree не может импортировать транспорт Telegram и клиента eve
 // (scripts/authored-tree-guard.test.ts), поэтому тик спавнит скрипт по имени.
@@ -8,6 +8,14 @@
 // ожидания ребёнка перед следующим тиком. Ребёнок только дописывает факт в строку; если он
 // не запустился или умер, не сказав факта, тик пишет delivered=false с причиной по коду
 // выхода — и на этом всё, второго захода у строки нет.
+//
+// Тик живёт в процессе агента и умирает вместе с ним. Своих идущих детей он держит в памяти
+// (TickMemory): такое срабатывание срок жизни не закрывает. Строку, которую взял упавший агент,
+// следующий тик закрывает причиной, когда срок жизни истёк. Alert о ней тик отдаёт ребёнку на
+// каждом проходе, пока дроссель Alert (packages/alert-state) не хранит факт отправки: падение
+// между причиной и ребёнком долг не стирает. Пока долг не погашен, строку не берут на новый
+// срок и не убирают (alertOwed). Текст напоминания заново не уходит
+// (specs/ReminderLifecycle.tla).
 //
 // Пульс тика — mtime файла data/reminders.tick: он обновляется после удачного взятия, и по
 // нему `iva doctor` и remind list говорят, жив ли диспетчер.
@@ -19,13 +27,19 @@ import {
   commandFile,
   commandTimeoutMs,
   reminderFile,
+  alertOwed,
+  closeAbandoned,
   fireDue,
   list,
   recordDelivery,
   sweepFired,
   type Reminder,
 } from "./reminder-store.ts";
-import { listChatStatuses, setChatStatusIf } from "./run-status.ts";
+import {
+  listChatStatuses,
+  setChatStatusIf,
+  TURN_FIELDS_CLEARED,
+} from "./run-status.ts";
 import {
   runScheduledJob,
   type RunScheduledJobOptions,
@@ -34,6 +48,8 @@ import {
 
 /** Строк за тик; остальное заберёт следующий тик. */
 export const REMINDER_CLAIM_LIMIT = 5;
+/** Срок ребёнка с Alert о брошенной строке: одной отправке в Telegram его хватает с запасом. */
+const ALERT_TIMEOUT_MS = 120_000;
 /** Тик старше этого — планировщик не жив. */
 export const REMINDER_TICK_STALE_MS = 3 * 60_000;
 
@@ -59,9 +75,21 @@ export function readTickPulse(dir?: string): number | null {
   }
 }
 
+/**
+ * Дети этого процесса агента, которые ещё идут: ребёнок срабатывания и ребёнок с Alert, по
+ * ключу «файл, id, firedAt». Память умирает вместе с агентом; после перезапуска действует срок.
+ */
+export type TickMemory = {
+  readonly firing: Set<string>;
+  readonly alerting: Set<string>;
+};
+const memory: TickMemory = { firing: new Set(), alerting: new Set() };
+const childKey = (file: string, row: Reminder) =>
+  `${file}\0${row.id}\0${row.firedAt}`;
+
 export interface ReminderTickOptions {
   readonly command?: boolean;
-  /** Finish admission before returning to the minute Schedule, not the child turn. */
+  /** Finish admission before returning to the Schedule, not the child turn. */
   readonly dispatchOnly?: boolean;
   readonly nowMs?: number;
   readonly limit?: number;
@@ -69,6 +97,8 @@ export interface ReminderTickOptions {
   readonly nodeBin?: string;
   readonly runJob?: typeof runScheduledJob;
   readonly log?: (...args: unknown[]) => void;
+  /** Шов теста: свежая память — перезапуск агента. */
+  readonly memory?: TickMemory;
 }
 
 export interface ReminderTickResult {
@@ -87,6 +117,7 @@ type TickWiring = {
   readonly nodeBin: string;
   readonly runJob: typeof runScheduledJob;
   readonly log: (...args: unknown[]) => void;
+  readonly memory: TickMemory;
 };
 
 function tickWiring(options: ReminderTickOptions): TickWiring {
@@ -99,6 +130,7 @@ function tickWiring(options: ReminderTickOptions): TickWiring {
     log:
       options.log ??
       ((...args: unknown[]) => console.log(new Date().toISOString(), ...args)),
+    memory: options.memory ?? memory,
   };
 }
 
@@ -174,7 +206,7 @@ function releaseReminderStatus(
       setChatStatusIf(
         chatKey,
         { sessionId },
-        { status: "idle", sessionId: null, turnId: null, draftId: null },
+        { status: "idle", ...TURN_FIELDS_CLEARED },
       );
     }
   } catch (error) {
@@ -182,7 +214,23 @@ function releaseReminderStatus(
   }
 }
 
+/** Срабатывание считается идущим, пока его продолжение не дописало исход. */
 async function fireRow(
+  row: Reminder,
+  file: string,
+  command: boolean,
+  wiring: TickWiring,
+): Promise<"spawned" | "filled" | null> {
+  const key = childKey(file, row);
+  wiring.memory.firing.add(key);
+  try {
+    return await fireAndFill(row, file, command, wiring);
+  } finally {
+    wiring.memory.firing.delete(key);
+  }
+}
+
+async function fireAndFill(
   row: Reminder,
   file: string,
   command: boolean,
@@ -243,6 +291,54 @@ async function fireRow(
 }
 
 /**
+ * Alert о брошенной строке: ребёнок перечитывает строку, шлёт и пишет факт в дроссель Alert.
+ * Пока он идёт, следующий проход второго не зовёт.
+ */
+async function alertAbandoned(
+  row: Reminder,
+  file: string,
+  command: boolean,
+  { root, nodeBin, runJob, log, memory: { alerting } }: TickWiring,
+): Promise<null> {
+  const key = childKey(file, row);
+  alerting.add(key);
+  const result = await fireOnce(
+    {
+      name: `reminder-${row.id}-abandoned`,
+      argv: command
+        ? [
+            "scripts/reminders/command.ts",
+            row.id,
+            String(row.firedAt),
+            "abandoned",
+          ]
+        : ["scripts/reminders/fire.ts", row.id, "abandoned"],
+      root,
+      nodeBin,
+      timeoutMs: ALERT_TIMEOUT_MS,
+      log,
+    },
+    runJob,
+  ).finally(() => alerting.delete(key));
+  if (!result.ok)
+    log(
+      `reminders: ${row.id} abandoned, alert not sent: ${fireFailure(result)}`,
+    );
+  return null;
+}
+
+/** Закрытые строки без факта Alert и без идущего ребёнка с Alert: им Alert должен сейчас. */
+function owedAlerts(
+  rows: readonly Reminder[],
+  file: string,
+  alerting: ReadonlySet<string>,
+): Reminder[] {
+  return rows.filter(
+    (row) => alertOwed(row, file) && !alerting.has(childKey(file, row)),
+  );
+}
+
+/**
  * Один тик. Никогда не бросает наружу: это обработчик расписания, как и runScheduledJob —
  * сбой самого тика не должен ронять ход планировщика.
  */
@@ -250,7 +346,8 @@ export async function runReminderTick(
   options: ReminderTickOptions = {},
 ): Promise<ReminderTickResult> {
   const wiring = tickWiring(options);
-  const { nowMs, limit, log } = wiring;
+  const { nowMs, limit, log, memory } = wiring;
+  const command = options.command ?? false;
 
   const file = options.command ? commandFile() : reminderFile();
   let rows: Reminder[];
@@ -273,18 +370,35 @@ export async function runReminderTick(
     log(`reminders: sweep failed: ${message(error)}`);
   }
 
-  if (rows.length === 0) return { claimed: 0, spawned: 0, filled: 0, swept };
+  // После взятия и уборки: закрытая сейчас строка доживает до следующего тика, и ребёнок
+  // с Alert успевает её прочитать. Долг Alert читается из таблицы, а не из закрытых сейчас.
+  let abandoned: Reminder[] = [];
+  let owed: Reminder[] = [];
+  try {
+    abandoned = await closeAbandoned(nowMs, file, (row) =>
+      memory.firing.has(childKey(file, row)),
+    );
+    owed = owedAlerts(await list(file), file, memory.alerting);
+  } catch (error) {
+    log(`reminders: closing abandoned rows failed: ${message(error)}`);
+  }
 
-  log(
-    `reminders: tick claimed ${rows.length}: ${rows.map((row) => row.id).join(", ")}`,
-  );
+  if (rows.length > 0)
+    log(
+      `reminders: tick claimed ${rows.length}: ${rows.map((row) => row.id).join(", ")}`,
+    );
+  if (abandoned.length > 0)
+    log(
+      `reminders: tick closed ${abandoned.length} abandoned: ${abandoned.map((row) => row.id).join(", ")}`,
+    );
 
   let spawned = 0;
   let filled = 0;
 
-  const completion = Promise.allSettled(
-    rows.map((row) => fireRow(row, file, options.command ?? false, wiring)),
-  ).then((outcomes) => {
+  const completion = Promise.allSettled([
+    ...rows.map((row) => fireRow(row, file, command, wiring)),
+    ...owed.map((row) => alertAbandoned(row, file, command, wiring)),
+  ]).then((outcomes) => {
     outcomes.forEach((outcome, index) => {
       if (outcome.status === "fulfilled") {
         if (outcome.value === "spawned") spawned += 1;

@@ -1,13 +1,6 @@
 /* eslint-disable @typescript-eslint/no-floating-promises, @typescript-eslint/require-await -- Node owns test registration; async doubles preserve the I/O boundary. */
 import assert from "node:assert/strict";
-import {
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
+import { readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import fc from "fast-check";
@@ -15,6 +8,11 @@ import {
   TELEGRAM_BUTTON_TAP_FIELD,
   TELEGRAM_BUTTON_TAP_DAILY_TEXT_FIELD,
 } from "#lib/telegram-parts.ts";
+import { tempDir } from "../fixtures/temp-dir.ts";
+import {
+  resetIntentPhase,
+  type ResetIntentPhase,
+} from "../lib/telegram-reset-intent.ts";
 
 type Event = string | [string, string, number | undefined, string | undefined];
 type CaptureMessage = { message_id?: number };
@@ -54,8 +52,7 @@ type ControlModule = {
           discardThroughUpdateId?: number;
         },
       ) => Promise<unknown>;
-      resetRetryPendingImpl?: (chatKey: string) => boolean;
-      resetIntentPendingImpl?: (chatKey: string) => boolean;
+      resetPhaseImpl?: (chatKey: string) => ResetIntentPhase;
       pluginTapImpl?: (tap: {
         digest12: string;
         chatId: number;
@@ -119,7 +116,7 @@ type WizardsModule = {
 
 // Мост читает run-status с диска и берёт allowlist из окружения на импорте, поэтому
 // и то и другое ставим ДО загрузки модуля, в свежей data-директории.
-const dataDir = mkdtempSync(join(tmpdir(), "iva-control-"));
+const dataDir = tempDir("iva-control-");
 process.env.ASSISTANT_DATA_DIR = dataDir;
 // Экраны моста в тестах проверяются в rich-стиле (по умолчанию у пользователя classic).
 writeFileSync(
@@ -467,25 +464,6 @@ test("the ⏹ Stop button cancels through the channel route, never through Eve",
   assert.deepEqual(replies, []);
 });
 
-test("the legacy iva_cancel button stays out of the inbox and cancels the recorded pair", async () => {
-  runningTurn();
-  writeFileSync(
-    join(
-      dataDir,
-      "run-status.d",
-      `${Buffer.from("7:").toString("base64url")}.json`,
-    ),
-    JSON.stringify({ ...status.getChatStatus("7:"), statusMessageId: 4 }),
-  );
-  const { cancels, acks, deps } = recordingDeps();
-  assert.equal(await handleControl(stopButton(), deps), true);
-  assert.equal(cancels.length, 1);
-  assert.equal(cancels[0].sessionId, "session-1");
-  assert.equal(cancels[0].turnId, "turn-1");
-  assert.equal(status.getChatStatus("7:")?.wasCancelled, true);
-  assert.deepEqual(acks, [["cq-5", undefined]]);
-});
-
 test("/stop takes the same door and stays silent while the status message speaks", async () => {
   runningTurn({ sessionId: "session-2", turnId: "turn-2" });
   const { cancels, replies, deps } = recordingDeps();
@@ -508,8 +486,11 @@ test("/stop takes the same door and stays silent while the status message speaks
 test("Stop on an idle chat explains itself and never calls cancel", async () => {
   status.setChatStatus("7:", {
     status: "idle",
+    ingressId: null,
+    ingressAt: null,
     sessionId: null,
     turnId: null,
+    draftId: null,
   });
   const { cancels, acks, replies, deps } = recordingDeps();
 
@@ -526,6 +507,7 @@ test("an early running status without a session is not cancellable", async () =>
     status: "running",
     sessionId: null,
     turnId: null,
+    draftId: null,
     ingressId: "ingress-1",
   });
   const { cancels, acks, deps } = recordingDeps();
@@ -557,6 +539,7 @@ function stopTurn(key: string) {
     status: "idle",
     sessionId: null,
     turnId: null,
+    draftId: null,
   });
 }
 
@@ -1086,8 +1069,11 @@ test("a falsey local reply does not authorize offset acknowledgement", async () 
 test("a falsey callback ack does not claim a local control", async () => {
   status.setChatStatus("7:", {
     status: "idle",
+    ingressId: null,
+    ingressAt: null,
     sessionId: null,
     turnId: null,
+    draftId: null,
   });
 
   const consumed = await handleControl(
@@ -1109,8 +1095,11 @@ test("a falsey callback ack does not claim a local control", async () => {
 test("a false callback ack result does not claim a local control", async () => {
   status.setChatStatus("7:", {
     status: "idle",
+    ingressId: null,
+    ingressAt: null,
     sessionId: null,
     turnId: null,
+    draftId: null,
   });
 
   const consumed = await handleControl(
@@ -1852,17 +1841,23 @@ function resetDeps(
         resets.push([key, target, options]);
         return performReset();
       },
-      resetRetryPendingImpl: () => retryPending,
-      resetIntentPendingImpl: () => intentPending,
+      resetPhaseImpl: () =>
+        resetIntentPhase({
+          recorded: intentPending,
+          retryPending,
+          escalated: false,
+        }),
     },
   };
 }
 
+// Запись помнит сессию, только пока её держит ход: по ней /new и находит диалог.
 function idleSession() {
   status.setChatStatus("7:", {
-    status: "idle",
+    status: "running",
     sessionId: "session-r",
     turnId: null,
+    draftId: null,
   });
 }
 
@@ -1876,7 +1871,7 @@ async function withFakeSystemctl<T>(
   exitCode: number,
   run: (argsLog: string) => Promise<T>,
 ): Promise<T> {
-  const dir = mkdtempSync(join(tmpdir(), "iva-systemctl-"));
+  const dir = tempDir("iva-systemctl-");
   const argsLog = join(dir, "args.log");
   writeFileSync(
     join(dir, "systemctl"),
@@ -1901,7 +1896,7 @@ test("/new resets this private conversation and reports completion", async () =>
     assert.deepEqual(resets, [
       [
         "7:",
-        { sessionId: "session-r" },
+        { sessionId: "session-r", chatKey: "7:" },
         { clearQueue: true, discardThroughUpdateId: 1020 },
       ],
     ]);
@@ -3319,9 +3314,10 @@ test("native stop is handled before admission and leaves the next turn and compa
   assert.equal(await handleControl(nativeStop(), deps), true);
   assert.equal(cancels.length, 1);
   assert.equal(status.getChatStatus("7:")?.wasCancelled, undefined);
-  runningTurn({ turnId: "turn-compacting", draftId: 41, compacting: true });
+  // Свёртка черновика не держит: запись без turnId и draftId, нативный Стоп её не касается.
+  runningTurn({ turnId: null, draftId: null, compacting: true });
   assert.equal(await handleControl(nativeStop(), deps), true);
-  assert.equal(cancels.length, 2);
+  assert.equal(cancels.length, 1);
   assert.equal(status.getChatStatus("7:")?.wasCancelled, undefined);
   assert.deepEqual(replies, []);
   assert.deepEqual(acks, []);

@@ -3,6 +3,9 @@ import { readdir, realpath, stat } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { resolveVaultDir } from "@iva/vault-dir";
 
+// Свой короткий список, а не технический список обхода vault (packages/vault-walk): glob и
+// grep — глаза модели, и любой файл человека, в том числе внутри `.claude` или `.obsidian`,
+// она должна уметь найти и прочитать по имени.
 const IGNORE_DIRS = new Set([
   ".git",
   "node_modules",

@@ -281,6 +281,17 @@ export function buttonRow(buttons: readonly string[]): string {
   return `<tg-button-row>${buttons.join("")}</tg-button-row>`;
 }
 
+/** Строка «‹ Меню — вернуться в настройки»: одна подпись у всех экранов /menu. */
+export function menuBackLine(
+  ctx: { readonly tr: (en: string, ru: string) => string },
+  parent: string,
+): string {
+  return `${button(ctx.tr("‹ Menu", "‹ Меню"), `iva_menu:${parent}:o`)} — ${ctx.tr(
+    "back to the settings.",
+    "вернуться в настройки.",
+  )}`;
+}
+
 /**
  * Экранирование данных пользователя для rich markdown: путь, имя модели, ключ. Эти
  * символы rich-разметка читает как разметку: `<` ломает ещё и тег, `*`/`_`/`#`/`|` —

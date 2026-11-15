@@ -131,8 +131,10 @@ function failureOf(work: Promise<unknown>): Promise<unknown> {
   );
 }
 
+// Тесты с именем TurnLifecycle держат инварианты specs/TurnLifecycle.tla на настоящем ходе;
+// OldTurnStopped — в agent/lib/telegram-stop.test.ts.
 for (const data of [undefined, null, { message: 42 }] as const) {
-  void test(`turn.failed without string text is failed with a cause: ${JSON.stringify(data)}`, async () => {
+  void test(`TurnLifecycle FailurePreserved: turn.failed without string text is failed with a cause: ${JSON.stringify(data)}`, async () => {
     const spy = spyTurn(async function* () {
       yield { type: "message.completed", data: { message: "intermediate" } };
       yield { type: "turn.failed", data };
@@ -154,7 +156,7 @@ for (const mode of [
   "hanging",
   "reset-hanging",
 ] as const) {
-  void test(`silence-before-turn-start cancels the known session: ${mode}`, async (t) => {
+  void test(`TurnLifecycle CancelBeforeStart, ResetReached: silence-before-turn-start cancels the known session: ${mode}`, async (t) => {
     const { MessageResponse } = (await import(
       new URL(
         "../../node_modules/eve/dist/src/client/message-response.js",
@@ -277,7 +279,7 @@ for (const mode of [
 }
 
 for (const mark of ["cancel", "limit", "cancel-and-limit"] as const) {
-  void test(`recoverable failure preserves ${mark} priority`, async () => {
+  void test(`TurnLifecycle OwnerFirst, LimitFirst: recoverable failure preserves ${mark} priority`, async () => {
     const spy = spyTurn(async function* () {
       yield { type: "message.completed", data: { message: "intermediate" } };
       yield { type: "turn.failed", data: { message: "provider unavailable" } };

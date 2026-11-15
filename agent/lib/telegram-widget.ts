@@ -10,7 +10,10 @@
 // уходит caption виджета: её видят список чатов, поиск и клиенты без виджетов. Её же шов
 // шлёт текстом, когда виджет не ушёл: транспорт его не умеет, Telegram отказал, HTML не влез.
 // Импорты с расширением .ts: модуль грузится и голым node (cron → scripts/lib/telegram-send.ts).
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { deflateSync } from "node:zlib";
+import { dataDir } from "./data-dir.ts";
 
 // Пределы сервера: HTML до 32768 байт, после zlib уровня 9 до 4096 (PHP gzcompress($html, 9)).
 // deflateSync даёт тот же поток RFC 1950, Node жмёт на десяток байт плотнее PHP, отсюда запас.
@@ -32,6 +35,42 @@ export function widgetMode(raw: string | undefined): WidgetMode {
 }
 
 export const TELEGRAM_WIDGETS = widgetMode(process.env.TELEGRAM_WIDGETS);
+
+// Telegram выключает виджеты и на своей стороне (13.11.2026, после отчёта об уязвимости):
+// sendWidget отвечает 400 INPUT_MEDIA_WIDGET_NOT_ALLOWED, и владельцу доходит одна подпись.
+// Шов Outbox запоминает такой отказ, и сутки модель пишет ответ текстом
+// (agent/instructions/06-widgets.ts). Срок вышел — следующий виджет спрашивает сервер заново:
+// вернул Telegram виджеты, вернулись они и у Ивы. Цена проверки — один ответ подписью в сутки.
+export const WIDGET_REFUSAL_HOLD_MS = 24 * 60 * 60 * 1000;
+const refusalFile = () => join(dataDir(), "widget-refusal.json");
+
+/** Remembers that the server refuses widgets as such; a refusal of one widget's HTML is not it. */
+export function noteWidgetRefusal(
+  error: string | undefined,
+  now = Date.now(),
+): void {
+  if (!error?.includes("WIDGET_NOT_ALLOWED")) return;
+  try {
+    mkdirSync(dataDir(), { recursive: true });
+    writeFileSync(refusalFile(), JSON.stringify({ at: now }));
+  } catch (e) {
+    console.error("[telegram] отказ виджетов не записан:", e);
+  }
+}
+
+/** True while the last server refusal is fresh; a missing, torn or future-dated file is "no". */
+export function widgetsRefused(now = Date.now()): boolean {
+  try {
+    const { at } = JSON.parse(readFileSync(refusalFile(), "utf8")) as {
+      at?: unknown;
+    };
+    return (
+      typeof at === "number" && now >= at && now - at < WIDGET_REFUSAL_HOLD_MS
+    );
+  } catch {
+    return false;
+  }
+}
 
 export type ReplyPart =
   | { kind: "text"; text: string }

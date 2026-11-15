@@ -1,6 +1,6 @@
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { dataDirSetting, resolveDataDir } from "./lib/data-dir.ts";
+import { dataDirSetting, resolveDataDir } from "../packages/data-dir/index.ts";
 import { recoverInterruptedSessionState } from "./lib/wf-store.ts";
 
 // Runs as ExecStartPre: a failed recovery is one journal line, never a service that

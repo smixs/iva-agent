@@ -12,7 +12,7 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { CATALOG, catalogProvider } from "./lib/model-catalog.ts";
-import { notificationChat } from "./lib/notification-chat.ts";
+import { notificationChat } from "../packages/notification-chat/index.ts";
 import { redactNotice } from "./lib/notice.ts";
 import {
   alertOnce,
@@ -33,22 +33,27 @@ import {
   SHIM_PATH,
 } from "./lib/version-layout.ts";
 import { throughLink } from "./lib/link-target.ts";
+import { belowFloor } from "./lib/update-check.ts";
 import {
+  moveQuarantine,
+  quarantineDestination,
   quarantinePath,
   rewriteRunStatusesForUpdate,
   sessionStateTargets,
 } from "./lib/wf-store.ts";
 import {
+  beginUpdateRun,
+  closeUpdateRun,
+  markUpdateRun,
+  resumableUpdateRun,
+} from "./lib/update-run-journal.ts";
+import {
   adoptUpdateLock,
+  createVersionStore,
   layoutFor,
-  LEGACY_STATE_DIRS,
   readJson,
   STATE_DIRS,
 } from "./lib/version-store.ts";
-import {
-  LEGACY_BRAIN_UNITS,
-  LEGACY_MEMORY_UNITS,
-} from "./lib/legacy-memory-units.ts";
 import {
   commandRunner,
   customOverlay,
@@ -77,17 +82,53 @@ type WriterRuntime = Pick<
 export type UpdateQuarantine = {
   readonly path: string;
   readonly trash: string;
+  /** Исходный путь до `throughLink`: по нему видно, надо ли завести каталог заново. */
+  readonly link?: string;
 };
 
-/** Retire open session state as one reversible update step. */
+/** Карантинная метка одного хода: по ней повтор узнаёт карантин, который уже сделан. */
+export function quarantineStamp(): string {
+  return new Date().toISOString().replace(/[:.]/gu, "-");
+}
+
+/**
+ * Куда уйдёт состояние сессий, если его унести сейчас: только адреса, без движения.
+ * Пишется в журнал хода до остановки служб (specs/UpdateRun.tla): путь карантина,
+ * названный только в памяти убитого процесса, не переживает обрыв.
+ */
+export function planUpdateState(
+  root: string,
+  dataDir: string,
+  stamp = quarantineStamp(),
+): UpdateQuarantine[] {
+  return sessionStateTargets(root, dataDir).flatMap((target) => {
+    const plan = quarantineDestination(target, stamp);
+    return plan ? [plan] : [];
+  });
+}
+
+/**
+ * Retire open session state as one reversible update step. `planned` - адреса, уже
+ * записанные в журнал хода: уносится ровно то, что названо, а повтор после обрыва не
+ * заводит второй карантин поверх первого.
+ */
 export function quarantineUpdateState(
   root: string,
   dataDir: string,
   notify: Say,
-  stamp = new Date().toISOString().replace(/[:.]/gu, "-"),
+  stamp = quarantineStamp(),
+  planned?: readonly UpdateQuarantine[],
 ): UpdateQuarantine[] {
   const quarantined: UpdateQuarantine[] = [];
   try {
+    if (planned) {
+      // Уже унесённое не двигается второй раз: moveQuarantine молчит, если пути нет.
+      for (const entry of planned) {
+        moveQuarantine(entry);
+        quarantined.push(entry);
+      }
+      return quarantined;
+    }
     for (const target of sessionStateTargets(root, dataDir)) {
       const path = throughLink(target);
       const trash = quarantinePath(target, stamp);
@@ -203,8 +244,6 @@ export function captureOptionalWriterState(
       runtime.BRAIN_TIMER,
       runtime.BRAIN_SERVICE,
       runtime.SVC_USERBOT,
-      ...LEGACY_BRAIN_UNITS,
-      ...LEGACY_MEMORY_UNITS,
     ]),
   ].map((unit) => {
     const loadState = unitLoadState(runtime, unit);
@@ -314,67 +353,21 @@ function restoreUnitState(
   restoreOptionalWriterState(runtime, [state]);
 }
 
-/** Restore captured writer semantics after writeUnits retires legacy names. */
-export function restoreMigratedWriterState(
+/** Restore captured writer semantics onto the units writeUnits just rewrote. */
+function restoreMigratedWriterState(
   runtime: WriterRuntime,
   states: readonly OptionalWriterState[],
-  { legacyMemoryOwnerProven = false } = {},
 ): void {
   restoreOptionalWriterState(
     runtime,
     states.filter((state) => state.unit === runtime.SVC_USERBOT),
   );
-  const brainTimers = new Set([
-    runtime.BRAIN_TIMER,
-    ...LEGACY_BRAIN_UNITS.filter((unit) => unit.endsWith(".timer")),
-  ]);
-  const brainServices = new Set([
-    runtime.BRAIN_SERVICE,
-    ...LEGACY_BRAIN_UNITS.filter((unit) => unit.endsWith(".service")),
-  ]);
-  restoreUnitState(runtime, {
-    unit: runtime.BRAIN_TIMER,
-    loadState: "loaded",
-    ...mergedState(states, brainTimers),
-  });
-  restoreUnitState(runtime, {
-    unit: runtime.BRAIN_SERVICE,
-    loadState: "loaded",
-    ...mergedState(states, brainServices),
-  });
-
-  const legacyMemory = states.filter(
-    (state) =>
-      LEGACY_MEMORY_UNITS.includes(state.unit) && present(state.loadState),
-  );
-  const remaining = new Map(
-    legacyMemory.map((state) => [
-      state.unit,
-      present(unitLoadState(runtime, state.unit)),
-    ]),
-  );
-  restoreOptionalWriterState(
-    runtime,
-    legacyMemory.filter((state) => remaining.get(state.unit)),
-  );
-  const hadLegacyMemorySchedule = legacyMemory.some(
-    (state) => state.active || state.enabled,
-  );
-  const completeLegacySchedule = legacyMemory.every((state) => {
-    if (!state.active && !state.enabled) return true;
-    if (!remaining.get(state.unit)) return false;
-    if (!state.unit.endsWith(".timer")) return true;
-    return remaining.get(state.unit.replace(/\.timer$/u, ".service")) === true;
-  });
-  const owner = runtime.SERVICES[0];
-  if (hadLegacyMemorySchedule && !completeLegacySchedule) {
-    if (!legacyMemoryOwnerProven)
-      throw new Error(
-        "legacy memory schedule owner was not proven by writeUnits",
-      );
-    if (!owner || !unitActive(runtime, owner))
-      throw new Error("legacy memory schedule has no active service owner");
-  }
+  for (const unit of [runtime.BRAIN_TIMER, runtime.BRAIN_SERVICE])
+    restoreUnitState(runtime, {
+      unit,
+      loadState: "loaded",
+      ...mergedState(states, new Set([unit])),
+    });
 }
 
 export function restoreWriterOwnership(
@@ -382,7 +375,6 @@ export function restoreWriterOwnership(
   states: readonly OptionalWriterState[],
   phase: {
     readonly unitMigrationStarted: boolean;
-    readonly legacyMemoryOwnerProven: boolean;
     readonly userbotReady: boolean;
   },
 ): void {
@@ -396,9 +388,7 @@ export function restoreWriterOwnership(
     restoreOptionalWriterState(runtime, states);
     return;
   }
-  restoreMigratedWriterState(runtime, states, {
-    legacyMemoryOwnerProven: phase.legacyMemoryOwnerProven,
-  });
+  restoreMigratedWriterState(runtime, states);
 }
 
 /** Build leftovers of a checkout: not tracked, not state, never worth keeping. */
@@ -560,7 +550,7 @@ function topLevel(path: string): string {
 
 /** Never removed, whatever git says about them. */
 const KEEP = new Set([
-  ...[...STATE_DIRS, ...LEGACY_STATE_DIRS].map(topLevel),
+  ...STATE_DIRS.map(topLevel),
   ...".env current repo versions".split(" "),
 ]);
 
@@ -924,6 +914,13 @@ async function alertOwnerOnce(
  * Only what is running is restarted, and a unit that refuses is one line in the log: an
  * update that is otherwise finished must not fail over a plugin, and `iva doctor` says
  * which unit is down.
+ *
+ * A plugin the update switched off (settlePlugins, version-update.ts) has its units
+ * stopped here: otherwise its MCP proxy and services keep running the old version's code
+ * until the next `iva plugin` command (specs/PluginMode.tla, DisabledIsStopped). The same
+ * goes for any stored plugin that is not enabled and trusted - its units have no business
+ * running (ProcessesNeedTrust). The owner hears the name and the reason from the update's
+ * own notice (pluginsOffNotice), not from this line.
  */
 export async function restartPluginUnits(
   runtime: Pick<CliRuntime, "systemd" | "UNIT_DIR">,
@@ -934,13 +931,33 @@ export async function restartPluginUnits(
   if (!core) return;
   const { state, damaged } = await core.store.readPluginsStateSafe(dataDir);
   if (damaged) return;
+  const scope = canonicalPluginScope(dataDir);
   const live = runningPluginUnits({
-    scope: canonicalPluginScope(dataDir),
+    scope,
     entries: state.plugins.filter((entry) => entry.enabled && entry.trusted),
     unitDir: runtime.UNIT_DIR,
     manager: runtime.systemd.manager,
     systemd: runtime.systemd,
   });
+  const switchedOff = runningPluginUnits({
+    scope,
+    entries: state.plugins.filter((entry) => !(entry.enabled && entry.trusted)),
+    unitDir: runtime.UNIT_DIR,
+    manager: runtime.systemd.manager,
+    systemd: runtime.systemd,
+  });
+  if (switchedOff.length > 0) {
+    try {
+      runtime.systemd.disableNow(switchedOff);
+      log(
+        `stopped ${switchedOff.length} plugin unit(s) of the plugins that are switched off`,
+      );
+    } catch (error) {
+      log(
+        `some units of the switched-off plugins did not stop: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
   if (live.length === 0) return;
   try {
     runtime.systemd.restart(live);
@@ -967,7 +984,7 @@ export async function startCandidateServices(
   runtime: CliRuntime,
   services: Pick<
     ReturnType<typeof createCliSystemd>,
-    "restartServices" | "retireDeferredBrainUnits" | "writeUnits"
+    "restartServices" | "writeUnits"
   >,
   {
     states,
@@ -1002,8 +1019,6 @@ export async function startCandidateServices(
       ...(capturedUserbot?.loadState === "not-found"
         ? { skipUnits: [runtime.SVC_USERBOT] }
         : {}),
-      deferBrainMigration: true,
-      deferMemoryMigration: true,
     });
     runtime.systemd.activate([runtime.UPDATE_TIMER]);
     // The code of every plugin proxy is in the version this flip just made
@@ -1017,16 +1032,31 @@ export async function startCandidateServices(
       if (recovery.status === "failed") userbotOff = recovery.reason;
     }
   } finally {
-    if (states) {
+    if (states)
       restoreWriterOwnership(runtime, states, {
         unitMigrationStarted: migration.started,
-        legacyMemoryOwnerProven: false,
         userbotReady,
       });
-      if (migration.started) services.retireDeferredBrainUnits();
-    }
   }
   await tellAboutUserbot(alertUserbot, userbotOff, notify);
+}
+
+/** Версия, которая работает сейчас; чужой или битый симлинк - это «не знаю». */
+function currentVersionName(home: string): string | null {
+  try {
+    return createVersionStore(home).currentName();
+  } catch {
+    return null;
+  }
+}
+
+/** An outcome reported before the lock is adopted: nothing was touched. */
+function refuse(message: string): number {
+  const outcome: UpdateOutcome = { status: "failed", message };
+  const report = process.env.IVA_UPDATE_OUTCOME;
+  if (report) writeFileSync(report, JSON.stringify(outcome));
+  else console.log(JSON.stringify(outcome));
+  return 1;
 }
 
 /**
@@ -1054,16 +1084,12 @@ export async function main(argv: readonly string[]): Promise<number> {
   // a health cycle - and finally names the value. `iva update` on the release after this one
   // refuses before even that (scripts/cli/version-update-command.ts).
   const configured = layout.values.MODEL_PROVIDER ?? "ollama";
-  if (!catalogProvider(configured)) {
-    const outcome: UpdateOutcome = {
-      status: "failed",
-      message: `Invalid MODEL_PROVIDER ${JSON.stringify(configured)}; expected one of: ${Object.keys(CATALOG).join(", ")} — run: iva config`,
-    };
-    const report = process.env.IVA_UPDATE_OUTCOME;
-    if (report) writeFileSync(report, JSON.stringify(outcome));
-    else console.log(JSON.stringify(outcome));
-    return 1;
-  }
+  if (!catalogProvider(configured))
+    return refuse(
+      `Invalid MODEL_PROVIDER ${JSON.stringify(configured)}; expected one of: ${Object.keys(CATALOG).join(", ")} — run: iva config`,
+    );
+  const tooOld = belowFloor(home, join(import.meta.dirname, ".."));
+  if (tooOld) return refuse(tooOld);
 
   const lock = adoptUpdateLock(layout.data);
   const log: Say = (message) => console.log(`  ${message}`);
@@ -1091,13 +1117,36 @@ export async function main(argv: readonly string[]): Promise<number> {
         // itself is the old writer root and must remain usable until activation.
         const writerRoot = existsSync(layout.current) ? layout.current : home;
         const runtime = createCliRuntime(writerRoot);
-        optionalWriterState = captureOptionalWriterState(runtime);
+        // A run killed after the stop left the units down: a fresh snapshot would read
+        // them as "was stopped" and never bring them back (specs/UpdateRun.tla,
+        // UnitsReturn). The snapshot and the quarantine paths of the run on disk are the
+        // ones taken before the stop, and they are what this attempt uses.
+        const resumed = resumableUpdateRun(layout.data, name);
+        const stamp = quarantineStamp();
+        optionalWriterState = resumed?.units
+          ? [...resumed.units]
+          : captureOptionalWriterState(runtime);
+        const planned = resumed?.quarantine.length
+          ? [...resumed.quarantine]
+          : planUpdateState(writerRoot, layout.data, stamp);
+        beginUpdateRun(layout.data, {
+          version: name,
+          from: currentVersionName(home),
+          units: optionalWriterState,
+          quarantine: planned,
+        });
         stopWriterUnits(runtime, optionalWriterState);
+        markUpdateRun(layout.data, name, "stopped");
         quarantinedState = quarantineUpdateState(
           writerRoot,
           layout.data,
           notify,
+          stamp,
+          planned,
         );
+        markUpdateRun(layout.data, name, "quarantined", {
+          quarantine: quarantinedState,
+        });
         rewriteRunStatusesForUpdate(layout.data);
         await Promise.resolve();
       },
@@ -1126,7 +1175,6 @@ export async function main(argv: readonly string[]): Promise<number> {
           if (stateReady && optionalWriterState)
             restoreWriterOwnership(runtime, optionalWriterState, {
               unitMigrationStarted: migration.started,
-              legacyMemoryOwnerProven: false,
               userbotReady: true,
             });
         }
@@ -1150,14 +1198,6 @@ export async function main(argv: readonly string[]): Promise<number> {
             return Promise.resolve();
           },
         });
-      },
-      retireCommittedWriters: async (root) => {
-        const { createCliRuntime } = await import("./cli/runtime.ts");
-        const { createCliSystemd } = await import("./cli/systemd.ts");
-        const runtime = createCliRuntime(root);
-        const services = createCliSystemd(runtime);
-        services.retireLegacyMemoryUnits();
-        await Promise.resolve();
       },
       adopt: () => {
         writeShim(home, log, notify);
@@ -1192,6 +1232,21 @@ export async function main(argv: readonly string[]): Promise<number> {
     (reason) => alertOwnerAboutUserbot(layout, reason, notify),
     notify,
   );
+  // Итог хода - в тот же журнал, из которого его читают повтор, `iva doctor` и Bridge.
+  // Пишется до отчёта вызывающему: отчёт умирает вместе с процессом, журнал остаётся.
+  closeUpdateRun(layout.data, name, {
+    status:
+      outcome.status === "updated" || outcome.status === "current"
+        ? outcome.status
+        : outcome.status === "unhealthy"
+          ? "unhealthy"
+          : "failed",
+    ...("previous" in outcome && outcome.previous
+      ? { before: outcome.previous }
+      : {}),
+    ...("version" in outcome ? { after: outcome.version } : {}),
+    ...("message" in outcome ? { message: outcome.message } : {}),
+  });
   const report = process.env.IVA_UPDATE_OUTCOME;
   if (report) writeFileSync(report, JSON.stringify(outcome));
   else console.log(JSON.stringify(outcome));

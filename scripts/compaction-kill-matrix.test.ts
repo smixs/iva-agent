@@ -521,7 +521,6 @@ void test(
             notices.push(text);
             return Promise.resolve();
           },
-          deleteMessageImpl: () => Promise.resolve(),
           logImpl: note,
         });
         assert.ok(

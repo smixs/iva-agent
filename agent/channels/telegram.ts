@@ -20,6 +20,7 @@ import {
 // внутри него outbound-Gate, выбор rich/HTML, нарезка на чанки и plain-фолбэк.
 import {
   noticeSender,
+  redactNotice,
   sendThroughOutbox,
   type NoticeSend,
   type OutboxAck,
@@ -51,6 +52,7 @@ import {
   closeTelegramDraftChat,
   startTelegramAcceptedTyping,
   closeTelegramAcceptedTyping,
+  draftText,
 } from "../lib/telegram-draft.ts";
 import { notifyTelegramFailure } from "../lib/telegram-failure-notice.js";
 import { rememberTurnQuestion, turnQuestion } from "../lib/turn-question.js";
@@ -58,10 +60,12 @@ import { rememberTurnQuestion, turnQuestion } from "../lib/turn-question.js";
 // мост по ним буферизует входящие, канал хранит sessionId/turnId для отмены.
 import {
   chatKeyOf,
+  chatState,
   getChatStatus,
   RUN_STALE_MS,
   setChatStatus,
   setChatStatusIf,
+  TURN_FIELDS_CLEARED,
 } from "../lib/run-status.js";
 import { handleTelegramResetRequest } from "../lib/telegram-reset-route.js";
 // Отмена хода: публичный cancel eve отдаётся только роутам, поэтому «Стоп» — свой
@@ -422,7 +426,7 @@ const releaseCompactionClaim = (chatKey: string, sessionId: string) =>
   setChatStatusIf(
     chatKey,
     { sessionId, compacting: true },
-    { status: "idle", sessionId: null, compacting: null },
+    { status: "idle", ...TURN_FIELDS_CLEARED },
   );
 
 const telegram = telegramChannel({
@@ -645,13 +649,32 @@ const telegram = telegramChannel({
     async "message.completed"(data, channel, ctx) {
       if (!ctx?.session) return;
       if (data.finishReason === "tool-calls") {
-        telegramDraftTurn(
+        const stream = telegramDraftTurn(
           channel.telegram,
           ctx.session.id,
           data.turnId,
           channel.state.chatType === "private" &&
             channel.telegram.messageThreadId === undefined,
-        )?.completeStep(data.stepIndex, data.message ?? "");
+        );
+        const { text, silent } = parseTelegramDelivery(data.message ?? "");
+        // Redact the complete text before the draft renderer cuts its tail.
+        const progress = draftText(redactNotice(text), true);
+        stream?.completeStep(data.stepIndex, data.message ?? "");
+        if (stream?.claimProgress(data.stepIndex, progress)) {
+          await traceOutbox(
+            { turn: data.turnId, session: ctx.session.id, source: "telegram" },
+            progress,
+            () =>
+              sendThroughOutbox(
+                progress,
+                outboxTransport(
+                  channel.telegram,
+                  TELEGRAM_RICH_REPLIES,
+                  silent,
+                ),
+              ),
+          );
+        }
         return;
       }
       await closeTelegramDraftChat(
@@ -743,12 +766,10 @@ const telegram = telegramChannel({
     const tg = ctx.telegram;
     const chatKey = chatKeyOf(message.chat.id, message.messageThreadId);
     const ingressId = randomUUID();
-    const receivedStatus = getChatStatus(chatKey);
+    const receivedState = chatState(getChatStatus(chatKey));
     const receivedDuringTurn =
       telegramTurnPolicy() === "steer" &&
-      receivedStatus?.status === "running" &&
-      receivedStatus.compacting !== true &&
-      Date.now() - (receivedStatus.updatedAt ?? 0) < RUN_STALE_MS;
+      (receivedState === "turn" || receivedState === "accepted");
     return rememberAccepted(
       chatKey,
       message,

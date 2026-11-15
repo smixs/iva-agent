@@ -5,7 +5,7 @@ import { basename, dirname, join } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { parseEnv } from "node:util";
 import { formatEnvLine, writeEnvAtomicSync } from "../lib/env-file.ts";
-import { resolveDataDir } from "../lib/data-dir.ts";
+import { resolveDataDir } from "../../packages/data-dir/index.ts";
 import { createSystemdControl } from "../lib/systemd-control.ts";
 import { real } from "../lib/version-layout.ts";
 import { parseVersionName } from "../lib/version-store.ts";
@@ -84,7 +84,6 @@ export function createCliRuntime(root: string) {
   const TOKEN_FILE = join(dataDirAbs(), "telegram-userbot.token");
 
   const DEFAULT_PORT = "8723";
-  const OLD_DEFAULT_HOST = "http://127.0.0.1:3000";
 
   const C: RuntimeColors =
     process.env.NO_COLOR || process.env.TERM === "dumb"
@@ -261,7 +260,6 @@ export function createCliRuntime(root: string) {
     VENV_PY,
     TOKEN_FILE,
     DEFAULT_PORT,
-    OLD_DEFAULT_HOST,
     C,
     ok,
     warn,

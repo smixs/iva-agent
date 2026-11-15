@@ -1,5 +1,5 @@
 // Stateless transport for the agent dispatcher. It never reads or writes Alert state.
-import { ownerChat } from "./lib/notification-chat.ts";
+import { ownerChat } from "../packages/notification-chat/index.ts";
 import { sendTelegramHtml } from "./lib/telegram-send.ts";
 import { isEntrypoint } from "./lib/version-layout.ts";
 

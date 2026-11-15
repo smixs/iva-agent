@@ -15,10 +15,11 @@ test("one minute Schedule keeps helpers runnable during a pending reminder turn"
       return next(url, ctx);
     }});
     const schedule = (await import('./agent/schedules/reminders.ts')).default;
-    for (let n=0;n<2;n++) {
+    let now=Date.UTC(2026,10,10,23,18); Date.now=()=>now;
+    for (let n=0;n<2;n++,now+=60000) {
       let work; schedule.run({waitUntil:p=>work=p}); await work; await new Promise(setImmediate);
     }
-    if (schedule.cron !== '* * * * *' || globalThis.helperTicks !== 2) throw Error('minute stalled');
+    if (schedule.cron !== '* * * * * *' || globalThis.helperTicks !== 2) throw Error('minute stalled');
     console.log('helpers completed two ticks');
   `;
   const result = await run(
@@ -96,7 +97,8 @@ test("R4 a pending helper step cannot hold later reminder/command minutes", asyn
  if(url.endsWith('/agent/lib/helper-tick.ts'))return{format:'module',shortCircuit:true,source:'export const runHelperTick = () => new Promise(()=>{});'};
  return next(url,ctx);}});
  const schedule=(await import('./agent/schedules/reminders.ts')).default;
- for(let n=0;n<2;n++){let work;schedule.run({waitUntil:p=>work=p});
+ let now=Date.UTC(2026,10,10,23,18);Date.now=()=>now;
+ for(let n=0;n<2;n++,now+=60000){let work;schedule.run({waitUntil:p=>work=p});
  const result=await Promise.race([work,new Promise(r=>setTimeout(()=>r('held'),150))]);
  if(result==='held')throw Error('helper held the minute');}
  if(globalThis.ticks!==4)throw Error('reminder/command minute lost');`;
@@ -104,5 +106,26 @@ test("R4 a pending helper step cannot hold later reminder/command minutes", asyn
     process.execPath,
     ["--input-type=module", "-e", script],
     { timeout: 2000 },
+  );
+});
+
+test("ReminderLifecycle exact-second admission stays free while minute maintenance is waiting", async () => {
+  const script = `
+ import './scripts/lib/ts-esm-hooks.ts';import {registerHooks} from 'node:module';
+ registerHooks({load(url,ctx,next){
+ if(url.endsWith('/agent/lib/reminder-tick.ts'))return{format:'module',shortCircuit:true,source:'export const runReminderTick = o => {if(o.command){globalThis.commands=(globalThis.commands??0)+1;return new Promise(()=>{});}globalThis.reminders=(globalThis.reminders??0)+1;return Promise.resolve();}'};
+ if(url.endsWith('/agent/lib/helper-tick.ts'))return{format:'module',shortCircuit:true,source:'export const runHelperTick = () => {globalThis.helpers=(globalThis.helpers??0)+1;return Promise.resolve();}'};
+ if(url.endsWith('/agent/lib/model-auth-dispatch.ts'))return{format:'module',shortCircuit:true,source:'export const dispatchModelAuth = () => {globalThis.auth=(globalThis.auth??0)+1;return new Promise(()=>{}); }'};
+ return next(url,ctx);}});
+ const schedule=(await import('./agent/schedules/reminders.ts')).default;
+ let now=Date.UTC(2026,10,10,23,18);Date.now=()=>now;
+ for(let n=0;n<2;n++,now+=1000){let work;schedule.run({waitUntil:p=>work=p});
+ const result=await Promise.race([work,new Promise(r=>setTimeout(()=>r('held'),150))]);
+ if(result==='held')throw Error('maintenance held reminder admission');}
+ if(globalThis.reminders!==2 || globalThis.commands!==1 || globalThis.auth!==1 || globalThis.helpers!==1)throw Error('cadence changed');`;
+  await promisify(execFile)(
+    process.execPath,
+    ["--input-type=module", "-e", script],
+    { timeout: 10_000 },
   );
 });

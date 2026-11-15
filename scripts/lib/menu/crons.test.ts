@@ -56,7 +56,8 @@ test("the ⏰ screen lists the nearest reminders and the dispatcher tick", async
     writeFileSync(join(dataDir, "rollup-status.json"), "{}");
     const { add } = await import("#lib/reminder-store.ts");
     const { formatZoned } = await import("#lib/zoned-time.ts");
-    const { resolveTimeZone } = await import("#lib/timezone.ts");
+    const { resolveTimeZone } =
+      await import("../../../packages/timezone/index.ts");
     const { tickPulseFile } = await import("#lib/reminder-tick.ts");
     const now = Date.now();
     const later = await add({

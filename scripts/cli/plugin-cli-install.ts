@@ -118,6 +118,7 @@ export function createPluginInstallCommands(
   const {
     findPlugin,
     pluginDataDir,
+    pluginMode,
     pluginRoot,
     pluginsDir,
     pluginsStateFile,
@@ -334,6 +335,11 @@ export function createPluginInstallCommands(
    * Папки возвращаются ДО лока, а не под ним: `locked` первым делом подметает
    * недоделки прерванной установки, а смещённая копия выглядит ровно как они — она
    * бы её и снесла. Состояние пишется одной записью под локом.
+   *
+   * Назад едут только код и версия прежней записи. Тумблеры берутся из записи, прочитанной
+   * под этим же замком: пока шла сборка, владелец мог выключить плагин или снять доверие, и
+   * прежняя запись целиком вернула бы и то и другое без нового тапа. Плагин, снятый за это
+   * время, не возвращается вместе с папкой (`specs/PluginMode.tla`: `UpdateUndoKeeps`).
    */
   async function undoInstalls(
     data: string,
@@ -346,10 +352,23 @@ export function createPluginInstallCommands(
     }
     await locked(data, async () => {
       let state = await readPluginsState(data);
-      for (const undo of undos)
-        state = undo.previous
-          ? upsertPlugin(state, undo.previous)
-          : removePlugin(state, undo.name);
+      for (const undo of undos) {
+        const now = findPlugin(state, undo.name);
+        if (undo.previous && now)
+          state = upsertPlugin(state, {
+            ...undo.previous,
+            enabled: now.enabled,
+            trusted: now.trusted,
+          });
+        else {
+          state = removePlugin(state, undo.name);
+          if (undo.previous)
+            rmSync(pluginRoot(data, undo.name), {
+              recursive: true,
+              force: true,
+            });
+        }
+      }
       await writePluginsState(data, state);
     });
   }
@@ -516,7 +535,7 @@ export function createPluginInstallCommands(
     // заканчивается сборкой и рестартом. Сборка не прошла — установки не было: стор и
     // plugins.json возвращаются как были, работающая версия не тронута (ADR-0003).
     let inRunningVersion = false;
-    if (entry.enabled && inVersion(report, entry.trusted)) {
+    if (inVersion(report, pluginMode(entry))) {
       const outcome = await buildCode(entry.name, true);
       if (outcome.failure !== null) {
         await undoInstalls(data, [undo]);
@@ -592,7 +611,7 @@ export function createPluginInstallCommands(
       await reconcileUnits(data, next);
       return {
         entry: found,
-        code: inVersion(report, found.trusted) && found.enabled,
+        code: inVersion(report, pluginMode(found)),
       };
     });
     // Плагин удалён, а его код всё ещё в работающей версии: убирает его сборка.
@@ -706,7 +725,7 @@ export function createPluginInstallCommands(
       undo,
       // Доверенный плагин с MCP пересобирается и без кода: его connection-файлы
       // описывают тот `mcp.json`, который только что приехал.
-      code: inVersion(report, installed.trusted) && installed.enabled,
+      code: inVersion(report, pluginMode(installed)),
       moved: installed.sha !== entry.sha || installed.digest !== entry.digest,
     };
   }

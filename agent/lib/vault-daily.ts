@@ -4,7 +4,7 @@
 // не разъезжается между записями.
 import { appendFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { resolveTimeZone } from "./timezone.ts";
+import { resolveTimeZone } from "../../packages/timezone/index.ts";
 import { resolveVaultDir } from "@iva/vault-dir";
 
 export type VaultStamp = { date: string; hhmm: string; hhmmss: string };

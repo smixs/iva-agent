@@ -2,7 +2,7 @@
 // ```tg-widget <подпись> режется в отдельное сообщение sendWidget, остальное идёт прежним путём,
 // отказ виджета оставляет подпись текстом, код виджета текстом в чат не уходит никогда.
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -13,8 +13,15 @@ process.env.ASSISTANT_DATA_DIR = join(root, "data");
 mkdirSync(process.env.ASSISTANT_DATA_DIR, { recursive: true });
 process.on("exit", () => rmSync(root, { recursive: true, force: true }));
 
-const { splitWidgets, widgetMode, widgetProblem, withoutWidgetCode } =
-  await import("./telegram-widget.ts");
+const {
+  WIDGET_REFUSAL_HOLD_MS,
+  noteWidgetRefusal,
+  splitWidgets,
+  widgetMode,
+  widgetProblem,
+  widgetsRefused,
+  withoutWidgetCode,
+} = await import("./telegram-widget.ts");
 const { sendThroughOutbox } = await import("./outbox.ts");
 type OutboxAck = import("./outbox.ts").OutboxAck;
 type OutboxTransport = import("./outbox.ts").OutboxTransport;
@@ -279,4 +286,70 @@ await test("the widgets block reaches chat and scheduled turns, not helpers", as
     },
   );
   assert.equal(helper, null);
+});
+
+// Telegram выключил виджеты на своей стороне (13.11.2026): отказ запоминается на сутки.
+const refusalFile = join(process.env.ASSISTANT_DATA_DIR, "widget-refusal.json");
+const NOT_ALLOWED =
+  "sendWidget 400: Bad Request: INPUT_MEDIA_WIDGET_NOT_ALLOWED";
+
+await test("a server refusal of widgets holds for a day and no longer", () => {
+  rmSync(refusalFile, { force: true });
+  assert.equal(widgetsRefused(1000), false);
+  noteWidgetRefusal(NOT_ALLOWED, 1000);
+  assert.equal(widgetsRefused(1000), true);
+  assert.equal(widgetsRefused(1000 + WIDGET_REFUSAL_HOLD_MS - 1), true);
+  assert.equal(widgetsRefused(1000 + WIDGET_REFUSAL_HOLD_MS), false);
+  assert.equal(widgetsRefused(999), false, "a future-dated fact is not a hold");
+});
+
+await test("a refusal of one widget, a network error and a torn file are not a hold", () => {
+  for (const error of [
+    "sendWidget 400: Bad Request: INPUT_MEDIA_WIDGET_TOO_LARGE",
+    "widget 5000 B after zlib > 4096",
+    "sendWidget: fetch failed",
+    undefined,
+  ]) {
+    rmSync(refusalFile, { force: true });
+    noteWidgetRefusal(error, 1000);
+    assert.equal(widgetsRefused(1000), false, String(error));
+  }
+  for (const torn of ["", "{", '{"at":"1000"}', "null", "[]"]) {
+    writeFileSync(refusalFile, torn);
+    assert.equal(widgetsRefused(1000), false, torn);
+  }
+});
+
+await test("the Outbox records the server refusal when a widget falls back to its caption", async () => {
+  rmSync(refusalFile, { force: true });
+  const texts: string[] = [];
+  const ack = (text: string): Promise<OutboxAck> => {
+    texts.push(text);
+    return Promise.resolve({ ok: true });
+  };
+  const transport: OutboxTransport = {
+    sendRich: ack,
+    sendHtml: ack,
+    sendPlain: ack,
+    sendWidget: () =>
+      Promise.resolve({ ok: false, error: NOT_ALLOWED, retryPlain: false }),
+  };
+  const result = await sendThroughOutbox(block("Лента: 21 пост"), transport);
+  assert.equal(result.fellBack, true);
+  assert.equal(texts.length, 1, "the caption went out as text");
+  assert.match(texts[0], /Лента: 21 пост/u);
+  assert.equal(widgetsRefused(), true);
+  rmSync(refusalFile, { force: true });
+});
+
+await test("while Telegram refuses widgets the model is told to answer in text", async () => {
+  const { default: widgets } = await import("../instructions/06-widgets.ts");
+  const said = () =>
+    JSON.stringify(widgets.events["turn.started"]!({}, {} as never));
+  rmSync(refusalFile, { force: true });
+  assert.match(said(), /Widgets in replies/u);
+  noteWidgetRefusal(NOT_ALLOWED);
+  assert.match(said(), /Widgets are off right now/u);
+  assert.doesNotMatch(said(), /Widgets in replies/u);
+  rmSync(refusalFile, { force: true });
 });

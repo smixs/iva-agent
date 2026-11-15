@@ -33,7 +33,6 @@ type TelegramImpl = (
 const errorMessage = (error: unknown) => (error as ErrorLike).message;
 
 // offset: null ⇒ no file (first run) — distinguish from a genuine offset 0.
-// delivered: update_id последнего доставленного в eve апдейта (см. offset-store.ts).
 async function loadOffset({
   file = OFFSET_FILE,
   readFileImpl = readFile,
@@ -42,7 +41,7 @@ async function loadOffset({
     return parseOffsetFile((await readFileImpl(file, "utf8")) as string);
   } catch (error) {
     if ((error as ErrorLike | null | undefined)?.code === "ENOENT")
-      return { offset: null, delivered: null };
+      return { offset: null };
     throw new Error(
       `failed to load Telegram offset ${file}: ${String(errorMessage(error))}`,
       { cause: error },
@@ -107,7 +106,6 @@ function chatKey(update: TelegramUpdate) {
 }
 async function saveOffset(
   offset: number,
-  delivered: number | null = null,
   {
     file = OFFSET_FILE,
     writeFileImpl = writeFileAtomic,
@@ -117,7 +115,7 @@ async function saveOffset(
   } = {},
 ) {
   try {
-    await writeFileImpl(file, serializeOffsetFile(offset, delivered), {
+    await writeFileImpl(file, serializeOffsetFile(offset), {
       mode: 0o600,
     });
   } catch (error) {

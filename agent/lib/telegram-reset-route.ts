@@ -1,5 +1,6 @@
 import type { RouteHandlerArgs } from "eve/channels";
 import { verifyTelegramRequest } from "eve/channels/telegram";
+import { isRecord } from "../../packages/guards/index.ts";
 
 export type TelegramSessionAddress = {
   chatId: string;
@@ -8,16 +9,13 @@ export type TelegramSessionAddress = {
 };
 
 export type ResetTarget =
-  | { sessionId: string; address?: never }
+  | { sessionId: string; address?: never; chatKey?: string }
   | { sessionId?: never; address: TelegramSessionAddress };
 
 type ResetOperations = Pick<
   RouteHandlerArgs,
   "attachSession" | "resolveSession"
 >;
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
 
 const numericString = (value: unknown, signed: boolean): string | null => {
   if (typeof value === "number") {
@@ -65,13 +63,31 @@ export function parseTelegramResetTarget(value: unknown): ResetTarget | null {
   if (hasSessionId === hasAddress) return null;
   if (hasSessionId) {
     const sessionId = value.sessionId;
-    return typeof sessionId === "string" && sessionId.length > 0
-      ? { sessionId }
-      : null;
+    if (typeof sessionId !== "string" || sessionId.length === 0) return null;
+    if (!Object.hasOwn(value, "chatKey")) return { sessionId };
+    if (
+      typeof value.chatKey !== "string" ||
+      !/^-?\d+:(?:[1-9]\d*)?$/u.test(value.chatKey)
+    )
+      return null;
+    const [chatId, thread] = value.chatKey.split(":");
+    const address = parseAddress({
+      chatId,
+      ...(thread ? { messageThreadId: Number(thread) } : {}),
+    });
+    return address ? { sessionId, chatKey: value.chatKey } : null;
   }
+  if (Object.hasOwn(value, "chatKey")) return null;
   const address = parseAddress(value.address);
   return address === null ? null : { address };
 }
+
+// Запрос агента переживает смерть Bridge: поздний resolveSession может вернуть сессию
+// с сообщением после отсечки. Номер завершённого сброса того же чата ограждает её
+// от старых запросов (specs/ResetIntent.tla, AgentStale). Восстановление при этом
+// может закончиться, пока прежний запрос ещё ждёт разрешения адреса.
+const resetCompletedByChat = new Map<string, number>();
+let resetAcceptedSeq = 0;
 
 /** Authenticated Telegram-owned session reset endpoint. */
 export async function handleTelegramResetRequest(
@@ -98,12 +114,29 @@ export async function handleTelegramResetRequest(
     });
   }
 
+  const accepted = ++resetAcceptedSeq;
+  const key =
+    target.sessionId !== undefined
+      ? target.chatKey
+      : `${target.address.chatId}:${target.address.messageThreadId ?? ""}`;
   const session =
-    target.sessionId === undefined
-      ? await operations.resolveSession(addressKey(target.address))
-      : operations.attachSession(target.sessionId);
-  const result = session
-    ? await session.reset({ reason: "Telegram recovery command" })
-    : { status: "no_active_session" as const };
+    target.sessionId !== undefined
+      ? operations.attachSession(target.sessionId)
+      : await operations.resolveSession(addressKey(target.address));
+  const resetSinceAccepted =
+    target.sessionId === undefined &&
+    key !== undefined &&
+    (resetCompletedByChat.get(key) ?? 0) > accepted;
+  const result =
+    session && !resetSinceAccepted
+      ? await session.reset({ reason: "Telegram recovery command" })
+      : { status: "no_active_session" as const };
+  if (key !== undefined && !resetSinceAccepted) {
+    // Пока reset() ждал, более новый запрос мог уже закончиться (AgentDone: doneSeq).
+    resetCompletedByChat.set(
+      key,
+      Math.max(resetCompletedByChat.get(key) ?? 0, accepted),
+    );
+  }
   return Response.json({ ok: true, ...result });
 }

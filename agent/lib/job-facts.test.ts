@@ -3,13 +3,11 @@
 import assert from "node:assert/strict";
 import {
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   readdirSync,
   statSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -26,12 +24,13 @@ import {
   recordWake,
   type JobFact,
 } from "./job-facts.ts";
+import { tempDir } from "../../scripts/fixtures/temp-dir.ts";
 
 const DAY = 24 * 60 * 60 * 1000;
 const NOW = Date.UTC(2026, 8, 13, 12, 0, 0);
 
 function dir(): string {
-  return mkdtempSync(join(tmpdir(), "t20-facts-"));
+  return tempDir("t20-facts-");
 }
 
 function fact(overrides: Partial<JobFact> = {}): JobFact {

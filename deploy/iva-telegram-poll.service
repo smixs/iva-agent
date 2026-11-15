@@ -1,8 +1,7 @@
 # systemd USER unit — Telegram polling-мост (бот отвечает без webhook/прокси).
 #
 # Сам забирает апдейты у Telegram (getUpdates) и POST-ит их в локальный eve.
-# Плейсхолдеры __PROJECT_DIR__/__NODE_BIN__ подставляет install.sh.
-# Установка вручную: см. комментарии в deploy/iva-memory-daily.service.
+# Плейсхолдеры __PROJECT_DIR__/__NODE_BIN__ подставляет writeUnits() (scripts/cli/systemd.ts).
 [Unit]
 Description=Iva Telegram polling bridge (getUpdates → local webhook)
 After=network-online.target iva.service

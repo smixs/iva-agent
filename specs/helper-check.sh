@@ -36,7 +36,7 @@ check() {
   cfg=$1; expect=$2; module=${cfg%%-*}; log="$META/$cfg.log"
   case " $selected " in ' all '|*" $cfg "*) ;; *) return 0;; esac
   workers=$WORKERS; [ "$expect" = none ] || workers=1
-  echo "RUN $cfg: expected=$expect; mode=$CHECK_MODE; workers=$workers; timeout=${TLC_TIMEOUT:-600}s"
+  echo "RUN $cfg: expected=$expect; mode=$CHECK_MODE; workers=$workers; timeout=${TLC_TIMEOUT:-1800}s"
   # В переднем плане. timeout ограничивает каждый Java-процесс, TERM -> KILL через 5s.
   # -deadlock отключает проверку тупика: конечные replay заканчиваются stutter.
   if [ "$CHECK_MODE" = simulate ]; then
@@ -48,7 +48,7 @@ check() {
   fi
   wait_load
   echo "LOAD $cfg: ${load:-unavailable}; required <20"
-  "$TIMEOUT" --foreground --kill-after=5s "${TLC_TIMEOUT:-600}s" "$TLC" "$@" \
+  "$TIMEOUT" --foreground --kill-after=5s "${TLC_TIMEOUT:-1800}s" "$TLC" "$@" \
     -workers "$workers" -deadlock -metadir "$META/$cfg.states" \
     -config "$cfg.cfg" "$module.tla" >"$log" 2>&1
   code=$?

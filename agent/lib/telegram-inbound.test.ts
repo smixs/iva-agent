@@ -3,20 +3,19 @@ import assert from "node:assert/strict";
 import {
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   readdirSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import fc from "fast-check";
+import { tempDir } from "../../scripts/fixtures/temp-dir.ts";
 
 // Пайплайн живёт БЕЗ eve: тест грузит его голым node. Окружение выставляем до
 // импорта — i18n и settings читают ASSISTANT_DATA_DIR на загрузке модуля.
-const root = mkdtempSync(join(tmpdir(), "iva-telegram-inbound-"));
+const root = tempDir("iva-telegram-inbound-");
 process.env.ASSISTANT_DATA_DIR = join(root, "data");
 process.env.ASSISTANT_VAULT_DIR = join(root, "vault");
 process.env.ASSISTANT_TIMEZONE = "UTC";

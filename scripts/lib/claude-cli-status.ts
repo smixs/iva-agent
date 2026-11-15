@@ -13,7 +13,7 @@ import {
   resolveClaude,
   servicePath,
 } from "../../packages/claude-command/index.ts";
-import { CANONICAL_REASONING_EFFORTS } from "./reasoning-levels.ts";
+import { CANONICAL_REASONING_EFFORTS } from "../../packages/reasoning-levels/index.ts";
 
 export type ClaudeEnv = Readonly<Record<string, string | undefined>>;
 
@@ -243,6 +243,9 @@ const runClaude: ClaudeRunner = (command, { env, input, timeoutMs, cwd }) =>
       finish({ stdout, stderr, failed });
     });
     child.on("close", () => finish({ stdout, stderr, failed }));
+    // CLI, который вышел, не открыв stdin, отвечает на запись EPIPE: без слушателя это
+    // исключение процесса, а итог запуска и так придёт по `close`.
+    child.stdin?.on("error", () => undefined);
     child.stdin?.end(input);
   });
 

@@ -1,3 +1,0 @@
-# Compatibility shim for Iva updaters before the hash-locked installer.
-# Keep this file dependency-free through the 0.3.5 transition release.
-# Current code installs the exact graph from requirements.lock.

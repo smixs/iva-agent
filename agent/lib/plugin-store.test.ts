@@ -25,6 +25,7 @@ import {
   findPlugin,
   normalizePluginsState,
   pluginDataDir,
+  pluginMode,
   pluginRoot,
   pluginsDir,
   pluginsStateFile,
@@ -36,6 +37,7 @@ import {
   upsertPlugin,
   writePluginsState,
   type PluginEntry,
+  type PluginMode,
   type PluginsState,
 } from "./plugin-store.ts";
 
@@ -101,6 +103,41 @@ test("state survives a write and a read byte for byte", async () => {
   );
   // Пишем в data/custom/, каталог создаём сами: свежая инсталляция его не имеет.
   assert.ok(existsSync(pluginsStateFile(data)));
+});
+
+test("PluginMode: the four modes are the four pairs of toggles, and the file still holds two booleans", async () => {
+  const pairs: Record<PluginMode, readonly [boolean, boolean]> = {
+    full: [true, true],
+    "no-processes": [true, false],
+    paused: [false, true],
+    off: [false, false],
+  };
+  const data = world();
+  await writePluginsState(data, {
+    marketplaces: [],
+    plugins: Object.entries(pairs).map(([name, [enabled, trusted]]) =>
+      entry({ name, enabled, trusted }),
+    ),
+  });
+
+  // Формат на диске прежний: слово режима живёт в коде, в файл не попадает, и
+  // версия до режимов читает запись как раньше.
+  const onDisk = JSON.parse(readFileSync(pluginsStateFile(data), "utf8")) as {
+    plugins: Record<string, unknown>[];
+  };
+  for (const item of onDisk.plugins) {
+    const [enabled, trusted] = pairs[item.name as PluginMode];
+    assert.equal(item.enabled, enabled);
+    assert.equal(item.trusted, trusted);
+    assert.equal("mode" in item, false);
+  }
+  for (const item of (await readPluginsState(data)).plugins)
+    assert.equal(pluginMode(item), item.name);
+
+  // Запись без тумблеров (файл старше их появления): поставлен — значит включён, а
+  // доверия, которого никто не давал, нет.
+  const [old] = normalizePluginsState({ plugins: [{ name: "old" }] }).plugins;
+  assert.equal(pluginMode(old), "no-processes");
 });
 
 test("junk entries fall out and the survivors keep their order", () => {

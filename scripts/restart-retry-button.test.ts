@@ -46,7 +46,6 @@ async function interrupted(
       sent.push(message);
       return Promise.resolve();
     },
-    deleteMessageImpl: async () => {},
     logImpl: () => {},
     trImpl: (english: string, russian: string) => (en ? english : russian),
   };
@@ -115,7 +114,6 @@ void test("a tap after /new or a newer accepted turn is stale", async () => {
     if (reset)
       await queue.completeScopedResetState(fx.key, {
         clearQueue: false,
-        deleteMessageImpl: async () => {},
       });
     else status.setChatStatus(fx.key, chatTakeOverPatch({ status: "idle" }));
     assert.equal(await handleControl(tap(fx, reset ? 200 : 201), io), true);
@@ -125,6 +123,7 @@ void test("an old notification cannot submit the next interrupted question", asy
   const fx = await interrupted("старый вопрос");
   status.setChatStatus(fx.key, {
     status: "running",
+    sessionId: "next",
     turnQuestion: "новый вопрос",
   });
   await queue.reapStaleRuns({
@@ -132,7 +131,6 @@ void test("an old notification cannot submit the next interrupted question", asy
     staleMs: 1,
     resetImpl: async () => {},
     sendImpl: async () => {},
-    deleteMessageImpl: async () => {},
     logImpl: () => {},
   });
   assert.equal(await handleControl(tap(fx, 300), io), true);
@@ -209,7 +207,6 @@ void test("a Telegram refusal is logged once and the interrupted turn stays clos
     now: () => Date.now() + 100_000,
     staleMs: 1,
     resetImpl: async () => {},
-    deleteMessageImpl: async () => {},
     sendImpl: () => {
       sends++;
       return Promise.reject(new Error("Telegram 403"));
@@ -292,7 +289,6 @@ void test("restart notice has a shared 30s deadline and leaves the reaped turn i
         now: () => Date.now() + 100_000,
         staleMs: 1,
         resetImpl: async () => {},
-        deleteMessageImpl: async () => {},
         logImpl: (...parts: unknown[]) => {
           errors.push(parts);
         },

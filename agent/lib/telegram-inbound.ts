@@ -29,6 +29,7 @@ import { traceInboundReceived } from "./trace.ts";
 import { appendDaily } from "./vault-daily.ts";
 import { buildTelegramReplyContext } from "./telegram-reply-context.ts";
 import {
+  asText,
   readTelegramMessageText,
   type RichMessageReading,
   type TelegramMessageTextReading,
@@ -92,10 +93,6 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
-}
-
-function asText(value: unknown): string {
-  return typeof value === "string" ? value : "";
 }
 
 function asScalarText(value: unknown): string {
@@ -687,12 +684,14 @@ export async function runTelegramInbound(
   }
   // Eve's public reply reference intentionally contains only routing metadata;
   // the quoted content remains in raw.reply_to_message. Add it as inert JSON,
-  // bounded and explicitly untrusted. The helper never exposes/downloads file IDs.
+  // bounded and attributed. Foreign quotes stay untrusted; the bot ID is the
+  // numeric identity in this installation's Bot API token, never a username.
   const preContext = [...operationalPreContext];
   const replyContext = buildTelegramReplyContext(
     raw,
     sanitizeInbound,
     hasInboundAttackSignal,
+    process.env.TELEGRAM_BOT_TOKEN?.trim().split(":")[0],
   );
   if (replyContext !== null) {
     if (replyContext.flagged) {

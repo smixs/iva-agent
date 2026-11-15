@@ -23,7 +23,7 @@ import {
   type EveProcess,
 } from "./lib/eve-app.ts";
 import { carryCodexLogin } from "./lib/live-codex-auth.ts";
-import { resolveDataDir } from "./lib/data-dir.ts";
+import { resolveDataDir } from "../packages/data-dir/index.ts";
 
 const PROVIDER_ENV =
   /^(MODEL_PROVIDER|HELPER_MODEL|THINKING_EFFORT|(OLLAMA|OPENCODE|OPENROUTER|CODEX|CLAUDE|CUSTOM)_[A-Z_]+)$/u;

@@ -2,9 +2,7 @@ export {
   byokProviderEnvVar,
   CURRENT_DIRECTORY_PROJECT_NAME,
   isEveProject,
-  scaffoldBaseProject,
   type EvePackageContract,
-  type ScaffoldBaseProjectOptions,
 } from "./create/project.js";
 
 export {
@@ -13,24 +11,12 @@ export {
 } from "./create/extension.js";
 
 export {
-  DEFAULT_SLACK_CONNECTOR_SLUG,
-  SLACK_CHANNEL_DEFAULT_ROUTE,
-  deriveSlackConnectorSlug,
-  ensureChannel,
   hasVercelHostFramework,
   isNextJsProject,
   listAuthoredChannels,
-  normalizeSlackConnectorSlug,
   resolveVercelHostFrameworkPreset,
   type ChannelKind,
-  type ChannelMutationResult,
-  type EnsureChannelOptions,
-  type SlackConnectorSlug,
-  type WebAuthentication,
-  type WebPackageVersions,
 } from "./update/channels.js";
-
-export { SCAFFOLDABLE_CHANNELS, type ScaffoldableChannel } from "./channels-catalog.js";
 
 export {
   ensureConnection,

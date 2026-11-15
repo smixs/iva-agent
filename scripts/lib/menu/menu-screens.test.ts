@@ -17,6 +17,7 @@ import character from "./character.ts";
 import search from "./search.ts";
 import rich from "./rich.ts";
 import voice from "./voice.ts";
+import { tempDir } from "../../fixtures/temp-dir.ts";
 // gws.ts импортируем ДИНАМИЧЕСКИ в своём тесте: он считает SECRET_PATH от homedir() при
 // загрузке, поэтому HOME переопределяем ДО импорта, чтобы не тронуть реальный ~/.config/gws.
 
@@ -154,7 +155,7 @@ const newState = (over: Partial<MenuState> = {}): MenuState => ({
 
 // ── 1. character: полный проход 10 ответов через scoreQuiz + apply пишет PERSONA.md ─────
 test("character: 10 ответов скорятся через scoreQuiz, apply пишет PERSONA.md", async () => {
-  const vault = mkdtempSync(join(tmpdir(), "iva-vault-"));
+  const vault = tempDir("iva-vault-");
   process.env.ASSISTANT_VAULT_DIR = vault;
   const h = makeCtx({ lang: "ru", screens: { chr: characterScreen } });
   const st = newState({ screen: "chr" });
@@ -205,7 +206,7 @@ test("character: другой набор ответов даёт другой к
 
 // ── 2. search: render помечает ✓ текущий провайдер и 🔑 провайдеров с ключом ────────────
 test("search: render ✓ текущий провайдер и 🔑 наличие ключа на фикстурном .env", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "iva-env-"));
+  const dir = tempDir("iva-env-");
   const envPath = join(dir, ".env");
   // brave — текущий (без ключа); tavily — ключ есть, но не текущий.
   writeFileSync(
@@ -244,7 +245,7 @@ test("search: render ✓ текущий провайдер и 🔑 наличи�
 });
 
 test("search: тап по провайдеру без ключа ставит секретный awaitText (в личке)", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "iva-env2-"));
+  const dir = tempDir("iva-env2-");
   const envPath = join(dir, ".env");
   writeFileSync(envPath, "SEARCH_PROVIDER=tavily\n");
   const h = makeCtx({
@@ -262,7 +263,7 @@ test("search: тап по провайдеру без ключа ставит с
 });
 
 test("search: inherited property names are never accepted as providers", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "iva-env-provider-"));
+  const dir = tempDir("iva-env-provider-");
   const envPath = join(dir, ".env");
   writeFileSync(envPath, "SEARCH_PROVIDER=toString\n");
   const h = makeCtx({
@@ -295,7 +296,7 @@ test("search: inherited property names are never accepted as providers", async (
 
 // ── 2b. rich: тумблер TELEGRAM_RICH_REPLIES ───────────────────────────────────────────
 test("rich: ✓ на текущем режиме, запись в .env и предложение рестарта", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "iva-env-rich-"));
+  const dir = tempDir("iva-env-rich-");
   const envPath = join(dir, ".env");
   writeFileSync(envPath, "TELEGRAM_RICH_REPLIES=never\n");
   const restarts: Array<[string, string]> = [];
@@ -329,7 +330,7 @@ test("rich: ✓ на текущем режиме, запись в .env и пре
 });
 
 test("rich: тумблер виджетов пишет TELEGRAM_WIDGETS и отмечает текущий режим", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "iva-env-widgets-"));
+  const dir = tempDir("iva-env-widgets-");
   const envPath = join(dir, ".env");
   writeFileSync(envPath, "TELEGRAM_RICH_REPLIES=auto\n");
   const h = makeCtx({
@@ -360,7 +361,7 @@ test("rich: тумблер виджетов пишет TELEGRAM_WIDGETS и от�
 });
 
 test("rich: кривое значение .env названо на экране и ничем не помечено", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "iva-env-rich-bad-"));
+  const dir = tempDir("iva-env-rich-bad-");
   const envPath = join(dir, ".env");
   writeFileSync(envPath, "TELEGRAM_RICH_REPLIES=maybe\n");
   const h = makeCtx({
@@ -393,7 +394,7 @@ test("rich: кривое значение .env названо на экране 
 
 // ── 2c. voice: ключ Deepgram и язык распознавания ─────────────────────────────────────
 test("voice: ключ принимается в личке, пишется в .env, язык переключается", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "iva-env-voice-"));
+  const dir = tempDir("iva-env-voice-");
   const envPath = join(dir, ".env");
   writeFileSync(envPath, "DEEPGRAM_LANGUAGE=ru\n");
   const h = makeCtx({
@@ -438,7 +439,7 @@ test("voice: ключ принимается в личке, пишется в .e
 });
 
 test("voice: в группе ключ не принимается, а мусор вместо ключа снимает ожидание", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "iva-env-voice-bad-"));
+  const dir = tempDir("iva-env-voice-bad-");
   const envPath = join(dir, ".env");
   writeFileSync(envPath, "");
   const h = makeCtx({
@@ -471,7 +472,7 @@ test("voice: в группе ключ не принимается, а мусор
 });
 
 test("voice: имена и термины пишутся в .env одной строкой, «-» и пустой список очищают", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "iva-env-voice-terms-"));
+  const dir = tempDir("iva-env-voice-terms-");
   const envPath = join(dir, ".env");
   writeFileSync(envPath, "DEEPGRAM_LANGUAGE=ru\n");
   const h = makeCtx({
@@ -534,7 +535,7 @@ test("voice: имена и термины пишутся в .env одной ст
 });
 
 test("voice: «-» без списка в .env возвращает на экран без перезапуска; «-» среди имён не сохраняется", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "iva-env-voice-terms-dash-"));
+  const dir = tempDir("iva-env-voice-terms-dash-");
   const envPath = join(dir, ".env");
   writeFileSync(envPath, "");
   const h = makeCtx({
@@ -566,7 +567,7 @@ test("voice: «-» без списка в .env возвращает на экр�
 });
 
 test("voice: кириллицу и знаки, которых .env не хранит, список не пишет; 60 слов — первые 50", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "iva-env-voice-terms-bad-"));
+  const dir = tempDir("iva-env-voice-terms-bad-");
   const envPath = join(dir, ".env");
   writeFileSync(envPath, "DEEPGRAM_KEYTERMS=OJ\n");
   const h = makeCtx({
@@ -605,7 +606,7 @@ test("voice: кириллицу и знаки, которых .env не хран
 // каждое голосовое остаётся без расшифровки. Абзац без запятых — одно слово, и счёт слов его
 // не останавливает; меню сохраняет только то, что войдёт в запрос.
 test("voice: абзац без запятых не сохраняется, длинный список обрезан по 500 байт", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "iva-env-voice-terms-bytes-"));
+  const dir = tempDir("iva-env-voice-terms-bytes-");
   const envPath = join(dir, ".env");
   writeFileSync(envPath, "DEEPGRAM_KEYTERMS=OJ\n");
   const h = makeCtx({
@@ -644,7 +645,7 @@ test("voice: абзац без запятых не сохраняется, дл�
 });
 
 test("voice: список из .env на экране экранирован и обрезан по длине", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "iva-env-voice-terms-long-"));
+  const dir = tempDir("iva-env-voice-terms-long-");
   const envPath = join(dir, ".env");
   const long = Array.from({ length: 80 }, (_, i) => `LongName${i}`);
   writeFileSync(envPath, `DEEPGRAM_KEYTERMS=a<b>*c*,${long.join(",")}\n`);
@@ -667,7 +668,7 @@ test("voice: список из .env на экране экранирован и 
 
 // ── 3. gws: валидация shape client_secret.json (bad JSON / неверная форма / успех 0600) ──
 test("gws.gwsjson: bad JSON и неверная форма отвергаются, валидный секрет пишется 0600", async () => {
-  const home = mkdtempSync(join(tmpdir(), "iva-home-"));
+  const home = tempDir("iva-home-");
   const prevHome = process.env.HOME;
   process.env.HOME = home; // до импорта — SECRET_PATH возьмёт этот homedir
   const gws = (await import("./gws.ts")).default as unknown as Screen;

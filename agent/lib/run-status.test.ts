@@ -6,19 +6,18 @@ import {
   chmodSync,
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   readdirSync,
   rmSync,
   utimesSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { acquireFileLockSync, releaseFileLock } from "./fs-atomic.ts";
+import { tempDir } from "../../scripts/fixtures/temp-dir.ts";
 
-const dataDir = mkdtempSync(join(tmpdir(), "iva-run-status-"));
+const dataDir = tempDir("iva-run-status-");
 process.env.ASSISTANT_DATA_DIR = dataDir;
 process.env.IVA_RUN_STATUS_LOCK_STALE_MS = "300";
 process.env.IVA_RUN_STATUS_LOCK_TIMEOUT_MS = "150";
@@ -27,55 +26,52 @@ const status = (await import(
   `${pathToFileURL(modulePath).href}?test=${Date.now()}`
 )) as typeof import("./run-status.ts");
 
-test("legacy whole-map is read and each touched key migrates independently", () => {
-  const legacy = join(dataDir, "run-status.json");
-  writeFileSync(
-    legacy,
-    JSON.stringify({
-      "legacy-a:": { status: "running", sessionId: "a" },
-      "legacy-b:7": { status: "running", sessionId: "b" },
-    }),
-  );
+// specs/UpdateFloor.tla: NoSilentLoss. Releases before 0.3.10 kept every chat in one file.
+test("NoSilentLoss: the shared run-status.json is neither read nor touched", () => {
+  const shared = join(dataDir, "run-status.json");
+  const bytes = JSON.stringify({
+    "shared-a:": { status: "running", sessionId: "a" },
+    "shared-b:7": { status: "running", sessionId: "b" },
+  });
+  writeFileSync(shared, bytes);
 
-  assert.equal(status.getChatStatus("legacy-a:")?.sessionId, "a");
-  status.setChatStatus("legacy-a:", { status: "idle", sessionId: null });
-
-  // The untouched key remains available from the legacy file.
-  assert.equal(status.getChatStatus("legacy-b:7")?.sessionId, "b");
-  // Once migrated, the per-chat file wins over stale legacy bytes.
-  writeFileSync(
-    legacy,
-    JSON.stringify({
-      "legacy-a:": { status: "running", sessionId: "stale" },
-      "legacy-b:7": { status: "running", sessionId: "b" },
-    }),
-  );
-  assert.equal(status.getChatStatus("legacy-a:")?.status, "idle");
-  assert.equal(status.getChatStatus("legacy-a:")?.sessionId, undefined);
+  assert.equal(status.getChatStatus("shared-a:"), null);
+  status.setChatStatus("shared-a:", { status: "idle" });
+  assert.equal(status.getChatStatus("shared-a:")?.status, "idle");
+  assert.equal(status.getChatStatus("shared-b:7"), null);
+  assert.equal(readFileSync(shared, "utf8"), bytes);
 });
 
-test("the first normal rewrite removes the retired routing field", () => {
-  const legacy = join(dataDir, "run-status.json");
-  const key = "legacy-routing:";
+// specs/UpdateFloor.tla: NoSilentLoss. Releases before 0.4.0 wrote continuationToken into a
+// chat record. The record is read whole; the field is neither used nor stripped.
+// A field this version does not know stays outside the typed record.
+const rawStatus = (key: string): Record<string, unknown> | null =>
+  status.getChatStatus(key);
+test("NoSilentLoss: a chat record that carries continuationToken is read whole and the field stays", () => {
+  const key = "token-chat:";
+  mkdirSync(join(dataDir, "run-status.d"), { recursive: true });
   writeFileSync(
-    legacy,
+    join(
+      dataDir,
+      "run-status.d",
+      `${Buffer.from(key).toString("base64url")}.json`,
+    ),
     JSON.stringify({
-      [key]: {
-        status: "running",
-        sessionId: "session-current",
-        [status.RETIRED_SESSION_ROUTING_FIELD]: "retired-value",
-      },
+      status: "running",
+      sessionId: "s",
+      turnId: "t",
+      generation: 3,
+      updatedAt: 5,
+      continuationToken: "old",
     }),
   );
 
-  const rewritten = status.setChatStatus(key, { status: "idle" });
-
-  assert.equal(rewritten[status.RETIRED_SESSION_ROUTING_FIELD], undefined);
-  assert.equal(
-    status.getChatStatus(key)?.[status.RETIRED_SESSION_ROUTING_FIELD],
-    undefined,
-  );
-  assert.equal(rewritten.sessionId, "session-current");
+  assert.equal(status.getChatStatus(key)?.sessionId, "s");
+  assert.equal(rawStatus(key)?.continuationToken, "old");
+  status.setChatStatus(key, { turnId: "t2" });
+  assert.equal(status.getChatStatus(key)?.turnId, "t2");
+  assert.equal(status.getChatStatus(key)?.sessionId, "s");
+  assert.equal(rawStatus(key)?.continuationToken, "old");
 });
 
 test("distinct chats survive bounded concurrent writers", async () => {
@@ -435,14 +431,15 @@ test(
 
 test("markTelegramSessionForRetirement помечает ровно нужную сессию", () => {
   const { markTelegramSessionForRetirement } = status;
-  const running = (over: Record<string, unknown> = {}) => ({
-    status: "running",
-    generation: 3,
-    updatedAt: 1000,
-    sessionId: "s1",
-    turnId: "t1",
-    ...over,
-  });
+  const running = (over: Record<string, unknown> = {}) =>
+    ({
+      status: "running",
+      generation: 3,
+      updatedAt: 1000,
+      sessionId: "s1",
+      turnId: "t1",
+      ...over,
+    }) as import("./run-status.ts").ChatRecord;
   const calls: unknown[][] = [];
   // Приманки ПЕРЕД целью: выключение любого условия ниже обязано дать лишний вызов.
   const listStatusesImpl = () => [
@@ -453,7 +450,7 @@ test("markTelegramSessionForRetirement помечает ровно нужную 
   ];
   const setStatusIfImpl = (...args: unknown[]) => {
     calls.push(args);
-    return { ok: true };
+    return {};
   };
 
   assert.equal(
@@ -491,7 +488,7 @@ test("markTelegramSessionForRetirement молчит, когда помечать
       {
         chatKey: "tg:9",
         status: {
-          status: "running",
+          status: "running" as const,
           sessionId: "s1",
           turnId: "t1",
           retiredSessionId: "s1",
@@ -500,7 +497,7 @@ test("markTelegramSessionForRetirement молчит, когда помечать
       {
         chatKey: "tg:8",
         status: {
-          status: "running",
+          status: "running" as const,
           sessionId: "s1",
           turnId: "t1",
           retireAfterTurn: { replayMs: 1, sessionId: "s1", turnId: "t1" },

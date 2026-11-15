@@ -100,7 +100,7 @@ A status card built from the shared CLI/Telegram health probe plus the presence 
 - **Credentials, not running** → **Enable**, which launches `iva userbot setup` detached (the venv build is slow, so the screen shows a spinner and refreshes when it's done).
 - **Starting** → a bounded waiting state with **Disable** and **Refresh**.
 - **Unreachable** → the service is active but the bearer-protected proxy health route did not answer.
-- **Login required** → the existing proxy session is reachable but Telethon is not authorized yet.
+- **Login required** → the existing proxy session is reachable but Telethon is not authorized yet. The card names the next step for the login phase: scan the QR, send the two-step verification password (a wrong one can be sent again), or start again after an expired QR, a failure or a proxy restart.
 - **Ready** → both the proxy and the personal Telegram account are healthy.
 
 Setup failures are shown in the menu instead of collapsing back to an inactive card. The

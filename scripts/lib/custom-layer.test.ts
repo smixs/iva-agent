@@ -613,6 +613,7 @@ test("279-A: successful recovery delegates activation for Version and developer 
       join(root, "scripts/lib"),
       "dir",
     );
+    symlinkSync(join(PROJECT_ROOT, "packages"), join(root, "packages"), "dir");
     symlinkSync(
       join(PROJECT_ROOT, "node_modules"),
       join(root, "node_modules"),

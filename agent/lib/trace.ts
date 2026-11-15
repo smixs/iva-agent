@@ -31,7 +31,7 @@ import { dataDir } from "./data-dir.ts";
 import { readSettings } from "./settings.ts";
 import { parentTurnId } from "./usage.ts";
 import { allowedTelegramUsers } from "./telegram-allowlist.ts";
-import { resolveTimeZone } from "./timezone.ts";
+import { resolveTimeZone } from "../../packages/timezone/index.ts";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -899,12 +899,17 @@ export function traceBridgeDelivery(
   });
 }
 
-/** Шов Bridge: сообщение встало в очередь чата; count — сколько теперь ждёт. */
+/** Шов Bridge: сообщение встало в очередь чата; count — сколько теперь ждёт, reason — почему. */
 export function traceBridgeQueued(
   update: TelegramUpdateLike,
   count: number,
+  reason?: string,
 ): void {
-  emitBridge(update, "queued", { count, parts: updatePartCount(update) });
+  emitBridge(update, "queued", {
+    count,
+    parts: updatePartCount(update),
+    ...(reason === undefined ? {} : { reason }),
+  });
 }
 
 export type HelperTraceEvent =

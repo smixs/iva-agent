@@ -145,7 +145,7 @@ Install as a normal user, not as root — Iva's shell tool runs as whoever insta
 - `iva update` installs releases only (`vX.Y.Z` tags) — the default.
 - `main` holds releases only; every accepted change lands in the `beta` branch first.
 - `iva beta` turns on beta updates: the tip of the `beta` branch; `iva stable` turns them off and goes back to `main` (nothing is rolled back — the next release catches up). Then run `iva update`.
-- Any installation, 0.4.8 included, switches to beta with one command: `curl -fsSL https://raw.githubusercontent.com/smixs/iva-agent/beta/beta.sh | bash`. A new installation on beta: `curl -fsSL https://raw.githubusercontent.com/smixs/iva-agent/beta/install.sh | IVA_BETA=1 bash`.
+- A new installation on beta: `curl -fsSL https://raw.githubusercontent.com/smixs/iva-agent/beta/install.sh | IVA_BETA=1 bash`.
 - The same switch is in Telegram: `/menu` → 🛠 Maintenance → 🧪 Updates. `iva version` shows which one is on.
 
 ### The first minute
@@ -198,9 +198,37 @@ Iva carries eve 0.51.1 sources from vercel/eve in `eve/`, with our changes under
 ## What's New
 
 <details>
-<summary><b>v0.5.11 · 10.11.2026 — expand the latest releases</b></summary>
+<summary><b>v0.5.13 · 15.11.2026 — expand the latest releases</b></summary>
+
+### 15.11.2026
+
+#### v0.5.13
+
+- 🧩 **Text answers while Telegram refuses widgets**: Telegram's refusal is remembered for a day and Iva gives the same content as text; before, only the widget's caption arrived.
+- ⏰ **Plain reminders arrive on time without waiting for the model**: ready text is sent by code to the second; tasks still run as their own turn.
+- ⏰ **A reminder no longer vanishes after an Iva restart**: a firing cut short is marked and reported once, naming the reminder that may not have arrived; its text is never sent twice.
+- ⏰ **A conversation reset keeps the reminder's text**: when `/new` interrupts a reminder task, the original text arrives with a note; an explicit `/stop` keeps the cancellation.
+- ⏰ **A failed reminder task arrives as a short line**: the start of its text and "Not done: the turn gave no answer" instead of the whole task text.
+- 🩹 **The first progress reply arrives as an ordinary message**: before a long chain of tools Iva says what she is doing, once the turn has run for more than 10 seconds.
+- 🩹 **A reply to Iva's own service message carries context**: a reply to the bot's own text is marked as Iva's history; foreign quotes stay protected.
+- 🩹 **The message after `/new` survives a restart in the middle of the reset**: the new session receives the message sent right after `/new`.
+- 🧠 **The night retries a temporarily failing model for weekly and monthly summaries**: overload, HTTP 429 and dropped connections use growing pauses until the night's deadline; a successful retry closes the failure.
+- 🩹 **The night is not skipped after a restart that reused the process id**: a schedule reservation left by the earlier process counts as abandoned at once.
+- 🔎 **`iva jobs status` names the state of schedules**: free, running, a dead process's reservation or an expired one, and the last outcome.
+- 🔧 **Updates start from version 0.5.0**: an older installation is refused with the recovery command and keeps running its version; `beta.sh` is gone, `iva beta` turns the beta on.
+- 🛠️ **A truthful update result**: the success message appears after the new version is pinned in the installation.
+- 🔧 **Userbot: a wrong password can be entered again**: the QR sign-in no longer starts over because of a typo in the two-factor password.
+- 💾 **A huge file no longer stops the memory backup**: a vault file over 90 MB stays out of the commit and is named to the owner once; the rest of the memory is backed up as before.
+- 🧠 **The nightly graph and the write check judge a link the same way**: a `[[…]]` link accepted when the card was written is no longer called broken by the nightly graph.
+- 🔌 **A failed plugin build undoes only its own switch**: undoing `iva plugin enable` or `trust` no longer restores trust or enablement removed during the build.
+- 🩹 **A turn no longer takes Iva down when the Claude CLI exits early**: it is now the failure of one turn, not of the process.
+- 🧹 **The eve copy without tests and docs**: the eve sources inside Iva drop what Iva never loads; a plugin importing a removed eve entry point stops building.
 
 ### 10.11.2026
+
+#### v0.5.12
+
+- 🧩 **Widget code stays hidden in live drafts**: Iva no longer shows raw widget code in the reply draft while it is being typed.
 
 #### v0.5.11
 
@@ -224,19 +252,13 @@ Iva carries eve 0.51.1 sources from vercel/eve in `eve/`, with our changes under
 - 🔧 **Iva survives a Claude access rotation**: after an early HTTP 401 she waits for the new access and repeats the call once.
 - 🧠 **The night raises its own limits for long days**: within the configured ceilings it keeps going and retries git with a longer wait; `iva night show|set` shows and changes the limits.
 
-### 31.10.2026
-
-#### v0.5.8
-
-- 🔧 **Telegram shows the model context window**: `/new` and status use the same window as Iva. Claude model selection saves its window, and helpers respect their own model window.
-
 </details>
 
 Full history — [CHANGELOG.md](CHANGELOG.md).
 
 ## Built on
 
-[eve](https://eve.dev/docs/introduction) 0.51.1-iva.5, Vercel's agent framework, runs the agent; Node 24's built-in SQLite runs the search index — no separate database. Iva grew out of [agent-second-brain](https://github.com/smixs/agent-second-brain) and [autograph](https://github.com/smixs/autograph) — that story is in [docs/memory.md](docs/memory.md).
+[eve](https://eve.dev/docs/introduction) 0.51.1-iva.7, Vercel's agent framework, runs the agent; Node 24's built-in SQLite runs the search index — no separate database. Iva grew out of [agent-second-brain](https://github.com/smixs/agent-second-brain) and [autograph](https://github.com/smixs/autograph) — that story is in [docs/memory.md](docs/memory.md).
 
 ## Thanks
 

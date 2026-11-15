@@ -117,7 +117,7 @@ iva version
 iva status
 node --env-file-if-exists=.env scripts/custom-recovery.ts status
 iva_data_dir=$(node --env-file-if-exists=.env --input-type=module -e '
-  import { resolveDataDir } from "./scripts/lib/data-dir.ts";
+  import { resolveDataDir } from "./packages/data-dir/index.ts";
   console.log(resolveDataDir(process.cwd()));
 ')
 if [ -d "$iva_data_dir/custom/agent" ]; then
@@ -189,7 +189,7 @@ iva restart
 
 ### Agent dead after editing MODEL_PROVIDER
 
-Cause: exactly five names are accepted — `ollama`, `opencode`, `codex`, `openrouter`, `custom`. Anything else, a typo or a different case included, is refused at startup instead of quietly running Ollama under the wrong name, so the service stops and says which names it takes:
+Cause: exactly six names are accepted — `ollama`, `opencode`, `codex`, `claude`, `openrouter`, `custom`. Anything else, a typo or a different case included, is refused at startup instead of quietly running Ollama under the wrong name, so the service stops and says which names it takes:
 
 ```bash
 journalctl --user -u iva.service -n 20 --no-pager
@@ -222,15 +222,21 @@ The installer command does the same thing over an existing installation: it hand
 
 ### Update says my version is too old
 
-Symptoms: `iva update` — in the terminal or in the chat — answers `Your Iva (0.3.x) is too old to update itself` and stops. Cause: every release names the oldest updater able to install it (`update-compat.json`, field `minUpdater`), and the installed CLI is older than that. It stops before touching anything: the installation keeps running the version it ran before, and no unit, version or data was written.
+Symptoms: `iva update` — in the terminal or in the chat — answers `Your Iva (<version>) is too old to update itself` and stops. Cause: every release names the oldest release it is installed over (`update-compat.json`, field `minUpdater` — 0.5.0 today), and the installed Iva is older than that. The installation keeps running the version it ran before: nothing is switched, and no unit or data is written. What is left on disk depends on how old the installed updater is:
 
-Reinstall from the current tree — one command, and it is the only way out:
+- 0.3.30 and newer stop before the first write.
+- 0.3.15 to 0.3.29 stop after unpacking: the unpacked directory under `versions/` is the one thing written.
+- 0.3.7 to 0.3.14 answer `Couldn't build Iva` and name their update log under `data/logs/`; the sentence above is in that log.
+
+The way out is one command:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/smixs/iva-agent/main/repair.sh | bash
 ```
 
-Your data and `.env` stay in place: nothing outside Iva's own code is touched. What the command does touch is that code - it puts the checkout back on the release it tracks, so local edits to Iva's files are removed - and then runs the ordinary update.
+On an installation older than 0.5.0 it updates in two steps: first to 0.5.11, the last release that takes an update from every older one, then to the newest release. Your Update branch is set aside for the first step and put back after it. If the command is interrupted between the two steps, Iva runs on 0.5.11; run the command again and it puts the branch back and finishes. An installation pinned to a rollback branch (`release/<version>`) is left on that branch.
+
+Your data and `.env` stay in place: nothing outside Iva's own code is touched. On a checkout the command puts the code back on a release, so local edits to Iva's files are removed.
 
 ### gh not available warnings
 
@@ -242,7 +248,6 @@ systemctl --user start iva-brain.service           # backup now: creates the pri
 ```
 
 `iva doctor` only reports a missing vault origin — the repo creation and push happen in the nightly Brain pass; the second command runs it immediately instead of waiting for 05:00.
-On an install that has not been updated since the rename the unit is still called `iva-memory-doctor.service` — `iva doctor` moves it to `iva-brain.service`.
 
 ### agent-browser fails on Ubuntu 24.04
 

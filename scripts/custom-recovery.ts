@@ -6,7 +6,7 @@ import {
   listCustomConflicts,
   resolveCustomConflict,
 } from "./lib/custom-layer.ts";
-import { resolveDataDir } from "./lib/data-dir.ts";
+import { resolveDataDir } from "../packages/data-dir/index.ts";
 
 const ROOT = fileURLToPath(new URL("../", import.meta.url));
 const SideSchema = z.enum(["base", "local", "upstream", "edited"]);

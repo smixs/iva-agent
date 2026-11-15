@@ -13,12 +13,10 @@
   },
   "include": [
     "agent/**/*.ts",
-    "evals/**/*.ts",
     "packages/**/*.ts",
     "eslint.config.ts",
     "scripts/**/*.ts",
     "services/**/*.ts",
-    "**/*.mts",
     ".eve/**/*.d.ts"
   ]
 }

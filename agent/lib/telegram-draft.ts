@@ -1,14 +1,22 @@
 import { randomInt } from "node:crypto";
-import { chatKeyOf, getChatStatus, setChatStatusIf } from "./run-status.ts";
+import {
+  chatKeyOf,
+  getChatStatus,
+  setChatStatusIf,
+  TURN_FIELDS_CLEARED,
+} from "./run-status.ts";
 import { scanOutbound } from "./security-gate.ts";
 import { traceOutboundGate, traceWithScope } from "./trace.ts";
 import { parseTelegramDelivery } from "./telegram-delivery.ts";
+import { splitWidgets } from "./telegram-widget.ts";
 import { tr } from "./i18n.ts";
 
 export const DRAFT_INTERVAL_MS = 1_000;
 export const DRAFT_REFRESH_MS = 20_000;
 export const TYPING_INTERVAL_MS = 4_500;
 export const DRAFT_TIMEOUT_MS = 10_000;
+// Fast tool chains stay quiet; only a completed step more than 10s into the turn may send progress.
+export const PROGRESS_MIN_TURN_MS = 10_000;
 
 export type TelegramDraftHandle = {
   readonly chatId: string;
@@ -56,6 +64,19 @@ export function draftText(text: string, complete: boolean): string {
       ) + 1,
     );
   text = parseTelegramDelivery(text).text;
+  // The final-delivery parser also drops unclosed widget bodies and clamps captions.
+  // Do this before the tail cut, which must never reopen a widget as a code fence.
+  text = splitWidgets(text)
+    .map((part) =>
+      part.kind === "text"
+        ? part.text
+        : part.caption || tr("Widget…", "Виджет…"),
+    )
+    .join("\n\n");
+  const tailStart = text.lastIndexOf("\n") + 1;
+  const tail = text.slice(tailStart);
+  if (tail.length > 3 && "```tg-widget".startsWith(tail))
+    text = text.slice(0, tailStart);
   text = text
     .replace(/<tg-button(?=[\s>])[^>]*>([\s\S]*?)<\/tg-button>/gi, "[$1]")
     .replace(/<\/?tg-button-row\b[^>]*>/gi, "");
@@ -244,6 +265,40 @@ export class TelegramDraftStream {
     this.#text = text;
     this.#complete = true;
     this.#push();
+  }
+
+  /** Claim in ChatRecord before Outbox: stream recreation and process restart cannot repeat it. */
+  claimProgress(step: number, text: string): boolean {
+    const status = this.#getStatus();
+    if (
+      this.#closed ||
+      !this.#identity ||
+      step < this.#step ||
+      !draftText(text, true) ||
+      !this.#matches(status) ||
+      status?.status !== "running" ||
+      status.sessionId !== this.#identity.sessionId ||
+      status.turnId !== this.#identity.turnId ||
+      status.progressClaimed !== undefined ||
+      typeof status.turnAt !== "number" ||
+      !Number.isFinite(status.turnAt) ||
+      this.#now() - status.turnAt <= PROGRESS_MIN_TURN_MS
+    )
+      return false;
+    return Boolean(
+      setChatStatusIf(
+        this.chatKey,
+        {
+          status: "running",
+          sessionId: this.#identity.sessionId,
+          turnId: this.#identity.turnId,
+          draftId: this.#identity.draftId,
+          turnAt: status.turnAt,
+          progressClaimed: undefined,
+        },
+        { progressClaimed: true },
+      ),
+    );
   }
 
   requested(step: number, actions: readonly Action[]): void {
@@ -437,14 +492,16 @@ export function telegramDraftTurn(
           st.sessionId === pair.sessionId &&
           st.turnId === pair.turnId &&
           st.draftId === pair.draftId
-        : [
-            "status",
-            "sessionId",
-            "turnId",
-            "draftId",
-            "resetAt",
-            "ingressId",
-          ].every((field) => st?.[field] === snapshot?.[field]),
+        : (
+            [
+              "status",
+              "sessionId",
+              "turnId",
+              "draftId",
+              "resetAt",
+              "ingressId",
+            ] as const
+          ).every((field) => st?.[field] === snapshot?.[field]),
   });
   if (!stream.closed) turns.set(key, stream);
   return stream;
@@ -514,15 +571,7 @@ export async function finishTelegramStatus(
       { sessionId, ...(turnId === undefined ? {} : { turnId }) },
       {
         status: "idle",
-        sessionId: null,
-        turnId: null,
-        draftId: null,
-        compacting: null,
-        ingressId: null,
-        ingressAt: null,
-        turnAt: null,
-        firstOutputAt: null,
-        latencyLogged: null,
+        ...TURN_FIELDS_CLEARED,
         ...(keepBusy ? { status: "running", sessionId, compacting: true } : {}),
       },
     ),

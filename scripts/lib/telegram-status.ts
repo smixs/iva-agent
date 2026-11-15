@@ -43,6 +43,8 @@ type Reporter = {
   /** Refusal before the first write: this CLI is older than the release it fetched. */
   updaterTooOld(version: string): Promise<void>;
   postCommitFailure(message: string): Promise<void>;
+  /** Отправлено ли «обновление не завершилось»: итог задания, у которого нет вердикта. */
+  unfinished(beforeVersion: string, detail?: string): Promise<boolean>;
   /** Whether the user really got the final screen; false is a result to act on. */
   complete(versions: {
     beforeVersion?: string;
@@ -75,6 +77,7 @@ const COPY = {
     devCheckout:
       "this is a development checkout (.iva-dev): update it with git, build it with `npm run build`",
     final: "✅ Iva updated",
+    unfinished: "⚠️ The update did not finish",
     failure: (version: string) =>
       `Iva is still running ${version}.\nYour settings, memory and skills are where they were.\nRetry: /update`,
   },
@@ -93,6 +96,7 @@ const COPY = {
     devCheckout:
       "это чекаут разработчика (.iva-dev): обновляйся через git, собирай `npm run build`",
     final: "✅ Iva обновлена",
+    unfinished: "⚠️ Обновление не завершилось",
     failure: (version: string) =>
       `Iva продолжает работать на ${version}.\nНастройки, память и ваши скиллы на месте.\nПовторить: /update`,
   },
@@ -313,6 +317,17 @@ export function createTelegramUpdateReporter({
     async postCommitFailure(message: string) {
       currentPhase = null;
       await finish(`⚠️ ${copy.timerFailure}\n\n${message}`);
+    },
+    // Задание обновления, у которого нет вердикта: обновлятор убит, повтор не прошёл, или
+    // срок истёк. Крутилка в чате без этого остаётся навсегда, поэтому экран говорит, что
+    // версия на месте и что чинить.
+    async unfinished(beforeVersion: string, detail?: string) {
+      currentPhase = null;
+      const tail = (detail ?? "").trim().slice(-FAIL_DETAIL_CHARS);
+      return await finish(
+        `⚠️ ${copy.unfinished}${tail ? `\n\n${tail}` : ""}\n\n${copy.failure(beforeVersion)}`,
+        { silent: true },
+      );
     },
     // The version it started on is not always knowable by whoever delivers this:
     // the reconciler after a restart may have only the version that runs now,

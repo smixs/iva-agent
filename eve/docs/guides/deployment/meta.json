@@ -1,5 +1,0 @@
-{
-  "title": "Deployment",
-  "defaultOpen": false,
-  "pages": ["overview", "vercel", "self-hosting"]
-}

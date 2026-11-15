@@ -29,6 +29,7 @@ import {
   NPM_CLI,
   type ArchiveFault,
 } from "./fixtures/eve-archive.ts";
+import { tempDir } from "./fixtures/temp-dir.ts";
 
 const ROOT = fileURLToPath(new URL("../", import.meta.url));
 const PYTHON = execFileSync("sh", ["-c", "command -v python3"], {
@@ -577,7 +578,7 @@ function createWorld(t: TestContext, options: { env?: boolean } = {}): World {
     `${JSON.stringify(
       {
         name: "iva",
-        version: "0.0.0",
+        version: "0.5.0",
         private: true,
         type: "module",
         dependencies: { eve: "0.30.8" },
@@ -591,11 +592,11 @@ function createWorld(t: TestContext, options: { env?: boolean } = {}): World {
     `${JSON.stringify(
       {
         name: "iva",
-        version: "0.0.0",
+        version: "0.5.0",
         lockfileVersion: 3,
         requires: true,
         packages: {
-          "": { name: "iva", version: "0.0.0" },
+          "": { name: "iva", version: "0.5.0" },
           "node_modules/eve": { version: "0.30.8" },
         },
       },
@@ -1835,7 +1836,13 @@ void test("an exit before any work is done stays quiet and succeeds", () => {
   // runs: everything it touches has to exist by then.
   const help = spawnSync("bash", [join(ROOT, "install.sh"), "--help"], {
     encoding: "utf8",
-    env: { ...process.env, NO_COLOR: "1", TERM: "dumb" },
+    env: {
+      ...process.env,
+      NO_COLOR: "1",
+      TERM: "dumb",
+      // The installer opens its log before it reads its arguments.
+      TMPDIR: tempDir("iva-install-help-"),
+    },
   });
   assert.equal(help.status, 0, help.stdout + help.stderr);
   assert.equal(help.stderr, "");

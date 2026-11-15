@@ -430,7 +430,7 @@ void test("R1: a stalled launcher leaves Stop, callbacks and new input available
     ];
     for (const update of updates) {
       const id = update.update_id;
-      const result = await processTelegramUpdate(update, id, null, {
+      const result = await processTelegramUpdate(update, id, {
         handleControlImpl: (update) => {
           handled.push(update.update_id);
           return Promise.resolve(update.update_id !== 103);

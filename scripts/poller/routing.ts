@@ -17,11 +17,16 @@ import type {
 import { join } from "node:path";
 import { joinUpdates, queueBatchLength } from "../lib/telegram-collect.ts";
 import {
+  chatBusy,
+  chatState,
   getChatStatus,
   isCompacting,
   isRunning,
   RUN_STALE_MS,
   setChatStatusIf,
+  type ChatRecord,
+  type ChatRecordExpected,
+  type ChatRecordPatch,
 } from "#lib/run-status.ts";
 import { tr } from "#lib/i18n.ts";
 import { traceBridgeQueued } from "#lib/trace.ts";
@@ -43,6 +48,7 @@ import { pacedDeliver, type DeliverOptions } from "./deliver.ts";
 import {
   acknowledgeTelegramQueueItems,
   acknowledgeQueued,
+  chatResetInFlight,
   clearFailedDirectIngress,
   enqueueTelegramQueueUpdate,
   hasPrivateResetIntent,
@@ -61,7 +67,7 @@ import { alertOnce, alertResolved } from "../lib/notice-policy.ts";
 
 type MaybePromise<T> = T | Promise<T>;
 type ErrorLike = { code?: unknown; message?: unknown };
-type Status = Record<string, unknown>;
+type Status = ChatRecord;
 type DeliveryResult = Awaited<ReturnType<typeof pacedDeliver>>;
 type DeliverImpl = (
   update: TelegramQueueUpdate,
@@ -70,8 +76,8 @@ type DeliverImpl = (
 type StatusImpl = (key: string) => Status | null;
 type SetStatusIfImpl = (
   key: string,
-  expected: Status,
-  patch: Status,
+  expected: ChatRecordExpected,
+  patch: ChatRecordPatch,
 ) => Status | null;
 const errorMessage = (error: unknown) => (error as ErrorLike).message;
 const errorCode = (error: unknown) =>
@@ -208,18 +214,22 @@ export type RouteMessageResult =
   | "terminal-drop";
 
 // Дубль после обрыва уже в очереди: время постановки не переписываем, сбой Trace молчит.
+// Причина — словом: чем занят чат (состояние записи) или что стоит перед сообщением.
 function traceQueued(
   update: TelegramQueueUpdate,
   queued: { count: number; added?: boolean },
+  reason: string,
   logImpl: (...parts: unknown[]) => void,
   traceImpl: (
     update: TelegramQueueUpdate,
     count: number,
+    reason: string,
   ) => void = traceBridgeQueued,
 ) {
   if (queued.added === false) return;
+  logImpl(`queued update ${update.update_id}: ${reason}`);
   try {
-    traceImpl(update, queued.count);
+    traceImpl(update, queued.count, reason);
   } catch (error) {
     logImpl(`queue trace failed for ${update.update_id}:`, errorMessage(error));
   }
@@ -276,7 +286,11 @@ export async function routeMessageUpdate(
       update: TelegramQueueUpdate,
       count: number,
     ) => MaybePromise<unknown>;
-    traceQueuedImpl?: (update: TelegramQueueUpdate, count: number) => void;
+    traceQueuedImpl?: (
+      update: TelegramQueueUpdate,
+      count: number,
+      reason: string,
+    ) => void;
     deliverImpl?: DeliverImpl;
     statusImpl?: StatusImpl;
     setStatusIfImpl?: SetStatusIfImpl;
@@ -325,7 +339,18 @@ export async function routeMessageUpdate(
         );
         return "enqueue-failed";
       }
-      traceQueued(update, queued, logImpl, traceQueuedImpl);
+      const state = chatState(statusImpl(key));
+      traceQueued(
+        update,
+        queued,
+        resetPending
+          ? "reset pending"
+          : chatBusy(state)
+            ? `chat busy: ${state}`
+            : "earlier messages wait",
+        logImpl,
+        traceQueuedImpl,
+      );
       await acknowledgeImpl(update, queued.count);
       return "queued";
     }
@@ -412,6 +437,7 @@ export async function drainReadyQueueHeads({
     quarantineQueueRecords(join(DATA_DIR, "telegram-queue.json"), records, {
       logImpl: log,
     }),
+  resetBusyImpl = chatResetInFlight,
 }: {
   loadImpl?: () => MaybePromise<TelegramQueueDocument>;
   runningImpl?: (key: string) => boolean;
@@ -434,6 +460,7 @@ export async function drainReadyQueueHeads({
   quarantineImpl?: (
     records: readonly DamagedQueueRecord[],
   ) => MaybePromise<unknown>;
+  resetBusyImpl?: (chatKey: string) => boolean;
 } = {}) {
   const snapshot = await loadImpl();
   const keys = [...new Set([...queueKeys(snapshot), ...inFlight.keys()])];
@@ -453,7 +480,8 @@ export async function drainReadyQueueHeads({
       break;
     }
     // Remove this fence when vercel/eve#2876 is fixed in the installed eve.
-    if (resetPendingImpl(key)) continue;
+    // Сброс чата держит его очередь сброса: доставка ждёт своей следующей пачки.
+    if (resetPendingImpl(key) || resetBusyImpl(key)) continue;
     const currentStatus = statusImpl(key);
     const currentGeneration = statusGeneration(currentStatus);
     const running = runningImpl(key);

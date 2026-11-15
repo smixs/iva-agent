@@ -72,10 +72,13 @@ test("no text written through the transcript seam ever reads as a service marker
   fc.assert(
     fc.property(
       fc.array(
-        fc.array(fc.oneof(markerLine, headerLine, fc.string({ maxLength: 30 })), {
-          minLength: 1,
-          maxLength: 6,
-        }),
+        fc.array(
+          fc.oneof(markerLine, headerLine, fc.string({ maxLength: 30 })),
+          {
+            minLength: 1,
+            maxLength: 6,
+          },
+        ),
         { minLength: 1, maxLength: 4 },
       ),
       (replies) => {

@@ -1,6 +1,6 @@
 import { defineDynamic, defineInstructions } from "eve/instructions";
 import { isHelperTurn } from "../lib/eve-auth.ts";
-import { TELEGRAM_WIDGETS } from "../lib/telegram-widget.ts";
+import { TELEGRAM_WIDGETS, widgetsRefused } from "../lib/telegram-widget.ts";
 
 // Виджеты Telegram (Bot API 10.4): модель знает о них, только пока оператор их не выключил
 // (TELEGRAM_WIDGETS=never, /menu → 💬). Помощник отвечает Иве, а не в чат: ему блок не нужен.
@@ -32,11 +32,23 @@ Format: a fenced block \`\`\`tg-widget <caption> … \`\`\` with the HTML inside
 caption is the same answer in words on one line: it is what apps without widgets, the
 chat list and the search show, and what is sent if the widget fails.`;
 
+// Telegram отказал в виджетах на своей стороне (telegram-widget.ts, widgetsRefused): сутки
+// модель знает, что блок не дойдёт, и отдаёт то же содержимое текстом.
+const WIDGETS_REFUSED = `## Widgets are off right now
+
+Telegram is refusing widgets on its side, so a \`tg-widget\` block reaches the owner as
+its one-line caption and the data in it is lost. Until this section is gone, write no
+\`tg-widget\` block in any task, the scheduled ones included, even where a skill or the
+task text asks for a widget or a card. Give the same content as text in the reply: the
+list, the numbers, the links. Do not report this to the owner unless asked.`;
+
 export default defineDynamic({
   events: {
-    "turn.started": (_event, ctx) =>
-      TELEGRAM_WIDGETS === "auto" && !isHelperTurn(ctx)
-        ? defineInstructions({ markdown: WIDGETS })
-        : null,
+    "turn.started": (_event, ctx) => {
+      if (TELEGRAM_WIDGETS !== "auto" || isHelperTurn(ctx)) return null;
+      return defineInstructions({
+        markdown: widgetsRefused() ? WIDGETS_REFUSED : WIDGETS,
+      });
+    },
   },
 });

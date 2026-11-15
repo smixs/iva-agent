@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { notificationChat } from "./notification-chat.ts";
+import { notificationChat } from "../../packages/notification-chat/index.ts";
 
 void test("notification chat uses the configured digest chat", () => {
   assert.equal(

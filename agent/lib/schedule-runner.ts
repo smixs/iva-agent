@@ -18,6 +18,7 @@ import { resolveDataDir } from "./data-dir.ts";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { jobTail, recordFact, recordWake } from "./job-facts.ts";
+import { jobReservation, jobState, OWNER_STARTED_AT } from "./job-state.ts";
 import {
   acquireFileLock,
   releaseFileLock,
@@ -58,17 +59,10 @@ const TAIL_MAX = 4000;
 const LOCK_STALE_MS = 30_000;
 const LOCK_RETRY_DELAY_MS = 20;
 const LOCK_TIMEOUT_MS = 500;
-const processOwner = globalThis as typeof globalThis & {
-  ivaOwnerStartedAt?: number;
-};
-export const OWNER_STARTED_AT = (processOwner.ivaOwnerStartedAt ??= Math.round(
-  Date.now() - process.uptime() * 1000,
-));
+export { OWNER_STARTED_AT };
 
+// Запись имени в статусе: гварды и бронь (agent/lib/job-state.ts читает её объединением).
 interface ScheduleStatusEntry {
-  readonly inProgressSince?: number;
-  readonly ownerPid?: number;
-  readonly ownerStartedAt?: number;
   readonly lastSuccessAt?: number;
   readonly [key: string]: unknown;
 }
@@ -138,40 +132,23 @@ function errorMessage(error: unknown): string {
   return (error as { message: string }).message;
 }
 
-function reservationOwnerIsDead(
-  entry: ScheduleStatusEntry | undefined,
-): boolean {
-  const ownerPid = entry?.ownerPid;
-  if (
-    !Number.isSafeInteger(ownerPid) ||
-    (ownerPid as number) <= 0 ||
-    typeof entry?.ownerStartedAt !== "number"
-  ) {
-    return false;
-  }
-  try {
-    process.kill(ownerPid as number, 0);
-    return false;
-  } catch (error) {
-    return errorCode(error) === "ESRCH";
-  }
-}
-
 function ownsReservation(
   entry: ScheduleStatusEntry | undefined,
   startedAt: number,
 ): boolean {
+  const reservation = jobReservation(entry);
   return (
-    entry?.inProgressSince === startedAt &&
-    entry?.ownerPid === process.pid &&
-    entry?.ownerStartedAt === OWNER_STARTED_AT
+    reservation.kind === "owned" &&
+    reservation.since === startedAt &&
+    reservation.ownerPid === process.pid &&
+    reservation.ownerStartedAt === OWNER_STARTED_AT
   );
 }
 
 /**
  * Срок запуска как число. `null` — срока нет (ход напоминания живёт, пока идут события),
  * и тогда срока нет и у брони: она держится, пока жив её владелец, а его смерть освобождает
- * её сразу (reservationOwnerIsDead).
+ * её сразу (reservationOwnerIsDead, agent/lib/job-state.ts).
  */
 function deadlineMs(timeoutMs: number | null): number {
   return timeoutMs ?? Number.POSITIVE_INFINITY;
@@ -436,12 +413,13 @@ function admitUnderLock(
   // lastSuccessAt guard below can't see it. Without this, a Nitro tick and a
   // migration catch-up landing on the same period at nearly the same instant would
   // both read the same stale lastSuccessAt and both pass that guard.
-  if (
-    typeof prior?.inProgressSince === "number" &&
-    now() - prior.inProgressSince < deadlineMs(timeoutMs) &&
-    !reservationOwnerIsDead(prior)
-  ) {
-    const ageS = Math.round((now() - prior.inProgressSince) / 1000);
+  const current = jobState(name, {
+    entry: prior,
+    now: now(),
+    deadlineMs: deadlineMs(timeoutMs),
+  });
+  if (current.state === "running" && current.reservation.kind !== "none") {
+    const ageS = Math.round((now() - current.reservation.since) / 1000);
     log(
       `schedule-runner: ${name} skipped — already in progress (started ${ageS}s ago)`,
     );
@@ -624,8 +602,9 @@ function logOutcome(o: ResolvedOptions, outcome: SpawnOutcome): void {
     log(`schedule-runner: ${name} spawn error: ${errorMessage(outcome.error)}`);
 }
 
-// Факт — история запуска (одна таблица, п.1 T20): пишется и после провала, и после
-// успеха. Будим агента только когда факт на диске — иначе ходу нечего показать.
+// Факт — история запуска (одна таблица, п.1 T20): провал пишется всегда, успех — по политике
+// задания (factOnSuccess): always — всегда, after-failure — только закрывая прошлый провал.
+// Будим агента только когда факт на диске — иначе ходу нечего показать.
 interface Finish {
   readonly finishedAt: number;
   readonly outcome: SpawnOutcome;
@@ -816,7 +795,8 @@ async function finishRun(
   if (o.factsPath)
     await recordJobFact(o, o.factsPath, run, { finishedAt, outcome, childOk });
 
-  // Запуск успешен, только если ребёнок вышел нулём И факт лёг в таблицу.
+  // Запуск успешен, только если ребёнок вышел нулём И запись факта не отказала: успех,
+  // пропущенный политикой after-failure, — тоже успех, его след остаётся в статусе.
   const ok = childOk && run.factFailure === null;
   if (hasStatus(o)) {
     const finish = { finishedAt, code: outcome.code, ok };
@@ -825,8 +805,8 @@ async function finishRun(
     ));
   }
 
-  // Факт обязателен: без строки нет ни пробуждения, ни следа в таблице. Отказ записи
-  // обязан отклонить промис, иначе расписание считает шаг успешным (T30 №5).
+  // Отказ записи обязан отклонить промис, иначе расписание считает шаг успешным (T30 №5):
+  // без строки нет ни пробуждения, ни следа в таблице для провала и для политики always.
   if (run.factFailure !== null) throw run.factFailure;
 
   // Ошибка spawn (ENOENT и любая другая) едет наружу: потребитель обязан сказать

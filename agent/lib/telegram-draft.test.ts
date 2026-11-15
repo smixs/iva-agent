@@ -26,6 +26,180 @@ const runStatus =
 
 type Call = { method: string; body: Record<string, unknown> };
 
+const widgetHtml =
+  "<style>.card { color: red; }</style><div>Данные</div>" +
+  "<script>document.body.textContent = 'widget';</script>";
+const widgetBlock = (caption = "", html = widgetHtml) =>
+  [`\`\`\`tg-widget${caption ? ` ${caption}` : ""}`, html, "```"].join("\n");
+
+await test("TelegramProgress Once/Quiet: claims survive stream recovery (seed 111101)", async () => {
+  const fc = await import("fast-check");
+  await fc.assert(
+    fc.asyncProperty(
+      fc.boolean(),
+      fc.array(
+        fc.record({
+          kind: fc.constantFrom("complete", "close", "lose", "restore", "age"),
+          step: fc.integer({ min: 0, max: 2 }),
+          text: fc.boolean(),
+          elapsed: fc.constantFrom(0, 1, 10_000, 10_001),
+        }),
+        { maxLength: 30 },
+      ),
+      async (enabled, events) => {
+        let owner = true;
+        let closed = false;
+        let claimed = false;
+        let step = 0;
+        let now = 100_000;
+        let draftId = 41;
+        const { tg } = handle();
+        runStatus.setChatStatus("77:", {
+          status: "running",
+          sessionId: "s",
+          turnId: "t",
+          draftId,
+          turnAt: now,
+          progressClaimed: null,
+        });
+        const create = () =>
+          new status.TelegramDraftStream(tg, {
+            identity: { sessionId: "s", turnId: "t", draftId },
+            enabled,
+            matches: () => owner,
+            now: () => now,
+          });
+        let stream = create();
+        try {
+          for (const event of events) {
+            if (event.kind === "close") {
+              closed = true;
+              await stream.close();
+            } else if (event.kind === "lose") owner = false;
+            else if (event.kind === "age") now += event.elapsed;
+            else if (event.kind === "restore") {
+              await stream.close();
+              draftId++;
+              runStatus.setChatStatus("77:", { draftId });
+              stream = create();
+              closed = !owner;
+              step = 0;
+            } else {
+              const expected: boolean =
+                !closed &&
+                owner &&
+                event.step >= step &&
+                event.text &&
+                !claimed &&
+                now - 100_000 > 10_000;
+              if (!closed && event.step >= step) step = event.step;
+              stream.completeStep(event.step, event.text ? "Checking." : "");
+              assert.equal(
+                stream.claimProgress(event.step, event.text ? "Checking." : ""),
+                expected,
+              );
+              claimed ||= expected;
+              assert.equal(
+                runStatus.getChatStatus("77:")?.progressClaimed === true,
+                claimed,
+              );
+            }
+          }
+        } finally {
+          await stream.close();
+        }
+      },
+    ),
+    { seed: 111101, numRuns: 120 },
+  );
+});
+
+await test("draft widget: closed blocks show their delivery caption or a short placeholder", () => {
+  for (const complete of [false, true]) {
+    assert.equal(
+      status.draftText(
+        `До.\n${widgetBlock("День: 4 встречи")}\nПосле. `,
+        complete,
+      ),
+      "До.\n\nДень: 4 встречи\n\nПосле.",
+    );
+    assert.equal(status.draftText(`${widgetBlock()}\n`, complete), "Widget…");
+    assert.equal(
+      status.draftText(`${widgetBlock("я".repeat(2000))}\n`, complete),
+      `${"я".repeat(1023)}…`,
+    );
+  }
+});
+
+await test("draft widget: unclosed blocks keep the caption and hide unfinished HTML", () => {
+  for (const complete of [false, true]) {
+    assert.equal(
+      status.draftText(
+        `До.\n\`\`\`tg-widget Сон 7 ч\n${widgetHtml} `,
+        complete,
+      ),
+      "До.\n\nСон 7 ч",
+    );
+    assert.equal(
+      status.draftText(`\`\`\`tg-widget\n${widgetHtml} `, complete),
+      "Widget…",
+    );
+  }
+});
+
+await test("draft widget: partial opening fences stay hidden", () => {
+  const opener = "```tg-widget";
+  for (let length = 1; length < opener.length; length++) {
+    const prefix = `До.\n${opener.slice(0, length)}`;
+    assert.equal(status.draftText(prefix, false), "До.", `prefix ${length}`);
+    if (length > 3)
+      assert.equal(status.draftText(prefix, true), "До.", `complete ${length}`);
+  }
+});
+
+await test("draft widget: strip long code before the 3500-character tail cut", () => {
+  const block = widgetBlock("Сводка", widgetHtml.repeat(100));
+  for (const complete of [false, true]) {
+    assert.equal(
+      status.draftText(`До.\n${block}\nПосле. `, complete),
+      "До.\n\nСводка\n\nПосле.",
+    );
+    const before = "начало ".repeat(600);
+    const after = "конец ".repeat(20);
+    const visible = `${before.trim()}\n\nСводка\n\n${after.trim()}`;
+    assert.equal(
+      status.draftText(`${before}\n${block}\n${after}`, complete),
+      `…${visible.slice(-3500)}`,
+    );
+  }
+});
+
+await test("draft widget: every stream prefix hides HTML, JS and CSS in every widget", () => {
+  for (const caption of ["", "День: 4 встречи"]) {
+    const reply = `До.\n${widgetBlock(caption)}\nМежду.\n${widgetBlock("Второй")}\nПосле. `;
+    for (let length = 0; length <= reply.length; length++) {
+      for (const complete of [false, true]) {
+        const draft = status.draftText(reply.slice(0, length), complete);
+        assert.doesNotMatch(
+          draft,
+          /<style|<script|<div|color: red|document\.body|tg-widget/iu,
+          `prefix ${length}, complete ${complete}: ${draft}`,
+        );
+      }
+    }
+  }
+});
+
+await test("draft widget: buttons keep their labels and ordinary code fences survive", () => {
+  const reply = `До.\n${widgetBlock("Сводка")}\n<tg-button-row><tg-button data="yes">Да</tg-button></tg-button-row> `;
+  for (const complete of [false, true])
+    assert.equal(status.draftText(reply, complete), "До.\n\nСводка\n\n[Да]");
+  assert.equal(
+    status.draftText("```ts\nconst x = 1;\n```", true),
+    "```ts\nconst x = 1;\n```",
+  );
+});
+
 function handle(
   reply: (
     call: Call,
@@ -91,7 +265,10 @@ await test("отмена освобождает статус без пометк
     true,
   );
   assert.equal(runStatus.getChatStatus(key)?.wasCancelled, undefined);
-  assert.equal(runStatus.getChatStatus(key)?.stopPressed, undefined);
+  assert.equal(
+    (runStatus.getChatStatus(key) as Record<string, unknown>).stopPressed,
+    undefined,
+  );
 });
 
 await test("освобождение записи после сбоя хода обходится без Bot API", async () => {
@@ -187,7 +364,7 @@ await test("вход очереди переживает любой финал �
       [],
       mode,
     );
-    const after = runStatus.getChatStatus(key);
+    const after = runStatus.getChatStatus(key) as Record<string, unknown>;
     for (const [field, value] of Object.entries(queued))
       assert.equal(after?.[field], value, `${mode}: ${field}`);
   }
@@ -456,6 +633,11 @@ await test("PBT смешивает ходы, шаги, инструменты, �
                 turnId: null,
                 draftId: null,
                 compacting: null,
+                ingressId: null,
+                ingressAt: null,
+                turnAt: null,
+                firstOutputAt: null,
+                latencyLogged: null,
                 resetAt: Date.now(),
               });
               await advance(4500);

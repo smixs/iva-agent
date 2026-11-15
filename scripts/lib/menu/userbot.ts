@@ -13,12 +13,17 @@ import { runLaunchd } from "../launchd.ts";
 import { execFile } from "node:child_process";
 import { join } from "node:path";
 import { readEnvValues, upsertEnv } from "../env-file.ts";
-import { resolveDataDir } from "../data-dir.ts";
-import { probeUserbotHealth } from "../userbot-health.ts";
-import { button } from "./buttons.ts";
+import { resolveDataDir } from "../../../packages/data-dir/index.ts";
+import {
+  probeUserbotHealth,
+  userbotStateLabel,
+  type UserbotHealth,
+  type UserbotLoginPhase,
+} from "../userbot-health.ts";
+import { button, menuBackLine } from "../telegram-buttons.ts";
 
 type ErrorLike = { code?: unknown; message?: unknown };
-type Health = { state: string };
+type Tr = (en: string, ru: string) => string;
 type MenuState = {
   chatId: number | string;
   userId: string;
@@ -35,7 +40,7 @@ type MenuContext = {
       root: string;
       dataDir?: string;
       port: string;
-    }) => Promise<Health>;
+    }) => Promise<UserbotHealth>;
     runUserbotSetup?: () => Promise<void>;
     log?: (...parts: unknown[]) => void;
   };
@@ -43,7 +48,7 @@ type MenuContext = {
     get: (chatId: number | string, userId: string) => MenuState | null;
     screen: (state: MenuState, text: string) => Promise<unknown>;
   };
-  tr: (en: string, ru: string) => string;
+  tr: Tr;
   show: (state: MenuState, screen: string) => Promise<unknown>;
 };
 type Exec = (
@@ -65,11 +70,6 @@ const SVC = "iva-telegram-userbot.service";
 
 const isPrivate = (st: MenuState) => Number(st.chatId) > 0;
 
-const backLine = (ctx: MenuContext) =>
-  `${button(ctx.tr("‹ Menu", "‹ Меню"), `iva_menu:${PARENT}:o`)} — ${ctx.tr(
-    "back to the settings.",
-    "вернуться в настройки.",
-  )}`;
 const cancelLine = (ctx: MenuContext) =>
   `${button(ctx.tr("Cancel", "Отмена"), `iva_menu:${SID}:o`, "danger")} — ${ctx.tr(
     "leave the prompt without entering anything.",
@@ -85,6 +85,43 @@ const turnOffLine = (ctx: MenuContext) =>
     "stop the userbot proxy.",
     "остановить userbot-прокси.",
   )}`;
+
+// What the owner does next on the login phase the proxy named (specs/UserbotLogin.tla).
+function loginHint(T: Tr, login: UserbotLoginPhase | undefined) {
+  switch (login) {
+    case "starting":
+    case "waiting":
+      return T(
+        "The QR is in your chat with the bot. Scan it in Telegram: Settings → Devices → Link Desktop Device.",
+        "QR лежит в твоём чате с ботом. Отсканируй его в Telegram: Настройки → Устройства → Подключить устройство.",
+      );
+    case "password_needed":
+      return T(
+        "The QR is accepted; Telegram asks for the two-step verification password. Send it to the bot — a wrong password can be sent again.",
+        "QR принят, Telegram просит пароль двухфакторной защиты. Пришли его боту — неверный пароль можно прислать ещё раз.",
+      );
+    case "expired":
+      return T(
+        "The QR expired before it was scanned. Message the bot: «connect my telegram» to get a new one.",
+        "QR истёк раньше, чем его отсканировали. Напиши боту: «подключи мой телеграм», чтобы получить новый.",
+      );
+    case "error":
+      return T(
+        "The login failed. Message the bot: «connect my telegram» to start again.",
+        "Вход не удался. Напиши боту: «подключи мой телеграм», чтобы начать заново.",
+      );
+    case "interrupted":
+      return T(
+        "The proxy restarted in the middle of the login. Message the bot: «connect my telegram» to start again.",
+        "Прокси перезапустился посреди входа. Напиши боту: «подключи мой телеграм», чтобы начать заново.",
+      );
+    default:
+      return T(
+        "Proxy is on, but the Telegram account is not connected. Message the bot: «connect my telegram» to scan a QR.",
+        "Прокси включён, но аккаунт Telegram не подключён. Напиши боту: «подключи мой телеграм», чтобы отсканировать QR.",
+      );
+  }
+}
 
 function run(cmd: string, args: string[], timeout = 1500) {
   if (cmd === "systemctl" && serviceManager() === "launchd") {
@@ -167,18 +204,7 @@ async function buildScreen(st: MenuState, ctx: MenuContext): Promise<View> {
     "⚠️ Personal-account automation carries account-ban risk.",
     "⚠️ Автоматизация личного аккаунта несёт риск блокировки.",
   );
-  const stateLabel =
-    {
-      off: T("off", "выкл"),
-      starting: T("starting", "запускается"),
-      unreachable: T("unreachable", "недоступен"),
-      unauthorized: T("login required", "нужен вход"),
-      ready: T("ready", "готов"),
-    }[
-      status.state as
-        "off" | "starting" | "unreachable" | "unauthorized" | "ready"
-    ] || T("unreachable", "недоступен");
-  const statusLine = `${T("Status", "Статус")}: ${stateLabel}`;
+  const statusLine = `${T("Status", "Статус")}: ${userbotStateLabel(T, status.state)}`;
 
   if (!hasCreds) {
     const text = [
@@ -193,7 +219,7 @@ async function buildScreen(st: MenuState, ctx: MenuContext): Promise<View> {
         "enter api_id and api_hash in a private chat.",
         "ввести api_id и api_hash в личном чате.",
       )}`,
-      backLine(ctx),
+      menuBackLine(ctx, PARENT),
     ].join("\n\n");
     return { text };
   }
@@ -212,7 +238,7 @@ async function buildScreen(st: MenuState, ctx: MenuContext): Promise<View> {
         "запустить прокси (сборка venv, до ~3 мин).",
       )}`,
       refreshLine(ctx),
-      backLine(ctx),
+      menuBackLine(ctx, PARENT),
     ].join("\n\n");
     return { text };
   }
@@ -228,7 +254,7 @@ async function buildScreen(st: MenuState, ctx: MenuContext): Promise<View> {
       ),
       turnOffLine(ctx),
       refreshLine(ctx),
-      backLine(ctx),
+      menuBackLine(ctx, PARENT),
     ].join("\n\n");
     return { text };
   }
@@ -244,17 +270,14 @@ async function buildScreen(st: MenuState, ctx: MenuContext): Promise<View> {
       ),
       turnOffLine(ctx),
       refreshLine(ctx),
-      backLine(ctx),
+      menuBackLine(ctx, PARENT),
     ].join("\n\n");
     return { text };
   }
 
   const accountHint =
     status.state === "unauthorized"
-      ? T(
-          "Proxy is on, but the Telegram account is not connected. Message the bot: «connect my telegram» to scan a QR.",
-          "Прокси включён, но аккаунт Telegram не подключён. Напиши боту: «подключи мой телеграм», чтобы отсканировать QR.",
-        )
+      ? loginHint(T, status.login)
       : T(
           "Proxy and Telegram account are ready.",
           "Прокси и аккаунт Telegram готовы.",
@@ -266,7 +289,7 @@ async function buildScreen(st: MenuState, ctx: MenuContext): Promise<View> {
     accountHint,
     turnOffLine(ctx),
     refreshLine(ctx),
-    backLine(ctx),
+    menuBackLine(ctx, PARENT),
   ].join("\n\n");
   return { text };
 }
@@ -307,7 +330,7 @@ export default {
           `${ctx.tr(
             "Credentials are secrets — open a private chat and enter them there.",
             "Ключи — это секрет. Открой личный чат и введи их там.",
-          )}\n\n${backLine(ctx)}`,
+          )}\n\n${menuBackLine(ctx, PARENT)}`,
         );
       }
       st.data.ub = {};
@@ -348,7 +371,7 @@ export default {
                   "run the proxy setup again.",
                   "запустить настройку прокси заново.",
                 )}`,
-                backLine(ctx),
+                menuBackLine(ctx, PARENT),
               ].join("\n\n"),
             );
           }
@@ -361,7 +384,7 @@ export default {
             "◇ Setting up the userbot proxy…",
             "◇ Собираю userbot-прокси…",
           ),
-          backLine(ctx),
+          menuBackLine(ctx, PARENT),
         ].join("\n\n"),
       );
     }
@@ -420,7 +443,7 @@ export default {
           `${ctx.tr(
             `Couldn't write .env: ${String(errorMessage(error))}`,
             `Не удалось записать .env: ${String(errorMessage(error))}`,
-          )}\n\n${backLine(ctx)}`,
+          )}\n\n${menuBackLine(ctx, PARENT)}`,
         );
       }
       // Ключи есть — экран покажет [Включить].

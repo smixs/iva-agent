@@ -9,6 +9,7 @@ import { parseFrontmatterOrSkip } from "#lib/frontmatter.ts";
 import * as input from "./night-input.ts";
 import {
   callBySchema,
+  withNightRetry,
   NightCeilingError,
   NightSchemaError,
 } from "./night-call.ts";
@@ -154,12 +155,17 @@ async function buildPeriod(
   let fallback = false;
   try {
     const input = { period, id, children: values };
-    answer = await callBySchema({
-      skill: ask.skill,
-      input,
-      schema: periodAnswer,
-      signal: ask.signal,
-    });
+    answer = await withNightRetry(
+      () =>
+        callBySchema({
+          skill: ask.skill,
+          input,
+          schema: periodAnswer,
+          signal: ask.signal,
+        }),
+      `${period} ${id}`,
+      ask.signal,
+    );
   } catch (error) {
     if (!(error instanceof NightSchemaError)) throw error;
     fallback = true;
@@ -251,15 +257,16 @@ function finishedPeriods(today: string): Array<[Period, string]> {
 const tried = new Set<string>();
 
 /** Готовые периоды, которых нет или чей вход изменился; сбой периода не роняет ночь, а
- * идёт строкой в факт Job, предел ночи останавливает сборку. Возвращает периоды,
- * собранные без модели. */
+ * идёт строкой в факт Job и делает итог ночи неуспешным, предел ночи останавливает
+ * сборку. Возвращает периоды, собранные без модели, и признак провала. */
 export async function buildReadyPeriods(
   vault: string,
   today: string,
   ask: Ask,
   jobs: string[],
-): Promise<string[]> {
+): Promise<{ fallbacks: string[]; failed: boolean }> {
   const fallbacks: string[] = [];
+  let failed = false;
   // Второй проход ночи не трогает собранное этой ночью: fallback пересобирает следующая.
   const periods = finishedPeriods(today).filter((p) => !tried.has(p.join("/")));
   for (const period of periods)
@@ -268,9 +275,10 @@ export async function buildReadyPeriods(
       if (made !== null) tried.add(period.join("/"));
       if (made) fallbacks.push(made);
     } catch (error) {
+      failed = true;
       tried.add(period.join("/"));
       jobs.push(`${period.join(" ")} не собран: ${String(error)}`);
       if (error instanceof NightCeilingError) break;
     }
-  return fallbacks;
+  return { fallbacks, failed };
 }

@@ -19,9 +19,9 @@ def guard(client):
     print(f"TEST guarded {Path(client.session.filename).name}", file=sys.stderr)
 
 
-def onboard(mcp, client):
-    assert Path(client.session.filename).name == "telegram-userbot.session"
-    register_onboarding_tools(mcp, client)
+def onboard(mcp, login):
+    assert Path(login._client.session.filename).name == "telegram-userbot.session"
+    register_onboarding_tools(mcp, login)
 
 
 async def connect(client):

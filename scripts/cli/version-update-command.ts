@@ -15,10 +15,10 @@ import {
   reporterFor,
 } from "../lib/telegram-status.ts";
 import {
-  BETA_CONFIG,
   betaChannel,
   BranchUnavailableError,
   resolveReleaseTarget,
+  syncUpdateBranch,
 } from "../lib/update-channel.ts";
 import {
   gitAt,
@@ -150,8 +150,8 @@ export async function ensureMirror(home: string): Promise<string> {
   rmSync(staging, { recursive: true, force: true });
   const git = (root: string, args: string[]): Promise<string> =>
     requireGit(gitAt, root, args);
-  // What the installation follows, not the clone: its branch and beta updates.
-  const keys = ["iva.updateBranch", BETA_CONFIG];
+  // What the installation follows, not the clone: its Update branch.
+  const keys = ["iva.updateBranch"];
   try {
     await git(home, ["clone", "--mirror", join(home, ".git"), staging]);
     const origin = await git(home, ["remote", "get-url", "origin"]);
@@ -238,6 +238,12 @@ function releaseUpdate(home: string) {
   let aim: ReleaseAim | undefined;
   return {
     target: async (repo: string) => {
+      // Зеркало - кэш записи владельца: расхождение, оставленное оборванной записью
+      // `iva beta`/`iva stable`, чинится до чтения ветки (specs/UpdateBranch.tla).
+      await syncUpdateBranch(
+        (...args: string[]) => gitAt(repo, args),
+        (...args: string[]) => gitAt(home, args),
+      );
       aim = await resolveTarget(repo, await installedCommit(home));
       return aim;
     },

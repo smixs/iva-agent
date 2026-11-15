@@ -1,7 +1,7 @@
-// Канал-фикстура для replica-смоука (scripts/replica-smoke.ts): prepareReplica копирует
+// Сохранённая фикстура канала для проверок reset: тест копирует
 // этот файл в одноразовое приложение как agent/channels/reset-canary.ts. Он существует
 // только ради канарейки session reset. Реальный telegram-канал ходит в
-// api.telegram.org, поэтому replica-smoke использует детерминированный адрес фикстуры.
+// api.telegram.org; герметичный HTTP-набор проверяет настоящий Telegram route.
 //
 // Роуты повторяют пару from(address).send/reset. Смоук приходит после reset
 // по тому же адресу и проверяет, что история не воскресла.

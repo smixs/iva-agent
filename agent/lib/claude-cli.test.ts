@@ -77,7 +77,7 @@ import {
 // но и то, что уехало в CLI.
 const FAKE_CLI = `#!/usr/bin/env node
 import { spawn } from "node:child_process";
-import { closeSync, readFileSync, writeFileSync } from "node:fs";
+import { closeSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 
 const argv = process.argv.slice(2);
 const arg = (name) => {
@@ -103,7 +103,10 @@ function streamText(chunks) {
 
 function dump(extra) {
   if (dumpPath === undefined) return;
-  writeFileSync(dumpPath, JSON.stringify({ argv, settings, system: readFileSync(arg("--system-prompt-file"), "utf8"), frames, pid: process.pid, cwd: process.cwd(), ...extra }));
+  // Целиком или никак: тест читает дамп, пока подделка ещё жива, и пустой файл между
+  // открытием и записью ронял его разбор JSON.
+  writeFileSync(dumpPath + ".tmp", JSON.stringify({ argv, settings, system: readFileSync(arg("--system-prompt-file"), "utf8"), frames, pid: process.pid, cwd: process.cwd(), ...extra }));
+  renameSync(dumpPath + ".tmp", dumpPath);
 }
 
 async function scenario() {
@@ -307,6 +310,9 @@ async function scenario() {
   dump({});
   process.exit(3);
 }
+
+// Глухой CLI выходит, не прочитав ни кадра.
+if (mode === "deaf") process.exit(0);
 
 let pending = "";
 process.stdin.setEncoding("utf8");
@@ -1467,6 +1473,19 @@ test("нулевой код выхода с непустым result не выд�
     drain(await model.doStream({ prompt: userPrompt() })),
   );
   assert.match(error.message, /exit 7/u);
+});
+
+// Кадр больше буфера трубы: запись ещё идёт, когда CLI уже вышел, и ядро отвечает EPIPE.
+// Без слушателя на stdin это исключение процесса, а не отказ одного хода.
+test("CLI, вышедший до конца записи кадров, валит ход, а не процесс", async (t) => {
+  fakeCli(t, "deaf");
+  const model = makeClaudeCliModel(MODEL);
+  const error = await failureOf(async () =>
+    drain(
+      await model.doStream({ prompt: userPrompt("я".repeat(1024 * 1024)) }),
+    ),
+  );
+  assert.ok(error instanceof ClaudeCliError, error.message);
 });
 
 // ─── Тишина, отмена, отсутствие бинаря ──────────────────────────────────────────────────

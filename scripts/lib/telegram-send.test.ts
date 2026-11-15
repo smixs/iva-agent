@@ -545,6 +545,54 @@ void test("a transient 5xx is retried and the second attempt delivers", async ()
   assert.deepEqual(delays, [1000]);
 });
 
+void test("beforeAttempt is asked before every attempt, and false after the backoff sends nothing more", async () => {
+  const { sendTelegramHtml } = await import("./telegram-send.ts");
+  for (const wanted of [
+    [true, true],
+    [true, false],
+  ]) {
+    const asked: boolean[] = [];
+    let calls = 0;
+    let slept = 0;
+    const result = await sendTelegramHtml(
+      "test-bot",
+      "test-chat",
+      "remember this",
+      {
+        retryTransient: true,
+        sleep: () => {
+          slept += 1;
+          return Promise.resolve();
+        },
+        beforeAttempt: () => {
+          const answer = wanted[asked.length] ?? false;
+          asked.push(answer);
+          return Promise.resolve(answer);
+        },
+        fetchImpl: () => {
+          calls += 1;
+          return Promise.resolve(
+            calls === 1
+              ? new Response("unavailable", { status: 503 })
+              : new Response("{}", { status: 200 }),
+          );
+        },
+      },
+    );
+    assert.deepEqual(asked, wanted);
+    assert.equal(slept, 1);
+    if (wanted[1]) {
+      assert.deepEqual(result, { ok: true, fellBack: false, error: "" });
+      assert.equal(calls, 2);
+    } else {
+      // No request, no plain fallback, no further backoff.
+      assert.equal(result.ok, false);
+      assert.match(result.error, /withdrawn before the attempt/u);
+      assert.equal(calls, 1);
+    }
+  }
+});
+
 void test("omitted and false retryTransient preserve the original single attempt", async () => {
   const { sendTelegramHtml } = await import("./telegram-send.ts");
   for (const retryTransient of [undefined, false] as const) {
