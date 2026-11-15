@@ -2306,6 +2306,13 @@ void test("a pending reboot does not stop a first install that has no system pac
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.match(result.stderr + result.stdout, /reboot is pending/iu);
   assert.doesNotMatch(world.calls(), /apt-get (?:-\S+ )*install/u);
+  // agent-browser's own apt run is outside apt_get() and would hang on the pending reboot.
+  assert.match(world.calls(), /agent-browser install\n/u);
+  assert.doesNotMatch(world.calls(), /agent-browser install --with-deps/u);
+  assert.match(
+    result.stderr + result.stdout,
+    /Browser system libraries were skipped.*sudo reboot.*agent-browser install --with-deps/u,
+  );
 });
 
 void test("an occupied tree without git is refused with its previous build preserved", (t) => {

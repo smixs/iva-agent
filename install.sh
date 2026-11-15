@@ -1080,7 +1080,14 @@ else
   if run_stage "$(t "Installing agent-browser" "Ставлю agent-browser")" "$(t "agent-browser installed" "agent-browser установлен")" \
     install_verified_npm_tarball agent-browser "$AGENT_BROWSER_TARBALL_URL" "$AGENT_BROWSER_TARBALL_SHA256"; then
     browser_install=(agent-browser install)
-    if [ "$HEADLESS_SUDO" != true ]; then browser_install+=(--with-deps); fi
+    # --with-deps runs its own apt through sudo, outside apt_get(): on a pending reboot it
+    # hangs behind the spinner, so it is left for after the reboot.
+    if [ "$HEADLESS_SUDO" != true ] && [ "$REBOOT_REFUSES_PACKAGES" != true ]; then
+      browser_install+=(--with-deps)
+    fi
+    if [ "$REBOOT_REFUSES_PACKAGES" = true ]; then
+      warn "$(t "Browser system libraries were skipped because a reboot is pending. After sudo reboot, run: agent-browser install --with-deps" "Системные библиотеки браузера пропущены: ждёт перезагрузка. После sudo reboot выполните: agent-browser install --with-deps")"
+    fi
     run_stage "$(t "Downloading Chromium" "Скачиваю Chromium")" "$(t "Chromium ready" "Chromium готов")" "${browser_install[@]}" \
       || warn "$(t "Finish later: agent-browser install --with-deps" "Завершите позже: agent-browser install --with-deps")"
     # Chrome won't start on Ubuntu 23.10+/24.04: the kernel forbids unprivileged user
