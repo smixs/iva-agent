@@ -460,6 +460,53 @@ test("failed close claim produces no edit; unknown close retries its frozen payl
   );
 });
 
+test("a definitive refusal of the close ends the signal; a 502 keeps it closing", async (t) => {
+  const { closeTelegramWatchSignal } = await import("../lib/telegram-send.ts");
+  const run = async (status: number, body: string) => {
+    const h = harness(t);
+    await seed(h);
+    await runProactiveTick(NOW, h.deps);
+    h.owner = NOW + MIN;
+    h.now += 30 * MIN;
+    let requests = 0;
+    const deps = {
+      ...h.deps,
+      closeSignal: (ids: readonly number[], text: string) =>
+        closeTelegramWatchSignal(
+          "fixture",
+          "owner",
+          { messageIds: ids, text },
+          {
+            fetchImpl: async () => {
+              requests++;
+              return new Response(body, { status });
+            },
+          },
+        ),
+    };
+    const first = await runProactiveTick(h.now, deps);
+    const second = await runProactiveTick(h.now + 30 * MIN, deps);
+    return {
+      first,
+      second,
+      requests,
+      status: readProactiveState(h.statePath)?.signals?.[KEY].status,
+    };
+  };
+  assert.deepEqual(await run(400, "Bad Request: message to edit not found"), {
+    first: 0,
+    second: 0,
+    requests: 1,
+    status: "closed",
+  });
+  assert.deepEqual(await run(502, "Bad Gateway"), {
+    first: 1,
+    second: 1,
+    requests: 2,
+    status: "closing",
+  });
+});
+
 test("history failure leaves a Telegram candidate quiet", async (t) => {
   const h = harness(t);
   await seed(h);

@@ -40,6 +40,8 @@ type PostAck = OutboxAck & {
   readonly retryable?: boolean;
   readonly retryAfterMs?: number;
   readonly outcomeUnknown?: boolean;
+  /** HTTP status of a refusal; absent for network errors. */
+  readonly status?: number;
 };
 
 export type TelegramSendOptions = {
@@ -161,6 +163,7 @@ async function post(
     return {
       ok: false,
       error: `${res.status}: ${text}`,
+      status: res.status,
       retryPlain: res.status === 400,
       retryable: classifyDeliverStatus(res.status) === "retry",
       outcomeUnknown: res.status >= 500 || res.status === 408,
@@ -484,13 +487,30 @@ export async function sendTelegramScreen(
   return { ok: ack.ok, error: ack.ok ? "" : ack.error };
 }
 
-/** Close only the recorded Watch messages; empty markup removes any classic buttons. */
+/**
+ * A refusal that repeating cannot change: HTTP 4xx except 429 and 408 (the latter says nothing
+ * about the outcome). 5xx, 429, 408 and network errors may heal, so the caller retries them.
+ */
+const definitiveRefusal = (ack: PostAck) =>
+  !ack.ok &&
+  ack.status !== undefined &&
+  ack.status >= 400 &&
+  ack.status < 500 &&
+  ack.status !== 408 &&
+  ack.status !== 429;
+
+/**
+ * Close only the recorded Watch messages; empty markup removes any classic buttons.
+ * A definitive refusal (the owner deleted the message, the chat is gone) ends the close
+ * like a success and is reported in `refused`; a transient failure is `ok: false`.
+ */
 export async function closeTelegramWatchSignal(
   bot: string,
   chat: string,
   { messageIds, text }: { messageIds: readonly number[]; text: string },
   { fetchImpl = fetch }: Pick<TelegramSendOptions, "fetchImpl"> = {},
-): Promise<{ ok: boolean; error: string }> {
+): Promise<{ ok: boolean; error: string; refused?: string }> {
+  let refused = "";
   for (const message_id of messageIds) {
     const ack = await post(
       bot,
@@ -503,8 +523,9 @@ export async function closeTelegramWatchSignal(
       },
       fetchImpl,
     );
-    if (!ack.ok && !/message is not modified/iu.test(ack.error))
-      return { ok: false, error: ack.error };
+    if (ack.ok || /message is not modified/iu.test(ack.error)) continue;
+    if (!definitiveRefusal(ack)) return { ok: false, error: ack.error };
+    refused ||= ack.error;
   }
-  return { ok: true, error: "" };
+  return { ok: true, error: "", ...(refused ? { refused } : {}) };
 }

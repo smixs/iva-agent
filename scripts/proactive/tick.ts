@@ -105,7 +105,7 @@ export type TickDeps = {
   readonly closeSignal?: (
     messageIds: readonly number[],
     text: string,
-  ) => Promise<{ ok: boolean; error: string }>;
+  ) => Promise<{ ok: boolean; error: string; refused?: string }>;
   readonly timeZone: string;
   readonly statePath: string;
   readonly sources: readonly Source[];
@@ -517,6 +517,10 @@ async function closeOneSignal(
       failed = true;
       return { state: current, failed };
     }
+    if (ack.refused)
+      log(
+        `proactive: ${key} close refused for good, signal closed: ${ack.refused}`,
+      );
     current = {
       ...current,
       signals: { ...current.signals, [key]: { ...signal, status: "closed" } },
