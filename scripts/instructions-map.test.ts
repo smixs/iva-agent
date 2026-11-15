@@ -63,6 +63,24 @@ test("long output goes to a file and is read in parts", () => {
   assert.match(rule, /read it in parts/u);
 });
 
+// Три правила поведения (владелец, 15.11.2026): форма ответа, прерванная работа, проверка факта.
+// Карта сжата под предел, поэтому каждое держится якорями.
+test("the map carries the answer shape, the interrupted-work rule and the fact check", () => {
+  assert.match(
+    FLAT_MAP,
+    /Answer first in 1-4 lines; the rest in one `<details>` fold \(`rich-replies`\); a short answer has none\./u,
+  );
+  const interrupt = item("A message that interrupts your work continues it");
+  assert.match(interrupt, /another subject or says stop/u);
+  assert.match(interrupt, /steps in the history, no restart/u);
+  assert.match(interrupt, /one line says what you take into account/u);
+  const check = item("Check before you state");
+  assert.match(check, /read its source with a tool this turn and name it/u);
+  assert.match(check, /call it unchecked/u);
+  assert.match(check, /Read messages before compiling tasks/u);
+  assert.match(check, /facts already read need no re-read/u);
+});
+
 // В фоновом ходе (Watch, Brief, Insight, Reminder) код доставляет текст хода сам: фраза «что
 // делаю» там стала бы сообщением владельцу, поэтому правило — только для разговора в чате.
 test("the one sentence before a chain of tools is for a chat only", () => {
