@@ -182,3 +182,45 @@ void test("HTML path never shows button tags: url becomes a link, the rest their
   assert.match(html, /<b>Да<\/b>/);
   assert.match(html, /<a href="https:\/\/iva-agent\.com">Сайт<\/a>/);
 });
+
+await test("HTML path renders a fold as an expandable quote with a bold title", () => {
+  assert.deepEqual(
+    toTelegramHtmlChunks(
+      "Итог.\n\n<details><summary>Детали</summary>\n\n- шаг **один**\n> цитата\n\n`код`\n</details>",
+    ),
+    [
+      "Итог.\n\n<blockquote expandable><b>Детали</b>\n• шаг <b>один</b>\nцитата\n\n<code>код</code></blockquote>",
+    ],
+  );
+  assert.deepEqual(toTelegramHtmlChunks("<details>тело</details>"), [
+    "<blockquote expandable>тело</blockquote>",
+  ]);
+});
+
+await test("malformed folds degrade to balanced text without literal tags", () => {
+  assert.deepEqual(toTelegramHtmlChunks("<details>a"), [
+    "<blockquote expandable>a</blockquote>",
+  ]);
+  assert.deepEqual(toTelegramHtmlChunks("x</details>y"), ["xy"]);
+  assert.deepEqual(
+    toTelegramHtmlChunks("<details><details>a</details>b</details>"),
+    ["<blockquote expandable>ab</blockquote>"],
+  );
+  assert.deepEqual(toTelegramHtmlChunks("```\n<details>код</details>\n```"), [
+    "<pre>&lt;details&gt;код&lt;/details&gt;</pre>",
+  ]);
+});
+
+await test("a long fold is cut into self-contained expandable quotes within the limit", () => {
+  const body = Array.from({ length: 60 }, (_, i) => `строка ${i}`).join("\n");
+  const chunks = toTelegramHtmlChunks(
+    `<details><summary>S</summary>${body}</details>`,
+    300,
+  );
+  assert.ok(chunks.length > 1);
+  for (const c of chunks) {
+    assert.ok(c.length <= 300);
+    assert.match(c, /^<blockquote expandable>/);
+    assert.match(c, /<\/blockquote>$/);
+  }
+});
