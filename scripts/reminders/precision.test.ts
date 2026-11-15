@@ -11,7 +11,7 @@ import {
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import test, { beforeEach } from "node:test";
 import type { Session } from "eve/channels";
 import type { ToolContext } from "eve/tools";
@@ -477,8 +477,11 @@ test("Reminder content: unreadable directory degrades add to task; orphan sweep 
 
 test("Reminder content: a failed kind write still refuses the row", async (t) => {
   const rename = fsp.rename;
+  // The atomic write renames onto the resolved path; the temp directory is a symlink on macOS.
+  const target = reminderContentFile();
+  const resolved = join(fs.realpathSync(dirname(target)), basename(target));
   t.mock.method(fsp, "rename", (...args: Parameters<typeof fsp.rename>) => {
-    if (String(args[1]) === reminderContentFile())
+    if (String(args[1]) === target || String(args[1]) === resolved)
       return Promise.reject(new Error("injected content write failure"));
     return rename(...args);
   });

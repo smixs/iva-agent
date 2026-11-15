@@ -49,6 +49,16 @@ const texts = (h: Harness, text: string) =>
   h.telegram.requests.filter(
     (r) => r.method === "sendMessage" && r.body.text === text,
   );
+// A failed task turn delivers the row's text followed by the not-done line (fire.ts).
+const failedTexts = (h: Harness) =>
+  h.telegram.requests.filter(
+    (r) =>
+      r.method === "sendMessage" &&
+      typeof r.body.text === "string" &&
+      /^SMOKE_REMINDER_TEXT\n\n(?:Not done: the turn gave no answer\.|Не выполнено: ход не дал ответа\.)$/u.test(
+        r.body.text,
+      ),
+  );
 const tick = (h: Harness, now: number, capture = false) => {
   // All newly spawned processes start at this logical instant. Advancing it on
   // each tick avoids rewinding the Alert throttle's clock between children.
@@ -179,7 +189,7 @@ void test(
 );
 
 void test(
-  "S-rem-ontime: failed reminder turn sends the original text and records the reason",
+  "S-rem-ontime: failed reminder turn sends its text with the not-done line and records the reason",
   { timeout: 120_000 },
   async (t) => {
     const h = await createHarness(t);
@@ -187,19 +197,19 @@ void test(
     h.provider.enqueue({ kind: "overloaded", times: 3 });
     await tick(h, row.nextRunAtMs);
     const delivered = (await rows(h))[0];
-    t.diagnostic(JSON.stringify({ row: delivered, sends: texts(h, TEXT) }));
+    t.diagnostic(JSON.stringify({ row: delivered, sends: failedTexts(h) }));
     assert.equal(
       h.provider.requests.length,
       5,
       "two setup requests and three refused attempts",
     );
     assert.equal(
-      texts(h, TEXT).length,
+      failedTexts(h).length,
       1,
-      "a failed turn preserves the reminder text verbatim",
+      "a failed turn sends the reminder text with the not-done line",
     );
-    assert.equal(String(texts(h, TEXT)[0].chat), String(OWNER));
-    assert.equal(String(texts(h, TEXT)[0].topic), String(TOPIC));
+    assert.equal(String(failedTexts(h)[0].chat), String(OWNER));
+    assert.equal(String(failedTexts(h)[0].topic), String(TOPIC));
     assert.equal(delivered.delivered, true);
     assert.match(delivered.error ?? "", /^agent turn failed: .+/u);
     assert.match(
@@ -208,7 +218,7 @@ void test(
     );
     await tick(h, row.nextRunAtMs + 60_000);
     assert.equal(
-      texts(h, TEXT).length,
+      failedTexts(h).length,
       1,
       "OneAttemptPerCapture after a failed turn",
     );
