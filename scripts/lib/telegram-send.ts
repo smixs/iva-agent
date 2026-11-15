@@ -221,7 +221,7 @@ function poster(
     );
     // A withdrawal ends the whole send: the rich -> HTML fallback and later chunks must not
     // ask beforeAttempt again, a second answer could differ from the first.
-    if (ack.withdrawn) {
+    if (!ack.ok && ack.withdrawn) {
       stopError = ack.error;
       return { ok: false, error: stopError, retryPlain: false, stop: true };
     }
