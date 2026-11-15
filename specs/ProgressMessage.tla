@@ -13,7 +13,7 @@
 \* (ForeignClear: Bridge reset and reaper, takeover); the id is not a turn field.
 \*
 \* An operation toward Telegram is a record in `ops`. Telegram accepts it (TgAccept) and
-\* the caller learns the answer later (Deliver): a crash between the two is the residual
+\* the caller learns the answer later (Deliver): a crash between the two is a residual
 \* of the design. Process memory is lost at Crash; a request already sent may still land.
 \*
 \* TurnStart   -> turn.started: retire (top of the handler), then publish.
@@ -24,9 +24,9 @@
 EXTENDS Naturals, FiniteSets
 CONSTANTS Mutant, MaxFaults, MaxCrashes, MaxForeign, MaxSteps, MaxMsgId
 VARIABLES rec, msgs, nextId, ts, ops, posts, steps, bound, finalSent,
-          faults, crashes, foreign, envDel, leaked, overId, late, liveDel, due
+          faults, crashes, foreign, envDel, leaked, overId, late, liveDel, due, badClear
 vars == <<rec, msgs, nextId, ts, ops, posts, steps, bound, finalSent,
-          faults, crashes, foreign, envDel, leaked, overId, late, liveDel, due>>
+          faults, crashes, foreign, envDel, leaked, overId, late, liveDel, due, badClear>>
 
 Turns == 1..2
 Stale(r) == r.id # 0 /\ ~r.claimed
@@ -49,6 +49,7 @@ Init ==
   /\ bound = [t \in Turns |-> FALSE] /\ finalSent = [t \in Turns |-> FALSE]
   /\ faults = 0 /\ crashes = 0 /\ foreign = 0 /\ envDel = 0
   /\ leaked = FALSE /\ overId = FALSE /\ late = FALSE /\ liveDel = FALSE /\ due = 0
+  /\ badClear = FALSE
 
 TurnStart(t) ==
   /\ ts[t] = "none" /\ (IF t = 1 THEN TRUE ELSE ts[t - 1] # "none")
@@ -57,7 +58,7 @@ TurnStart(t) ==
   /\ rec' = [pair |-> t, claimed |-> FALSE, id |-> rec.id]
   /\ ts' = [ts EXCEPT ![t] = "open"]
   /\ UNCHANGED <<msgs, nextId, posts, steps, bound, finalSent, faults, crashes,
-                 foreign, envDel, leaked, overId, late, due>>
+                 foreign, envDel, leaked, overId, late, due, badClear>>
 
 \* One status call. A skipped call (same text, throttle, pause) is no step at all.
 Step(t) ==
@@ -74,9 +75,9 @@ Step(t) ==
      \/ \* shown: edit the id read from the record
         /\ rec.pair = t /\ rec.claimed /\ rec.id # 0
         /\ ops' = ops \cup {NewOp("edit", <<"e", t>>, t, rec.id)}
-        /\ UNCHANGED <<rec, posts, overId>>
+        /\ UNCHANGED <<rec, posts, overId, badClear>>
   /\ UNCHANGED <<msgs, nextId, ts, bound, finalSent, faults, crashes, foreign, envDel,
-                 leaked, liveDel, due>>
+                 leaked, liveDel, due, badClear>>
 
 \* ---- Telegram ------------------------------------------------------------
 Fault == faults < MaxFaults
@@ -86,7 +87,7 @@ Answer(o, res, rid, newMsgs, newNext, cost, lost) ==
   /\ faults' = faults + cost
   /\ leaked' = (leaked \/ lost)
   /\ UNCHANGED <<rec, ts, posts, steps, bound, finalSent, crashes, foreign, envDel,
-                 overId, late, liveDel, due>>
+                 overId, late, liveDel, due, badClear>>
 TgAccept(o) ==
   /\ o \in ops /\ o.src = "live" /\ o.st = "pend"
   /\ \/ /\ o.k = "post" /\ nextId <= MaxMsgId
@@ -99,7 +100,7 @@ TgAccept(o) ==
      \/ /\ o.k = "edit"
         /\ IF o.id \in msgs
            THEN \/ Answer(o, "ok", 0, msgs, nextId, 0, FALSE)
-                \/ Fault /\ \E r \in {"wait", "error"} :
+                \/ Fault /\ \E r \in {"wait", "error", "gone"} :
                      Answer(o, r, 0, msgs, nextId, 1, FALSE)
            ELSE Answer(o, "gone", 0, msgs, nextId, 0, FALSE)
      \/ /\ o.k = "del"
@@ -116,17 +117,21 @@ DeadSettle(o) ==
   /\ ops' = ops \ {o}
   /\ \/ /\ o.k = "post" /\ nextId <= MaxMsgId /\ o.st = "pend"
         /\ msgs' = msgs \cup {nextId} /\ nextId' = nextId + 1 /\ leaked' = TRUE
-     \/ /\ o.k = "del" /\ msgs' = msgs \ {o.id} /\ UNCHANGED <<nextId, leaked>>
-     \/ /\ msgs' = msgs /\ UNCHANGED <<nextId, leaked>>
+     \/ /\ o.k = "del" /\ msgs' = msgs \ {o.id} /\ UNCHANGED <<nextId, leaked, badClear>>
+     \/ /\ msgs' = msgs /\ UNCHANGED <<nextId, leaked, badClear>>
   /\ UNCHANGED <<rec, ts, posts, steps, bound, finalSent, faults, crashes, foreign,
-                 envDel, overId, late, liveDel, due>>
+                 envDel, overId, late, liveDel, due, badClear>>
 UserDeletes ==
   /\ envDel < 1 /\ \E i \in msgs : msgs' = msgs \ {i}
   /\ envDel' = envDel + 1
   /\ UNCHANGED <<rec, nextId, ts, ops, posts, steps, bound, finalSent, faults, crashes,
-                 foreign, leaked, overId, late, liveDel, due>>
+                 foreign, leaked, overId, late, liveDel, due, badClear>>
 
 \* ---- the caller learns the answer ---------------------------------------
+Answered(o) == o.res \in {"ok", "gone"}
+\* Frame of a post whose record write failed: the delete of its own message got no answer.
+FrameFailed(o) == o.k = "del" /\ o.by[1] = "f" /\ ~Answered(o)
+Blank(r) == ~r.claimed /\ r.id = 0
 Deliver(o) ==
   /\ o \in ops /\ o.src = "live" /\ o.st = "done"
   /\ ops' = (ops \ {o}) \cup
@@ -134,19 +139,32 @@ Deliver(o) ==
            /\ ~(rec.pair = o.t /\ rec.claimed /\ rec.id = 0)
            /\ Mutant # "no-frame-delete"
         THEN {NewOp("del", <<"f", o.t>>, 0, o.rid)} ELSE {})
+  \* An edit refused as gone keeps the id (the message may still exist) and the frame stops
+  \* editing; the model lets it try again, a superset of the code. The id leaves the record only
+  \* by the definitive answer to a delete of exactly that id.
   /\ rec' =
        CASE o.k = "post" /\ o.res = "ok" /\ o.rid # 0
               /\ rec.pair = o.t /\ rec.claimed /\ rec.id = 0
             -> [rec EXCEPT !.id = o.rid]
-         [] o.k = "edit" /\ o.res = "gone" /\ rec.id = o.id
-            -> [rec EXCEPT !.id = 0,
-                 !.claimed = IF Mutant = "resend-after-gone" THEN FALSE ELSE rec.claimed]
-         [] o.k = "del" /\ o.res \in {"ok", "gone"}
+         [] o.k = "edit" /\ o.res = "gone" /\ rec.id = o.id /\ Mutant = "edit-gone-clears"
+            -> [rec EXCEPT !.id = 0]
+         [] o.k = "edit" /\ o.res = "gone" /\ rec.id = o.id /\ Mutant = "resend-after-gone"
+            -> [rec EXCEPT !.id = 0, !.claimed = FALSE]
+         [] o.k = "del" /\ Answered(o)
             -> IF Mutant = "clear-null" THEN [rec EXCEPT !.id = 0]
                ELSE IF rec.id = o.id THEN [rec EXCEPT !.id = 0] ELSE rec
+         \* The frame could not delete its message and nobody else knows the id: keep it as a
+         \* stale mark when the record holds neither a claim nor an id.
+         [] FrameFailed(o) /\ Blank(rec) /\ Mutant # "no-mark"
+            -> [rec EXCEPT !.id = o.id]
+         [] o.k = "del" /\ ~Answered(o) /\ rec.id = o.id /\ Mutant = "clear-on-error"
+            -> [rec EXCEPT !.id = 0]
          [] OTHER -> rec
-  \* A failed delete of a frame leaves one untracked message: nobody else knows its id.
-  /\ leaked' = (leaked \/ (o.k = "del" /\ o.by[1] = "f" /\ o.res \notin {"ok", "gone"}))
+  \* The frame found the record busy (another claim or id): there is no place for the id and
+  \* no retry is made. With a lost post reply the only residual without a crash.
+  /\ leaked' = (leaked \/ (FrameFailed(o) /\ ~Blank(rec)))
+  /\ badClear' = (badClear \/ (rec.id # 0 /\ rec'.id # rec.id
+                  /\ ~(rec'.id = 0 /\ o.k = "del" /\ Answered(o) /\ o.id = rec.id)))
   /\ UNCHANGED <<msgs, nextId, ts, posts, steps, bound, finalSent, faults, crashes,
                  foreign, envDel, overId, late, liveDel, due>>
 
@@ -154,36 +172,37 @@ Deliver(o) ==
 CloseStart(t) ==
   /\ ts[t] = "open" /\ ts' = [ts EXCEPT ![t] = "closed"]
   /\ UNCHANGED <<rec, msgs, nextId, ops, posts, steps, bound, finalSent, faults,
-                 crashes, foreign, envDel, leaked, overId, late, liveDel, due>>
+                 crashes, foreign, envDel, leaked, overId, late, liveDel, due, badClear>>
 DrainTimeout(t) ==
   /\ ts[t] = "closed" /\ Inflight(t) /\ ~bound[t] /\ bound' = [bound EXCEPT ![t] = TRUE]
   /\ UNCHANGED <<rec, msgs, nextId, ts, ops, posts, steps, finalSent, faults, crashes,
-                 foreign, envDel, leaked, overId, late, liveDel, due>>
+                 foreign, envDel, leaked, overId, late, liveDel, due, badClear>>
 FinalSend(t) ==
   /\ ts[t] = "closed" /\ ~finalSent[t] /\ Drained(t)
   /\ finalSent' = [finalSent EXCEPT ![t] = TRUE]
   /\ UNCHANGED <<rec, msgs, nextId, ts, ops, posts, steps, bound, faults, crashes,
-                 foreign, envDel, leaked, overId, late, liveDel, due>>
+                 foreign, envDel, leaked, overId, late, liveDel, due, badClear>>
 Finish(t) ==
   /\ ts[t] = "closed" /\ Drained(t) /\ due = 0
   /\ ts' = [ts EXCEPT ![t] = "finished"]
   /\ rec' = IF rec.pair = t THEN [pair |-> 0, claimed |-> FALSE, id |-> rec.id] ELSE rec
   /\ due' = t
   /\ UNCHANGED <<msgs, nextId, ops, posts, steps, bound, finalSent, faults, crashes,
-                 foreign, envDel, leaked, overId, late, liveDel>>
+                 foreign, envDel, leaked, overId, late, liveDel, badClear>>
 \* retireProgressMessage after the CAS, whether or not the CAS succeeded.
 RetireCall ==
   /\ due # 0 /\ due' = 0
   /\ ops' = ops \cup RetireSet(rec, due, <<"r", due>>)
   /\ liveDel' = (liveDel \/ RetireLive(rec, due))
   /\ UNCHANGED <<rec, msgs, nextId, ts, posts, steps, bound, finalSent, faults,
-                 crashes, foreign, envDel, leaked, overId, late>>
+                 crashes, foreign, envDel, leaked, overId, late, badClear>>
 
 \* ---- other processes and failures -------------------------------------------
 ForeignClear ==
   /\ foreign < MaxForeign /\ foreign' = foreign + 1
   /\ rec' = [pair |-> 0, claimed |-> FALSE,
              id |-> IF Mutant = "id-turn-field" THEN 0 ELSE rec.id]
+  /\ badClear' = (badClear \/ (Mutant = "id-turn-field" /\ rec.id # 0))
   /\ UNCHANGED <<msgs, nextId, ts, ops, posts, steps, bound, finalSent, faults, crashes,
                  envDel, leaked, overId, late, liveDel, due>>
 Crash ==
@@ -197,16 +216,16 @@ Crash ==
   /\ ts' = [t \in Turns |-> IF ts[t] = "open" THEN "lost" ELSE ts[t]]
   /\ due' = 0
   /\ UNCHANGED <<rec, msgs, nextId, posts, steps, bound, finalSent, faults, foreign,
-                 envDel, overId, late, liveDel>>
+                 envDel, overId, late, liveDel, badClear>>
 \* The turn resumes: a lazily recreated stream reads the id from the record.
 Resume(t) ==
   /\ ts[t] = "lost" /\ ts' = [ts EXCEPT ![t] = "open"]
   /\ UNCHANGED <<rec, msgs, nextId, ops, posts, steps, bound, finalSent, faults,
-                 crashes, foreign, envDel, leaked, overId, late, liveDel, due>>
+                 crashes, foreign, envDel, leaked, overId, late, liveDel, due, badClear>>
 GiveUp(t) ==
   /\ ts[t] = "lost" /\ ts' = [ts EXCEPT ![t] = "dead"]
   /\ UNCHANGED <<rec, msgs, nextId, ops, posts, steps, bound, finalSent, faults,
-                 crashes, foreign, envDel, leaked, overId, late, liveDel, due>>
+                 crashes, foreign, envDel, leaked, overId, late, liveDel, due, badClear>>
 
 Next == (\E t \in Turns : TurnStart(t) \/ Step(t) \/ CloseStart(t) \/ DrainTimeout(t)
                           \/ FinalSend(t) \/ Finish(t) \/ Resume(t) \/ GiveUp(t))
@@ -223,7 +242,7 @@ Spec == Init /\ [][Next]_vars /\ Fairness
 
 TypeOK ==
   /\ rec.pair \in 0..2 /\ rec.claimed \in BOOLEAN /\ rec.id \in 0..MaxMsgId
-  /\ msgs \subseteq 1..MaxMsgId /\ due \in 0..2
+  /\ msgs \subseteq 1..MaxMsgId /\ due \in 0..2 /\ badClear \in BOOLEAN
   /\ \A t \in Turns : ts[t] \in {"none", "open", "closed", "finished", "lost", "dead"}
 
 \* 1. At most one status post attempt per turn; a failed post, a lost id or a gone
@@ -248,6 +267,14 @@ NoStatusAfterFinal ==
 \* 3. An id seen without a claim never becomes live again (concurrent deleters are safe).
 StaleIsFinal ==
   [][Stale(rec) => ~(rec'.claimed /\ rec'.id = rec.id)]_vars
+\* 9. The id leaves the record only after Telegram's definitive answer (ok or gone) to a
+\*    delete of that exact id: never on 429, 5xx or a timeout, never by a turn-field clear,
+\*    never by a delete of another message.
+ClearOnlyByAnswer == ~badClear
 \* 8. After a terminal event of a turn the recorded id is deleted (Telegram answering).
 EventuallyGone == (due # 0) ~> (due = 0 /\ ~Stale(rec))
+\* 10. One failed end-of-turn delete is not forever: the next turn.started retires the id.
+\*     Checked under SpecNext, where a turn that can start does start (ProgressMessage-live-fault.cfg).
+RetiredByNextTurn == (Stale(rec) /\ ts[2] = "none") ~> ~Stale(rec)
+SpecNext == Spec /\ WF_vars(TurnStart(2))
 =============================================================================

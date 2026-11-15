@@ -33,6 +33,7 @@ check() { # config expected: none | <invariant>
 }
 check ProgressMessage none
 check ProgressMessage-live none
+check ProgressMessage-live-fault none
 check ProgressMessage-id-turn-field NoOrphanWithoutCrash
 check ProgressMessage-delete-by-pair NoDeleteLive
 check ProgressMessage-clear-null NoOrphanWithoutCrash
@@ -40,5 +41,8 @@ check ProgressMessage-claim-over-id NoPostOverId
 check ProgressMessage-no-frame-delete NoOrphanWithoutCrash
 check ProgressMessage-edit-after-close NoStatusAfterFinal
 check ProgressMessage-resend-after-gone Once
+check ProgressMessage-clear-on-error ClearOnlyByAnswer
+check ProgressMessage-no-mark NoOrphanWithoutCrash
+check ProgressMessage-edit-gone-clears NoOrphanWithoutCrash
 echo "progress-message-check: ok=$ok failed=$failed"
 [ "$failed" -eq 0 ]
