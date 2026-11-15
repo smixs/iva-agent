@@ -80,6 +80,14 @@ export type SandboxBackendTags = Readonly<Record<string, string>>;
  */
 export interface SandboxBackendRuntimeContext {
   readonly appRoot: string;
+  /**
+   * Resolves whether the durable session that owns a session-keyed
+   * directory has finished. Backends whose cache outlives a session use
+   * this to decide which entries are collectable; when the framework
+   * cannot prove an owner finished, the entry must be kept. Absent when
+   * the runtime has no session-owner state to consult.
+   */
+  readonly isSessionFinished?: (sessionKey: string) => Promise<boolean>;
 }
 
 /**
