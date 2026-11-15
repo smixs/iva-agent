@@ -668,7 +668,7 @@ async function deliver(
         part.birthdayKeys.length &&
         !(await acknowledge(part.birthdayKeys))
       )
-        return { sent, all: false, ackSaveFailed: true };
+        return { sent, all: false, ackSaveFailed: true, uncertain };
     } else {
       all = false;
       log(`proactive: a part was not delivered: ${result.error}`);
