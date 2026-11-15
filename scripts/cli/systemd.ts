@@ -19,6 +19,7 @@ import {
 } from "../lib/systemd-control.ts";
 import {
   resolveTimeZone,
+  systemTimeZoneName,
   validateTimeZone,
 } from "../../packages/timezone/index.ts";
 import type { createCliRuntime } from "./runtime.ts";
@@ -109,7 +110,9 @@ class CliSystemdLifecycle {
   // local time) need — one place so the fallback/validation rule can't drift between them.
   configuredTimezone(): string {
     const raw = this.runtime.readEnv().ASSISTANT_TIMEZONE;
-    return raw?.trim() ? this.explicitTimezone(raw) : resolveTimeZone(raw);
+    return systemTimeZoneName(
+      raw?.trim() ? this.explicitTimezone(raw) : resolveTimeZone(raw),
+    );
   }
 
   // Only a name systemd can carry unquoted is accepted, and then only one Intl knows.

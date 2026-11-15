@@ -3,7 +3,10 @@ import assert from "node:assert/strict";
 import fc from "fast-check";
 
 import { validateTimeZone as validateAuthored } from "@iva/timezone";
-import { validateTimeZone } from "../../packages/timezone/index.ts";
+import {
+  systemTimeZoneName,
+  validateTimeZone,
+} from "../../packages/timezone/index.ts";
 
 // Оба дерева соблюдают один контракт: authored tree проверяет зону на старте сервера,
 // scripts/ — когда Doctor пишет юниты без каталога agent/. Пакет один; сверяются два пути
@@ -93,4 +96,19 @@ void test("arbitrary input yields a zone Intl accepts, or nothing", () => {
     ),
     { seed: 190_003, numRuns: 1_000 },
   );
+});
+
+void test("the system name of a zone is a zone Intl accepts and a second pass changes nothing", () => {
+  fc.assert(
+    fc.property(fc.constantFrom(...ZONES), (zone) => {
+      const name = systemTimeZoneName(zone);
+      assert.equal(systemTimeZoneName(name), name);
+      assert.notEqual(validateTimeZone(name), null);
+      // Only the legacy spelling moves: Intl takes the new one back to the same zone.
+      if (name !== zone) assert.equal(validateTimeZone(name), zone);
+    }),
+    { seed: 190_004, numRuns: 500 },
+  );
+  assert.equal(systemTimeZoneName("Europe/Kiev"), "Europe/Kyiv");
+  assert.equal(systemTimeZoneName("Asia/Tashkent"), "Asia/Tashkent");
 });

@@ -212,6 +212,19 @@ test("writeUnits writes every unit with its placeholders filled and closes the s
   });
 });
 
+test("writeUnits names Europe/Kyiv as the tz database does, not as Intl's legacy Europe/Kiev", () => {
+  withFixture("ASSISTANT_TIMEZONE=Europe/Kyiv\nIVA_PORT=9001\n", (fx) => {
+    cli(fx).writeUnits({ skipUnits: ["iva-telegram-userbot.service"] });
+
+    // Ubuntu 26.04 ships no Europe/Kiev file: systemd cannot parse it in OnCalendar=.
+    assert.equal(
+      unit(fx, "iva-brain.timer"),
+      "OnCalendar=*-*-* 05:00:00 Europe/Kyiv\n",
+    );
+    assert.match(unit(fx, "iva.service"), /^Environment=TZ=Europe\/Kyiv$/m);
+  });
+});
+
 test("writeUnits run twice leaves units, bearer and .env exactly as the first run did", () => {
   withFixture("IVA_PORT=9001\n", (fx) => {
     const systemd = cli(fx);

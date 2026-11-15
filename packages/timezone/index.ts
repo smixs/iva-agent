@@ -22,3 +22,38 @@ export function validateTimeZone(value: unknown): string | null {
 export function resolveTimeZone(value: unknown): string {
   return validateTimeZone(value) ?? "UTC";
 }
+
+/**
+ * Zones where `Intl` still answers with a legacy spelling that the tz database keeps only
+ * as a backward link (CLDR never renames an id): `Europe/Kiev` for `Europe/Kyiv`. A system
+ * tzdata that ships no legacy links (Ubuntu 26.04) has no such file, so systemd refuses an
+ * `OnCalendar=` naming it and `TZ=` silently means UTC. Each value is the name of the same
+ * zone in the tz database's `zone.tab`; the keys are exactly the `Intl` zones that are
+ * backward links and absent from `zone.tab`.
+ */
+const SYSTEM_ZONE_NAME: Readonly<Record<string, string>> = {
+  "Africa/Asmera": "Africa/Asmara",
+  "America/Buenos_Aires": "America/Argentina/Buenos_Aires",
+  "America/Catamarca": "America/Argentina/Catamarca",
+  "America/Coral_Harbour": "America/Atikokan",
+  "America/Cordoba": "America/Argentina/Cordoba",
+  "America/Godthab": "America/Nuuk",
+  "America/Indianapolis": "America/Indiana/Indianapolis",
+  "America/Jujuy": "America/Argentina/Jujuy",
+  "America/Louisville": "America/Kentucky/Louisville",
+  "America/Mendoza": "America/Argentina/Mendoza",
+  "Asia/Calcutta": "Asia/Kolkata",
+  "Asia/Katmandu": "Asia/Kathmandu",
+  "Asia/Rangoon": "Asia/Yangon",
+  "Asia/Saigon": "Asia/Ho_Chi_Minh",
+  "Atlantic/Faeroe": "Atlantic/Faroe",
+  "Europe/Kiev": "Europe/Kyiv",
+  "Pacific/Enderbury": "Pacific/Kanton",
+  "Pacific/Ponape": "Pacific/Pohnpei",
+  "Pacific/Truk": "Pacific/Chuuk",
+};
+
+/** The name of an already canonical zone as systemd and `TZ=` find it in the system tzdata. */
+export function systemTimeZoneName(zone: string): string {
+  return SYSTEM_ZONE_NAME[zone] ?? zone;
+}
