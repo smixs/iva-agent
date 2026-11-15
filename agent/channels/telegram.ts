@@ -15,6 +15,7 @@ import {
   flushSettledTelegramQuestions,
   postTelegramQuestion,
   settleTelegramQuestions,
+  transport as boundedRequest,
 } from "../lib/telegram-question.ts";
 // Outbox — ЕДИНЫЙ шов наружу (тот же, через который уходят ночные отчёты cron):
 // внутри него outbound-Gate, выбор rich/HTML, нарезка на чанки и plain-фолбэк.
@@ -25,6 +26,8 @@ import {
   type NoticeSend,
   type OutboxAck,
   type OutboxTransport,
+  type StatusReply,
+  type StatusTransport,
 } from "../lib/outbox.js";
 import { hasRichButtons } from "../lib/telegram-format.js";
 import { parseTelegramDelivery } from "../lib/telegram-delivery.js";
@@ -53,6 +56,7 @@ import {
   startTelegramAcceptedTyping,
   closeTelegramAcceptedTyping,
   draftText,
+  retireProgressMessage,
 } from "../lib/telegram-draft.ts";
 import { notifyTelegramFailure } from "../lib/telegram-failure-notice.js";
 import { rememberTurnQuestion, turnQuestion } from "../lib/turn-question.js";
@@ -220,6 +224,59 @@ export function outboxTransport(
       sendWidget(token, tg, html, caption, silent);
   return transport;
 }
+
+// Сообщение-статус долгого хода: сырые sendMessage, editMessageText и deleteMessage. Всегда
+// parse_mode HTML (plain — повтор шва при отказе по разметке) и всегда без звука; rich и
+// виджет сюда не заходят, TELEGRAM_RICH_REPLIES не читается. Правка и удаление идут со сроком
+// 10 с, пост без срока: ответ на принятый запрос терять нельзя, иначе id потерян, а сообщение в чате.
+const STATUS_REQUEST_TIMEOUT_MS = 10_000;
+export function statusTransport(
+  tg: Pick<TelegramHandle, "chatId" | "messageThreadId" | "request">,
+): StatusTransport {
+  const call = (
+    method: string,
+    body: Record<string, unknown>,
+    bounded: boolean,
+  ) =>
+    boundedRequest(
+      tg,
+      bounded ? performance.now() + STATUS_REQUEST_TIMEOUT_MS : undefined,
+    )(method, body) as Promise<StatusReply>;
+  const markup = (mode: "html" | "plain") =>
+    mode === "html" ? { parse_mode: "HTML" } : {};
+  return {
+    send: (text, mode) =>
+      call(
+        "sendMessage",
+        {
+          chat_id: tg.chatId,
+          text,
+          ...markup(mode),
+          disable_notification: true,
+          ...(tg.messageThreadId === undefined
+            ? {}
+            : { message_thread_id: tg.messageThreadId }),
+        },
+        false,
+      ),
+    edit: (id, text, mode) =>
+      call(
+        "editMessageText",
+        { chat_id: tg.chatId, message_id: id, text, ...markup(mode) },
+        true,
+      ),
+    remove: (id) =>
+      call("deleteMessage", { chat_id: tg.chatId, message_id: id }, true),
+  };
+}
+
+// finishTelegramStatus удаляет сообщение-статус после своей записи и берёт для этого транспорт канала.
+const withStatusTransport = (channel: {
+  telegram: Pick<TelegramHandle, "chatId" | "messageThreadId" | "request">;
+}) => ({
+  telegram: channel.telegram,
+  statusTransport: statusTransport(channel.telegram),
+});
 
 // sendWidget (Bot API 10.4) идёт своим вызовом, как send_file. Отказ — подпись текстом
 // (шов Outbox).
@@ -487,6 +544,11 @@ const telegram = telegramChannel({
     },
     async "turn.started"(data, channel, ctx) {
       const tg = channel.telegram;
+      // Сообщение-статус прошлого хода, не снятое его концом (сброс, жнец, обрыв связи), уходит до нового.
+      await retireProgressMessage(
+        chatKeyOf(tg.chatId, tg.messageThreadId),
+        statusTransport(tg),
+      );
       openIdleCompactionTurn(ctx.session.id);
       const draftId = randomInt(1, 2 ** 31);
       const published = await publishTelegramTurnStarted({
@@ -523,7 +585,7 @@ const telegram = telegramChannel({
         const report = takeManualCompactionReport(ctx.session.id);
         closeIdleCompactionTurn(ctx.session.id, providerConfig.contextWindow);
         await finishTelegramStatus(
-          channel,
+          withStatusTransport(channel),
           ctx.session.id,
           "completed",
           _data.turnId,
@@ -550,7 +612,7 @@ const telegram = telegramChannel({
         status?.status === "running" && status.compacting === true;
       try {
         await finishTelegramStatus(
-          channel,
+          withStatusTransport(channel),
           ctx.session.id,
           compacting ? "completed" : "cancelled",
           compacting ? undefined : _data.turnId,
@@ -578,7 +640,7 @@ const telegram = telegramChannel({
           manual = endIdleCompaction(sessionId);
         }
         await finishTelegramStatus(
-          channel,
+          withStatusTransport(channel),
           sessionId,
           "completed",
           undefined,
@@ -656,25 +718,21 @@ const telegram = telegramChannel({
           channel.state.chatType === "private" &&
             channel.telegram.messageThreadId === undefined,
         );
-        const { text, silent } = parseTelegramDelivery(data.message ?? "");
+        const { text } = parseTelegramDelivery(data.message ?? "");
         // Redact the complete text before the draft renderer cuts its tail.
         const progress = draftText(redactNotice(text), true);
         stream?.completeStep(data.stepIndex, data.message ?? "");
-        if (stream?.claimProgress(data.stepIndex, progress)) {
+        if (stream && progress)
           await traceOutbox(
             { turn: data.turnId, session: ctx.session.id, source: "telegram" },
             progress,
             () =>
-              sendThroughOutbox(
+              stream.status(
+                data.stepIndex,
                 progress,
-                outboxTransport(
-                  channel.telegram,
-                  TELEGRAM_RICH_REPLIES,
-                  silent,
-                ),
+                statusTransport(channel.telegram),
               ),
           );
-        }
         return;
       }
       await closeTelegramDraftChat(
@@ -722,7 +780,7 @@ const telegram = telegramChannel({
       dropIdleCompactionTurn(ctx.session.id);
       try {
         await finishTelegramStatus(
-          channel,
+          withStatusTransport(channel),
           ctx.session.id,
           "failed",
           data.turnId,
@@ -742,7 +800,11 @@ const telegram = telegramChannel({
       const tg = channel.telegram;
       if (tg.chatId) {
         try {
-          await finishTelegramStatus(channel, data.sessionId, "failed");
+          await finishTelegramStatus(
+            withStatusTransport(channel),
+            data.sessionId,
+            "failed",
+          );
           await dropQueuedStatus({
             chatKey: chatKeyOf(tg.chatId, tg.messageThreadId),
             sessionId: data.sessionId,

@@ -112,7 +112,9 @@ async function emit(
     | "action.result"
     | "input.requested"
     | "input.resolved"
-    | "turn.completed",
+    | "turn.completed"
+    | "turn.failed"
+    | "session.failed",
   data: Record<string, unknown>,
   {
     chatId,
@@ -990,4 +992,548 @@ test("a silent final closes the stream even when Outbox has no text", async () =
   assert.equal(apiCalls.length, count);
   assert.equal(apiCalls.filter((c) => c.method === "sendMessage").length, 0);
   await emit("turn.completed", { turnId: "turn_1" }, pair);
+});
+
+// ── The status message of a long turn: post, edit, delete (specs/ProgressMessage.tla) ──────
+const { PROGRESS_MIN_TURN_MS, STATUS_EDIT_MIN_MS, closeTelegramDraftTurn } =
+  await import("#lib/telegram-draft.ts");
+const { TURN_FIELDS_CLEARED, progressMessageOf: progressWord } =
+  await import("#lib/run-status.ts");
+
+const STATUS_METHODS = [
+  "sendMessage",
+  "editMessageText",
+  "deleteMessage",
+  "sendRichMessage",
+];
+const wireOf = () =>
+  apiCalls
+    .filter((c) => STATUS_METHODS.includes(c.method))
+    .map((c) =>
+      c.method === "editMessageText" || c.method === "deleteMessage"
+        ? `${c.method}:${String(c.body?.message_id)}`
+        : c.method,
+    );
+const callsOf = (method: string) => apiCalls.filter((c) => c.method === method);
+const reject = (status: number, description: string, extra = {}) =>
+  Response.json(
+    { ok: false, error_code: status, description, ...extra },
+    { status },
+  );
+
+// Один чат, один ход на Date.now двойника: статус-сообщение получает свои номера с 500.
+function statusChat(
+  t: { mock: { method: (...args: never[]) => unknown } },
+  chatId: string,
+  extra: {
+    threadId?: number;
+    chatType?: string;
+    onCall?: (call: ApiCall) => Response | Promise<Response> | null;
+  } = {},
+) {
+  const key = chatKeyOf(chatId, extra.threadId);
+  let now = 1_000_000;
+  (t.mock.method as (o: object, n: string, f: () => number) => void)(
+    Date,
+    "now",
+    () => now,
+  );
+  let nextId = 500;
+  apiCalls.length = 0;
+  telegramReply = (call) =>
+    extra.onCall?.(call) ??
+    (call.method === "sendMessage"
+      ? Response.json({
+          ok: true,
+          result: { message_id: ++nextId, chat: { id: 1, type: "private" } },
+        })
+      : null);
+  setChatStatus(key, {
+    status: "idle",
+    ...TURN_FIELDS_CLEARED,
+    resetAt: null,
+    progressMessageId: null,
+  });
+  const pair = {
+    chatId,
+    sessionId: `status-${chatId}`,
+    ...(extra.threadId === undefined ? {} : { threadId: extra.threadId }),
+    ...(extra.chatType === undefined ? {} : { chatType: extra.chatType }),
+  };
+  const step = (
+    turnId: string,
+    message: string,
+    stepIndex = 0,
+    finishReason = "tool-calls",
+  ) =>
+    emit(
+      "message.completed",
+      { turnId, stepIndex, message, finishReason },
+      pair,
+    );
+  return {
+    key,
+    pair,
+    step,
+    start: (turnId = "turn_1") => emit("turn.started", { turnId }, pair),
+    advance: (ms: number) => {
+      now += ms;
+    },
+    // Ход идёт достаточно долго, чтобы первый статус ушёл.
+    age: () => {
+      now += PROGRESS_MIN_TURN_MS + 1;
+    },
+    record: () => getChatStatus(key),
+    async end() {
+      telegramReply = () => null;
+      await closeTelegramDraftTurn(pair.sessionId, undefined, 0, true);
+    },
+  };
+}
+
+test("status: post once, throttled edit, final, then delete, always silent", async (t) => {
+  const chat = statusChat(t, "201");
+  t.after(() => chat.end());
+  await chat.start();
+  chat.age();
+  await chat.step("turn_1", "Step one.");
+  assert.deepEqual(callsOf("sendMessage")[0].body, {
+    chat_id: "201",
+    text: "Step one.",
+    parse_mode: "HTML",
+    disable_notification: true,
+  });
+  assert.equal(chat.record()?.progressMessageId, 501);
+  assert.equal(chat.record()?.progressClaimed, true);
+  await chat.step("turn_1", "Step two.");
+  assert.deepEqual(
+    wireOf(),
+    ["sendMessage"],
+    "throttled: skipped, not deferred",
+  );
+  chat.advance(STATUS_EDIT_MIN_MS);
+  await chat.step("turn_1", "Step two.");
+  assert.deepEqual(callsOf("editMessageText")[0].body, {
+    chat_id: "201",
+    message_id: 501,
+    text: "Step two.",
+    parse_mode: "HTML",
+  });
+  await chat.step("turn_1", "Done.", 1, "stop");
+  assert.deepEqual(wireOf(), [
+    "sendMessage",
+    "editMessageText:501",
+    "sendMessage",
+  ]);
+  await emit("turn.completed", { turnId: "turn_1" }, chat.pair);
+  assert.deepEqual(wireOf(), [
+    "sendMessage",
+    "editMessageText:501",
+    "sendMessage",
+    "deleteMessage:501",
+  ]);
+  assert.equal(chat.record()?.progressMessageId, undefined);
+  assert.equal(chat.record()?.progressClaimed, undefined);
+  assert.deepEqual(callsOf("deleteMessage")[0].body, {
+    chat_id: "201",
+    message_id: 501,
+  });
+});
+
+test("status: the same text is not edited", async (t) => {
+  const chat = statusChat(t, "202");
+  t.after(() => chat.end());
+  await chat.start();
+  chat.age();
+  await chat.step("turn_1", "Same.");
+  chat.advance(STATUS_EDIT_MIN_MS * 2);
+  await chat.step("turn_1", "Same.");
+  assert.deepEqual(wireOf(), ["sendMessage"]);
+  await emit("turn.cancelled", { turnId: "turn_1" }, chat.pair);
+});
+
+test("status: Stop deletes the message", async (t) => {
+  const chat = statusChat(t, "203");
+  t.after(() => chat.end());
+  await chat.start();
+  chat.age();
+  await chat.step("turn_1", "Working.");
+  await emit("turn.cancelled", { turnId: "turn_1" }, chat.pair);
+  assert.deepEqual(wireOf(), ["sendMessage", "deleteMessage:501"]);
+  assert.equal(chat.record()?.progressMessageId, undefined);
+});
+
+test("status: steer, the new turn.started before the old turn.cancelled", async (t) => {
+  const chat = statusChat(t, "204");
+  t.after(() => chat.end());
+  await chat.start("turn_1");
+  chat.age();
+  await chat.step("turn_1", "Old step.");
+  await chat.start("turn_2");
+  assert.deepEqual(
+    wireOf(),
+    ["sendMessage"],
+    "the old status is still shown at the top of turn.started",
+  );
+  assert.equal(progressWord(chat.record()), "stale");
+  await emit("turn.cancelled", { turnId: "turn_1" }, chat.pair);
+  assert.deepEqual(wireOf(), ["sendMessage", "deleteMessage:501"]);
+  chat.age();
+  await chat.step("turn_2", "New step.");
+  assert.deepEqual(wireOf(), [
+    "sendMessage",
+    "deleteMessage:501",
+    "sendMessage",
+  ]);
+  assert.equal(chat.record()?.progressMessageId, 502);
+  await emit("turn.cancelled", { turnId: "turn_2" }, chat.pair);
+  assert.deepEqual(
+    callsOf("deleteMessage").map((c) => c.body?.message_id),
+    [501, 502],
+  );
+});
+
+test("status: steer, the old turn.cancelled before the new turn.started", async (t) => {
+  const chat = statusChat(t, "205");
+  t.after(() => chat.end());
+  await chat.start("turn_1");
+  chat.age();
+  await chat.step("turn_1", "Old step.");
+  await emit("turn.cancelled", { turnId: "turn_1" }, chat.pair);
+  await chat.start("turn_2");
+  assert.deepEqual(
+    wireOf(),
+    ["sendMessage", "deleteMessage:501"],
+    "the second finds none",
+  );
+  await emit("turn.cancelled", { turnId: "turn_2" }, chat.pair);
+  assert.equal(callsOf("deleteMessage").length, 1);
+});
+
+test("status: an old post still in flight loses its CAS and deletes its own message", async (t) => {
+  let release!: (response: Response) => void;
+  const held = new Promise<Response>((resolve) => {
+    release = resolve;
+  });
+  const chat = statusChat(t, "206", {
+    onCall: (call) => (call.method === "sendMessage" ? held : null),
+  });
+  t.after(() => chat.end());
+  await chat.start("turn_1");
+  chat.age();
+  const old = chat.step("turn_1", "Slow post.");
+  await pause();
+  await chat.start("turn_2");
+  release(
+    Response.json({
+      ok: true,
+      result: { message_id: 601, chat: { id: 1, type: "private" } },
+    }),
+  );
+  await old;
+  await pause();
+  assert.deepEqual(wireOf(), ["sendMessage", "deleteMessage:601"]);
+  assert.equal(chat.record()?.progressMessageId, undefined);
+});
+
+test("status: failed turn and failed session delete the message before the notice", async (t) => {
+  for (const event of ["turn.failed", "session.failed"] as const) {
+    const chat = statusChat(t, event === "turn.failed" ? "207" : "208");
+    await chat.start();
+    chat.age();
+    await chat.step("turn_1", "Working.");
+    await emit(
+      event,
+      {
+        code: "MODEL_CALL_FAILED",
+        details: { statusCode: 500 },
+        message: "boom",
+        sequence: 0,
+        turnId: "turn_1",
+        sessionId: chat.pair.sessionId,
+      },
+      chat.pair,
+    );
+    const wire = wireOf();
+    assert.equal(wire[0], "sendMessage");
+    assert.equal(wire[1], "deleteMessage:501", event);
+    assert.equal(chat.record()?.progressMessageId, undefined);
+    await chat.end();
+  }
+});
+
+test("status: a final that cannot be delivered still removes the status; a failed delete waits for the next turn", async (t) => {
+  let down = false;
+  const chat = statusChat(t, "209", {
+    onCall: (call) => {
+      if (!down) return null;
+      return call.method === "sendMessage" || call.method === "deleteMessage"
+        ? reject(500, "Internal Server Error")
+        : null;
+    },
+  });
+  t.after(() => chat.end());
+  await chat.start("turn_1");
+  chat.age();
+  await chat.step("turn_1", "Working.");
+  down = true;
+  await chat.step("turn_1", "Final that fails.", 1, "stop");
+  await emit("turn.completed", { turnId: "turn_1" }, chat.pair);
+  assert.equal(
+    chat.record()?.progressMessageId,
+    501,
+    "Telegram is down: the id stays",
+  );
+  assert.equal(progressWord(chat.record()), "stale");
+  down = false;
+  const before = wireOf().length;
+  await chat.start("turn_2");
+  assert.equal(
+    wireOf()[before],
+    "deleteMessage:501",
+    "the next turn.started removes it",
+  );
+  assert.equal(chat.record()?.progressMessageId, undefined);
+});
+
+test("status: an edit refused as gone clears the id and never resends or deletes", async (t) => {
+  const chat = statusChat(t, "210", {
+    onCall: (call) =>
+      call.method === "editMessageText"
+        ? reject(400, "Bad Request: message to edit not found")
+        : null,
+  });
+  t.after(() => chat.end());
+  await chat.start();
+  chat.age();
+  await chat.step("turn_1", "One.");
+  chat.advance(STATUS_EDIT_MIN_MS);
+  await chat.step("turn_1", "Two.");
+  assert.equal(chat.record()?.progressMessageId, undefined);
+  assert.equal(
+    chat.record()?.progressClaimed,
+    true,
+    "claimed: never resend this turn",
+  );
+  chat.advance(STATUS_EDIT_MIN_MS);
+  await chat.step("turn_1", "Three.");
+  await emit("turn.cancelled", { turnId: "turn_1" }, chat.pair);
+  assert.deepEqual(wireOf(), ["sendMessage", "editMessageText:501"]);
+});
+
+test("status: an edit refused with 429 pauses edits and never waits", async (t) => {
+  const chat = statusChat(t, "211", {
+    onCall: (call) =>
+      call.method === "editMessageText"
+        ? reject(429, "Too Many Requests: retry after 20", {
+            parameters: { retry_after: 20 },
+          })
+        : null,
+  });
+  t.after(() => chat.end());
+  await chat.start();
+  chat.age();
+  await chat.step("turn_1", "One.");
+  chat.advance(STATUS_EDIT_MIN_MS);
+  const started = performance.now();
+  await chat.step("turn_1", "Two.");
+  assert.ok(performance.now() - started < 1000, "no sleeping");
+  for (const ms of [
+    STATUS_EDIT_MIN_MS,
+    STATUS_EDIT_MIN_MS,
+    STATUS_EDIT_MIN_MS,
+  ]) {
+    chat.advance(ms);
+    await chat.step("turn_1", `Later ${ms}.`);
+  }
+  assert.equal(callsOf("editMessageText").length, 1, "paused for 20s");
+  chat.advance(STATUS_EDIT_MIN_MS * 2);
+  await chat.step("turn_1", "After the pause.");
+  assert.equal(callsOf("editMessageText").length, 2);
+  assert.equal(
+    chat.record()?.progressMessageId,
+    501,
+    "a 429 never clears the id",
+  );
+});
+
+test("status: a delete refused with 429 keeps the id, and the next turn deletes it before any new claim", async (t) => {
+  let limited = true;
+  const chat = statusChat(t, "212", {
+    onCall: (call) =>
+      call.method === "deleteMessage" && limited
+        ? reject(429, "Too Many Requests", { parameters: { retry_after: 3 } })
+        : null,
+  });
+  t.after(() => chat.end());
+  await chat.start("turn_1");
+  chat.age();
+  await chat.step("turn_1", "Working.");
+  await emit("turn.completed", { turnId: "turn_1" }, chat.pair);
+  assert.equal(chat.record()?.progressMessageId, 501);
+  limited = false;
+  await chat.start("turn_2");
+  chat.age();
+  await chat.step("turn_2", "Second turn.");
+  assert.deepEqual(wireOf(), [
+    "sendMessage",
+    "deleteMessage:501",
+    "deleteMessage:501",
+    "sendMessage",
+  ]);
+  assert.equal(chat.record()?.progressMessageId, 502);
+});
+
+test("status: a delete refused with 400 counts as gone and clears the id", async (t) => {
+  const chat = statusChat(t, "213", {
+    onCall: (call) =>
+      call.method === "deleteMessage"
+        ? reject(400, "Bad Request: message can't be deleted")
+        : null,
+  });
+  t.after(() => chat.end());
+  await chat.start();
+  chat.age();
+  await chat.step("turn_1", "Working.");
+  await emit("turn.cancelled", { turnId: "turn_1" }, chat.pair);
+  assert.equal(chat.record()?.progressMessageId, undefined);
+});
+
+test("status: after a restart the recreated stream edits the recorded id and the message is deleted at the end", async (t) => {
+  const chat = statusChat(t, "214");
+  t.after(() => chat.end());
+  await chat.start();
+  chat.age();
+  await chat.step("turn_1", "Before restart.");
+  // A new process forgets every stream; the record stays.
+  await closeTelegramDraftTurn(chat.pair.sessionId, undefined, 0, true);
+  await emit(
+    "message.appended",
+    { turnId: "turn_1", stepIndex: 1, messageDelta: "after " },
+    chat.pair,
+  );
+  chat.advance(STATUS_EDIT_MIN_MS);
+  await chat.step("turn_1", "After restart.", 1);
+  assert.deepEqual(wireOf(), ["sendMessage", "editMessageText:501"]);
+  await emit("turn.completed", { turnId: "turn_1" }, chat.pair);
+  assert.deepEqual(wireOf().at(-1), "deleteMessage:501");
+});
+
+test("status: a record that is claimed without an id sends nothing and deletes nothing", async (t) => {
+  const chat = statusChat(t, "215");
+  t.after(() => chat.end());
+  await chat.start();
+  setChatStatus(chat.key, { progressClaimed: true });
+  chat.age();
+  await chat.step("turn_1", "No id.");
+  chat.advance(STATUS_EDIT_MIN_MS);
+  await chat.step("turn_1", "Still no id.");
+  await emit("turn.completed", { turnId: "turn_1" }, chat.pair);
+  assert.deepEqual(wireOf(), []);
+});
+
+test("status: a sendMessage reply without message_id gives no edits and no delete", async (t) => {
+  const chat = statusChat(t, "216", {
+    onCall: (call) =>
+      call.method === "sendMessage"
+        ? Response.json({ ok: true, result: {} })
+        : null,
+  });
+  t.after(() => chat.end());
+  await chat.start();
+  chat.age();
+  await chat.step("turn_1", "One.");
+  chat.advance(STATUS_EDIT_MIN_MS);
+  await chat.step("turn_1", "Two.");
+  assert.equal(chat.record()?.progressClaimed, true);
+  assert.equal(chat.record()?.progressMessageId, undefined);
+  await emit("turn.completed", { turnId: "turn_1" }, chat.pair);
+  assert.deepEqual(wireOf(), ["sendMessage"]);
+});
+
+test("status: a reset or a reap in mid-turn leaves the id, and the next turn.started removes it before a new claim", async (t) => {
+  const chat = statusChat(t, "217");
+  t.after(() => chat.end());
+  await chat.start();
+  chat.age();
+  await chat.step("turn_1", "Working.");
+  // The Bridge frees the chat from another process: the turn fields go, the mark stays.
+  setChatStatus(chat.key, {
+    status: "idle",
+    ...TURN_FIELDS_CLEARED,
+    resetAt: Date.now(),
+  });
+  assert.equal(chat.record()?.progressMessageId, 501);
+  assert.equal(progressWord(chat.record()), "stale");
+  setChatStatus(chat.key, { resetAt: null });
+  await chat.start("turn_2");
+  assert.equal(wireOf()[1], "deleteMessage:501");
+  assert.equal(chat.record()?.progressMessageId, undefined);
+  chat.age();
+  await chat.step("turn_2", "New turn.");
+  assert.deepEqual(wireOf(), [
+    "sendMessage",
+    "deleteMessage:501",
+    "sendMessage",
+  ]);
+});
+
+for (const scope of [
+  { chatType: "group", chatId: "-218", threadId: undefined },
+  { chatType: "supergroup", chatId: "-219", threadId: 5 },
+  { chatType: "private", chatId: "220", threadId: 6 },
+])
+  test(`status: ${scope.chatType}/${scope.threadId ?? ""} has the same lifecycle, with message_thread_id on the post`, async (t) => {
+    const chat = statusChat(t, scope.chatId, scope);
+    t.after(() => chat.end());
+    await chat.start();
+    chat.age();
+    await chat.step("turn_1", "Working.");
+    assert.equal(
+      callsOf("sendMessage")[0].body?.message_thread_id,
+      scope.threadId,
+    );
+    assert.equal(callsOf("sendMessage")[0].body?.disable_notification, true);
+    assert.equal(draftCalls().length, 0, "the draft stays private-only");
+    await emit("turn.completed", { turnId: "turn_1" }, chat.pair);
+    assert.deepEqual(wireOf(), ["sendMessage", "deleteMessage:501"]);
+  });
+
+test("status: rich text stays one HTML message, never rich, always silent", async (t) => {
+  const chat = statusChat(t, "221");
+  t.after(() => chat.end());
+  await chat.start();
+  chat.age();
+  await chat.step("turn_1", "| a |\n| - |\n| b |\n\n<tg-button>Go</tg-button>");
+  assert.deepEqual(
+    apiCalls
+      .filter(
+        (c) =>
+          c.method.startsWith("send") &&
+          c.method !== "sendChatAction" &&
+          c.method !== "sendRichMessageDraft",
+      )
+      .map((c) => c.method),
+    ["sendMessage"],
+  );
+  assert.equal(callsOf("sendMessage")[0].body?.parse_mode, "HTML");
+  assert.equal(callsOf("sendMessage")[0].body?.disable_notification, true);
+  await emit("turn.cancelled", { turnId: "turn_1" }, chat.pair);
+});
+
+test("status: a secret in the step text reaches neither the post nor the edit", async (t) => {
+  const chat = statusChat(t, "222");
+  t.after(() => chat.end());
+  const key = "sk-ant-api03-" + "Q".repeat(60);
+  await chat.start();
+  chat.age();
+  await chat.step("turn_1", `first ${key}`);
+  chat.advance(STATUS_EDIT_MIN_MS);
+  await chat.step("turn_1", `second ${key}`);
+  const texts = [...callsOf("sendMessage"), ...callsOf("editMessageText")].map(
+    (c) => String(c.body?.text),
+  );
+  assert.equal(texts.length, 2);
+  for (const text of texts) assert.doesNotMatch(text, /sk-ant/u);
+  await emit("turn.cancelled", { turnId: "turn_1" }, chat.pair);
 });

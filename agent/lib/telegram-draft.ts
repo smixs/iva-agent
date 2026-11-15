@@ -2,9 +2,16 @@ import { randomInt } from "node:crypto";
 import {
   chatKeyOf,
   getChatStatus,
+  progressMessageOf,
   setChatStatusIf,
   TURN_FIELDS_CLEARED,
 } from "./run-status.ts";
+import {
+  deleteStatusThroughOutbox,
+  editStatusThroughOutbox,
+  postStatusThroughOutbox,
+  type StatusTransport,
+} from "./outbox.ts";
 import { scanOutbound } from "./security-gate.ts";
 import { traceOutboundGate, traceWithScope } from "./trace.ts";
 import { parseTelegramDelivery } from "./telegram-delivery.ts";
@@ -17,6 +24,8 @@ export const TYPING_INTERVAL_MS = 4_500;
 export const DRAFT_TIMEOUT_MS = 10_000;
 // Fast tool chains stay quiet; only a completed step more than 10s into the turn may send progress.
 export const PROGRESS_MIN_TURN_MS = 10_000;
+// One status message per turn is edited in place; edits closer than this are skipped, not deferred.
+export const STATUS_EDIT_MIN_MS = 5_000;
 
 export type TelegramDraftHandle = {
   readonly chatId: string;
@@ -25,6 +34,13 @@ export type TelegramDraftHandle = {
     method: string,
     body?: Record<string, unknown>,
   ): Promise<{ ok: boolean; body: unknown }>;
+};
+/** What traceOutbox reads: one status call is one Outbox event. */
+export type StatusResult = {
+  ok: boolean;
+  delivered: number;
+  fellBack: boolean;
+  error: string;
 };
 type Identity = { sessionId: string; turnId: string; draftId: number };
 type Status = Record<string, unknown> | null;
@@ -149,6 +165,48 @@ function toolHint(action: Action, cleanArgs: string): string {
   return `⚙ <code>${escaped}</code>`;
 }
 
+const STATUS_IDLE: StatusResult = {
+  ok: true,
+  delivered: 0,
+  fellBack: false,
+  error: "",
+};
+
+// The id leaves the record only by value and only after Telegram's definitive answer.
+// A clear is not a heartbeat: it does not say the turn is alive.
+function clearProgressId(chatKey: string, id: number): void {
+  try {
+    setChatStatusIf(
+      chatKey,
+      { progressMessageId: id },
+      { progressMessageId: null },
+      { touch: false },
+    );
+  } catch (error) {
+    console.error("[telegram] status id was not cleared:", error);
+  }
+}
+
+/**
+ * The only code that deletes the status message by the record. It fires on `stale` alone
+ * (an id without a claim), so the shown message of a running turn is never touched. A failed
+ * delete keeps the id for the next trigger: a terminal event or the next turn.started.
+ */
+export async function retireProgressMessage(
+  chatKey: string,
+  t: StatusTransport,
+): Promise<void> {
+  try {
+    const record = getChatStatus(chatKey);
+    const id = record?.progressMessageId;
+    if (progressMessageOf(record) !== "stale" || typeof id !== "number") return;
+    const ack = await deleteStatusThroughOutbox(id, t);
+    if (ack.kind === "ok" || ack.kind === "gone") clearProgressId(chatKey, id);
+  } catch (error) {
+    console.error("[telegram] status message was not retired:", error);
+  }
+}
+
 export class TelegramDraftStream {
   readonly chatKey: string;
   readonly #tg: TelegramDraftHandle;
@@ -171,6 +229,10 @@ export class TelegramDraftStream {
   #sentAt = -Infinity;
   #pauseUntil = 0;
   #inFlight?: Promise<void>;
+  #statusFlight?: Promise<StatusResult>;
+  #statusText = "";
+  #statusAt = -Infinity;
+  #statusPauseUntil = 0;
   #typing?: ReturnType<typeof setInterval>;
   #timer?: ReturnType<typeof setTimeout>;
 
@@ -280,6 +342,7 @@ export class TelegramDraftStream {
       status.sessionId !== this.#identity.sessionId ||
       status.turnId !== this.#identity.turnId ||
       status.progressClaimed !== undefined ||
+      status.progressMessageId !== undefined ||
       typeof status.turnAt !== "number" ||
       !Number.isFinite(status.turnAt) ||
       this.#now() - status.turnAt <= PROGRESS_MIN_TURN_MS
@@ -295,10 +358,127 @@ export class TelegramDraftStream {
           draftId: this.#identity.draftId,
           turnAt: status.turnAt,
           progressClaimed: undefined,
+          progressMessageId: undefined,
         },
         { progressClaimed: true },
       ),
     );
+  }
+
+  /**
+   * The status message of a long turn (specs/ProgressMessage.tla): post once, edit in place.
+   * The id lives only in the chat record; the deleter is retireProgressMessage. A skipped call
+   * (closed stream, same text, throttle, pause, another state) sends nothing and never waits.
+   */
+  status(
+    step: number,
+    text: string,
+    t: StatusTransport,
+  ): Promise<StatusResult> {
+    if (this.#closed) return Promise.resolve(STATUS_IDLE);
+    if (this.#statusFlight) return this.#statusFlight;
+    const run: Promise<StatusResult> = this.#status(step, text, t)
+      .catch((error: unknown) => {
+        console.error("[telegram] status message failed:", error);
+        return { ...STATUS_IDLE, ok: false, error: String(error) };
+      })
+      .finally(() => {
+        if (this.#statusFlight === run) this.#statusFlight = undefined;
+      });
+    this.#statusFlight = run;
+    return run;
+  }
+
+  async #status(
+    step: number,
+    text: string,
+    t: StatusTransport,
+  ): Promise<StatusResult> {
+    const record = this.#getStatus();
+    const word = progressMessageOf(record);
+    if (word === "none") return this.#post(step, text, t);
+    if (word === "shown") return this.#edit(step, text, t, record);
+    return STATUS_IDLE;
+  }
+
+  async #post(
+    step: number,
+    text: string,
+    t: StatusTransport,
+  ): Promise<StatusResult> {
+    if (!this.claimProgress(step, text)) return STATUS_IDLE;
+    const identity = this.#identity;
+    if (!identity) return STATUS_IDLE;
+    this.#statusAt = this.#now();
+    const ack = await postStatusThroughOutbox(text, t);
+    if (ack.kind !== "ok" || ack.messageId === undefined)
+      return {
+        ...STATUS_IDLE,
+        ok: ack.kind === "ok",
+        error: ack.kind === "error" ? ack.error : "",
+      };
+    const id = ack.messageId;
+    let recorded = false;
+    try {
+      recorded = Boolean(
+        setChatStatusIf(
+          this.chatKey,
+          {
+            status: "running",
+            sessionId: identity.sessionId,
+            turnId: identity.turnId,
+            progressClaimed: true,
+            progressMessageId: undefined,
+          },
+          { progressMessageId: id },
+          { touch: false },
+        ),
+      );
+    } catch (error) {
+      console.error("[telegram] status id was not recorded:", error);
+    }
+    if (recorded) {
+      this.#statusText = text;
+      return { ...STATUS_IDLE, delivered: 1 };
+    }
+    // The record moved on (steer, reset, takeover): this frame alone knows the id.
+    await deleteStatusThroughOutbox(id, t).catch(() => undefined);
+    return { ...STATUS_IDLE, delivered: 1 };
+  }
+
+  async #edit(
+    step: number,
+    text: string,
+    t: StatusTransport,
+    record: Status,
+  ): Promise<StatusResult> {
+    const identity = this.#identity;
+    const id = record?.progressMessageId;
+    const now = this.#now();
+    if (
+      !identity ||
+      typeof id !== "number" ||
+      step < this.#step ||
+      record?.status !== "running" ||
+      record.sessionId !== identity.sessionId ||
+      record.turnId !== identity.turnId ||
+      !draftText(text, true) ||
+      text === this.#statusText ||
+      now - this.#statusAt < STATUS_EDIT_MIN_MS ||
+      now < this.#statusPauseUntil
+    )
+      return STATUS_IDLE;
+    this.#statusAt = now;
+    const ack = await editStatusThroughOutbox(id, text, t);
+    if (ack.kind === "ok") this.#statusText = text;
+    else if (ack.kind === "wait")
+      this.#statusPauseUntil = this.#now() + ack.retryAfterMs;
+    else if (ack.kind === "gone") clearProgressId(this.chatKey, id);
+    return {
+      ...STATUS_IDLE,
+      ok: ack.kind === "ok",
+      error: ack.kind === "error" ? ack.error : "",
+    };
   }
 
   requested(step: number, actions: readonly Action[]): void {
@@ -388,11 +568,14 @@ export class TelegramDraftStream {
     clearTimeout(this.#timer);
     this.#typing = undefined;
     this.#timer = undefined;
-    if (this.#inFlight && waitMs > 0) {
+    const pending: Array<Promise<unknown>> = [];
+    if (this.#inFlight) pending.push(this.#inFlight);
+    if (this.#statusFlight) pending.push(this.#statusFlight);
+    if (pending.length > 0 && waitMs > 0) {
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
         await Promise.race([
-          this.#inFlight,
+          Promise.all(pending),
           new Promise<void>((resolve) => {
             timer = setTimeout(resolve, waitMs).unref();
           }),
@@ -553,7 +736,7 @@ export async function closeTelegramDraftChat(
 }
 
 export async function finishTelegramStatus(
-  channel: { telegram: TelegramDraftHandle },
+  channel: { telegram: TelegramDraftHandle; statusTransport?: StatusTransport },
   sessionId: string,
   mode: "completed" | "cancelled" | "failed",
   turnId?: string,
@@ -565,15 +748,27 @@ export async function finishTelegramStatus(
     mode === "cancelled" ? 2_000 : DRAFT_TIMEOUT_MS,
     true,
   );
-  return Boolean(
-    setChatStatusIf(
-      chatKeyOf(channel.telegram.chatId, channel.telegram.messageThreadId),
-      { sessionId, ...(turnId === undefined ? {} : { turnId }) },
-      {
-        status: "idle",
-        ...TURN_FIELDS_CLEARED,
-        ...(keepBusy ? { status: "running", sessionId, compacting: true } : {}),
-      },
-    ),
+  const chatKey = chatKeyOf(
+    channel.telegram.chatId,
+    channel.telegram.messageThreadId,
   );
+  try {
+    return Boolean(
+      setChatStatusIf(
+        chatKey,
+        { sessionId, ...(turnId === undefined ? {} : { turnId }) },
+        {
+          status: "idle",
+          ...TURN_FIELDS_CLEARED,
+          ...(keepBusy
+            ? { status: "running", sessionId, compacting: true }
+            : {}),
+        },
+      ),
+    );
+  } finally {
+    // Whether or not the CAS won: another writer may have cleared the claim and left the id.
+    if (channel.statusTransport)
+      await retireProgressMessage(chatKey, channel.statusTransport);
+  }
 }
