@@ -627,14 +627,16 @@ async function deliver(
     recordSignal?: (
       part: DeliveryPart,
       result: Awaited<ReturnType<TickDeps["send"]>>,
-    ) => Promise<boolean>;
+    ) => Promise<SignalRecord>;
   } = {},
 ): Promise<{
   readonly sent: boolean;
   readonly all: boolean;
   readonly ackSaveFailed: boolean;
+  readonly uncertain: boolean;
 }> {
   let sent = false;
+  let uncertain = false;
   let all = parts.length > 0;
   for (const part of parts) {
     // Брошенное исключение шва — тот же отказ части: остальные части идут, сбой не сообщён.
@@ -644,8 +646,17 @@ async function deliver(
       ok: false,
       error: message(error),
     }));
-    if (recordSignal && !(await recordSignal(part, result)))
-      return { sent: result.ok || sent, all: false, ackSaveFailed: true };
+    const recorded = recordSignal ? await recordSignal(part, result) : "ok";
+    // Lost receipt or state: going on would lose track of sent messages. An unknown outcome
+    // of one part is only logged; it is not retried (ADR-0007), the other parts still go.
+    if (recorded === "abort")
+      return {
+        sent: result.ok || sent,
+        all: false,
+        ackSaveFailed: true,
+        uncertain,
+      };
+    if (recorded === "uncertain") uncertain = true;
     if (result.ok) {
       sent = true;
       if (
@@ -659,8 +670,11 @@ async function deliver(
       log(`proactive: a part was not delivered: ${result.error}`);
     }
   }
-  return { sent, all, ackSaveFailed: false };
+  return { sent, all, ackSaveFailed: false, uncertain };
 }
+
+/** What signalDelivery decided about one part: go on, go on with a failed run, or stop the batch. */
+type SignalRecord = "ok" | "uncertain" | "abort";
 
 /** Один накопленный state хода; подтверждения пишутся до следующей части. */
 function birthdayDelivery(
@@ -769,27 +783,29 @@ function signalDelivery(
   return async (
     part: DeliveryPart,
     ack: Awaited<ReturnType<TickDeps["send"]>>,
-  ) => {
+  ): Promise<SignalRecord> => {
     const key = part.itemKey;
-    if (!key || !dialogSource(deps, key)) return true;
-    const uncertain =
-      /^(?:receipt not durable|delivery outcome unknown):/u.test(ack.error);
+    if (!key || !dialogSource(deps, key)) return "ok";
+    const receiptLost = /^receipt not durable:/u.test(ack.error);
+    const uncertain = /^delivery outcome unknown:/u.test(ack.error);
     const ids = ack.messageIds;
     if (!validMessageIds(ids)) {
       log(`proactive: ${key} signal delivery has no message_id`);
-      return !ack.ok && !uncertain;
+      if (receiptLost) return "abort";
+      return !ack.ok && !uncertain ? "ok" : "uncertain";
     }
     try {
       for (const id of ids)
         recordSignalReceipt(deps.statePath, key, id, deps.now?.() ?? now);
     } catch (error) {
       log(`proactive: receipt not durable: ${message(error)}`);
-      return false;
+      return "abort";
     }
     const next = recoverSignalReceipts(deps.statePath, current.state);
-    if (!(await save(deps, next, "signal delivery", log))) return false;
+    if (!(await save(deps, next, "signal delivery", log))) return "abort";
     current.state = next;
-    return !uncertain;
+    if (receiptLost) return "abort";
+    return uncertain ? "uncertain" : "ok";
   };
 }
 
@@ -859,7 +875,8 @@ async function wake(
       next.wakes === current.state.wakes ? "failures" : "wakes",
       log,
     );
-  return 0;
+  // An unknown outcome is a failed run, as before, but it no longer holds back the other parts.
+  return delivered.uncertain ? 1 : 0;
 }
 
 /**

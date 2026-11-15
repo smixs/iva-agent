@@ -375,6 +375,58 @@ test("all parts of a signal retain their message ids", async (t) => {
   assert.deepEqual(h.edits[0].ids, [1, 2]);
 });
 
+test("an unknown outcome of one part does not hold the others; a lost receipt still aborts", async (t) => {
+  const message = `<!-- iva:item ${KEY} -->one\n<!-- iva:next -->\n<!-- iva:item ${KEY} -->two\n<!-- iva:next -->\n<!-- iva:item ${KEY} -->three`;
+  const runTurn = async () => ({
+    status: "completed" as const,
+    message,
+    feedback: async () => {},
+  });
+  const h = harness(t);
+  await seed(h);
+  const sent: string[] = [];
+  const deps: TickDeps = {
+    ...h.deps,
+    runTurn,
+    send: async (text) => {
+      sent.push(text);
+      return sent.length === 1
+        ? { ok: false, error: "delivery outcome unknown: 502: bad gateway" }
+        : { ok: true, error: "", messageIds: [100 + sent.length] };
+    },
+  };
+  assert.equal(await runProactiveTick(NOW, deps), 1);
+  assert.equal(sent.length, 3);
+  assert.deepEqual(
+    readProactiveState(h.statePath)?.signals?.[KEY].messageIds,
+    [102, 103],
+  );
+  assert.equal(await runProactiveTick(NOW + 60 * MIN, deps), 0);
+  assert.equal(sent.length, 3, "the unknown part is not retried");
+
+  const g = harness(t);
+  await seed(g);
+  const dir = join(g.statePath, "..");
+  let calls = 0;
+  try {
+    assert.equal(
+      await runProactiveTick(NOW, {
+        ...g.deps,
+        runTurn,
+        send: async () => {
+          calls++;
+          chmodSync(dir, 0o500);
+          return { ok: true, error: "", messageIds: [calls] };
+        },
+      }),
+      1,
+    );
+  } finally {
+    chmodSync(dir, 0o700);
+  }
+  assert.equal(calls, 1, "a lost receipt aborts the batch");
+});
+
 test("failed close claim produces no edit; unknown close retries its frozen payload", async (t) => {
   const h = harness(t);
   await seed(h);
