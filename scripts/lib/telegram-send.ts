@@ -40,6 +40,8 @@ type PostAck = OutboxAck & {
   readonly retryable?: boolean;
   readonly retryAfterMs?: number;
   readonly outcomeUnknown?: boolean;
+  /** beforeAttempt said no: no request was made. */
+  readonly withdrawn?: boolean;
   /** HTTP status of a refusal; absent for network errors. */
   readonly status?: number;
 };
@@ -178,6 +180,7 @@ async function post(
       retryPlain: false,
       retryable: !(e instanceof AttemptWithdrawn),
       outcomeUnknown: !(e instanceof AttemptWithdrawn),
+      ...(e instanceof AttemptWithdrawn ? { withdrawn: true } : {}),
     };
   }
 }
@@ -216,6 +219,12 @@ function poster(
       body,
       checkedFetch(options.fetchImpl, options.beforeAttempt),
     );
+    // A withdrawal ends the whole send: the rich -> HTML fallback and later chunks must not
+    // ask beforeAttempt again, a second answer could differ from the first.
+    if (ack.withdrawn) {
+      stopError = ack.error;
+      return { ok: false, error: stopError, retryPlain: false, stop: true };
+    }
     if (
       options.onAcknowledged &&
       (ack.ok ? ack.messageId === undefined : ack.outcomeUnknown)

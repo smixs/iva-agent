@@ -593,6 +593,33 @@ void test("beforeAttempt is asked before every attempt, and false after the back
   }
 });
 
+void test("a withdrawn rich attempt is latched: no HTML fallback, nothing is sent", async () => {
+  const { sendTelegramHtml } = await import("./telegram-send.ts");
+  const asked: boolean[] = [];
+  let calls = 0;
+  const result = await sendTelegramHtml(
+    "test-bot",
+    "test-chat",
+    'Question\n\n<tg-button data="ok">ok</tg-button>',
+    {
+      rich: true,
+      beforeAttempt: () => {
+        // The first answer is false (e.g. a failed dialog read), a second one would pass.
+        asked.push(asked.length > 0);
+        return Promise.resolve(asked.length > 1);
+      },
+      fetchImpl: () => {
+        calls += 1;
+        return Promise.resolve(new Response("{}", { status: 200 }));
+      },
+    },
+  );
+  assert.equal(result.ok, false);
+  assert.match(result.error, /withdrawn before the attempt/u);
+  assert.equal(calls, 0);
+  assert.deepEqual(asked, [false]);
+});
+
 void test("omitted and false retryTransient preserve the original single attempt", async () => {
   const { sendTelegramHtml } = await import("./telegram-send.ts");
   for (const retryTransient of [undefined, false] as const) {
