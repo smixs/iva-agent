@@ -8,7 +8,7 @@ the nightly backup against an oversized vault file and the commit of the vault (
 the draft stop of a turn, the compaction between turns, the tap on a model's button and the drain of the Bridge
 queue in batches (`DraftStop`, `IdleCompaction`, `ButtonTap`, `QueueDrain`), the userbot login (`UserbotLogin`),
 the launchd unit (`LaunchdUnit`), the helper run, its outcome and the goal check (`Helpers`, `GoalCheck`), the chat
-record (`ChatRecord`), the reminder row and its turn (`ReminderLifecycle`, `TurnLifecycle`), the reset intent of a
+record (`ChatRecord`), the status message of a long turn (`ProgressMessage`), the reminder row and its turn (`ReminderLifecycle`, `TurnLifecycle`), the reset intent of a
 private chat (`ResetIntent`) and the run of a schedule (`JobRun`). Run them from a temporary directory because TLC writes state files beside the model. Every `*-check.sh` takes `tlc` from `PATH`, and `~/.local/bin/tlc` otherwise; `TLC=` names another path, `TLC_TIMEOUT` and `JAVA_TOOL_OPTIONS` set the time and the heap.
 
 ## FileLock
@@ -703,12 +703,16 @@ Checked invariants:
    ingress id), through the reaper after the deadline, or through a reset.
 4. `FreeAfterRestart`: after any restart the chat becomes free in finite time.
    Fairness: every started step ends, time passes, the Bridge comes back.
+5. `ProgressIdKept`: the id of the status message (`progressMessageId`) is a mark,
+   not a turn field. Every terminal patch, takeover, reset and reap keeps it; only its
+   own writer sets or clears it (`pm`, with the ghost `pmSet`).
 
 Mutants that must fail: a turn's terminal write that compares the session
 without the turn (`ReleasedByOwnerOrReaper`); the reaper that frees a live
 record (`ReleasedByOwnerOrReaper`); a release that leaves `compacting` on a
 free chat (`TurnFieldsOnlyWhenBusy`, and `OneState` in a second
-configuration); the reaper switched off (`FreeAfterRestart`).
+configuration); the reaper switched off (`FreeAfterRestart`); the id of the status
+message cleared with the turn fields (`ProgressIdKept`).
 
 Run `sh specs/chat-record-check.sh`. `scripts/chat-record.test.ts` replays
 each counterexample on the real writers and names the invariant in the test
@@ -722,6 +726,61 @@ wall-clock values. The model assumes that eve handles the events of one session
 in order, so a session-level release never overlaps a turn of that session.
 `IdleCompaction`, `RestartRecovery`, `DraftStop`, `DeferredRestart` and
 `TurnLifecycle` keep their own scenarios over the same record.
+
+## ProgressMessage
+
+`ProgressMessage.tla` models the status message of a long turn: the first progress line is posted once,
+edited in place and deleted at the end of the turn. `TelegramProgress.tla` keeps the claim alone
+(`progressClaimed`); this model adds the id of the message, a mark of the chat record
+(`progressMessageId`, `ChatRecord.tla` `pm`), and the one deleter that fires on the state `stale`.
+`progressMessageOf` in `agent/lib/run-status.ts` turns the two fields into a word: `none`, `claimed`
+(posting, failed, id lost or message gone: never resend), `shown`, `stale` (an id without a claim).
+
+Two turns in one chat. A request to Telegram has two steps: Telegram accepts it, then the caller learns the
+answer, so a crash between them leaves one untracked message. Answers are ok, gone, wait (429) and error; a lost
+reply is an error with the effect applied. An edit refused as gone may come from a message that still exists, so
+the id stays and the frame stops editing; only the answer to a delete clears the id. Other processes clear the turn fields at any moment (Bridge reset or
+reaper, takeover). A restart forgets process memory, keeps the record, and the turn resumes or not.
+
+Checked invariants:
+
+1. `Once`: at most one post attempt per turn; a failed post, a lost id or a gone message is never followed by a resend.
+2. `NoPostOverId`: a post is attempted only when the record holds neither a claim nor an id.
+3. `StaleIsFinal` (property): an id seen without a claim never becomes live again.
+4. `NoDeleteLive`: deleteMessage is requested only for a stale id, or by the frame that posted it.
+5. Clear by value after a definitive answer: part of `NoOrphanWithoutCrash`, which also checks that every
+   existing status message is the recorded id or is held by a request that deletes or records it. A frame
+   whose record write lost and whose own delete got no definitive answer records the id as a stale mark when the
+   record holds neither a claim nor an id.
+6. `NoStatusAfterFinal`: no post or edit starts after the stream is closed; the final send waits for the
+   in-flight status call or its bound.
+7. `EventuallyGone` (property, `ProgressMessage-live.cfg`: Telegram answers, no crash): after a terminal event the
+   recorded id is deleted. `RetiredByNextTurn` (property, `ProgressMessage-live-fault.cfg`: one fault, no crash,
+   `SpecNext`: a turn that can start does start): an id left by a failed end-of-turn delete is retired by the next
+   `turn.started`.
+8. `ClearOnlyByAnswer`: the id leaves the record only after a definitive Telegram answer (ok or gone) to a delete of
+   that exact id: never on 429, 5xx or a timeout, never by a turn-field clear, never for another message.
+
+Mutants that must fail: the id as a turn field (`NoOrphanWithoutCrash`), delete by the pair instead of by
+`stale` (`NoDeleteLive`), clear with null instead of by value (`NoOrphanWithoutCrash`), claim without
+`id = undefined` (`NoPostOverId`), no delete after a failed CAS (`NoOrphanWithoutCrash`), an edit after close
+(`NoStatusAfterFinal`), a resend after gone (`Once`), the id cleared after a failed delete (`ClearOnlyByAnswer`),
+no stale mark after a failed frame delete (`NoOrphanWithoutCrash`), the id cleared by an edit refused as gone
+(`NoOrphanWithoutCrash`).
+
+Run `sh specs/progress-message-check.sh`. `agent/lib/progress-message.test.ts`,
+`agent/lib/progress-message-sequence.test.ts` and `scripts/telegram-status-progress.test.ts` replay the
+invariants on the real writers and on the wire.
+
+Outside the model: the text and the throttle (a skipped call is no step), the draft and typing, the
+final answer, and the case where Telegram accepts a delete of a message it still keeps (too old to delete).
+A delete Telegram refuses with a 4xx while the message still exists (for example a bot message too old to
+delete) counts as gone: the id is cleared and the message stays; only a stale mark that old would show it.
+Two residuals remain without a crash, and `NoOrphanWithoutCrash` excuses only them: a lost post reply (Telegram
+accepted the post and the id never came back: nobody can know it), and a frame delete that got no definitive
+answer while the record already holds another claim or id (there is no place for the id, and no retry is made,
+because a sleep would hold the handler). The first is the named residual of the design; the second needs a
+steer racing a failing Telegram. Both are rare and neither is repaired by the record.
 
 ## ReminderLifecycle
 

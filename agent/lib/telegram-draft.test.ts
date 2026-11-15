@@ -42,7 +42,12 @@ await test("TelegramProgress Once/Quiet: claims survive stream recovery (seed 11
           kind: fc.constantFrom("complete", "close", "lose", "restore", "age"),
           step: fc.integer({ min: 0, max: 2 }),
           text: fc.boolean(),
-          elapsed: fc.constantFrom(0, 1, 10_000, 10_001),
+          elapsed: fc.constantFrom(
+            0,
+            1,
+            status.PROGRESS_MIN_TURN_MS,
+            status.PROGRESS_MIN_TURN_MS + 1,
+          ),
         }),
         { maxLength: 30 },
       ),
@@ -91,7 +96,7 @@ await test("TelegramProgress Once/Quiet: claims survive stream recovery (seed 11
                 event.step >= step &&
                 event.text &&
                 !claimed &&
-                now - 100_000 > 10_000;
+                now - 100_000 > status.PROGRESS_MIN_TURN_MS;
               if (!closed && event.step >= step) step = event.step;
               stream.completeStep(event.step, event.text ? "Checking." : "");
               assert.equal(

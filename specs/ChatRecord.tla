@@ -45,7 +45,7 @@ Sessions == 1..2      \* dialogue sessions of the chat
 ReminderSession == 3  \* the session of one Reminder turn
 Empty == [status |-> "idle", ingress |-> 0, session |-> 0, turn |-> 0,
   compacting |-> FALSE, stale |-> FALSE, reset |-> FALSE, retry |-> FALSE,
-  retire |-> FALSE, pending |-> FALSE]
+  retire |-> FALSE, pending |-> FALSE, pm |-> FALSE, pmSet |-> FALSE]
 CoreIdle == [phase |-> "idle", session |-> 0, turn |-> 0, due |-> FALSE]
 
 Live(r) == r.status = "running" /\ ~r.stale
@@ -53,9 +53,12 @@ Live(r) == r.status = "running" /\ ~r.stale
 Claimed(r, ingress, session, compacting) == [r EXCEPT !.status = "running",
   !.ingress = ingress, !.session = session, !.turn = 0, !.compacting = compacting,
   !.stale = FALSE, !.reset = FALSE, !.retry = FALSE]
-\* The terminal patch: every turn field goes with the status.
+\* The terminal patch: every turn field goes with the status. pm (progressMessageId)
+\* is a mark, not a turn field: it stays (specs/ProgressMessage.tla). The mutant makes it
+\* a turn field.
 Freed(r) == [r EXCEPT !.status = "idle", !.ingress = 0, !.session = 0, !.turn = 0,
-  !.compacting = FALSE, !.stale = FALSE]
+  !.compacting = FALSE, !.stale = FALSE,
+  !.pm = IF Mutant = "mark-as-turn-field" THEN FALSE ELSE r.pm]
 Tombstone(r) == [Freed(r) EXCEPT !.reset = TRUE, !.retry = FALSE]
 
 Init ==
@@ -153,13 +156,24 @@ OwnerAnswers ==
 \* an interrupted record for the Bridge and frees an interrupted compaction; it may fail.
 Recovered(r) ==
   IF r.status # "running" THEN r
-  ELSE IF r.compacting THEN [Empty EXCEPT !.reset = TRUE]
+  ELSE IF r.compacting THEN [Empty EXCEPT !.reset = TRUE, !.pm = r.pm, !.pmSet = r.pmSet]
   ELSE [r EXCEPT !.stale = TRUE]
 Restart ==
   /\ restarts < MaxRestarts /\ restarts' = restarts + 1
   /\ acc' = 0 /\ core' = CoreIdle /\ closing' = {}
   /\ rec' \in {rec, Recovered(rec)}
   /\ UNCHANGED <<rem, bridgeUp, started, accepts, crashes, foreign>>
+
+\* The agent process records or clears the id of the status message by value
+\* (telegram-draft.ts); nothing else writes it.
+MarkProgressId ==
+  /\ core.phase = "turn" /\ ~rec.pm /\ rec' = [rec EXCEPT !.pm = TRUE, !.pmSet = TRUE]
+  /\ UNCHANGED <<acc, core, closing, rem, bridgeUp, started, accepts, restarts, crashes,
+                 foreign>>
+ClearProgressId ==
+  /\ rec.pm /\ rec' = [rec EXCEPT !.pm = FALSE, !.pmSet = FALSE]
+  /\ UNCHANGED <<acc, core, closing, rem, bridgeUp, started, accepts, restarts, crashes,
+                 foreign>>
 
 \* ---- Reminder turn: its own process, its own session ------------------------
 RemClaim ==
@@ -220,7 +234,7 @@ ReleasesIntoCompaction == \E c \in closing : ReleaseIntoCompaction(c)
 Next == Accept \/ Abandon \/ TurnStarts \/ Beat \/ TurnEnds
   \/ Releases \/ ReleasesIntoCompaction \/ CompactClaim \/ CompactEnd \/ SessionFails \/ MarkRetire \/ AskOwner
   \/ OwnerAnswers \/ Restart \/ RemClaim \/ RemRelease \/ Expire \/ Reap \/ Retire
-  \/ Reset \/ DeliveryFailed \/ BridgeCrash \/ BridgeBoot
+  \/ Reset \/ DeliveryFailed \/ BridgeCrash \/ BridgeBoot \/ MarkProgressId \/ ClearProgressId
 \* Every started step ends; time passes; the Bridge comes back.
 Fairness ==
   /\ WF_vars(Abandon) /\ WF_vars(TurnEnds) /\ WF_vars(Releases) /\ WF_vars(CompactEnd)
@@ -244,7 +258,7 @@ Is == [
 TypeOK ==
   /\ rec.status \in {"idle", "running"} /\ rec.ingress \in 0..MaxAccepts
   /\ rec.session \in 0..ReminderSession /\ rec.turn \in 0..MaxTurns
-  /\ \A f \in {"compacting", "stale", "reset", "retry", "retire", "pending"} :
+  /\ \A f \in {"compacting", "stale", "reset", "retry", "retire", "pending", "pm", "pmSet"} :
        rec[f] \in BOOLEAN
   /\ acc \in 0..MaxAccepts /\ core.phase \in {"idle", "turn", "compacting"}
   /\ rem \in BOOLEAN /\ bridgeUp \in BOOLEAN /\ foreign \in BOOLEAN
@@ -259,4 +273,8 @@ TurnFieldsOnlyWhenBusy ==
 ReleasedByOwnerOrReaper == ~foreign
 \* 4. After any restart the chat becomes free in finite time.
 FreeAfterRestart == (restarts > 0) ~> (rec.status = "idle")
+\* 5. The id of the status message is a mark: every patch of the Channel, the Bridge, the
+\*    reaper and the Reminder keeps it; only its own writer records or clears it.
+\*    pmSet is a ghost: it records that the writer set the mark and is touched only by it.
+ProgressIdKept == rec.pmSet => rec.pm
 =============================================================================

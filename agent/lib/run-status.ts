@@ -78,6 +78,10 @@ const markFields = {
   restartRetryUpdate: num,
   restartRetryQuestion: str,
   restartRetryMedia: bool,
+  // Id сообщения-статуса долгого хода (specs/ProgressMessage.tla). Отметка, а не поле хода:
+  // сброс Bridge, жнец и захват снимают поля хода другим процессом и не знают про этот id,
+  // а сообщение в чате остаётся «работаю» навсегда. Пока отметка жива, её удалит retireProgressMessage.
+  progressMessageId: num,
   // Следы индикаторов версий до 0.5.0: уходят, когда меняется пара хода.
   statusMessageId: legacy,
   statusAt: legacy,
@@ -452,6 +456,33 @@ export function chatState(
     pendingInputIds(record.pendingInputRequestIds).length > 0
     ? "awaiting-owner"
     : "free";
+}
+
+/**
+ * Сообщение-статус долгого хода по записи (specs/ProgressMessage.tla): единственное место,
+ * где `progressClaimed` и `progressMessageId` становятся словом.
+ *   none    — ничего не отправлено;
+ *   claimed — отправка идёт, провалилась, id потерян или сообщение исчезло: в этом ходе не повторять;
+ *   shown   — живой статус идущего хода;
+ *   stale   — id без заявки: сообщение надо удалить.
+ */
+export type ProgressMessage = "none" | "claimed" | "shown" | "stale";
+
+export function progressMessageOf(
+  record:
+    | {
+        readonly progressClaimed?: unknown;
+        readonly progressMessageId?: unknown;
+      }
+    | null
+    | undefined,
+): ProgressMessage {
+  const claimed = record?.progressClaimed === true;
+  const posted =
+    typeof record?.progressMessageId === "number" &&
+    !Number.isNaN(record.progressMessageId);
+  if (claimed) return posted ? "shown" : "claimed";
+  return posted ? "stale" : "none";
 }
 
 /** Чат занят: Bridge держит новые сообщения в очереди. */

@@ -38,5 +38,6 @@ check ChatRecord-reap-live ReleasedByOwnerOrReaper
 check ChatRecord-leave-compacting TurnFieldsOnlyWhenBusy
 check ChatRecord-leave-compacting-state OneState
 check ChatRecord-no-reaper FreeAfterRestart
+check ChatRecord-mark-as-turn-field ProgressIdKept
 echo "chat-record-check: ok=$ok failed=$failed"
 [ "$failed" -eq 0 ]

@@ -190,6 +190,16 @@ function queuedSignOf(record: object): Record<string, unknown> {
   );
 }
 
+// The id of the status message of a long turn is a mark, not a turn field: the record
+// rewritten from scratch keeps it, and the deleter removes it at the next turn.started
+// (specs/ProgressMessage.tla).
+function progressMarkOf(record: object): Record<string, unknown> {
+  const id = (record as { progressMessageId?: unknown }).progressMessageId;
+  return typeof id === "number" && !Number.isNaN(id)
+    ? { progressMessageId: id }
+    : {};
+}
+
 function nextGeneration(value: unknown): number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
     ? value + 1
@@ -235,6 +245,7 @@ export function rewriteRunStatusesForUpdate(
           retired && parsed.compacting === true
             ? {
                 ...queuedSignOf(parsed),
+                ...progressMarkOf(parsed),
                 status: "idle",
                 generation: nextGeneration(parsed.generation),
                 updatedAt: stamp,

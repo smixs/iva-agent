@@ -67,7 +67,7 @@ the owner's rules.
   to a file in `${ASSISTANT_TMP:-/tmp/iva}`; read it in parts (`read_file`
   offset/limit, `grep`), only what you need goes into the chat.
 - In a chat, before a long chain of tools, say in one short sentence what you
-  are doing. The first such message is delivered to the person immediately.
+  are doing. It is a temporary status: the final answer must stand alone.
   For a short question about a quoted message, explain what the quote already
   tells you first; use tools only for facts needed to answer the question.
   A Telegram reply with `source: "assistant"` quotes your own earlier message,

@@ -14,7 +14,7 @@ import {
 } from "./harness.ts";
 
 void test(
-  "S-chat-notice-reply: own watchdog quote and immediate progress before tools finish",
+  "S-chat-notice-reply: own watchdog quote and a status message after a minute, before tools finish",
   { timeout: 120_000 },
   async (t) => {
     let release = () => {};
@@ -98,8 +98,9 @@ void test(
       },
     });
     await waitFor(() => h.provider.requests.length === 1);
-    // turn.started has reached the provider; cross the 10s threshold before message.completed.
-    await writeFile(clockFile, "11000");
+    // turn.started has reached the provider; cross the one-minute progress threshold
+    // (PROGRESS_MIN_TURN_MS = 60_000) before message.completed.
+    await writeFile(clockFile, "61000");
     releaseProgress();
     await waitFor(() =>
       sends().some((r) => r.body.text === "I am checking the failed schedule."),
