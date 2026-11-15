@@ -2,9 +2,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { resolve } from "node:path";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { PROBE_FLAG } from "./lib/eve-health.ts";
 import instrumentation from "./instrumentation.ts";
+import { processTimeZone } from "./lib/process-timezone.ts";
 
 /** Run the server-start hook with console output captured. */
 function boot(t: { after(fn: () => void): void }): string[] {
@@ -69,4 +72,27 @@ test("server start gives every non-TS child the canonical absolute data dir", (t
   );
   assert.equal(child.status, 0, child.stderr);
   assert.equal(child.stdout, canonical);
+});
+
+test("the TZ exported to children is a name this host has a zone file for", () => {
+  const dir = mkdtempSync(join(tmpdir(), "iva-zoneinfo-"));
+  try {
+    mkdirSync(join(dir, "Europe"), { recursive: true });
+    writeFileSync(join(dir, "Europe/Kyiv"), "TZif2");
+
+    // Only the modern file exists: that spelling is exported, never the legacy one.
+    const kyiv = processTimeZone("Europe/Kyiv", dir);
+    assert.equal(kyiv.exported, "Europe/Kyiv");
+    // The legacy spelling resolves to the same file name, Intl keeps its own name.
+    assert.equal(processTimeZone("Europe/Kiev", dir).exported, "Europe/Kyiv");
+    // The owner's spelling is used when the host has that file.
+    writeFileSync(join(dir, "Europe/Kiev"), "TZif2");
+    assert.equal(processTimeZone("Europe/Kiev", dir).exported, "Europe/Kiev");
+    // An invalid value is never exported as the owner's spelling.
+    const bad = processTimeZone("Not/AZone", dir);
+    assert.equal(bad.invalid, true);
+    assert.equal(bad.exported, "UTC");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

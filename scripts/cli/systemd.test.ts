@@ -328,7 +328,7 @@ test("writeUnits falls back to UTC for an invalid timezone and says so", () => {
   });
 });
 
-test("writeUnits canonicalises an alias timezone and keeps the default port", () => {
+test("writeUnits maps an alias timezone to the name this host has and keeps the default port", () => {
   withFixture("ASSISTANT_TIMEZONE=US/Pacific\n", (fx) => {
     cli(fx).writeUnits();
 
