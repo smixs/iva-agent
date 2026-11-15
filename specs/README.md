@@ -774,6 +774,8 @@ invariants on the real writers and on the wire.
 
 Outside the model: the text and the throttle (a skipped call is no step), the draft and typing, the
 final answer, and the case where Telegram accepts a delete of a message it still keeps (too old to delete).
+A delete Telegram refuses with a 4xx while the message still exists (for example a bot message too old to
+delete) counts as gone: the id is cleared and the message stays; only a stale mark that old would show it.
 Two residuals remain without a crash, and `NoOrphanWithoutCrash` excuses only them: a lost post reply (Telegram
 accepted the post and the id never came back: nobody can know it), and a frame delete that got no definitive
 answer while the record already holds another claim or id (there is no place for the id, and no retry is made,

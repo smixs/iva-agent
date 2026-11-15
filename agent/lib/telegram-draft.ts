@@ -27,6 +27,9 @@ export const DRAFT_TIMEOUT_MS = 10_000;
 export const PROGRESS_MIN_TURN_MS = 60_000;
 // One status message per turn is edited in place; edits closer than this are skipped, not deferred.
 export const STATUS_EDIT_MIN_MS = 10_000;
+// After an edit that got no answer from Telegram (5xx, network, timeout) the next one waits this
+// long, so a failing edit does not hold the handler for a deadline at every tool step.
+export const STATUS_ERROR_BACKOFF_MS = 50_000;
 
 export type TelegramDraftHandle = {
   readonly chatId: string;
@@ -207,6 +210,8 @@ function clearProgressId(chatKey: string, id: number): void {
  * The only code that deletes the status message by the record. It fires on `stale` alone
  * (an id without a claim), so the shown message of a running turn is never touched. A failed
  * delete keeps the id for the next trigger: a terminal event or the next turn.started.
+ * Residual: a delete Telegram refuses with a 4xx while the message still exists (for example a
+ * bot message too old to delete) counts as gone: the id is cleared and the message stays.
  */
 export async function retireProgressMessage(
   chatKey: string,
@@ -249,6 +254,7 @@ export class TelegramDraftStream {
   #statusText = "";
   #statusAt = -Infinity;
   #statusPauseUntil = 0;
+  #closing?: { readonly waitMs: number; readonly done: Promise<void> };
   #statusGone = false;
   #typing?: ReturnType<typeof setInterval>;
   #timer?: ReturnType<typeof setTimeout>;
@@ -397,9 +403,11 @@ export class TelegramDraftStream {
     const run: Promise<StatusResult> = this.#status(step, text, t)
       .catch((error: unknown) => {
         console.error("[telegram] status message failed:", error);
+        // Nothing is known to have been sent (a lock timeout in claimProgress lands here too):
+        // no event with an empty name.
         return {
           ...STATUS_IDLE,
-          sent: true,
+          sent: false,
           ok: false,
           answer: "error" as const,
           error: String(error),
@@ -435,6 +443,8 @@ export class TelegramDraftStream {
     this.#statusAt = this.#now();
     const ack = await postStatusThroughOutbox(text, t);
     const result = sentResult("post", ack);
+    if (ack.kind === "wait")
+      this.#statusPauseUntil = this.#now() + ack.retryAfterMs;
     if (ack.kind !== "ok" || ack.messageId === undefined) return result;
     const id = ack.messageId;
     let recorded = false;
@@ -518,6 +528,9 @@ export class TelegramDraftStream {
     // Gone is a guess: a 4xx can come from a proxy or from text Telegram will not take while the
     // message stays. Keep the id, stop editing this turn, and let the end-of-turn delete decide.
     else if (ack.kind === "gone") this.#statusGone = true;
+    else if (ack.kind === "error")
+      this.#statusAt =
+        this.#now() + STATUS_ERROR_BACKOFF_MS - STATUS_EDIT_MIN_MS;
     return sentResult("edit", ack);
   }
 
@@ -612,17 +625,27 @@ export class TelegramDraftStream {
     if (this.#inFlight) pending.push(this.#inFlight);
     if (this.#statusFlight) pending.push(this.#statusFlight);
     if (pending.length > 0 && waitMs > 0) {
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      try {
-        await Promise.race([
-          Promise.all(pending),
-          new Promise<void>((resolve) => {
-            timer = setTimeout(resolve, waitMs).unref();
-          }),
-        ]);
-      } finally {
-        clearTimeout(timer);
-      }
+      // A second close of a stream that is already closing shares the first wait when that wait
+      // was at least as long: two closes never cost two deadlines. A longer wait (a cancelled
+      // turn's 2 s, then the final's 10 s) is not cut short.
+      if (!this.#closing || this.#closing.waitMs < waitMs)
+        this.#closing = {
+          waitMs,
+          done: (async () => {
+            let timer: ReturnType<typeof setTimeout> | undefined;
+            try {
+              await Promise.race([
+                Promise.all(pending),
+                new Promise<void>((resolve) => {
+                  timer = setTimeout(resolve, waitMs).unref();
+                }),
+              ]);
+            } finally {
+              clearTimeout(timer);
+            }
+          })(),
+        };
+      await this.#closing.done;
     }
     // The final answer waits for a flood window opened by a status edit as for a draft's.
     return Math.max(this.#pauseUntil, this.#statusPauseUntil);

@@ -6,7 +6,7 @@
 import "./lib/ts-esm-hooks.ts";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { after } from "node:test";
@@ -1849,5 +1849,117 @@ test("status: one edit step holds the handler for one deadline, the plain retry 
   assert.ok(
     took < 400,
     `one deadline for both requests (${Math.round(took)} ms)`,
+  );
+});
+
+test("status: an edit that got a 5xx is not followed by another attempt for 50 s while steps keep arriving", async (t) => {
+  const chat = statusChat(t, "260", {
+    onCall: (call) =>
+      call.method === "editMessageText" ? reject(502, "Bad Gateway") : null,
+  });
+  t.after(() => chat.end());
+  await chat.start();
+  chat.age();
+  await chat.step("turn_1", "One.");
+  chat.advance(STATUS_EDIT_MIN_MS);
+  await chat.step("turn_1", "Two.");
+  const failed = callsOf("editMessageText").length;
+  assert.ok(failed >= 1, "the first edit was attempted");
+  for (let i = 1; i <= 4; i++) {
+    chat.advance(STATUS_EDIT_MIN_MS);
+    await chat.step("turn_1", `Later ${i}.`);
+    assert.equal(
+      callsOf("editMessageText").length,
+      failed,
+      `no edit ${(i * STATUS_EDIT_MIN_MS) / 1000} s after the failure`,
+    );
+  }
+  chat.advance(STATUS_EDIT_MIN_MS);
+  await chat.step("turn_1", "After the backoff.");
+  assert.ok(callsOf("editMessageText").length > failed, "edits resume at 50 s");
+});
+
+test("status: a 429 on the status post makes the final wait retry_after", async (t) => {
+  let refusedAt = 0;
+  let finalAt = 0;
+  let sends = 0;
+  const chat = statusChat(t, "-261", {
+    chatType: "group",
+    onCall: (call) => {
+      if (call.method !== "sendMessage") return null;
+      if (++sends === 1) {
+        refusedAt = performance.now();
+        return reject(429, "Too Many Requests", {
+          parameters: { retry_after: 1 },
+        });
+      }
+      if (sends === 2) finalAt = performance.now();
+      return null;
+    },
+  });
+  t.after(() => chat.end());
+  await chat.start();
+  chat.age();
+  await chat.step("turn_1", "One.");
+  assert.ok(refusedAt > 0, "the post was refused");
+  await chat.step("turn_1", "Done.", 1, "stop");
+  assert.ok(finalAt > 0, "the final went out");
+  assert.ok(
+    finalAt - refusedAt >= 900,
+    `the final waited retry_after (${Math.round(finalAt - refusedAt)} ms)`,
+  );
+  await emit("turn.completed", { turnId: "turn_1" }, chat.pair);
+});
+
+test("status: a claimProgress failure writes no status trace event", async (t) => {
+  const chat = statusChat(t, "262");
+  t.after(() => chat.end());
+  await chat.start();
+  chat.age();
+  const dir = join(dataDir, "run-status.d");
+  chmodSync(dir, 0o500); // the lock directory cannot be created: the claim throws
+  try {
+    await chat.step("turn_1", "One.");
+  } finally {
+    chmodSync(dir, 0o700);
+  }
+  assert.equal(callsOf("sendMessage").length, 0, "nothing was sent");
+  const { events } = outcomeOf(chat.pair.sessionId, "turn_1");
+  assert.deepEqual(
+    events.filter((e) => e.kind === "status"),
+    [],
+    "no event for a call that sent nothing",
+  );
+});
+
+test("status: closing a chat with a hanging status post waits one deadline, not two", async (t) => {
+  let sends = 0;
+  const chat = statusChat(t, "-263", {
+    chatType: "group",
+    onCall: (call) =>
+      call.method === "sendMessage" && ++sends === 1
+        ? new Promise<Response>(() => {})
+        : null,
+  });
+  t.after(() => chat.end());
+  await chat.start();
+  chat.age();
+  void chat.step("turn_1", "Hangs.");
+  await pause();
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let done = false;
+  const final = chat
+    .step("turn_1", "Done.", 1, "stop")
+    .then(() => (done = true));
+  let ticks = 0;
+  while (!done && ticks < 40) {
+    t.mock.timers.tick(1_000);
+    ticks++;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  await final;
+  assert.ok(
+    ticks >= 9 && ticks <= 12,
+    `one 10 s wait (${ticks} s of fake clock)`,
   );
 });
