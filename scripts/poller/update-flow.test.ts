@@ -322,6 +322,48 @@ test("the /update button leaves the lock to the update it launches", async (t) =
   assert.equal(readdirSync(jobs).length, 2);
 });
 
+test("the /update unit starts on systemd 239, which has no --working-directory", async (t) => {
+  const jobs = join(dataDir, "update-jobs");
+  rmSync(jobs, { recursive: true, force: true });
+  const launched = join(dataDir, "launched-argv.log");
+  const bin = join(dataDir, "bin-239");
+  mkdirSync(bin, { recursive: true });
+  // systemd 239 (RHEL/Alma 8): --working-directory and --same-dir arrived in 240, and an
+  // unknown option is a hard failure. Everything else the launch uses is older than 239.
+  writeFileSync(
+    join(bin, "systemd-run"),
+    `#!/bin/sh
+for arg in "$@"; do
+  case "$arg" in
+    --working-directory*|--same-dir|-d) echo "systemd-run: unrecognized option '$arg'" >&2; exit 1 ;;
+  esac
+  printf '%s\\n' "$arg" >> "${launched}"
+done
+exit 0
+`,
+    { mode: 0o755 },
+  );
+  t.after(() => {
+    for (const path of [jobs, bin, launched])
+      rmSync(path, { recursive: true, force: true });
+  });
+
+  const texts = await press(bin);
+
+  assert.match(texts.at(-1) ?? "", /Starting the update/u);
+  const argv = readFileSync(launched, "utf8").trim().split("\n");
+  // The same working directory, as a property: WorkingDirectory= is accepted by every
+  // systemd-run since --property (211).
+  const property = argv.find((arg) => arg.startsWith("--property="));
+  assert.match(property ?? "", /^--property=WorkingDirectory=\/\S+$/u);
+  const root = (property ?? "").slice("--property=WorkingDirectory=".length);
+  assert.ok(argv.includes(join(root, "bin/iva.mjs")), argv.join(" "));
+  assert.deepEqual(
+    argv.filter((arg) => arg.startsWith("--working-directory")),
+    [],
+  );
+});
+
 test("/update --force starts a rebuild of the running version without asking upstream", async (t) => {
   const jobs = join(dataDir, "update-jobs");
   rmSync(jobs, { recursive: true, force: true });
