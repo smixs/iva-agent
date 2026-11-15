@@ -66,9 +66,6 @@
     "eve": {
       "undici": "^8.12.4"
     },
-    "@ai-sdk/provider-utils": {
-      "undici": "^7.30.2"
-    },
     "minimatch": "^11.0.8"
   }
 }
