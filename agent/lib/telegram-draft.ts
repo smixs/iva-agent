@@ -22,8 +22,8 @@ export const DRAFT_INTERVAL_MS = 1_000;
 export const DRAFT_REFRESH_MS = 20_000;
 export const TYPING_INTERVAL_MS = 4_500;
 export const DRAFT_TIMEOUT_MS = 10_000;
-// Fast tool chains stay quiet; only a completed step more than 10s into the turn may send progress.
-export const PROGRESS_MIN_TURN_MS = 10_000;
+// Fast tool chains stay quiet; only a completed step more than a minute into the turn may send progress.
+export const PROGRESS_MIN_TURN_MS = 60_000;
 // One status message per turn is edited in place; edits closer than this are skipped, not deferred.
 export const STATUS_EDIT_MIN_MS = 5_000;
 

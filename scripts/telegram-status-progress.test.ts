@@ -88,6 +88,8 @@ const [
 ]);
 const adapter = (channel as unknown as { adapter: Adapter }).adapter;
 const trace = await import("#lib/trace.ts");
+const { PROGRESS_MIN_TURN_MS, STATUS_EDIT_MIN_MS, closeTelegramDraftTurn } =
+  await import("#lib/telegram-draft.ts");
 
 function traceEvents(): Record<string, unknown>[] {
   try {
@@ -401,7 +403,7 @@ test("question answers resume typing and a fresh stoppable draft in the same tur
     resetAt: null,
   });
   await emit("turn.started", { turnId: "turn_1" }, pair);
-  t.mock.timers.tick(10_001);
+  t.mock.timers.tick(PROGRESS_MIN_TURN_MS + 1);
   try {
     for (let stepIndex = 0; stepIndex < 2; stepIndex++) {
       await emit(
@@ -579,7 +581,7 @@ test("channel wire redacts draft and one progress message, closes before separat
   );
   await pause(1000);
   assert.doesNotMatch(draftCalls().map(richText).join(""), /sk-ant/u);
-  turnNow += 11_000;
+  turnNow += PROGRESS_MIN_TURN_MS + 1_000;
   await emit(
     "message.completed",
     {
@@ -679,7 +681,11 @@ test("progress threshold is measured from turn start; quick tools keep one final
   let now = 100_000;
   t.mock.method(Date, "now", () => now);
   await emit("turn.started", { turnId: "turn_1" }, pair);
-  for (now of [100_000, 109_999, 110_000]) {
+  for (now of [
+    100_000,
+    100_000 + PROGRESS_MIN_TURN_MS - 1,
+    100_000 + PROGRESS_MIN_TURN_MS,
+  ]) {
     await emit(
       "message.completed",
       {
@@ -709,7 +715,7 @@ test("progress threshold is measured from turn start; quick tools keep one final
   );
   await emit("turn.completed", { turnId: "turn_1" }, pair);
   await emit("turn.started", { turnId: "turn_2" }, pair);
-  now += 10_001;
+  now += PROGRESS_MIN_TURN_MS + 1;
   await emit(
     "message.completed",
     {
@@ -724,7 +730,7 @@ test("progress threshold is measured from turn start; quick tools keep one final
   await emit("turn.completed", { turnId: "turn_2" }, pair);
   assert.equal(getChatStatus("93:")?.progressClaimed, undefined);
   await emit("turn.started", { turnId: "turn_3" }, pair);
-  now += 10_001;
+  now += PROGRESS_MIN_TURN_MS + 1;
   await emit(
     "message.completed",
     {
@@ -995,8 +1001,6 @@ test("a silent final closes the stream even when Outbox has no text", async () =
 });
 
 // ── The status message of a long turn: post, edit, delete (specs/ProgressMessage.tla) ──────
-const { PROGRESS_MIN_TURN_MS, STATUS_EDIT_MIN_MS, closeTelegramDraftTurn } =
-  await import("#lib/telegram-draft.ts");
 const { TURN_FIELDS_CLEARED, progressMessageOf: progressWord } =
   await import("#lib/run-status.ts");
 
