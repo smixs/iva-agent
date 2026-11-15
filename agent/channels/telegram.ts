@@ -228,20 +228,28 @@ export function outboxTransport(
 // Сообщение-статус долгого хода: сырые sendMessage, editMessageText и deleteMessage. Всегда
 // parse_mode HTML (plain — повтор шва при отказе по разметке) и всегда без звука; rich и
 // виджет сюда не заходят, TELEGRAM_RICH_REPLIES не читается. Правка и удаление идут со сроком
-// 10 с, пост без срока: ответ на принятый запрос терять нельзя, иначе id потерян, а сообщение в чате.
+// (по умолчанию 10 с) на весь транспорт, считая повтор без тегов: один шаг держит обработчик не
+// дольше срока. Пост без срока: ответ на принятый запрос терять нельзя, иначе id потерян, а
+// сообщение в чате. Транспорт создаётся на один шаг; срок начинается с первого запроса с ним.
 const STATUS_REQUEST_TIMEOUT_MS = 10_000;
+// Снятие сообщения прошлого хода в turn.started держит публикацию нового хода: срок короче.
+const STATUS_RETIRE_TIMEOUT_MS = 3_000;
 export function statusTransport(
   tg: Pick<TelegramHandle, "chatId" | "messageThreadId" | "request">,
+  timeoutMs = STATUS_REQUEST_TIMEOUT_MS,
 ): StatusTransport {
+  let deadline: number | undefined;
   const call = (
     method: string,
     body: Record<string, unknown>,
     bounded: boolean,
-  ) =>
-    boundedRequest(
-      tg,
-      bounded ? performance.now() + STATUS_REQUEST_TIMEOUT_MS : undefined,
-    )(method, body) as Promise<StatusReply>;
+  ) => {
+    if (bounded) deadline ??= performance.now() + timeoutMs;
+    return boundedRequest(tg, bounded ? deadline : undefined)(
+      method,
+      body,
+    ) as Promise<StatusReply>;
+  };
   const markup = (mode: "html" | "plain") =>
     mode === "html" ? { parse_mode: "HTML" } : {};
   return {
@@ -547,7 +555,7 @@ const telegram = telegramChannel({
       // Сообщение-статус прошлого хода, не снятое его концом (сброс, жнец, обрыв связи), уходит до нового.
       await retireProgressMessage(
         chatKeyOf(tg.chatId, tg.messageThreadId),
-        statusTransport(tg),
+        statusTransport(tg, STATUS_RETIRE_TIMEOUT_MS),
       );
       openIdleCompactionTurn(ctx.session.id);
       const draftId = randomInt(1, 2 ** 31);

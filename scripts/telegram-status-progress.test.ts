@@ -1777,3 +1777,77 @@ test("status: a failed frame delete does not touch a record that already holds a
   assert.equal(chat.record()?.progressClaimed, true, "the claim is untouched");
 });
 
+test("status: turn.started gives the retire-at-start delete three seconds and leaves the id stale", async (t) => {
+  let hang = false;
+  const chat = statusChat(t, "253", {
+    onCall: (call) =>
+      hang && call.method === "deleteMessage"
+        ? new Promise<Response>(() => {})
+        : null,
+  });
+  t.after(() => chat.end());
+  await chat.start("turn_1");
+  chat.age();
+  await chat.step("turn_1", "Working.");
+  setChatStatus(chat.key, { status: "idle", ...TURN_FIELDS_CLEARED });
+  hang = true;
+  const startedAt = performance.now();
+  await chat.start("turn_2");
+  const took = performance.now() - startedAt;
+  assert.ok(
+    took >= 2_500 && took < 5_000,
+    `bounded at 3 s (${Math.round(took)} ms)`,
+  );
+  assert.equal(
+    progressWord(chat.record()),
+    "stale",
+    "left for the next terminal event",
+  );
+  assert.equal(chat.record()?.status, "running");
+});
+
+test("status: one edit step holds the handler for one deadline, the plain retry included", async () => {
+  const { statusTransport } = (await import(
+    telegramTestModule
+  )) as typeof import("../agent/channels/telegram.ts");
+  const { editStatusThroughOutbox } = await import("#lib/outbox.ts");
+  let calls = 0;
+  const tg = {
+    chatId: "254",
+    messageThreadId: undefined,
+    request: () => {
+      calls++;
+      return calls === 1
+        ? new Promise<{ ok: boolean; status: number; body: unknown }>(
+            (resolve) =>
+              setTimeout(
+                () =>
+                  resolve({
+                    ok: false,
+                    status: 400,
+                    body: {
+                      ok: false,
+                      error_code: 400,
+                      description: "Bad Request: can't parse entities",
+                    },
+                  }),
+                150,
+              ),
+          )
+        : new Promise<{ ok: boolean; status: number; body: unknown }>(() => {});
+    },
+  };
+  const startedAt = performance.now();
+  const ack = await editStatusThroughOutbox(
+    5,
+    "text",
+    statusTransport(tg, 300),
+  );
+  const took = performance.now() - startedAt;
+  assert.equal(calls, 2, "the plain retry was made");
+  assert.equal(ack.kind, "error");
+  assert.ok(
+    took < 400,
+    `one deadline for both requests (${Math.round(took)} ms)`,
+  );
+});
