@@ -26,7 +26,7 @@ export const DRAFT_TIMEOUT_MS = 10_000;
 // Fast tool chains stay quiet; only a completed step more than a minute into the turn may send progress.
 export const PROGRESS_MIN_TURN_MS = 60_000;
 // One status message per turn is edited in place; edits closer than this are skipped, not deferred.
-export const STATUS_EDIT_MIN_MS = 5_000;
+export const STATUS_EDIT_MIN_MS = 10_000;
 
 export type TelegramDraftHandle = {
   readonly chatId: string;
@@ -598,7 +598,8 @@ export class TelegramDraftStream {
         clearTimeout(timer);
       }
     }
-    return this.#pauseUntil;
+    // The final answer waits for a flood window opened by a status edit as for a draft's.
+    return Math.max(this.#pauseUntil, this.#statusPauseUntil);
   }
 }
 

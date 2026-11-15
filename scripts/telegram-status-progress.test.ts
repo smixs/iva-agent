@@ -1329,8 +1329,8 @@ test("status: an edit refused with 429 pauses edits and never waits", async (t) 
   const chat = statusChat(t, "211", {
     onCall: (call) =>
       call.method === "editMessageText"
-        ? reject(429, "Too Many Requests: retry after 20", {
-            parameters: { retry_after: 20 },
+        ? reject(429, "Too Many Requests: retry after 40", {
+            parameters: { retry_after: 40 },
           })
         : null,
   });
@@ -1350,7 +1350,7 @@ test("status: an edit refused with 429 pauses edits and never waits", async (t) 
     chat.advance(ms);
     await chat.step("turn_1", `Later ${ms}.`);
   }
-  assert.equal(callsOf("editMessageText").length, 1, "paused for 20s");
+  assert.equal(callsOf("editMessageText").length, 1, "paused for 40s");
   chat.advance(STATUS_EDIT_MIN_MS * 2);
   await chat.step("turn_1", "After the pause.");
   assert.equal(callsOf("editMessageText").length, 2);
@@ -1620,4 +1620,38 @@ for (const [name, answer] of [
     for (const event of events)
       assert.equal(failureCause(event), null, `${event.kind}.${event.name}`);
   });
+
+test("status: a group's final waits for the flood window of a status edit", async (t) => {
+  let refusedAt = 0;
+  let finalAt = 0;
+  let sends = 0;
+  const chat = statusChat(t, "-250", {
+    chatType: "group",
+    onCall: (call) => {
+      if (call.method === "editMessageText") {
+        refusedAt = performance.now();
+        return reject(429, "Too Many Requests", {
+          parameters: { retry_after: 1 },
+        });
+      }
+      if (call.method === "sendMessage" && ++sends === 2)
+        finalAt = performance.now();
+      return null;
+    },
+  });
+  t.after(() => chat.end());
+  await chat.start();
+  chat.age();
+  await chat.step("turn_1", "One.");
+  chat.advance(STATUS_EDIT_MIN_MS);
+  await chat.step("turn_1", "Two.");
+  assert.ok(refusedAt > 0);
+  await chat.step("turn_1", "Done.", 1, "stop");
+  assert.ok(finalAt > 0, "the final went out");
+  assert.ok(
+    finalAt - refusedAt >= 900,
+    `the final waited retry_after (${Math.round(finalAt - refusedAt)} ms)`,
+  );
+  await emit("turn.completed", { turnId: "turn_1" }, chat.pair);
+});
 

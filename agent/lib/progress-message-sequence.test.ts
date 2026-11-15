@@ -618,3 +618,22 @@ await test("a status is never posted over an id that is still in the record", as
   await draft.closeTelegramDraftTurn(session, undefined, 0, true);
 });
 
+await test("close returns the later of the draft pause and the status pause", async () => {
+  const { key, session, stream, t } = runningStream("9106");
+  run.setChatStatus(key, { progressClaimed: true, progressMessageId: 9 });
+  clock += 10 * draft.STATUS_EDIT_MIN_MS;
+  const limited: StatusTransport = {
+    ...t,
+    edit: () =>
+      Promise.resolve({
+        ok: false,
+        status: 429,
+        description: "Too Many Requests",
+        parameters: { retry_after: 3 },
+      }),
+  };
+  stream.completeStep(0, "new text");
+  await stream.status(0, "new text", limited);
+  assert.equal(await stream.close(0), clock + 3_000);
+  await draft.closeTelegramDraftTurn(session, undefined, 0, true);
+});
