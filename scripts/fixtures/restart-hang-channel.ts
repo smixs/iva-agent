@@ -20,6 +20,7 @@ import { chatTakeOverPatch } from "#lib/telegram-turn-start.ts";
 import { handleTelegramCompactRequest } from "#lib/telegram-compact-route.ts";
 import {
   closeIdleCompactionTurn,
+  dropIdleCompactionTurn,
   openIdleCompactionTurn,
   parkIdleCompactionTurn,
   startIdleCompaction,
@@ -122,6 +123,34 @@ export default defineChannel({
         ctx.session.id,
         MATRIX_FIXTURE.contextWindowTokens,
       );
+      setChatStatus(MATRIX_FIXTURE.chatKey, {
+        status: "idle",
+        compacting: null,
+      });
+    },
+    // Отменённый ход: как канал Telegram — запись в idle и счёт свёртки снят. Событие
+    // помечаем в журнале, чтобы тест видел, доехал ли ход до терминала и какого.
+    "turn.cancelled"(_data, _channel, ctx) {
+      if (process.env.COMPACT_STEP1_MATRIX !== MATRIX_FIXTURE.enabledFlag)
+        return;
+      appendFileSync(
+        join(process.env.ASSISTANT_DATA_DIR ?? "data", "restart-hang-events.jsonl"),
+        `${JSON.stringify({ event: "turn.cancelled", at: Date.now() })}\n`,
+      );
+      dropIdleCompactionTurn(ctx.session.id);
+      setChatStatus(MATRIX_FIXTURE.chatKey, {
+        status: "idle",
+        compacting: null,
+      });
+    },
+    "turn.failed"(_data, _channel, ctx) {
+      if (process.env.COMPACT_STEP1_MATRIX !== MATRIX_FIXTURE.enabledFlag)
+        return;
+      appendFileSync(
+        join(process.env.ASSISTANT_DATA_DIR ?? "data", "restart-hang-events.jsonl"),
+        `${JSON.stringify({ event: "turn.failed", at: Date.now() })}\n`,
+      );
+      dropIdleCompactionTurn(ctx.session.id);
       setChatStatus(MATRIX_FIXTURE.chatKey, {
         status: "idle",
         compacting: null,
