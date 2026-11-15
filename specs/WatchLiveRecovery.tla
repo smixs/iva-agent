@@ -20,6 +20,10 @@ ClaimClose == /\ phase = "delivered" /\ owner > sentAt /\ ~Truncate
               /\ UNCHANGED <<now, owner, sentOwner, sentAt, edits, applied, crashed>>
 RejectedClose == /\ phase = "closing" /\ phase' = IF StuckReject THEN "stuck" ELSE "closing"
                  /\ UNCHANGED <<now, owner, sentOwner, sentAt, closeOwner, edits, applied, crashed>>
+\* A definitive 4xx refusal (the message was deleted) ends the signal without an edit;
+\* 429, 5xx and network errors stay RejectedClose and keep it closing for a retry.
+RefusedClose == /\ phase = "closing" /\ phase' = "closed"
+                /\ UNCHANGED <<now, owner, sentOwner, sentAt, closeOwner, edits, applied, crashed>>
 ApplyClose == /\ phase = "closing"
               /\ edits' = IF applied /\ ~Reapply THEN edits ELSE edits+1
               /\ applied' = TRUE
@@ -28,7 +32,7 @@ ConfirmClose == /\ phase = "closing" /\ applied /\ phase' = "closed"
                 /\ UNCHANGED <<now, owner, sentOwner, sentAt, closeOwner, edits, applied, crashed>>
 Crash == /\ phase = "closing" /\ ~crashed /\ crashed' = TRUE
          /\ UNCHANGED <<now, owner, phase, sentOwner, sentAt, closeOwner, edits, applied>>
-Next == Time \/ Owner \/ RejectedSend \/ Deliver \/ ClaimClose \/ RejectedClose \/ ApplyClose \/ ConfirmClose \/ Crash
+Next == Time \/ Owner \/ RejectedSend \/ Deliver \/ ClaimClose \/ RejectedClose \/ RefusedClose \/ ApplyClose \/ ConfirmClose \/ Crash
 Spec == Init /\ [][Next]_vars
 LiveSilence == sentAt >= 0 => sentOwner < 0 \/ sentAt-sentOwner >= 2
 RecoverableClose == phase # "stuck"
