@@ -505,6 +505,13 @@ test("a definitive refusal of the close ends the signal; a 502 keeps it closing"
     requests: 2,
     status: "closing",
   });
+  // A rejected token says nothing about this message: the close waits for a working token.
+  assert.deepEqual(await run(401, "Unauthorized"), {
+    first: 1,
+    second: 1,
+    requests: 2,
+    status: "closing",
+  });
 });
 
 test("history failure leaves a Telegram candidate quiet", async (t) => {

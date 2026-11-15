@@ -497,14 +497,16 @@ export async function sendTelegramScreen(
 }
 
 /**
- * A refusal that repeating cannot change: HTTP 4xx except 429 and 408 (the latter says nothing
- * about the outcome). 5xx, 429, 408 and network errors may heal, so the caller retries them.
+ * A refusal that repeating cannot change: HTTP 4xx except 429, 408 (says nothing about the
+ * outcome) and 401 (the token was rejected, not this message). 5xx, 429, 408, 401 and network
+ * errors may heal, so the caller retries them.
  */
 const definitiveRefusal = (ack: PostAck) =>
   !ack.ok &&
   ack.status !== undefined &&
   ack.status >= 400 &&
   ack.status < 500 &&
+  ack.status !== 401 &&
   ack.status !== 408 &&
   ack.status !== 429;
 
