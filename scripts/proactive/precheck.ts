@@ -5,8 +5,9 @@
 //
 // Telegram — инструмент `list_chats` прокси юзербота (telegram-mcp f1a2d8e,
 // telegram_mcp/tools/chats.py:449-578): `{"results":[…]}`, пусто — строка `No chats found…`.
-// Почта — `gws`: список непрочитанных входящих без категорий, затем заголовки каждого письма;
-// рассылка (`List-Unsubscribe`) пунктом не становится.
+// Почта — `gws`: два списка (непрочитанные входящие без категорий и непрочитанные Updates за
+// сутки), затем заголовки каждого письма; рассылка (`List-Unsubscribe`) из основного списка
+// пунктом не становится, письмо Updates — становится, с темой для модели.
 // Сбои (T3) — `systemctl --user`: таймерные сервисы пользователя и сервисы плагинов; идут и при
 // выключенном тумблере.
 import { execFile } from "node:child_process";
@@ -20,6 +21,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import {
   LIVE_DIALOG_MINUTES,
   MAIL_LIMIT,
+  MAIL_UPDATES_LIMIT,
   TELEGRAM_GROUPS_LIMIT,
   TELEGRAM_USERS_LIMIT,
   type Sender,
@@ -43,6 +45,8 @@ export type WatchItem = {
   readonly dialog?: Dialog;
   readonly from: Sender;
   readonly note?: string;
+  /** Тема автоматического письма (Updates): чужой текст, в промпт идёт через Gate. */
+  readonly subject?: string;
   /** Поля ДР до обработки промпта; в seen не сохраняются. */
   readonly birthday?: Birthday;
   readonly message_id?: number;
@@ -361,6 +365,8 @@ export function telegramSource(
 
 export const MAIL_QUERY =
   "is:unread in:inbox -category:promotions -category:social -category:forums -category:updates";
+export const MAIL_UPDATES_QUERY =
+  "is:unread in:inbox category:updates newer_than:1d";
 
 /** Исход `gws`: код выхода (2 — не авторизован), нет бинаря или срок вышел; и stdout. */
 export type GwsRun = (
@@ -441,24 +447,65 @@ function header(message: Record<string, unknown> | null, wanted: string) {
   return typeof found?.value === "string" ? found.value : null;
 }
 
-/** Непрочитанные входящие без категорий и рассылок, не больше MAIL_LIMIT; срок 20 с на всё. */
-export function mailSource(run: GwsRun = runGws): Source {
+/** Один список писем: годные id и, если писем больше предела, строка в журнал. */
+async function listIds(
+  run: GwsRun,
+  q: string,
+  limit: number,
+  name: string,
+  deadline: number,
+  log: (line: string) => void,
+): Promise<string[] | null> {
+  const list = await gwsJson(
+    run,
+    { userId: "me", q, maxResults: limit },
+    deadline,
+  );
+  if (list === null) return null;
+  if (typeof list.nextPageToken === "string" && list.nextPageToken !== "")
+    log(
+      `proactive: mail ${name} list has more letters than the limit ${limit}`,
+    );
+  return (Array.isArray(list.messages) ? list.messages : [])
+    .map((m: { id?: unknown }) => m.id)
+    .filter(
+      (id): id is string => typeof id === "string" && /^[\w-]+$/u.test(id),
+    )
+    .slice(0, limit);
+}
+
+/**
+ * Непрочитанные входящие без категорий и рассылок (MAIL_LIMIT) и непрочитанные Updates за сутки
+ * (MAIL_UPDATES_LIMIT); срок 20 с на всё. Письмо Updates рассылкой не отбрасывается.
+ */
+export function mailSource(
+  run: GwsRun = runGws,
+  log: (line: string) => void = console.log,
+): Source {
   const check = async (): Promise<SourceResult> => {
     const deadline = Date.now() + MAIL_TIMEOUT_MS;
     try {
-      const list = await gwsJson(
+      const primary = await listIds(
         run,
-        { userId: "me", q: MAIL_QUERY, maxResults: MAIL_LIMIT },
+        MAIL_QUERY,
+        MAIL_LIMIT,
+        "inbox",
         deadline,
+        log,
       );
-      if (list === null) return NOT_CONNECTED;
-      const ids = (Array.isArray(list.messages) ? list.messages : [])
-        .map((m: { id?: unknown }) => m.id)
-        .filter(
-          (id): id is string => typeof id === "string" && /^[\w-]+$/u.test(id),
-        )
-        .slice(0, MAIL_LIMIT);
-      const headers = ["From", "List-Unsubscribe"];
+      if (primary === null) return NOT_CONNECTED;
+      const updates =
+        (await listIds(
+          run,
+          MAIL_UPDATES_QUERY,
+          MAIL_UPDATES_LIMIT,
+          "updates",
+          deadline,
+          log,
+        )) ?? [];
+      const updatesSet = new Set(updates);
+      const ids = [...new Set([...primary, ...updates])];
+      const headers = ["From", "Subject", "List-Unsubscribe"];
       const metadata = { format: "metadata", metadataHeaders: headers };
       const messages = await Promise.all(
         ids.map((id) =>
@@ -469,8 +516,20 @@ export function mailSource(run: GwsRun = runGws): Source {
       for (const [index, id] of ids.entries()) {
         const m = messages[index] ?? null;
         const from = senderOf(header(m, "From") ?? "");
-        if (m !== null && header(m, "List-Unsubscribe") === null)
-          items.push({ key: `mail:${id}`, unread: 1, from });
+        const automated = updatesSet.has(id);
+        if (m === null) {
+          log(`proactive: mail ${id} dropped: no metadata`);
+        } else if (!automated && header(m, "List-Unsubscribe") !== null) {
+          log(`proactive: mail ${id} dropped: List-Unsubscribe`);
+        } else {
+          const subject = automated ? (header(m, "Subject") ?? "") : "";
+          items.push({
+            key: `mail:${id}`,
+            unread: 1,
+            from,
+            ...(automated ? { subject } : {}),
+          });
+        }
       }
       return { items, error: null };
     } catch (error) {

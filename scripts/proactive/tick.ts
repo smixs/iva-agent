@@ -329,7 +329,8 @@ function watchLine(
   flagged: { attack: boolean },
   birthdayKeys: Set<string>,
 ): string {
-  const { key, from, note, unread, urgent, message_id, topic_id } = item;
+  const { key, from, note, subject, unread, urgent, message_id, topic_id } =
+    item;
   if (isContactBirthdayKey(key)) {
     const birthday = item.birthday && birthdayForPrompt(item.birthday, flagged);
     if (!birthday) return "";
@@ -345,7 +346,11 @@ function watchLine(
   const message = message_id
     ? `, message_id=${message_id}${topic_id ? `, topic_id=${topic_id}` : ""}`
     : "";
-  return `- ${key} from ${who || "unknown"}: ${unread} unread${urgent ? ", urgent sender" : ""}${message}${waitingFrom(item)}`;
+  const automated =
+    subject === undefined
+      ? ""
+      : `, automated letter, subject: ${gated(subject, flagged)}`;
+  return `- ${key} from ${who || "unknown"}: ${unread} unread${urgent ? ", urgent sender" : ""}${message}${waitingFrom(item)}${automated}`;
 }
 
 function watchPrompt(candidates: readonly Candidate[], tr: Translate) {
