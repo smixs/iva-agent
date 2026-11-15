@@ -92,7 +92,7 @@ async function describeWithCompatible(
       },
       body: JSON.stringify({
         model: target.visionModel,
-        max_tokens: 700,
+        max_tokens: 4096,
         messages: [
           {
             role: "user",
@@ -114,11 +114,11 @@ async function describeWithCompatible(
         `vision HTTP ${res.status}: ${(await res.text()).slice(0, 200)}${providerName === "opencode" ? "; set OPENCODE_VISION_PROTOCOL to the model’s documented wire; Go /messages is unsupported" : ""}`,
       );
     const json = (await res.json()) as {
-      choices?: Array<{ message?: { content?: string } }>;
+      choices?: Array<{ message?: { content?: string; reasoning_content?: string } }>;
     };
     // Зрение тратит токены того же провайдера мимо шага хода — пишем их в usage.jsonl.
     recordVisionUsage(target.visionModel, chatCompletionsUsageTokens(json));
-    return (json.choices?.[0]?.message?.content ?? "").trim();
+    return (json.choices?.[0]?.message?.content || json.choices?.[0]?.message?.reasoning_content || "").trim();
   } catch (error) {
     if (signal.aborted)
       throw new Error(
