@@ -1018,6 +1018,8 @@ const wireOf = () =>
         ? `${c.method}:${String(c.body?.message_id)}`
         : c.method,
     );
+// Rendered to nothing by the HTML converter although the draft text is not empty.
+const EMPTY_RENDERING = "```\n```";
 const callsOf = (method: string) => apiCalls.filter((c) => c.method === method);
 const reject = (status: number, description: string, extra = {}) =>
   Response.json(
@@ -1300,11 +1302,11 @@ test("status: a final that cannot be delivered still removes the status; a faile
   assert.equal(chat.record()?.progressMessageId, undefined);
 });
 
-test("status: an edit refused as gone clears the id and never resends or deletes", async (t) => {
+test("status: an edit refused as gone keeps the id, stops editing, and the end-of-turn delete decides", async (t) => {
   const chat = statusChat(t, "210", {
     onCall: (call) =>
       call.method === "editMessageText"
-        ? reject(400, "Bad Request: message to edit not found")
+        ? reject(400, "Bad Request: message is empty")
         : null,
   });
   t.after(() => chat.end());
@@ -1313,16 +1315,63 @@ test("status: an edit refused as gone clears the id and never resends or deletes
   await chat.step("turn_1", "One.");
   chat.advance(STATUS_EDIT_MIN_MS);
   await chat.step("turn_1", "Two.");
-  assert.equal(chat.record()?.progressMessageId, undefined);
   assert.equal(
-    chat.record()?.progressClaimed,
-    true,
-    "claimed: never resend this turn",
+    chat.record()?.progressMessageId,
+    501,
+    "the message may still exist: the id stays",
   );
+  assert.equal(chat.record()?.progressClaimed, true, "never resend this turn");
   chat.advance(STATUS_EDIT_MIN_MS);
   await chat.step("turn_1", "Three.");
+  assert.equal(callsOf("editMessageText").length, 1, "no further edits");
   await emit("turn.cancelled", { turnId: "turn_1" }, chat.pair);
-  assert.deepEqual(wireOf(), ["sendMessage", "editMessageText:501"]);
+  assert.deepEqual(wireOf(), [
+    "sendMessage",
+    "editMessageText:501",
+    "deleteMessage:501",
+  ]);
+  assert.equal(
+    chat.record()?.progressMessageId,
+    undefined,
+    "the delete's own answer clears it",
+  );
+});
+
+test("status: after an edit refused as gone, a delete that fails keeps the id for the next turn", async (t) => {
+  let limited = true;
+  const chat = statusChat(t, "238", {
+    onCall: (call) =>
+      call.method === "editMessageText"
+        ? reject(403, "Forbidden")
+        : call.method === "deleteMessage" && limited
+          ? reject(500, "Internal Server Error")
+          : null,
+  });
+  t.after(() => chat.end());
+  await chat.start();
+  chat.age();
+  await chat.step("turn_1", "One.");
+  chat.advance(STATUS_EDIT_MIN_MS);
+  await chat.step("turn_1", "Two.");
+  await emit("turn.cancelled", { turnId: "turn_1" }, chat.pair);
+  assert.equal(chat.record()?.progressMessageId, 501);
+  limited = false;
+  await chat.start("turn_2");
+  assert.equal(chat.record()?.progressMessageId, undefined);
+  assert.equal(callsOf("deleteMessage").length, 2);
+});
+
+test("status: a text that renders empty is never sent as an edit", async (t) => {
+  const chat = statusChat(t, "239");
+  t.after(() => chat.end());
+  await chat.start();
+  chat.age();
+  await chat.step("turn_1", "One.");
+  chat.advance(STATUS_EDIT_MIN_MS);
+  await chat.step("turn_1", EMPTY_RENDERING);
+  assert.equal(callsOf("editMessageText").length, 0);
+  assert.equal(chat.record()?.progressMessageId, 501);
+  await emit("turn.cancelled", { turnId: "turn_1" }, chat.pair);
 });
 
 test("status: an edit refused with 429 pauses edits and never waits", async (t) => {

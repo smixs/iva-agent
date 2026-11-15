@@ -249,6 +249,7 @@ export class TelegramDraftStream {
   #statusText = "";
   #statusAt = -Infinity;
   #statusPauseUntil = 0;
+  #statusGone = false;
   #typing?: ReturnType<typeof setInterval>;
   #timer?: ReturnType<typeof setTimeout>;
 
@@ -502,6 +503,7 @@ export class TelegramDraftStream {
       record?.status !== "running" ||
       record.sessionId !== identity.sessionId ||
       record.turnId !== identity.turnId ||
+      this.#statusGone ||
       !draftText(text, true) ||
       text === this.#statusText ||
       now - this.#statusAt < STATUS_EDIT_MIN_MS ||
@@ -513,7 +515,9 @@ export class TelegramDraftStream {
     if (ack.kind === "ok") this.#statusText = text;
     else if (ack.kind === "wait")
       this.#statusPauseUntil = this.#now() + ack.retryAfterMs;
-    else if (ack.kind === "gone") clearProgressId(this.chatKey, id);
+    // Gone is a guess: a 4xx can come from a proxy or from text Telegram will not take while the
+    // message stays. Keep the id, stop editing this turn, and let the end-of-turn delete decide.
+    else if (ack.kind === "gone") this.#statusGone = true;
     return sentResult("edit", ack);
   }
 
