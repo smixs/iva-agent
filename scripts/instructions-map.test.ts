@@ -66,17 +66,25 @@ test("long output goes to a file and is read in parts", () => {
 // Три правила поведения (владелец, 15.11.2026): форма ответа, прерванная работа, проверка факта.
 // Карта сжата под предел, поэтому каждое держится якорями.
 test("the map carries the answer shape, the interrupted-work rule and the fact check", () => {
+  assert.match(FLAT_MAP, /what to do, if anything\./u);
+  assert.match(FLAT_MAP, /Delivery goes through this turn's response\./u);
   assert.match(
     FLAT_MAP,
-    /Answer first in 1-4 lines; the rest in one `<details>` fold \(`rich-replies`\); a short answer has none\./u,
+    /In chat talk: answer in 1-4 lines, optional depth in one `<details>` fold \(`rich-replies`\)\. Requested documents and scheduled turns keep their skill's format\./u,
   );
   const interrupt = item("A message that interrupts your work continues it");
   assert.match(interrupt, /another subject or says stop/u);
   assert.match(interrupt, /steps in the history, no restart/u);
   assert.match(interrupt, /one line says what you take into account/u);
   const check = item("Check before you state");
-  assert.match(check, /read its source with a tool this turn and name it/u);
-  assert.match(check, /call it unchecked/u);
+  assert.match(
+    check,
+    /read its source with a tool this turn, else call it unchecked/u,
+  );
+  assert.match(
+    check,
+    /CORE and memory count as read; name the source in a few words/u,
+  );
   assert.match(check, /Read messages before compiling tasks/u);
   assert.match(check, /facts already read need no re-read/u);
 });
