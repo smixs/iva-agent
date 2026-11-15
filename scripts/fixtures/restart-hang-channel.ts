@@ -33,6 +33,10 @@ const MATRIX_FIXTURE = Object.freeze({
   chatKey: "1:",
 });
 
+// Аналог draftId нативного драфта: канал Telegram кладёт его в запись на turn.started
+// (publishTelegramTurnStarted), чтобы нативная ■ сверяла драфт с живым ходом.
+let draftSeq = 0;
+
 // Только матрица обрыва включает эти барьеры. Они останавливают настоящий обработчик
 // до/после пересказа; родитель убивает всю группу процесса, не меняя код Ивы/eve.
 async function checkpoint(point: string): Promise<void> {
@@ -114,6 +118,7 @@ export default defineChannel({
       setChatStatus(MATRIX_FIXTURE.chatKey, {
         ...chatTakeOverPatch({ sessionId: ctx.session.id }),
         turnId: data.turnId,
+        draftId: 7000 + ++draftSeq,
       });
     },
     "turn.completed"(_data, _channel, ctx) {
@@ -129,13 +134,14 @@ export default defineChannel({
       });
     },
     // Отменённый ход: как канал Telegram — запись в idle и счёт свёртки снят. Событие
-    // помечаем в журнале, чтобы тест видел, доехал ли ход до терминала и какого.
-    "turn.cancelled"(_data, _channel, ctx) {
+    // помечаем в журнале с turnId, чтобы тест видел, доехал ли именно этот ход до
+    // терминала и какого.
+    "turn.cancelled"(data, _channel, ctx) {
       if (process.env.COMPACT_STEP1_MATRIX !== MATRIX_FIXTURE.enabledFlag)
         return;
       appendFileSync(
         join(process.env.ASSISTANT_DATA_DIR ?? "data", "restart-hang-events.jsonl"),
-        `${JSON.stringify({ event: "turn.cancelled", at: Date.now() })}\n`,
+        `${JSON.stringify({ event: "turn.cancelled", turnId: data.turnId, at: Date.now() })}\n`,
       );
       dropIdleCompactionTurn(ctx.session.id);
       setChatStatus(MATRIX_FIXTURE.chatKey, {
@@ -143,12 +149,12 @@ export default defineChannel({
         compacting: null,
       });
     },
-    "turn.failed"(_data, _channel, ctx) {
+    "turn.failed"(data, _channel, ctx) {
       if (process.env.COMPACT_STEP1_MATRIX !== MATRIX_FIXTURE.enabledFlag)
         return;
       appendFileSync(
         join(process.env.ASSISTANT_DATA_DIR ?? "data", "restart-hang-events.jsonl"),
-        `${JSON.stringify({ event: "turn.failed", at: Date.now() })}\n`,
+        `${JSON.stringify({ event: "turn.failed", turnId: data.turnId, at: Date.now() })}\n`,
       );
       dropIdleCompactionTurn(ctx.session.id);
       setChatStatus(MATRIX_FIXTURE.chatKey, {

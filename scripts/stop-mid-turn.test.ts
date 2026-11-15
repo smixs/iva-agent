@@ -20,12 +20,19 @@ import {
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 import { envFor, post } from "./fixtures/restart-app.ts";
 
-// Жалоба 25.10 «Стоп не останавливает ход»: исходная последовательность на настоящем
-// процессе eve — ход идёт (запрос к модели в полёте), «стоп» уходит тем же проводом, что
-// и на бою (POST на cancel-роут канала с парой sessionId/turnId из записи хода). Исход
-// проверяется на провайдере: если ход не остановился, запрос к модели дожил бы до ответа.
+// Жалоба 25.10 «не останавливаешься по кнопке Stop» (vault projects/iva.md:219, msg5403):
+// вход Стопа прогоняется через настоящий handleControl моста — нативная ■ драфта
+// (stopped_message_generation) и команда /stop. Мост читает пару sessionId/turnId из
+// той же записи run-status, что и на бою, и шлёт реальный POST на cancel-роут канала
+// (cancelImpl не подменяется). Факт остановки проверяется на провайдере — оборванный
+// сокет запроса к модели — и по терминальному событию хода в журнале канала.
+// Чего тест не проверяет: какая именно кнопка/команда была нажата 25.10 и какой
+// провайдер тогда крутился на c1 — оба факта не восстановлены (см. .scratch/t93/TRACE.md).
 const MARK_A = "STOP_MARK_A";
 const MARK_B = "STOP_MARK_B";
+const TG_SECRET = "restart-test-secret";
+const CHAT = { id: 1, type: "private" };
+const OWNER = { id: 1, is_bot: false };
 
 function completion(text: string): string {
   const chunk = (content: string, finishReason: string | null) =>
@@ -122,13 +129,14 @@ async function startBlockingProvider(marks: string[]): Promise<{
 }
 
 // Запись хода канала restart-hang (COMPACT_STEP1_MATRIX=1): то, что мост читает для
-// пары sessionId/turnId перед POST отмены, — и её переход в idle после терминала хода,
-// после которого очередь моста вообще доставляет следующее сообщение.
+// решения об отмене и для пары sessionId/turnId, — и её переход в idle после
+// терминала хода, после которого очередь моста вообще доставляет следующее сообщение.
 async function waitForRunStatus<T>(
   dir: string,
   pick: (record: {
     sessionId?: unknown;
     turnId?: unknown;
+    draftId?: unknown;
     status?: unknown;
   }) => T | null,
 ): Promise<T> {
@@ -140,7 +148,12 @@ async function waitForRunStatus<T>(
       if (!name.endsWith(".json")) continue;
       const record = JSON.parse(
         await readFile(join(statusDir, name), "utf8"),
-      ) as { sessionId?: unknown; turnId?: unknown; status?: unknown };
+      ) as {
+        sessionId?: unknown;
+        turnId?: unknown;
+        draftId?: unknown;
+        status?: unknown;
+      };
       lastSeen = record;
       const hit = pick(record);
       if (hit) return hit;
@@ -153,10 +166,19 @@ async function waitForRunStatus<T>(
   }
 }
 
-const waitForRunningTurn = (dir: string) =>
+type RunningTurn = { sessionId: string; turnId: string; draftId: number };
+
+const waitForRunningTurn = (dir: string, excludeTurnId?: string) =>
   waitForRunStatus(dir, (record) =>
-    typeof record.sessionId === "string" && typeof record.turnId === "string"
-      ? { sessionId: record.sessionId, turnId: record.turnId }
+    typeof record.sessionId === "string" &&
+    typeof record.turnId === "string" &&
+    typeof record.draftId === "number" &&
+    record.turnId !== excludeTurnId
+      ? {
+          sessionId: record.sessionId,
+          turnId: record.turnId,
+          draftId: record.draftId,
+        }
       : null,
   );
 
@@ -167,6 +189,36 @@ const waitForIdle = (dir: string) =>
       : null,
   );
 
+type TurnEvent = { event?: unknown; turnId?: unknown; point?: unknown };
+
+// Журнал терминальных событий хода, который ведёт канал-фикстура: turn.cancelled и
+// turn.failed с turnId. Читается всегда, а не только при падении сценария, — именно
+// он отличает «ход отменён» от «ход завершился/упал»: в idle запись уходит во всех
+// трёх исходах.
+async function readTurnEvents(dir: string): Promise<TurnEvent[]> {
+  const file = join(dir, "restart-hang-events.jsonl");
+  const lines = (await readFile(file, "utf8").catch(() => ""))
+    .split("\n")
+    .filter(Boolean);
+  return lines.map((line) => JSON.parse(line) as TurnEvent);
+}
+
+function assertCancelledNotFailed(
+  events: TurnEvent[],
+  turnId: string,
+): void {
+  assert.ok(
+    events.some((e) => e.event === "turn.cancelled" && e.turnId === turnId),
+    `ожидали turn.cancelled для ${turnId}, журнал: ${JSON.stringify(events)}`,
+  );
+  const failed = events.filter((e) => e.event === "turn.failed");
+  assert.equal(
+    failed.length,
+    0,
+    `turn.failed не должен встречаться: ${JSON.stringify(failed)}`,
+  );
+}
+
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const inTime = <T>(what: string, promise: Promise<T>, ms = 60_000) =>
@@ -175,8 +227,17 @@ const inTime = <T>(what: string, promise: Promise<T>, ms = 60_000) =>
     sleep(ms).then(() => assert.fail(`${what} did not happen in ${ms}ms`)),
   ]);
 
+type BridgeDeps = {
+  replyImpl?: (chatId: number | undefined, text: string) => Promise<null>;
+  ackImpl?: (id: string, text?: string) => Promise<unknown>;
+};
+type HandleControl = (
+  update: Record<string, unknown>,
+  deps?: BridgeDeps,
+) => Promise<unknown>;
+
 void test(
-  "«стоп» посреди хода обрывает запрос к модели; «стоп» с чужой парой — нет",
+  "«стоп» через настоящий обработчик моста обрывает ход; «стоп» с чужим драфтом — нет",
   { timeout: 240_000 },
   async (t) => {
     const sandbox = await mkdtemp(join(tmpdir(), "iva-stop-mid-turn-"));
@@ -213,6 +274,52 @@ void test(
     eve = startEve(app, env, port, () => {});
     await waitForHealth(port, eve);
 
+    // Мост — тот же scripts/poller/control.ts, что крутится на бою. Его config и
+    // run-status читают env на импорте, поэтому окружение поднимаем ДО загрузки
+    // модуля: data-директория — та, куда пишет канал внутри eve; секрет и порт — те,
+    // что у самой eve. cancelImpl не подменяем: POST на cancel-роут идёт настоящий.
+    process.env.ASSISTANT_DATA_DIR = join(app, "data");
+    process.env.IVA_PORT = String(port);
+    process.env.TELEGRAM_WEBHOOK_SECRET_TOKEN = TG_SECRET;
+    process.env.TELEGRAM_ALLOWED_USER_IDS = String(OWNER.id);
+    process.env.TELEGRAM_BOT_TOKEN = "1:test-token";
+    const { handleControl } = (await import("./poller/control.ts")) as unknown as {
+      handleControl: HandleControl;
+    };
+    // Telegram-IO моста (answerCallbackQuery, ответы в чат) в hermetic-прогоне глушим;
+    // они не часть пути отмены.
+    const deps: BridgeDeps = {
+      replyImpl: () => Promise.resolve(null),
+      ackImpl: () => Promise.resolve(undefined),
+    };
+    let updateId = 1;
+    // Нативная ■ драфта: Telegram присылает stopped_message_generation с draft_id.
+    const draftStop = (draftId: number) =>
+      handleControl(
+        {
+          update_id: updateId++,
+          stopped_message_generation: { chat: CHAT, draft_id: draftId },
+        },
+        deps,
+      );
+    // Команда /stop: вторая дверь в тот же requestTurnCancel.
+    const stopCommand = () => {
+      const id = updateId++;
+      return handleControl(
+        {
+          update_id: id,
+          message: {
+            message_id: id,
+            date: 1,
+            chat: CHAT,
+            from: OWNER,
+            text: "/stop",
+          },
+        },
+        deps,
+      );
+    };
+
     const dumpSession = async (sessionId: string) => {
       const events = await readFile(
         join(app, "data/restart-hang-events.jsonl"),
@@ -239,7 +346,9 @@ void test(
     };
 
     const scenario = async () => {
-      // ── Исходная последовательность: ход идёт, «стоп» — ход останавливается ──
+      // ── Исходная последовательность: ход идёт, нажата ■ — ход останавливается ──
+      // Доставку сообщения делает вход фикстуры (в жалобе спорил не вход, а Стоп);
+      // запись хода канал пишет штатную — именно её читает мост.
       const first = await post(port, bearer, "/restart-hang/send", {
         address: "1::",
         message: MARK_A,
@@ -247,36 +356,30 @@ void test(
       assert.equal(first.status, 200);
       const { sessionId } = (await first.json()) as { sessionId: string };
       await inTime("model request in flight", provider.waitBlocked(1));
-      t.diagnostic("turn A blocked mid-model-call");
-      const running = await waitForRunningTurn(join(app, "data"));
-      assert.equal(running.sessionId, sessionId);
-      t.diagnostic(`run-status ${JSON.stringify(running)}`);
+      const turnA: RunningTurn = await waitForRunningTurn(join(app, "data"));
+      assert.equal(turnA.sessionId, sessionId);
+      t.diagnostic(`turn A running: ${JSON.stringify(turnA)}`);
 
-      // Провод настоящего моста: requestTurnCancel шлёт sessionId + turnId из записи
-      // секретом вебхука; cancelEveTurn добавляет tasks: true внутри роута.
-      const cancel = await post(port, bearer, "/eve/v1/telegram/cancel", {
-        sessionId: running.sessionId,
-        turnId: running.turnId,
-      });
-      assert.equal(cancel.status, 200);
-      const accepted = (await cancel.json()) as { status?: unknown };
-      assert.equal(accepted.status, "accepted");
+      // Тап по нативной ■ того драфта, что в записи хода. Путь целиком настоящий:
+      // handleControl → handleTelegramDraftStop → requestTurnCancel → POST на
+      // cancel-роут канала → session.cancel({tasks:true, turnId}).
+      assert.equal(await draftStop(turnA.draftId), true);
 
       // «Стоп не останавливает ход» не воспроизводится: запрос к модели оборван —
       // работа прекратилась, а не доехала до ответа фоном.
       await inTime("model call aborted", provider.waitAborted(1));
       assert.equal(provider.alive(), false);
-      t.diagnostic("model call aborted by cancel");
+      t.diagnostic("model call aborted by draft stop");
 
-      // Ход доехал до терминала: запись вернулась в idle — именно здесь очередь моста
-      // начинает доставку следующего сообщения.
+      // Ход доехал до терминала ОТМЕНЫ: не completed и не failed — журнал событий
+      // привязан к turnId этого хода. Запись в idle — следствие того же события.
       await waitForIdle(join(app, "data"));
-      t.diagnostic("run-status back to idle (turn.completed fired)");
+      assertCancelledNotFailed(await readTurnEvents(join(app, "data")), turnA.turnId);
+      t.diagnostic("turn A reached turn.cancelled, record idle");
       await sleep(3_000); // workflow уходит на парковку ожидания следующей доставки
 
       // Чат не завис: следующее сообщение — новый ход, провайдер отвечает. Провод —
-      // штатный роут сессии eve (session.send, тот же dispatch, что и у webhook-доставки
-      // моста): ход после отмены должен уйти к модели и ответить.
+      // штатный роут сессии eve (тот же dispatch, что и у webhook-доставки моста).
       const next = await post(
         port,
         bearer,
@@ -302,44 +405,35 @@ void test(
       }
       t.diagnostic("turn after stop completed");
 
-      // ── Отделение от «стопа по устаревшей паре»: молчаливый no-op по дизайну ──
+      // ── Отделение от «стопа по устаревшему драфту»: молчаливый no-op по дизайну ──
       const second = await post(port, bearer, `/eve/v1/session/${sessionId}`, {
         message: MARK_B,
       });
       assert.equal(second.status, 202);
       await inTime("turn B blocked mid-model-call", provider.waitBlocked(2));
-      t.diagnostic("turn B blocked mid-model-call");
-
-      // Тот же провод, но пара turnId чужая (устаревший черновик/запись): команда
-      // принята, а живой ход не тронут — запрос к модели ещё висит.
-      const stale = await post(port, bearer, "/eve/v1/telegram/cancel", {
-        sessionId,
-        turnId: "turn-stale",
-      });
-      assert.equal(stale.status, 200);
-      assert.equal(
-        ((await stale.json()) as { status?: unknown }).status,
-        "accepted",
+      const turnB: RunningTurn = await waitForRunningTurn(
+        join(app, "data"),
+        turnA.turnId,
       );
+      t.diagnostic(`turn B running: ${JSON.stringify(turnB)}`);
+
+      // Второй тап по ■ старого (первого) драфта: запись уже зовёт другой драфт,
+      // обработчик молча игнорирует — живой ход и его запрос к модели не тронуты.
+      assert.equal(await draftStop(turnA.draftId), true);
       await sleep(2_000);
       assert.equal(
         provider.alive(),
         true,
-        "стоп по чужой паре не должен обрывать живой ход",
+        "стоп по чужому драфту не должен обрывать живой ход",
       );
-      t.diagnostic("stale-turnId cancel was a no-op");
+      t.diagnostic("stale-draft stop was a no-op");
 
-      // Правильный «стоп» тем же проводом ход всё-таки снимает.
-      const proper = await post(port, bearer, "/eve/v1/telegram/cancel", {
-        sessionId,
-      });
-      assert.equal(proper.status, 200);
-      assert.equal(
-        ((await proper.json()) as { status?: unknown }).status,
-        "accepted",
-      );
+      // /stop — вторая дверь — тем же настоящим путём ход всё-таки снимает.
+      assert.equal(await stopCommand(), true);
       await inTime("turn B aborted", provider.waitAborted(2));
-      t.diagnostic("turn B aborted by cancel");
+      await waitForIdle(join(app, "data"));
+      assertCancelledNotFailed(await readTurnEvents(join(app, "data")), turnB.turnId);
+      t.diagnostic("turn B aborted via /stop command");
     };
     await scenario();
   },
