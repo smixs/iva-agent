@@ -62,6 +62,7 @@ void test(
     });
 
     const sessionsDir = join(app, ".eve/sandbox-cache/just-bash/sessions");
+    const workflowDataDir = join(app, ".eve/.workflow-data");
     const probeFile = join(app, "data/sandbox-probe.jsonl");
     const probeEntries = async () =>
       (await readFile(probeFile, "utf8").catch(() => ""))
@@ -86,6 +87,41 @@ void test(
       );
     const waitCompleted = async (sessionId: string, label: string) =>
       waitFor(async () => (await completedFor(sessionId)) !== undefined, label);
+    // Граница «ход дожался в хранилище»: ни один step не выполняется
+    // (пара .locks/steps/*.created + *.terminal) и run хода терминален.
+    // message.completed виден до конца turn-шага; SIGKILL в этом окне
+    // оставляет подвисший step, который после рестарта ждёт backstop-wake
+    // (~15 минут) вместо немедленного requeue — ровно то, что ловил
+    // таймаут репривязки.
+    const waitSettled = async (label: string) =>
+      waitFor(async () => {
+        const stepLocks = await readdir(
+          join(workflowDataDir, ".locks/steps"),
+        ).catch(() => [] as string[]);
+        const terminal = new Set(
+          stepLocks
+            .filter((name) => name.endsWith(".terminal"))
+            .map((name) => name.slice(0, -".terminal".length)),
+        );
+        const inFlight = stepLocks.some(
+          (name) =>
+            name.endsWith(".created") &&
+            !terminal.has(name.slice(0, -".created".length)),
+        );
+        if (inFlight) return false;
+        const runsDir = join(workflowDataDir, "runs");
+        for (const file of await readdir(runsDir).catch(() => [] as string[])) {
+          const raw = await readFile(join(runsDir, file), "utf8").catch(
+            () => "",
+          );
+          if (!raw.includes('"workflowName": "workflow//eve//turnWorkflow"'))
+            continue;
+          const status = /"status":\s*"(\w+)"/.exec(raw)?.[1];
+          if (status !== "completed" && status !== "failed" && status !== "cancelled")
+            return false;
+        }
+        return true;
+      }, label);
 
     await runNode([join(app, "scripts/init-vault.mjs")], app, env, () => {});
     await runNode(
@@ -104,8 +140,10 @@ void test(
     await waitCompleted(runX, "session X first turn");
     assert.ok((await dirFor(runX)) !== undefined, "session X dir missing");
 
-    // Рестарт сервера. Сессия X не завершена — её каталог должен пережить
-    // и рестарт, и уборку при create следующей чужой сессии.
+    // Рестарт сервера. Сессия X не завершена (run workflowEntry всё ещё
+    // running и ждёт inbox) — её каталог должен пережить и рестарт, и
+    // уборку при create следующей чужой сессии.
+    await waitSettled("session X first turn to settle in workflow storage");
     await killEve(eve);
     eve = startEve(app, env, port, () => {});
     await waitForHealth(port, eve);
