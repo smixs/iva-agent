@@ -509,9 +509,12 @@ const definitiveRefusal = (ack: PostAck) =>
   ack.status !== 429;
 
 /**
- * Close only the recorded Watch messages; empty markup removes any classic buttons.
- * A definitive refusal (the owner deleted the message, the chat is gone) ends the close
- * like a success and is reported in `refused`; a transient failure is `ok: false`.
+ * Close the recorded Watch messages: the first one is edited to the close text (empty markup
+ * removes any classic buttons), the others of the same signal are deleted, so one signal never
+ * ends as several identical lines. A definitive refusal (the owner deleted the message, the
+ * chat is gone) counts as done and is reported in `refused`; a transient failure is `ok: false`
+ * and the whole close is repeated later (an edit that already landed answers "not modified",
+ * a delete that already landed answers "not found").
  */
 export async function closeTelegramWatchSignal(
   bot: string,
@@ -520,18 +523,26 @@ export async function closeTelegramWatchSignal(
   { fetchImpl = fetch }: Pick<TelegramSendOptions, "fetchImpl"> = {},
 ): Promise<{ ok: boolean; error: string; refused?: string }> {
   let refused = "";
-  for (const message_id of messageIds) {
-    const ack = await post(
-      bot,
-      "editMessageText",
-      {
-        chat_id: chat,
-        message_id,
-        text: redactNotice(text),
-        reply_markup: { inline_keyboard: [] },
-      },
-      fetchImpl,
-    );
+  for (const [index, message_id] of messageIds.entries()) {
+    const ack =
+      index === 0
+        ? await post(
+            bot,
+            "editMessageText",
+            {
+              chat_id: chat,
+              message_id,
+              text: redactNotice(text),
+              reply_markup: { inline_keyboard: [] },
+            },
+            fetchImpl,
+          )
+        : await post(
+            bot,
+            "deleteMessage",
+            { chat_id: chat, message_id },
+            fetchImpl,
+          );
     if (ack.ok || /message is not modified/iu.test(ack.error)) continue;
     if (!definitiveRefusal(ack)) return { ok: false, error: ack.error };
     refused ||= ack.error;

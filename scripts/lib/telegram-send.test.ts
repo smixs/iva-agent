@@ -819,6 +819,37 @@ void test("Watch close uses editMessageText with empty inline keyboard", async (
   });
 });
 
+void test("Watch close of a three-message signal edits the first and deletes the others", async () => {
+  const { closeTelegramWatchSignal } = await import("./telegram-send.ts");
+  const requests: CapturedRequest[] = [];
+  const ack = await closeTelegramWatchSignal(
+    "fixture",
+    "owner",
+    { messageIds: [11, 12, 13], text: "✅ ответил в 15:02" },
+    {
+      fetchImpl: async (url, options) => {
+        requests.push(captureRequest(url, options));
+        // 12 is already gone: a definitive refusal of a delete counts as done.
+        return requests.length === 2
+          ? new Response("Bad Request: message to delete not found", {
+              status: 400,
+            })
+          : new Response(JSON.stringify({ ok: true, result: true }));
+      },
+    },
+  );
+  assert.equal(ack.ok, true);
+  assert.deepEqual(
+    requests.map((r) => [r.url.split("/").pop(), r.body.message_id]),
+    [
+      ["editMessageText", 11],
+      ["deleteMessage", 12],
+      ["deleteMessage", 13],
+    ],
+  );
+  assert.deepEqual(requests[1].body, { chat_id: "owner", message_id: 12 });
+});
+
 void test("Watch receipt failure stops fallback and exposes delivery failure", async () => {
   const { sendTelegramHtml } = await import("./telegram-send.ts");
   let calls = 0;
