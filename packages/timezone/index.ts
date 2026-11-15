@@ -1,3 +1,6 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+
 /**
  * Return the canonical IANA timezone `Intl` resolves the input to, or `null`.
  * `Intl` accepts any case and the historical aliases, systemd accepts neither, so
@@ -53,7 +56,32 @@ const SYSTEM_ZONE_NAME: Readonly<Record<string, string>> = {
   "Pacific/Truk": "Pacific/Chuuk",
 };
 
-/** The name of an already canonical zone as systemd and `TZ=` find it in the system tzdata. */
-export function systemTimeZoneName(zone: string): string {
-  return SYSTEM_ZONE_NAME[zone] ?? zone;
+const DEFAULT_ZONEINFO_DIR = "/usr/share/zoneinfo";
+
+// Slash-separated segments of `[A-Za-z0-9_+-]`: no `..`, no empty or absolute parts.
+const ZONE_FILE_NAME = /^[A-Za-z0-9_+-]+(?:\/[A-Za-z0-9_+-]+)*$/;
+
+function zoneFileExists(dir: string, name: string): boolean {
+  return ZONE_FILE_NAME.test(name) && existsSync(join(dir, name));
+}
+
+/**
+ * The name of an already canonical zone as systemd and `TZ=` find it on this host. The
+ * candidates are the owner's own spelling, the tz database's modern name from the table and
+ * the `Intl` name; the first one with a file in the host's tz directory wins, so a host with
+ * only the legacy link or only the modern name is served either way. With no tz directory or
+ * no matching file the table's name is returned.
+ */
+export function systemTimeZoneName(
+  zone: string,
+  options: { configured?: string; zoneinfoDir?: string } = {},
+): string {
+  const mapped = SYSTEM_ZONE_NAME[zone] ?? zone;
+  const dir = options.zoneinfoDir ?? DEFAULT_ZONEINFO_DIR;
+  const candidates = [options.configured, mapped, zone];
+  return (
+    candidates.find(
+      (name): name is string => name !== undefined && zoneFileExists(dir, name),
+    ) ?? mapped
+  );
 }

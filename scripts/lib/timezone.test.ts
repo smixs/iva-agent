@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fc from "fast-check";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, dirname, join } from "node:path";
 
 import { validateTimeZone as validateAuthored } from "@iva/timezone";
 import {
@@ -111,4 +114,44 @@ void test("the system name of a zone is a zone Intl accepts and a second pass ch
   );
   assert.equal(systemTimeZoneName("Europe/Kiev"), "Europe/Kyiv");
   assert.equal(systemTimeZoneName("Asia/Tashkent"), "Asia/Tashkent");
+});
+
+void test("the system name follows the zone files the host has, the table is only the fallback", () => {
+  const dir = mkdtempSync(join(tmpdir(), "iva-zoneinfo-"));
+  try {
+    const put = (name: string) => {
+      mkdirSync(dirname(join(dir, name)), { recursive: true });
+      writeFileSync(join(dir, name), "TZif2");
+    };
+    const kiev = { zoneinfoDir: dir, configured: "Europe/Kiev" };
+    // Neither spelling exists: the table.
+    assert.equal(systemTimeZoneName("Europe/Kiev", kiev), "Europe/Kyiv");
+    put("Europe/Kiev");
+    assert.equal(systemTimeZoneName("Europe/Kiev", kiev), "Europe/Kiev");
+    // Without the owner's spelling the modern name still wins when present.
+    put("Europe/Kyiv");
+    assert.equal(
+      systemTimeZoneName("Europe/Kiev", { zoneinfoDir: dir }),
+      "Europe/Kyiv",
+    );
+    assert.equal(systemTimeZoneName("Europe/Kiev", kiev), "Europe/Kiev");
+    // A traversal-shaped spelling is never looked up, even if the file exists.
+    writeFileSync(join(dir, "..", `${basename(dir)}-evil`), "x");
+    for (const configured of [`../${basename(dir)}-evil`, "/etc/passwd", ""])
+      assert.equal(
+        systemTimeZoneName("Europe/Kiev", { zoneinfoDir: dir, configured }),
+        "Europe/Kyiv",
+      );
+    // A missing directory falls back to the table.
+    assert.equal(
+      systemTimeZoneName("Europe/Kiev", {
+        zoneinfoDir: join(dir, "nope"),
+        configured: "Europe/Kiev",
+      }),
+      "Europe/Kyiv",
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(`${dir}-evil`, { force: true });
+  }
 });

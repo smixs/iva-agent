@@ -57,6 +57,8 @@ type SystemdSetup = {
   readonly inactive?: readonly string[];
   /** Replaces the runtime's data-dir resolver, e.g. to make it throw. */
   readonly dataDirAbs?: () => string;
+  /** The host tz directory; by default a missing one, so the built-in table decides. */
+  readonly zoneinfoDir?: string;
 };
 
 function fixture(env: string | null): Fixture {
@@ -94,16 +96,19 @@ function cli(fx: Fixture, setup: SystemdSetup = {}) {
     return { code: 0, out: "" };
   };
   const runtime = createCliRuntime(fx.project);
-  return createCliSystemd({
-    ...runtime,
-    dataDirAbs: setup.dataDirAbs ?? runtime.dataDirAbs,
-    C: NO_COLOR,
-    UNIT_DIR: fx.unitDir,
-    hasSystemd: () => setup.hasSystemd ?? true,
-    systemd: createSystemdControl({ run }),
-    ok: (message: string) => fx.reports.push(message),
-    warn: (message: string) => fx.warnings.push(message),
-  });
+  return createCliSystemd(
+    {
+      ...runtime,
+      dataDirAbs: setup.dataDirAbs ?? runtime.dataDirAbs,
+      C: NO_COLOR,
+      UNIT_DIR: fx.unitDir,
+      hasSystemd: () => setup.hasSystemd ?? true,
+      systemd: createSystemdControl({ run }),
+      ok: (message: string) => fx.reports.push(message),
+      warn: (message: string) => fx.warnings.push(message),
+    },
+    setup.zoneinfoDir ?? join(fx.project, "..", "no-zoneinfo"),
+  );
 }
 
 function withFixture(env: string | null, body: (fx: Fixture) => void): void {
@@ -222,6 +227,74 @@ test("writeUnits names Europe/Kyiv as the tz database does, not as Intl's legacy
       "OnCalendar=*-*-* 05:00:00 Europe/Kyiv\n",
     );
     assert.match(unit(fx, "iva.service"), /^Environment=TZ=Europe\/Kyiv$/m);
+  });
+});
+
+function zoneinfo(fx: Fixture, ...names: string[]): string {
+  const dir = join(fx.project, "..", "zoneinfo");
+  for (const name of names) {
+    mkdirSync(join(dir, name, ".."), { recursive: true });
+    writeFileSync(join(dir, name), "TZif2");
+  }
+  mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+function timerZone(fx: Fixture, tz: string, zoneinfoDir: string): string[] {
+  writeFileSync(fx.envPath, `ASSISTANT_TIMEZONE=${tz}\n`);
+  cli(fx, { zoneinfoDir }).writeUnits({
+    skipUnits: ["iva-telegram-userbot.service"],
+  });
+  return [
+    unit(fx, "iva-brain.timer").trim(),
+    /^Environment=TZ=(.*)$/m.exec(unit(fx, "iva.service"))?.[1] ?? "",
+  ];
+}
+
+const KYIV_TIMER = "OnCalendar=*-*-* 05:00:00 Europe/Kyiv";
+const KIEV_TIMER = "OnCalendar=*-*-* 05:00:00 Europe/Kiev";
+
+test("writeUnits names the zone the host tz database has", () => {
+  withFixture("IVA_PORT=9001\n", (fx) => {
+    assert.deepEqual(
+      timerZone(fx, "Europe/Kyiv", zoneinfo(fx, "Europe/Kyiv")),
+      [KYIV_TIMER, "Europe/Kyiv"],
+    );
+  });
+  withFixture("IVA_PORT=9001\n", (fx) => {
+    // A host that kept only the legacy link, for an owner who typed that spelling.
+    assert.deepEqual(
+      timerZone(fx, "Europe/Kiev", zoneinfo(fx, "Europe/Kiev")),
+      [KIEV_TIMER, "Europe/Kiev"],
+    );
+  });
+  withFixture("IVA_PORT=9001\n", (fx) => {
+    const dir = zoneinfo(fx, "Europe/Kyiv", "Europe/Kiev");
+    assert.deepEqual(timerZone(fx, "Europe/Kyiv", dir), [
+      KYIV_TIMER,
+      "Europe/Kyiv",
+    ]);
+  });
+  withFixture("IVA_PORT=9001\n", (fx) => {
+    // No tz directory at all: the built-in table decides.
+    assert.deepEqual(
+      timerZone(fx, "Europe/Kiev", join(fx.project, "..", "missing")),
+      [KYIV_TIMER, "Europe/Kyiv"],
+    );
+  });
+});
+
+test("writeUnits never looks a rejected timezone name up in the tz directory", () => {
+  withFixture("IVA_PORT=9001\n", (fx) => {
+    const dir = zoneinfo(fx, "UTC");
+    writeFileSync(join(fx.project, "..", "evil"), "x");
+    assert.deepEqual(timerZone(fx, "../evil", dir), [
+      "OnCalendar=*-*-* 05:00:00 UTC",
+      "UTC",
+    ]);
+    assert.ok(
+      fx.warnings.some((w) => w.includes("invalid ASSISTANT_TIMEZONE")),
+    );
   });
 });
 
