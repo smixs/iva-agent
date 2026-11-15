@@ -198,7 +198,31 @@ Iva carries eve 0.51.1 sources from vercel/eve in `eve/`, with our changes under
 ## What's New
 
 <details>
-<summary><b>v0.5.12 · 10.11.2026 — expand the latest releases</b></summary>
+<summary><b>v0.5.13 · 15.11.2026 — expand the latest releases</b></summary>
+
+### 15.11.2026
+
+#### v0.5.13
+
+- 🧩 **Text answers while Telegram refuses widgets**: Telegram's refusal is remembered for a day and Iva gives the same content as text; before, only the widget's caption arrived.
+- ⏰ **Plain reminders arrive on time without waiting for the model**: ready text is sent by code to the second; tasks still run as their own turn.
+- ⏰ **A reminder no longer vanishes after an Iva restart**: a firing cut short is marked and reported once, naming the reminder that may not have arrived; its text is never sent twice.
+- ⏰ **A conversation reset keeps the reminder's text**: when `/new` interrupts a reminder task, the original text arrives with a note; an explicit `/stop` keeps the cancellation.
+- ⏰ **A failed reminder task arrives as a short line**: the start of its text and "Not done: the turn gave no answer" instead of the whole task text.
+- 🩹 **The first progress reply arrives as an ordinary message**: before a long chain of tools Iva says what she is doing, once the turn has run for more than 10 seconds.
+- 🩹 **A reply to Iva's own service message carries context**: a reply to the bot's own text is marked as Iva's history; foreign quotes stay protected.
+- 🩹 **The message after `/new` survives a restart in the middle of the reset**: the new session receives the message sent right after `/new`.
+- 🧠 **The night retries a temporarily failing model for weekly and monthly summaries**: overload, HTTP 429 and dropped connections use growing pauses until the night's deadline; a successful retry closes the failure.
+- 🩹 **The night is not skipped after a restart that reused the process id**: a schedule reservation left by the earlier process counts as abandoned at once.
+- 🔎 **`iva jobs status` names the state of schedules**: free, running, a dead process's reservation or an expired one, and the last outcome.
+- 🔧 **Updates start from version 0.5.0**: an older installation is refused with the recovery command and keeps running its version; `beta.sh` is gone, `iva beta` turns the beta on.
+- 🛠️ **A truthful update result**: the success message appears after the new version is pinned in the installation.
+- 🔧 **Userbot: a wrong password can be entered again**: the QR sign-in no longer starts over because of a typo in the two-factor password.
+- 💾 **A huge file no longer stops the memory backup**: a vault file over 90 MB stays out of the commit and is named to the owner once; the rest of the memory is backed up as before.
+- 🧠 **The nightly graph and the write check judge a link the same way**: a `[[…]]` link accepted when the card was written is no longer called broken by the nightly graph.
+- 🔌 **A failed plugin build undoes only its own switch**: undoing `iva plugin enable` or `trust` no longer restores trust or enablement removed during the build.
+- 🩹 **A turn no longer takes Iva down when the Claude CLI exits early**: it is now the failure of one turn, not of the process.
+- 🧹 **The eve copy without tests and docs**: the eve sources inside Iva drop what Iva never loads; a plugin importing a removed eve entry point stops building.
 
 ### 10.11.2026
 
@@ -227,12 +251,6 @@ Iva carries eve 0.51.1 sources from vercel/eve in `eve/`, with our changes under
 - 🔧 **Tool search ranks names first**: literal names beat long descriptions, so Telegram history and the chat list are found again.
 - 🔧 **Iva survives a Claude access rotation**: after an early HTTP 401 she waits for the new access and repeats the call once.
 - 🧠 **The night raises its own limits for long days**: within the configured ceilings it keeps going and retries git with a longer wait; `iva night show|set` shows and changes the limits.
-
-### 31.10.2026
-
-#### v0.5.8
-
-- 🔧 **Telegram shows the model context window**: `/new` and status use the same window as Iva. Claude model selection saves its window, and helpers respect their own model window.
 
 </details>
 
