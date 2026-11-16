@@ -45,12 +45,16 @@ const SCOPE = ["cards", "summaries", "weekly", "monthly", "yearly"];
 // собранным в отдельном индексе: застейдженный набор владельца в него не попадает.
 // Любой отказ — строка в журнал, ночь не роняется.
 function keepIndexOutOfBackup(vault: string): void {
-  const git = (args: readonly string[], index?: string) =>
-    spawnSync("git", [...args], {
+  const git = (args: readonly string[], index?: string, input?: string) => {
+    const env = gitEnv();
+    if (index !== undefined) env.GIT_INDEX_FILE = index;
+    return spawnSync("git", [...args], {
       cwd: vault,
       encoding: "utf8",
-      env: index !== undefined ? { ...gitEnv(), GIT_INDEX_FILE: index } : gitEnv(),
+      env,
+      input,
     });
+  };
   // Только собственный репозиторий: vault внутри чужого (например dev-checkout)
   // сам репозиторием не является, и без этой проверки каждая git-запись ниже
   // ушла бы в чужой индекс и чужой exclude.
@@ -69,8 +73,22 @@ function keepIndexOutOfBackup(vault: string): void {
   )
     return;
   // Эффективное исключение, а не наличие строки: при `!.index/` или `!.index/**`
-  // в .gitignore владельца дописанная в конец `.index/` снова решает.
-  if (git(["check-ignore", "-q", "--", ".index/embeddings.json"]).status !== 0)
+  // в .gitignore владельца дописанная в конец `.index/` снова решает. Строку
+  // дописываем только на честный «не игнорируется» (1): любая другая ошибка —
+  // строка в журнал, а не дубль в .gitignore владельца. check-ignore читает
+  // имена, не pathspec: GIT_LITERAL_PATHSPECS ей не поддерживается (git 2.54
+  // отвечает 128), поэтому флаг снимается на вызов, а имя идёт NUL-stdin'ом —
+  // как в vault-commit.
+  const ignored = git(
+    ["--no-literal-pathspecs", "check-ignore", "-q", "-z", "--stdin"],
+    undefined,
+    ".index/embeddings.json\0",
+  );
+  if (ignored.status !== 0 && ignored.status !== 1)
+    console.error(
+      `embed-index: не смог проверить ignore .index: ${(ignored.stderr || ignored.stdout || "git check-ignore failed").trim().split("\n")[0]}`,
+    );
+  if (ignored.status === 1)
     try {
       const file = join(vault, ".gitignore");
       let current = "";

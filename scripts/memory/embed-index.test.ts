@@ -335,6 +335,13 @@ test("старая установка: кэш исключается из бэк
       "2",
       "новых коммитов про .index нет",
     );
+    assert.equal(
+      readFileSync(join(vault, ".gitignore"), "utf8")
+        .split("\n")
+        .filter((line) => line === ".index/").length,
+      1,
+      "повторная ночь не дописывает .index/ второй раз",
+    );
     assert.ok(
       !git("status", "--porcelain")
         .split("\n")
@@ -344,6 +351,46 @@ test("старая установка: кэш исключается из бэк
   } finally {
     await stub.close();
   }
+});
+
+// check-ignore шёл через GIT_LITERAL_PATHSPECS, который эта команда не знает:
+// git 2.54 отвечал 128, ошибка читалась как «не игнорируется» и каждая ночь
+// дописывала `.index/` в .gitignore заново. Держим обе стороны: строки нет —
+// дописываем ровно один раз, строка есть — файл владельца остаётся байт-в-байт.
+test("повторные ночи не дублируют .index/ в .gitignore", async () => {
+  const vault = makeVault();
+  const git = (...args: string[]) =>
+    execFileSync("git", ["-C", vault, ...args], { encoding: "utf8" }).trim();
+  writeFileSync(join(vault, "cards", "ivan.md"), card("Иван", "Монтажёр."));
+  writeFileSync(join(vault, ".gitignore"), "# owner rules\n*.log\n");
+  git("init", "-q");
+  git("config", "user.email", "owner@example.invalid");
+  git("config", "user.name", "Owner");
+  git("add", "-A");
+  git("commit", "-qm", "owner state");
+
+  // Без ключа сборка выходит сразу после сторожа — проверяется именно он.
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    ASSISTANT_VAULT_DIR: vault,
+  };
+  delete env.JINA_API_KEY;
+  delete env.DEEPINFRA_API_KEY;
+  delete env.MEMORY_EMBED_URL;
+  for (let i = 0; i < 3; i++) await run(process.execPath, [SCRIPT], { env });
+
+  const written = readFileSync(join(vault, ".gitignore"), "utf8");
+  assert.equal(
+    written.split("\n").filter((line) => line === ".index/").length,
+    1,
+    "три ночи подряд — ровно одна строка .index/",
+  );
+  for (let i = 0; i < 2; i++) await run(process.execPath, [SCRIPT], { env });
+  assert.equal(
+    readFileSync(join(vault, ".gitignore"), "utf8"),
+    written,
+    "исключённый .index: .gitignore владельца не тронут",
+  );
 });
 
 // Vault, лежащий внутри чужого репозитория (dev-checkout с vault/ подряд), сам
