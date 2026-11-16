@@ -22,6 +22,7 @@ import {
 import { traceBridgeAdmission } from "#lib/trace.ts";
 import { ALLOWED, BOT_USERNAME, DATA_DIR, log } from "./config.ts";
 import { chatKey } from "./offset.ts";
+import { resetEpochFor } from "./queue.ts";
 import { routeMessageUpdate, type RouteMessageResult } from "./routing.ts";
 
 export const TELEGRAM_INBOX_FILE = join(DATA_DIR, "telegram-inbox.json");
@@ -44,6 +45,12 @@ export type InboxCollectorOptions = {
 export type ReadyInboxBatch = {
   update: TelegramQueueUpdate;
   updateIds: number[];
+  // Время постановки головы пачки во входящие: в очередь чата пачка встаёт с ним,
+  // иначе отсечка сброса отпустит сообщение, пришедшее до /new, но промотированное позже.
+  arrivedAt: number;
+  // Эпоха сброса головы пачки (null — запись без пометки): элемент очереди хранит
+  // эпоху приёма, а не момент промоута, иначе старое пометилось бы новой границей.
+  resetFence: number | null;
 };
 
 export type InboxAdmissionResult =
@@ -163,20 +170,40 @@ export function selectReadyInboxBatch(
 ): ReadyInboxBatch | null {
   const collector = createCollector(collectorOptions);
   const updateIds: number[] = [];
+  let arrivedAt = 0;
+  let resetFence: number | null = null;
   for (const item of items) {
     if (!isReadyInboxItem(key, item)) {
       throw new Error(`invalid durable Telegram inbox item ${item.updateId}`);
     }
     const update = item.update;
+    if (updateIds.length === 0) {
+      arrivedAt = item.enqueuedAt;
+      resetFence =
+        typeof item.resetFence === "number" ? item.resetFence : null;
+    }
     updateIds.push(item.updateId);
     const offered = collectorOffer(collector, update, item.enqueuedAt);
     if (offered.status === "passthrough" || offered.status === "ready") {
-      return { update: offered.update, updateIds: [...updateIds] };
+      return {
+        update: offered.update,
+        updateIds: [...updateIds],
+        arrivedAt,
+        resetFence,
+      };
     }
   }
   const [expired] = collectorTakeExpired(collector, now);
-  return expired ? { update: expired, updateIds } : null;
+  return expired ? { update: expired, updateIds, arrivedAt, resetFence } : null;
 }
+
+// Пометка эпохи сброса при постановке: запись, принятая до durable-намерения
+// /new, после успешного сброса не выживает — промоут отбрасывает чужую эпоху.
+const admitFenceFields = (candidate: TelegramQueueUpdate) => {
+  const key = chatKey(candidate);
+  const epoch = key === null ? undefined : resetEpochFor(key);
+  return epoch === undefined ? {} : { itemFields: { resetFence: epoch } };
+};
 
 export async function admitTelegramUpdate(
   update: TelegramQueueUpdate,
@@ -185,7 +212,10 @@ export async function admitTelegramUpdate(
     botUsername = BOT_USERNAME,
     trustedLocal = false,
     enqueueImpl = (key: string, candidate: TelegramQueueUpdate) =>
-      enqueueQueueFile(TELEGRAM_INBOX_FILE, key, candidate, { strict: true }),
+      enqueueQueueFile(TELEGRAM_INBOX_FILE, key, candidate, {
+        strict: true,
+        ...admitFenceFields(candidate),
+      }),
     logImpl = log,
   }: {
     allowedUserIds?: ReadonlySet<string>;
@@ -223,6 +253,14 @@ export async function admitTelegramUpdate(
   }
 }
 
+// inbox-ключ → ключ чата: «chat:thread:from» → «chat:thread»,
+// «callback:chat:thread» → «chat:thread». У inline-колбэков чата нет, эпоха для
+// них не определена — записи без пометки считаются свежими.
+const inboxChatKey = (key: string) =>
+  key.startsWith("callback:")
+    ? key.slice("callback:".length)
+    : key.slice(0, key.lastIndexOf(":"));
+
 export async function promoteReadyInbox({
   now = Date.now,
   collectorOptions = {},
@@ -234,16 +272,21 @@ export async function promoteReadyInbox({
   quarantineImpl = (records: readonly DamagedQueueRecord[]) =>
     quarantineQueueRecords(TELEGRAM_INBOX_FILE, records, { logImpl: log }),
   backoff = inboxPromotionBackoff,
+  resetEpochImpl = resetEpochFor,
 }: {
   now?: () => number;
   collectorOptions?: InboxCollectorOptions;
   loadImpl?: () => Promise<
     Awaited<ReturnType<typeof loadQueueFile>>["document"]
   >;
-  routeImpl?: (update: TelegramQueueUpdate) => Promise<RouteMessageResult>;
+  routeImpl?: (
+    update: TelegramQueueUpdate,
+    options?: { arrivedAt?: number; resetFence?: number | null },
+  ) => Promise<RouteMessageResult>;
   acknowledgeImpl?: (key: string, ids: readonly number[]) => Promise<unknown>;
   quarantineImpl?: (records: readonly DamagedQueueRecord[]) => Promise<unknown>;
   backoff?: Map<string, InboxPromotionBackoff>;
+  resetEpochImpl?: (chatKey: string) => number | undefined;
 } = {}): Promise<number> {
   const snapshot = await loadImpl();
   for (const key of queueKeys(snapshot)) {
@@ -267,14 +310,41 @@ export async function promoteReadyInbox({
         damaged.map((record) => record.updateId),
       );
     }
+    const undamaged = items.filter((item) => !damaged.includes(item));
+    // Записи до границы последнего /new мертвы: durable-владение снимает их до
+    // склейки коллектора — в новый разговор ни пачкой, ни напрямую не попадают.
+    // Пометка новее эпохи тоже живая: это наследие отменённого намерения, сброс
+    // не состоялся, и терять такие сообщения нельзя. Запись без пометки доказывает
+    // «после» только строго бо́льшим временем постановки: совпавшая миллисекунда
+    // «до» и «после» не различает.
+    const epoch = resetEpochImpl(inboxChatKey(key));
+    const fresh = (item: TelegramQueueItem) =>
+      epoch === undefined ||
+      (item.resetFence !== undefined
+        ? item.resetFence >= epoch
+        : typeof item.enqueuedAt === "number" && item.enqueuedAt > epoch);
+    const firstFresh = undamaged.findIndex(fresh);
+    const droppable = undamaged.slice(
+      0,
+      firstFresh < 0 ? undamaged.length : firstFresh,
+    );
+    if (droppable.length > 0) {
+      await acknowledgeImpl(
+        key,
+        droppable.map((item) => item.updateId),
+      );
+    }
     const batch = selectReadyInboxBatch(
       key,
-      items.filter((item) => !damaged.includes(item)),
+      undamaged.filter(fresh),
       attemptAt,
       collectorOptions,
     );
     if (!batch) continue;
-    const routed = await routeImpl(batch.update);
+    const routed = await routeImpl(batch.update, {
+      arrivedAt: batch.arrivedAt,
+      resetFence: batch.resetFence,
+    });
     // terminal-drop — исход, после которого повторять доставку нечем и незачем:
     // владение снимается ровно так же, как после принятого хода (issue #203).
     if (!["queued", "delivered", "terminal-drop", "dropped"].includes(routed)) {

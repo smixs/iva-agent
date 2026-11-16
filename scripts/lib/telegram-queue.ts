@@ -233,6 +233,10 @@ export type TelegramQueueItem = {
   version: number;
   updateId: number;
   enqueuedAt?: number;
+  // Эпоха сброса, в которую элемент принят (requestedAt намерения /new): update_id
+  // Telegram не обязан расти, а миллисекундный штамп не различает «до» и «после»
+  // внутри одной отсечки — границу задаёт только совпадение эпохи.
+  resetFence?: number;
   update?: TelegramQueueUpdate;
   // Releases up to 0.5.11 wrote a queue of strings they found as items of this shape.
   legacyText?: string;
@@ -273,6 +277,9 @@ type QueueFileOptions = {
   nonce?: string | (() => string);
   replace?: boolean;
   now?: () => number;
+  // Служебные поля нового элемента (например, эпоха сброса); версия, updateId,
+  // enqueuedAt и update всегда берёт сам createQueueItem.
+  itemFields?: Record<string, unknown>;
   logImpl?: (...parts: unknown[]) => void;
 };
 
@@ -440,6 +447,7 @@ export function normalizeQueueDocument(
 export function createQueueItem(
   update: unknown,
   now = Date.now(),
+  fields?: Record<string, unknown>,
 ): TelegramQueueItem {
   if (!isTelegramQueueUpdate(update)) {
     throw new Error(
@@ -447,6 +455,7 @@ export function createQueueItem(
     );
   }
   return {
+    ...fields,
     version: TELEGRAM_QUEUE_ITEM_VERSION,
     updateId: update.update_id,
     enqueuedAt: now,
@@ -1043,7 +1052,7 @@ export async function enqueueQueueFile(
   const result = enqueueItem(
     loaded.document,
     chatKey,
-    createQueueItem(update, options.now?.() ?? Date.now()),
+    createQueueItem(update, options.now?.() ?? Date.now(), options.itemFields),
   );
   // A previous rename can be visible even when its parent-directory fsync failed.
   // Rewrite duplicate retries too, so offset advancement always follows a write

@@ -34,7 +34,13 @@ const load = async (path: string): Promise<unknown> =>
   await import(pathToFileURL(join(root, path)).href);
 
 await load("scripts/lib/ts-esm-hooks.ts");
-const queue = (await load("scripts/poller/main.ts")) as BridgeModule;
+const queue = (await load("scripts/poller/main.ts")) as BridgeModule & {
+  persistPrivateResetIntent: (
+    chatKey: string,
+    discardThroughUpdateId?: number,
+    options?: { now?: () => number },
+  ) => Promise<unknown>;
+};
 
 const CHAT_KEY = "42:";
 const item = (updateId: number) => ({
@@ -63,7 +69,14 @@ const remote = (target: unknown) =>
 if (role === "old") {
   await queue.writeQueueAtomic({
     version: 1,
-    queues: { [CHAT_KEY]: [item(100), item(102)] },
+    queues: {
+      [CHAT_KEY]: [
+        item(100),
+        // Сообщение после отсечки принято под намерением нового /new: его пометка
+        // — эпоха намерения (1001), и правило >= границы оставляет его в очереди.
+        { ...item(102), resetFence: 1001 },
+      ],
+    },
   });
   await queue.performScopedReset(
     CHAT_KEY,
@@ -71,6 +84,8 @@ if (role === "old") {
     {
       clearQueue: true,
       discardThroughUpdateId: 101,
+      persistIntentImpl: () =>
+        queue.persistPrivateResetIntent(CHAT_KEY, 101, { now: () => 1001 }),
       requestResetImpl: ({ target }: { target: unknown }) => remote(target),
       logImpl: () => {},
     },

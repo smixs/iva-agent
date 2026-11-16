@@ -164,10 +164,17 @@ void test("reset cleanup and post-intent enqueue cannot overwrite each other", a
   });
   await clearStarted;
 
-  const enqueuing = enqueueTelegramQueueUpdate("77:", { update_id: 78 }, () => {
-    events.push("enqueue");
-    return Promise.resolve({} as never);
-  });
+  const enqueuing = enqueueTelegramQueueUpdate(
+    "77:",
+    { update_id: 78 },
+    undefined,
+    {
+      enqueueImpl: () => {
+        events.push("enqueue");
+        return Promise.resolve({} as never);
+      },
+    },
+  );
   await Promise.resolve();
   assert.deepEqual(events, ["clear-start"]);
 

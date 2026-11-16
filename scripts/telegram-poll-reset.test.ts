@@ -24,6 +24,7 @@ type QueueItem = {
   version: number;
   updateId: number;
   enqueuedAt?: number;
+  resetFence?: number;
   update?: QueueUpdate;
 };
 type QueueDocument = {
@@ -39,6 +40,7 @@ const queued = (updateId: number, text: string): QueueItem => ({
 type ResetIntent = {
   chatKey: string;
   discardThroughUpdateId?: number;
+  resetEpoch?: number;
   target:
     | { sessionId: string }
     | { address: { chatId: string; messageThreadId?: number } };
@@ -56,7 +58,10 @@ type CompleteResetOptions = {
 type PerformResetOptions = {
   clearQueue?: boolean;
   discardThroughUpdateId?: number;
-  persistIntentImpl?: () => Promise<unknown>;
+  persistIntentImpl?: (
+    chatKey: string,
+    discardThroughUpdateId?: number,
+  ) => Promise<unknown>;
   requestResetImpl?: (intent: ResetIntent) => Promise<unknown>;
   completeStateImpl?: () => Promise<unknown>;
   clearIntentImpl?: () => Promise<unknown>;
@@ -69,8 +74,16 @@ type ReconcileResetOptions = {
   requestResetImpl?: (intent: ResetIntent) => Promise<unknown>;
   completeStateImpl?: (
     chatKey: string,
-    options: Record<string, unknown>,
-  ) => Promise<void>;
+    options: {
+      clearQueue?: boolean;
+      discardThroughUpdateId?: number;
+      resetFence?: number;
+    },
+  ) => Promise<unknown>;
+  clearIntentImpl?: (
+    chatKey: string,
+    expectedRequestedAt?: number,
+  ) => Promise<unknown>;
   logImpl?: (line: string) => void;
   now?: () => number;
   retryAfterMs?: number;
@@ -88,12 +101,18 @@ type WriteQueueOptions = {
   renameImpl?: () => Promise<unknown>;
 };
 type PollModule = {
+  clearChatQueue: (
+    chatKey: string,
+    discardThroughUpdateId?: number,
+    resetFence?: number,
+  ) => Promise<void>;
   clearPrivateResetIntent: (
     chatKey: string,
     options?: {
       clearImpl?: (directory: string, chatKey: string) => Promise<void>;
+      expectedRequestedAt?: number;
     },
-  ) => Promise<void>;
+  ) => Promise<boolean>;
   completeScopedResetState: (
     chatKey: string,
     options: CompleteResetOptions,
@@ -119,6 +138,7 @@ type PollModule = {
         chatKey: string,
         options: { discardThroughUpdateId?: number },
       ) => Promise<DurableResetIntent>;
+      now?: () => number;
     },
   ) => Promise<unknown>;
   reconcileScopedResetIntents: (
@@ -146,11 +166,27 @@ process.env.TELEGRAM_BOT_TOKEN = "test-token";
 process.env.TELEGRAM_WEBHOOK_SECRET_TOKEN = "test-secret";
 await import("./lib/ts-esm-hooks.ts");
 
-const [pollModule, runStatusModule] = (await Promise.all([
+const [pollModule, runStatusModule, inboxModule] = (await Promise.all([
   import(`./telegram-poll.mjs?reset-test=${Date.now()}`),
   import(`#lib/run-status.ts?reset-test=${Date.now()}`),
-])) as [unknown, unknown];
+  import("./poller/inbox.ts"),
+])) as [unknown, unknown, unknown];
+type InboxModule = {
+  admitTelegramUpdate: (
+    update: QueueUpdate,
+    options?: { trustedLocal?: boolean },
+  ) => Promise<string>;
+  promoteReadyInbox: (options?: {
+    now?: () => number;
+    collectorOptions?: { quietMs?: number };
+    routeImpl?: (
+      update: QueueUpdate,
+      options?: { arrivedAt?: number; resetFence?: number | null },
+    ) => Promise<string>;
+  }) => Promise<number>;
+};
 const {
+  clearChatQueue,
   clearPrivateResetIntent,
   completeScopedResetState,
   drainReadyQueueHeads,
@@ -166,6 +202,23 @@ const {
   writeQueueAtomic,
 } = pollModule as PollModule;
 const status = runStatusModule as RunStatusModule;
+const inbox = inboxModule as InboxModule;
+
+const inboxKey = (chatId: number, fromId: number) => `${chatId}::${fromId}`;
+const inboxDocument = () =>
+  JSON.parse(
+    readFileSync(join(dataDir, "telegram-inbox.json"), "utf8"),
+  ) as unknown as QueueDocument;
+const inboxUpdate = (chatId: number, updateId: number, text: string) => ({
+  update_id: updateId,
+  message: {
+    message_id: updateId,
+    date: 1,
+    chat: { id: chatId, type: "private" },
+    from: { id: 42, is_bot: false, first_name: "Owner" },
+    text,
+  },
+});
 
 test("private reset clears only the target chat status and queue", async () => {
   status.setChatStatus("chat-a:", {
@@ -294,7 +347,7 @@ test("private reset intent is durable before remote reset and clears after local
   assert.deepEqual(events, ["intent", "remote", "cleanup", "clear-intent"]);
 });
 
-// Тесты соответствия specs/ResetIntent.tla: имя называет инвариант модели.
+// Тесты соответствия specs/ResetEpoch.tla: имя называет инвариант модели.
 const privateUpdate = (updateId: number, chatId: number, text: string) => ({
   version: 1,
   updateId,
@@ -426,18 +479,22 @@ test("ResetIntent IntentUntilClean and ConfirmOnce: a failed queue cleanup keeps
   assert.deepEqual(notices, [], "recovery never repeats the confirmation");
 });
 
-test("ResetIntent ExactCut: recovery clears the queue through the recorded update_id and keeps later messages", async () => {
+test("ResetEpoch ExactCut: recovery clears the queue through the recorded update_id and keeps later messages", async () => {
   const key = "603:";
+  const intent = (await persistPrivateResetIntent(key, 801, {
+    now: () => 1000,
+  })) as DurableResetIntent;
   await writeQueueAtomic({
     version: 1,
     queues: {
       [key]: [
         privateUpdate(800, 603, "before /new"),
-        privateUpdate(802, 603, "after /new"),
+        // Принятое под живым намерением: промоут ставит эпоху намерения,
+        // и правило >= границы оставляет такой элемент.
+        { ...privateUpdate(802, 603, "after /new"), resetFence: intent.requestedAt },
       ],
     },
   });
-  await persistPrivateResetIntent(key, 801);
   assert.equal(
     await reconcileScopedResetIntents({
       requestResetImpl: async () => ({ status: "reset" }),
@@ -454,16 +511,18 @@ test("ResetIntent ExactCut: recovery clears the queue through the recorded updat
 
 test("ResetIntent ExactCut: a reconciliation that scanned before /new does not reset the session the delivery filled", async () => {
   const key = "735:";
+  await persistPrivateResetIntent(key, 731, { now: () => 1000 });
+  // Эпоха /new детерминирована: floor = намерение + 1.
   await writeQueueAtomic({
     version: 1,
     queues: {
       [key]: [
         privateUpdate(730, 735, "before /new"),
-        privateUpdate(732, 735, "after /new"),
+        // Принятое под намерением нового /new (эпоха 1001): живо по >=.
+        { ...privateUpdate(732, 735, "after /new"), resetFence: 1001 },
       ],
     },
   });
-  await persistPrivateResetIntent(key, 731);
   // Удалённая сторона: агент разрешает сессию чата по адресу и сбрасывает её.
   const session: number[] = [730];
   const resets: string[] = [];
@@ -501,6 +560,8 @@ test("ResetIntent ExactCut: a reconciliation that scanned before /new does not r
     {
       clearQueue: true,
       discardThroughUpdateId: 731,
+      persistIntentImpl: () =>
+        persistPrivateResetIntent(key, 731, { now: () => 1001 }),
       requestResetImpl: async () => reset("new"),
       logImpl: () => {},
     },
@@ -622,7 +683,7 @@ test("startup reconciliation prevents a remotely reset private queue from draini
       ],
     },
   });
-  await persistPrivateResetIntent(key);
+  await persistPrivateResetIntent(key, undefined, { now: () => 4242 });
 
   const remoteRetries: ResetIntent[] = [];
   await reconcileScopedResetIntents({
@@ -632,7 +693,11 @@ test("startup reconciliation prevents a remotely reset private queue from draini
   });
 
   assert.deepEqual(remoteRetries, [
-    { chatKey: key, target: { address: { chatId: "106" } } },
+    {
+      chatKey: key,
+      resetEpoch: 4242,
+      target: { address: { chatId: "106" } },
+    },
   ]);
   assert.deepEqual(await loadPrivateResetIntents(), []);
   assert.equal(status.getChatStatus(key).status, "idle");
@@ -1020,6 +1085,726 @@ test("a message queued after failed /new survives reconcile and enters the new s
   assert.deepEqual(delivered, [501]);
 });
 
+// update_id Telegram не обязан расти (опыт c1, backlog IVB-501): сообщение до /new с
+// бо́льшим номером обязано уйти, а сообщение после /new с меньшим — остаться.
+// Границу задаёт эпоха сброса (requestedAt намерения), а не номер и не штамп времени.
+test("a reset cuts the queue by reset fence, not by update_id", async () => {
+  const key = "512:";
+  await writeQueueAtomic({
+    version: 1,
+    queues: {
+      [key]: [
+        {
+          version: 1,
+          updateId: 900,
+          enqueuedAt: 1,
+          update: { update_id: 900, message: { text: "before /new" } },
+        },
+      ],
+    },
+  });
+  await performScopedReset(
+    key,
+    { sessionId: "session-512" },
+    {
+      clearQueue: true,
+      discardThroughUpdateId: 500,
+      requestResetImpl: async () => {
+        // Пришло, пока шёл сброс: номер меньше отсечки, но элемент помечается
+        // эпохой ожидающего намерения и переживает чистку.
+        await routeMessageUpdate(
+          {
+            update_id: 400,
+            message: {
+              message_id: 400,
+              date: 1,
+              chat: { id: 512, type: "private" },
+              from: { id: 42, is_bot: false, first_name: "Owner" },
+              text: "after /new",
+            },
+          },
+          {
+            deliverImpl: () => Promise.resolve(true),
+            acknowledgeImpl: () => Promise.resolve(),
+            shouldQueueImpl: () => true,
+          },
+        );
+        return { status: "reset" };
+      },
+    },
+  );
+  assert.deepEqual(
+    (await loadQueue()).queues[key]?.map(({ updateId }) => updateId),
+    [400],
+  );
+  await writeQueueAtomic({ version: 1, queues: {} });
+});
+
+test("reconcile cuts the queue by reset fence too", async () => {
+  const key = "513:";
+  const intent = (await persistPrivateResetIntent(
+    key,
+    500,
+  )) as DurableResetIntent;
+  await writeQueueAtomic({
+    version: 1,
+    queues: {
+      [key]: [
+        {
+          // До /new: без пометки эпохи, время постановки старше границы — уходит.
+          version: 1,
+          updateId: 900,
+          enqueuedAt: intent.requestedAt - 1,
+          update: { update_id: 900, message: { text: "before /new" } },
+        },
+        {
+          // Штамп совпадает с границей миллисекунда в миллисекунду — без эпохи
+          // это не доказывает «после», элемент уходит.
+          version: 1,
+          updateId: 700,
+          enqueuedAt: intent.requestedAt,
+          update: { update_id: 700, message: { text: "same ms" } },
+        },
+        {
+          // После /new: помечен эпохой намерения — живёт, хотя штамп старше её.
+          version: 1,
+          updateId: 400,
+          enqueuedAt: intent.requestedAt - 1,
+          resetFence: intent.requestedAt,
+          update: { update_id: 400, message: { text: "after /new" } },
+        },
+        {
+          // Запись до появления пометок: время постановки строго позже границы —
+          // пришла после /new, живёт.
+          version: 1,
+          updateId: 500,
+          enqueuedAt: intent.requestedAt + 1,
+          update: { update_id: 500, message: { text: "legacy post" } },
+        },
+      ],
+    },
+  });
+  assert.equal(
+    await reconcileScopedResetIntents({
+      requestResetImpl: () => Promise.resolve({ status: "reset" }),
+      logImpl: () => {},
+    }),
+    1,
+  );
+  assert.deepEqual(
+    (await loadQueue()).queues[key]?.map(({ updateId }) => updateId),
+    [400, 500],
+  );
+  await writeQueueAtomic({ version: 1, queues: {} });
+});
+
+const intentFileFor = (key: string) =>
+  join(
+    dataDir,
+    "telegram-reset-intents",
+    `${Buffer.from(key, "utf8").toString("base64url")}.json`,
+  );
+// Новое /new перезаписывает durable-намерение той же пары чат:эпоха новой
+// requestedAt. persistImpl пишет файл сама, потому что подменяет durable-слой.
+const persistFreshIntent = async (
+  key: string,
+  requestedAt: number,
+): Promise<DurableResetIntent> => {
+  const fresh: DurableResetIntent = { version: 1, chatKey: key, requestedAt };
+  await persistPrivateResetIntent(key, undefined, {
+    persistImpl: async (_directory, chatKey) => {
+      writeFileSync(intentFileFor(chatKey), JSON.stringify(fresh));
+      return fresh;
+    },
+  });
+  return fresh;
+};
+
+// Второй возврат IVB-501: сверка завершила намерение, которое за время remote-вызова
+// уступило новому /new, — её clearChatQueue резал элементы новой эпохи, а clearIntent
+// снимал чужое намерение. Теперь сверка проверяет актуальность перед чисткой.
+test("a reconcile superseded during remote reset keeps the newer intent and its queue", async () => {
+  const key = "516:";
+  status.setChatStatus(key, { status: "idle" });
+  await writeQueueAtomic({ version: 1, queues: {} });
+  const stale = (await persistPrivateResetIntent(key)) as DurableResetIntent;
+  let remoteEntered: (() => void) | undefined;
+  const entered = new Promise<void>((resolve) => {
+    remoteEntered = resolve;
+  });
+  let releaseRemote: (() => void) | undefined;
+  const remoteGate = new Promise<void>((resolve) => {
+    releaseRemote = resolve;
+  });
+  const reconciling = reconcileScopedResetIntents({
+    loadIntentsImpl: async () => [stale],
+    requestResetImpl: async () => {
+      remoteEntered?.();
+      await remoteGate;
+      return { status: "reset" };
+    },
+    logImpl: () => {},
+  });
+  await entered;
+  const fresh = await persistFreshIntent(key, stale.requestedAt + 1);
+  await routeMessageUpdate(
+    {
+      update_id: 600,
+      message: {
+        message_id: 600,
+        date: 1,
+        chat: { id: 516, type: "private" },
+        from: { id: 42, is_bot: false, first_name: "Owner" },
+        text: "after second /new",
+      },
+    },
+    {
+      deliverImpl: () => Promise.resolve(true),
+      acknowledgeImpl: () => Promise.resolve(),
+      shouldQueueImpl: () => true,
+    },
+  );
+  releaseRemote?.();
+
+  assert.equal(await reconciling, 0);
+  assert.deepEqual(
+    (await loadQueue()).queues[key]?.map(({ updateId }) => updateId),
+    [600],
+  );
+  assert.deepEqual(
+    (await loadPrivateResetIntents()).filter(({ chatKey }) => chatKey === key),
+    [fresh],
+  );
+  assert.equal(hasPrivateResetIntent(key), true);
+  await clearPrivateResetIntent(key);
+});
+
+test("a reconcile skips an intent already superseded before its remote call", async () => {
+  const key = "517:";
+  status.setChatStatus(key, { status: "idle" });
+  const stale = (await persistPrivateResetIntent(key)) as DurableResetIntent;
+  const fresh = await persistFreshIntent(key, stale.requestedAt + 1);
+  let remoteCalls = 0;
+  assert.equal(
+    await reconcileScopedResetIntents({
+      loadIntentsImpl: async () => [stale],
+      requestResetImpl: async () => {
+        remoteCalls += 1;
+        return { status: "reset" };
+      },
+      logImpl: () => {},
+    }),
+    0,
+  );
+  assert.equal(remoteCalls, 0);
+  assert.deepEqual(
+    (await loadPrivateResetIntents()).filter(({ chatKey }) => chatKey === key),
+    [fresh],
+  );
+  await clearPrivateResetIntent(key);
+});
+
+test("a reconcile completing under a newer intent leaves its durable record", async () => {
+  const key = "518:";
+  status.setChatStatus(key, { status: "idle" });
+  const stale = (await persistPrivateResetIntent(key)) as DurableResetIntent;
+  assert.equal(
+    await reconcileScopedResetIntents({
+      loadIntentsImpl: async () => [stale],
+      requestResetImpl: async () => ({ status: "reset" }),
+      completeStateImpl: async () => {
+        // Новое /new приземлилось между remote и снятием намерения.
+        await persistFreshIntent(key, stale.requestedAt + 1);
+      },
+      logImpl: () => {},
+    }),
+    0,
+  );
+  assert.equal(hasPrivateResetIntent(key), true);
+  assert.deepEqual(
+    (await loadPrivateResetIntents()).filter(({ chatKey }) => chatKey === key),
+    [{ version: 1, chatKey: key, requestedAt: stale.requestedAt + 1 }],
+  );
+  await clearPrivateResetIntent(key);
+});
+
+// Слот remote-сброса един на чат (T341): пока remote /new летит, проход сверки
+// ждёт его конца и, видя упавший за эту эпоху вызов, второй не выпускает — за
+// одно намерение remote уходит один раз, запоздать ему некуда.
+test("a reconcile during a delayed /new remote issues no second remote for the intent", async () => {
+  const key = "522:";
+  status.setChatStatus(key, { status: "idle" });
+  await writeQueueAtomic({ version: 1, queues: {} });
+  let remoteCalls = 0;
+  let remoteEntered: (() => void) | undefined;
+  const entered = new Promise<void>((resolve) => {
+    remoteEntered = resolve;
+  });
+  let releaseRemote: (() => void) | undefined;
+  const remoteGate = new Promise<void>((resolve) => {
+    releaseRemote = resolve;
+  });
+  const requestResetImpl = async () => {
+    remoteCalls += 1;
+    remoteEntered?.();
+    await remoteGate;
+    return { status: "reset" };
+  };
+  const resetting = performScopedReset(
+    key,
+    { address: { chatId: "522" } },
+    { clearQueue: true, requestResetImpl, logImpl: () => {} },
+  );
+  await entered; // remote /new в полёте и держит слот
+  const reconciling = reconcileScopedResetIntents({
+    requestResetImpl,
+    logImpl: () => {},
+  });
+  releaseRemote?.();
+  await resetting;
+  await reconciling;
+  assert.equal(remoteCalls, 1);
+  assert.equal(hasPrivateResetIntent(key), false);
+});
+
+// Пока remote сверки за F1 летит, remote нового /new F2 ждёт слота: старый
+// вызов падает первым, и свежий разговор он не стирает (T341).
+test("a /new remote waits for the reconciled intent's remote to land first", async () => {
+  const key = "523:";
+  status.setChatStatus(key, { status: "idle" });
+  await writeQueueAtomic({ version: 1, queues: {} });
+  const stale = (await persistPrivateResetIntent(key)) as DurableResetIntent;
+  const events: string[] = [];
+  let remoteEntered: (() => void) | undefined;
+  const entered = new Promise<void>((resolve) => {
+    remoteEntered = resolve;
+  });
+  let releaseRemote: (() => void) | undefined;
+  const remoteGate = new Promise<void>((resolve) => {
+    releaseRemote = resolve;
+  });
+  const reconciling = reconcileScopedResetIntents({
+    loadIntentsImpl: async () => [stale],
+    requestResetImpl: async () => {
+      events.push("reconcile-issued");
+      remoteEntered?.();
+      await remoteGate;
+      events.push("reconcile-landed");
+      return { status: "reset" };
+    },
+    logImpl: () => {},
+  });
+  await entered; // remote F1 в полёте и держит слот
+  const resetting = performScopedReset(
+    key,
+    { address: { chatId: "523" } },
+    {
+      clearQueue: true,
+      requestResetImpl: async () => {
+        events.push("new-issued");
+        return { status: "reset" };
+      },
+      logImpl: () => {},
+    },
+  );
+  // remote F2 ждёт слота: пока намерение не перезаписано и чуть дольше — его
+  // выпуск недопустим, пока F1 не упал.
+  for (
+    let intent = (await loadPrivateResetIntents()).find(
+      ({ chatKey }) => chatKey === key,
+    );
+    intent === undefined || intent.requestedAt === stale.requestedAt;
+    intent = (await loadPrivateResetIntents()).find(
+      ({ chatKey }) => chatKey === key,
+    )
+  ) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(events, ["reconcile-issued"]);
+  releaseRemote?.();
+  const [reconciled] = await Promise.all([reconciling, resetting]);
+  assert.deepEqual(events, [
+    "reconcile-issued",
+    "reconcile-landed",
+    "new-issued",
+  ]);
+  assert.equal(reconciled, 0);
+  assert.equal(hasPrivateResetIntent(key), false);
+});
+
+// Запоздалый remote после завершённого /new: сверка со старым снимком намерения
+// вызова не выпускает — слот видит упавшую за эту эпоху посадку (отметка
+// процесса и resetEpoch статуса), и доставленное в свежий разговор не
+// стирается (T341).
+test("a stale reconcile lands no remote after the completed /new and delivery", async () => {
+  const key = "524:";
+  status.setChatStatus(key, { status: "idle" });
+  await writeQueueAtomic({ version: 1, queues: {} });
+  let f1: DurableResetIntent | undefined;
+  let remoteCalls = 0;
+  await performScopedReset(
+    key,
+    { address: { chatId: "524" } },
+    {
+      clearQueue: true,
+      persistIntentImpl: async (chatKey, discardThroughUpdateId) => {
+        f1 = (await persistPrivateResetIntent(
+          chatKey,
+          discardThroughUpdateId,
+        )) as DurableResetIntent;
+        return f1;
+      },
+      requestResetImpl: async () => {
+        remoteCalls += 1;
+        return { status: "reset" };
+      },
+      logImpl: () => {},
+    },
+  );
+  assert.equal(remoteCalls, 1);
+  const delivered: number[] = [];
+  const result = await routeMessageUpdate(
+    {
+      update_id: 610,
+      message: {
+        message_id: 610,
+        date: 1,
+        chat: { id: 524, type: "private" },
+        from: { id: 42, is_bot: false, first_name: "Owner" },
+        text: "fresh conversation",
+      },
+    },
+    {
+      deliverImpl: async () => {
+        delivered.push(610);
+        return true;
+      },
+      acknowledgeImpl: () => Promise.resolve(),
+      shouldQueueImpl: () => false,
+    },
+  );
+  assert.equal(result, "delivered");
+  assert.deepEqual(delivered, [610]);
+  // Снимок старого намерения: сверка его отпускает ещё до слота.
+  assert.equal(
+    await reconcileScopedResetIntents({
+      loadIntentsImpl: async () => [f1 as DurableResetIntent],
+      requestResetImpl: async () => {
+        remoteCalls += 1;
+        return { status: "reset" };
+      },
+      logImpl: () => {},
+    }),
+    0,
+  );
+  assert.equal(remoteCalls, 1);
+  // Окно «remote упал, намерение не снято» (падение процесса между записью
+  // статуса и снятием): сверка дожимает намерение локально, второй вызов не
+  // выпускает.
+  await persistFreshIntent(key, (f1 as DurableResetIntent).requestedAt);
+  assert.equal(
+    await reconcileScopedResetIntents({
+      requestResetImpl: async () => {
+        remoteCalls += 1;
+        return { status: "reset" };
+      },
+      logImpl: () => {},
+    }),
+    1,
+  );
+  assert.equal(remoteCalls, 1);
+  assert.equal(hasPrivateResetIntent(key), false);
+  assert.equal(
+    status.getChatStatus(key).resetEpoch,
+    (f1 as DurableResetIntent).requestedAt,
+  );
+});
+
+// Окно внутри чистки очереди: новое /new успело записать свою эпоху, пока старое
+// завершение ждало блокировку — отсечка идёт по живой границе, а не по аргументу.
+test("a stale fence cleans the queue for the live epoch, not its own", async () => {
+  const key = "519:";
+  const stale = (await persistPrivateResetIntent(key)) as DurableResetIntent;
+  const fresh: DurableResetIntent = {
+    version: 1,
+    chatKey: key,
+    requestedAt: stale.requestedAt + 1,
+  };
+  await writeQueueAtomic({
+    version: 1,
+    queues: {
+      [key]: [
+        {
+          version: 1,
+          updateId: 910,
+          enqueuedAt: stale.requestedAt + 1,
+          resetFence: stale.requestedAt,
+          update: { update_id: 910, message: { text: "stale epoch" } },
+        },
+        {
+          version: 1,
+          updateId: 600,
+          enqueuedAt: stale.requestedAt + 1,
+          resetFence: fresh.requestedAt,
+          update: { update_id: 600, message: { text: "live epoch" } },
+        },
+        {
+          version: 1,
+          updateId: 700,
+          enqueuedAt: fresh.requestedAt + 1,
+          update: { update_id: 700, message: { text: "unmarked after" } },
+        },
+        {
+          version: 1,
+          updateId: 800,
+          enqueuedAt: fresh.requestedAt,
+          update: { update_id: 800, message: { text: "unmarked at fence" } },
+        },
+      ],
+    },
+  });
+  await persistFreshIntent(key, fresh.requestedAt);
+  await clearChatQueue(key, undefined, stale.requestedAt);
+  assert.deepEqual(
+    (await loadQueue()).queues[key]?.map(({ updateId }) => updateId),
+    [600, 700],
+  );
+  await clearPrivateResetIntent(key);
+});
+
+// Пометка новее отсекаемой границы — наследие отменённого намерения: сброс не
+// состоялся, и элемент живёт по тому же правилу, что в promoteReadyInbox.
+test("a fence newer than the cleared one keeps its queue item", async () => {
+  const key = "521:";
+  await writeQueueAtomic({
+    version: 1,
+    queues: {
+      [key]: [
+        {
+          version: 1,
+          updateId: 600,
+          enqueuedAt: 500,
+          resetFence: 2000,
+          update: { update_id: 600, message: { text: "newer epoch" } },
+        },
+      ],
+    },
+  });
+  await clearChatQueue(key, undefined, 1000);
+  assert.deepEqual(
+    (await loadQueue()).queues[key]?.map(({ updateId }) => updateId),
+    [600],
+  );
+});
+
+test("a reset superseded during remote leaves the newer epoch's state", async () => {
+  const key = "520:";
+  status.setChatStatus(key, { status: "running", sessionId: "live-session" });
+  await writeQueueAtomic({ version: 1, queues: {} });
+  let stale: DurableResetIntent | undefined;
+  await performScopedReset(
+    key,
+    { sessionId: "old-session" },
+    {
+      clearQueue: true,
+      persistIntentImpl: async (chatKey, discardThroughUpdateId) => {
+        stale = (await persistPrivateResetIntent(
+          chatKey,
+          discardThroughUpdateId,
+        )) as DurableResetIntent;
+        return stale;
+      },
+      requestResetImpl: async () => {
+        await persistFreshIntent(
+          key,
+          (stale as DurableResetIntent).requestedAt + 1,
+        );
+        await routeMessageUpdate(
+          {
+            update_id: 600,
+            message: {
+              message_id: 600,
+              date: 1,
+              chat: { id: 520, type: "private" },
+              from: { id: 42, is_bot: false, first_name: "Owner" },
+              text: "after second /new",
+            },
+          },
+          {
+            deliverImpl: () => Promise.resolve(true),
+            acknowledgeImpl: () => Promise.resolve(),
+            shouldQueueImpl: () => true,
+          },
+        );
+        return { status: "reset" };
+      },
+    },
+  );
+  assert.equal(status.getChatStatus(key).status, "running");
+  assert.equal(status.getChatStatus(key).sessionId, "live-session");
+  assert.deepEqual(
+    (await loadQueue()).queues[key]?.map(({ updateId }) => updateId),
+    [600],
+  );
+  assert.equal(hasPrivateResetIntent(key), true);
+  await clearPrivateResetIntent(key);
+});
+
+// Склейка через границу /new: до-часть мертва и снимается с durable inbox до
+// коллектора, после-часть идёт в маршрут со своей эпохой (возврат IVB-501).
+test("a burst merged across the reset keeps only the post-reset part", async () => {
+  const key = "515:";
+  await inbox.admitTelegramUpdate(inboxUpdate(515, 900, "before /new"), {
+    trustedLocal: true,
+  });
+  const intent = (await persistPrivateResetIntent(key)) as DurableResetIntent;
+  await inbox.admitTelegramUpdate(inboxUpdate(515, 400, "after /new"), {
+    trustedLocal: true,
+  });
+  const routed: Array<{
+    update: QueueUpdate;
+    resetFence?: number | null;
+  }> = [];
+  await inbox.promoteReadyInbox({
+    now: () => Date.now() + 60_000,
+    collectorOptions: { quietMs: 800 },
+    routeImpl: async (update, options) => {
+      routed.push({ update, resetFence: options?.resetFence });
+      return "queued";
+    },
+  });
+  assert.deepEqual(
+    routed.map(({ update }) => update.update_id),
+    [400],
+  );
+  assert.equal(routed[0]?.resetFence, intent.requestedAt);
+  assert.deepEqual(inboxDocument().queues[inboxKey(515, 42)] ?? [], []);
+  await clearPrivateResetIntent(key);
+});
+
+// Запись, принятая до /new, не доходит до нового разговора ни напрямую, ни через
+// очередь: успешный сброс оставляет эпоху в статусе, и промоут снимает её до
+// маршрута (возврат IVB-501).
+test("an inbox message admitted before /new is dropped before delivery", async () => {
+  const key = "514:";
+  await inbox.admitTelegramUpdate(inboxUpdate(514, 900, "before /new"), {
+    trustedLocal: true,
+  });
+  await performScopedReset(
+    key,
+    { sessionId: "session-514" },
+    {
+      clearQueue: true,
+      requestResetImpl: () => Promise.resolve({ status: "reset" }),
+    },
+  );
+  const routed: number[] = [];
+  await inbox.promoteReadyInbox({
+    routeImpl: async (update) => {
+      routed.push(update.update_id);
+      return "delivered";
+    },
+  });
+  assert.deepEqual(routed, []);
+  assert.deepEqual(inboxDocument().queues[inboxKey(514, 42)] ?? [], []);
+});
+
+// Эпоха сброса — счётчик, а не показание часов (замечание D53 п.1): повторное
+// /new обязано поднять эпоху выше последней durable, иначе принятое до него
+// переживает чистку новой границы (проба приёмки T122: actualQueue=[900],
+// actualDelivered=[900]). Первый /new завершается при часах firstNow, затем 900
+// принимается в inbox и в очередь под его эпохой, а второй /new записывает
+// намерение при часах secondNow.
+const secondNewProbe = async (
+  key: string,
+  chatId: number,
+  firstNow: number,
+  secondNow: number,
+) => {
+  status.setChatStatus(key, { status: "idle" });
+  await writeQueueAtomic({ version: 1, queues: {} });
+  await performScopedReset(
+    key,
+    { sessionId: `session-${chatId}-first` },
+    {
+      clearQueue: true,
+      persistIntentImpl: (chatKey, discardThroughUpdateId) =>
+        persistPrivateResetIntent(chatKey, discardThroughUpdateId, {
+          now: () => firstNow,
+        }),
+      requestResetImpl: () => Promise.resolve({ status: "reset" }),
+      now: () => firstNow,
+    },
+  );
+  // Чат занят ходом: принятое до второго /new идёт в inbox и в очередь под
+  // эпохой первого сброса.
+  status.setChatStatus(key, { status: "running", sessionId: "busy" });
+  const update = inboxUpdate(chatId, 900, "before second /new");
+  await inbox.admitTelegramUpdate(update, { trustedLocal: true });
+  assert.equal(
+    await routeMessageUpdate(update, {
+      deliverImpl: () => Promise.resolve(true),
+      acknowledgeImpl: () => Promise.resolve(),
+      shouldQueueImpl: () => true,
+    }),
+    "queued",
+  );
+  const second = (await persistPrivateResetIntent(key, undefined, {
+    now: () => secondNow,
+  })) as DurableResetIntent;
+  assert.equal(
+    await reconcileScopedResetIntents({
+      requestResetImpl: () => Promise.resolve({ status: "reset" }),
+      logImpl: () => {},
+      now: () => secondNow,
+    }),
+    1,
+  );
+  const delivered: number[] = [];
+  await inbox.promoteReadyInbox({
+    now: () => secondNow + 60_000,
+    routeImpl: async (candidate) => {
+      delivered.push(candidate.update_id);
+      return "delivered";
+    },
+  });
+  return {
+    second,
+    queueItems: (await loadQueue()).queues[key],
+    inboxItems: inboxDocument().queues[inboxKey(chatId, 42)] ?? [],
+    delivered,
+  };
+};
+
+test("a second /new in the same millisecond still retires the accepted message", async () => {
+  const { second, queueItems, inboxItems, delivered } = await secondNewProbe(
+    "530:",
+    530,
+    30_000,
+    30_000,
+  );
+  assert.equal(second.requestedAt, 30_001);
+  assert.equal(queueItems, undefined);
+  assert.deepEqual(inboxItems, []);
+  assert.deepEqual(delivered, []);
+});
+
+test("a clock rollback cannot lower the reset epoch", async () => {
+  // Часы ушли на 10 с назад между первым и вторым /new.
+  const { second, queueItems, inboxItems, delivered } = await secondNewProbe(
+    "531:",
+    531,
+    30_000,
+    20_000,
+  );
+  assert.equal(second.requestedAt, 30_001);
+  assert.equal(queueItems, undefined);
+  assert.deepEqual(inboxItems, []);
+  assert.deepEqual(delivered, []);
+});
+
 test("remote reset failures keep their intent and share one retry backoff", async () => {
   const key = "107:";
   let now = 1_000;
@@ -1175,7 +1960,7 @@ test("control failure counts toward escalation and a failed notice retries", asy
 
 test("a corrupt reset intent does not block a valid chat", async (t) => {
   const key = "108:";
-  await persistPrivateResetIntent(key);
+  await persistPrivateResetIntent(key, undefined, { now: () => 4242 });
   const intentDirectory = join(dataDir, "telegram-reset-intents");
   const corruptFile = join(intentDirectory, "corrupt.json");
   writeFileSync(corruptFile, "{broken", "utf8");
@@ -1190,7 +1975,11 @@ test("a corrupt reset intent does not block a valid chat", async (t) => {
   });
 
   assert.deepEqual(requested, [
-    { chatKey: key, target: { address: { chatId: "108" } } },
+    {
+      chatKey: key,
+      resetEpoch: 4242,
+      target: { address: { chatId: "108" } },
+    },
   ]);
   assert.equal(readdirSync(intentDirectory).includes("corrupt.json"), true);
   assert.deepEqual(await loadPrivateResetIntents(), []);
@@ -1261,9 +2050,9 @@ test("ordinary queue load quarantines corrupt bytes and continues", async () => 
   assert.equal(readFileSync(join(dataDir, backups[0]), "utf8"), corrupt);
 });
 
-test("a durable reset intent reconstructs its Telegram address", async () => {
+test("a durable reset intent reconstructs its Telegram address and carries the epoch on the wire", async () => {
   const key = "429888768:";
-  await persistPrivateResetIntent(key);
+  await persistPrivateResetIntent(key, undefined, { now: () => 4242 });
 
   const requested: ResetIntent[] = [];
   await reconcileScopedResetIntents({
@@ -1273,7 +2062,11 @@ test("a durable reset intent reconstructs its Telegram address", async () => {
   });
 
   assert.deepEqual(requested, [
-    { chatKey: key, target: { address: { chatId: "429888768" } } },
+    {
+      chatKey: key,
+      resetEpoch: 4242,
+      target: { address: { chatId: "429888768" } },
+    },
   ]);
   assert.equal(status.getChatStatus(key).status, "idle");
 });
@@ -1295,6 +2088,29 @@ test("/new sends the exact stored session target", async () => {
   assert.deepEqual(requested, [
     {
       chatKey: "7091451031:",
+      target: { sessionId: "session-1" },
+    },
+  ]);
+});
+
+test("/new carries the intent epoch on the wire", async () => {
+  const requested: ResetIntent[] = [];
+  await performScopedReset(
+    "epoch-wire:",
+    { sessionId: "session-1" },
+    {
+      clearQueue: true,
+      persistIntentImpl: async () => ({ requestedAt: 31415 }),
+      requestResetImpl: async (request) => requested.push(request),
+      completeStateImpl: async () => {},
+      clearIntentImpl: async () => {},
+    },
+  );
+
+  assert.deepEqual(requested, [
+    {
+      chatKey: "epoch-wire:",
+      resetEpoch: 31415,
       target: { sessionId: "session-1" },
     },
   ]);

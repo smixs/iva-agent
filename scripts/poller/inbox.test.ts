@@ -175,7 +175,12 @@ void test("callback inbox keys are stable passthrough keys and cannot collide wi
     0,
     { quietMs: 800 },
   );
-  assert.deepEqual(batch, { update: callbackUpdate, updateIds: [102] });
+  assert.deepEqual(batch, {
+    update: callbackUpdate,
+    updateIds: [102],
+    arrivedAt: 0,
+    resetFence: null,
+  });
 });
 
 void test("an allowed inline callback has a bounded sender key and remains passthrough", async () => {
@@ -199,7 +204,7 @@ void test("an allowed inline callback has a bounded sender key and remains passt
     selectReadyInboxBatch(key as string, document.queues[key as string], 0, {
       quietMs: 800,
     }),
-    { update: candidate, updateIds: [103] },
+    { update: candidate, updateIds: [103], arrivedAt: 0, resetFence: null },
   );
 });
 
@@ -260,6 +265,67 @@ void test("promotion publishes the delivery item before removing raw ownership",
   // Пачка inbox снимается одной записью: обрыв между частями не оставит остаток
   // с тем же update_id, который ушёл бы прямой доставкой мимо полной копии.
   assert.deepEqual(events, ["route:102", "ack:101,102"]);
+});
+
+// IVB-501: отсечка сброса идёт по времени прибытия. Элемент очереди обязан
+// унаследовать enqueuedAt входящей записи, иначе сообщение до /new, пролежавшее
+// в коллекторе, выжило бы сброс со свежим штампом промоута.
+void test("promotion carries the inbox arrival time to the queue item", async () => {
+  const document = inboxDocument(update(101, "early"));
+  const routed: { updateId: number; arrivedAt?: number }[] = [];
+  await promoteReadyInbox({
+    backoff: promotionBackoff(),
+    now: () => 1_000,
+    collectorOptions: { quietMs: 800 },
+    loadImpl: () => Promise.resolve(document),
+    routeImpl: (candidate, options) => {
+      routed.push({
+        updateId: candidate.update_id,
+        arrivedAt: options?.arrivedAt,
+      });
+      return Promise.resolve("queued");
+    },
+    acknowledgeImpl: () => Promise.resolve(),
+  });
+  assert.deepEqual(routed, [{ updateId: 101, arrivedAt: 0 }]);
+});
+
+// IVB-501: записи до границы /new мертвы — промоут снимает их с durable-владения
+// до склейки коллектора, и до маршрута доходят только части текущей эпохи.
+void test("promotion drops pre-reset items before merging the batch", async () => {
+  let document: TelegramQueueDocument = {
+    version: 1,
+    queues: {
+      "1::42": [
+        createQueueItem(update(101, "before /new"), 0),
+        { ...createQueueItem(update(102, "after /new"), 100), resetFence: 7 },
+      ],
+    },
+  };
+  const acknowledgements: number[][] = [];
+  const routed: { updateId: number; resetFence?: number | null }[] = [];
+  const remaining = await promoteReadyInbox({
+    backoff: promotionBackoff(),
+    now: () => 1_000,
+    collectorOptions: { quietMs: 800 },
+    loadImpl: () => Promise.resolve(document),
+    resetEpochImpl: (key) => (key === "1:" ? 7 : undefined),
+    routeImpl: (candidate, options) => {
+      routed.push({
+        updateId: candidate.update_id,
+        resetFence: options?.resetFence,
+      });
+      return Promise.resolve("queued");
+    },
+    acknowledgeImpl: (key, updateIds) => {
+      acknowledgements.push([...updateIds]);
+      document = removeQueueItems(document, key, updateIds).document;
+      return Promise.resolve();
+    },
+  });
+  assert.equal(remaining, 0);
+  assert.deepEqual(routed, [{ updateId: 102, resetFence: 7 }]);
+  assert.deepEqual(acknowledgements, [[101], [102]]);
 });
 
 void test("failed promotion keeps every raw part for retry", async () => {
