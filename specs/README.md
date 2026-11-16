@@ -278,7 +278,7 @@ The final answer can receive another 429 after restart; Outbox retries it.
 Draft ids are abstract fresh values, so random
 collisions and clock durations require implementation tests.
 
-The main BFS configuration checks two turns and one restart. Nine mutants must
+The main BFS configuration checks two turns and one restart. Eight mutants must
 violate their named state invariant: missing draft comparison (`StopOwnDraft`),
 cancel with a null turn (`StopHasTurn`), a frame after final delivery
 (`NoFrameAfterFinal`), a missing record check (`SelfCheckCloses`), resetting the
