@@ -673,6 +673,110 @@ test("garbage collection preserves the settled rollback regardless of mtime", (t
   assert.match(String(state.settledAt), /^\d{4}-\d{2}-\d{2}T/u);
 });
 
+test("garbage collection collects a demoted version's rebuilt cache and keeps its way back", (t) => {
+  const root = home(t);
+  const store = createVersionStore(root);
+  const previous = "0.3.13-333333333333";
+  const current = "0.3.14-444444444444";
+  const serve = (name: string): void => {
+    const dir = install(store, name);
+    store.linkState(dir);
+    const cache = join(dir, ".eve/sandbox-cache");
+    const sessions = join(cache, "just-bash/sessions/s1");
+    mkdirSync(sessions, { recursive: true });
+    writeFileSync(join(sessions, "blob"), "session files\n");
+    const templates = join(cache, "just-bash/templates/t1");
+    mkdirSync(templates, { recursive: true });
+    writeFileSync(join(templates, "blob"), "template\n");
+    const lock = join(cache, "template-locks/just-bash/t1.lock");
+    mkdirSync(lock, { recursive: true });
+    writeFileSync(join(lock, "owner.json"), "{}");
+    writeFileSync(join(dir, ".eve/agent-summary.json"), "{}");
+    writeFileSync(join(dir, ".eve/unrelated-state"), "keep me\n");
+  };
+  serve(previous);
+  serve(current);
+  store.activate(current);
+  store.settle(current);
+
+  assert.deepEqual(store.gc(2), []);
+  const demoted = join(store.layout.versions, previous, ".eve");
+  // Templates and prewarm locks are one serving's cache, written again by the
+  // next start. Session payloads are state a rollback reattaches to, and an
+  // entry the collection does not know stays where it is.
+  assert.deepEqual(
+    readdirSync(join(demoted, "sandbox-cache/just-bash/templates")),
+    [],
+  );
+  assert.ok(!existsSync(join(demoted, "sandbox-cache/template-locks")));
+  assert.equal(
+    readFileSync(
+      join(demoted, "sandbox-cache/just-bash/sessions/s1/blob"),
+      "utf8",
+    ),
+    "session files\n",
+  );
+  assert.deepEqual(readdirSync(demoted).sort(), [
+    ".workflow-data",
+    "agent-summary.json",
+    "sandbox-cache",
+    "unrelated-state",
+  ]);
+  // The serving version's cache is nobody's business.
+  assert.ok(
+    existsSync(
+      join(
+        store.layout.versions,
+        current,
+        ".eve/sandbox-cache/just-bash/templates/t1",
+      ),
+    ),
+  );
+
+  // Demoted still means a way back: activation rewrites the state links and
+  // the build summary the skills screen reads is intact.
+  store.activate(previous);
+  assert.equal(store.currentName(), previous);
+  assert.equal(
+    realpathSync(join(demoted, ".workflow-data")),
+    realpathSync(join(root, ".eve/.workflow-data")),
+  );
+  assert.ok(existsSync(join(demoted, "agent-summary.json")));
+});
+
+test("garbage collection never strips a version through a linked directory", (t) => {
+  const root = home(t);
+  const store = createVersionStore(root);
+  const current = "0.3.14-444444444444";
+  const dir = install(store, current);
+  store.linkState(dir);
+  const payload = join(dir, ".eve/sandbox-cache/just-bash/sessions/s1/blob");
+  mkdirSync(dirname(payload), { recursive: true });
+  writeFileSync(payload, "session files\n");
+  store.activate(current);
+  store.settle(current);
+
+  // An alias names a version but owns no payload: the link into the serving
+  // version keeps its `.eve` whole, and the link out of `versions/` loses
+  // only its own name to the collection, never what it points at.
+  const inside = "0.3.13-333333333333";
+  const outside = "0.3.12-222222222222";
+  symlinkSync(dir, join(store.layout.versions, inside));
+  const foreign = join(root, "foreign");
+  const foreignPayload = join(foreign, ".eve/sandbox-cache/blob");
+  mkdirSync(dirname(foreignPayload), { recursive: true });
+  writeFileSync(foreignPayload, "foreign\n");
+  symlinkSync(foreign, join(store.layout.versions, outside));
+
+  assert.deepEqual(store.gc(2), [outside]);
+  assert.ok(existsSync(payload));
+  assert.ok(existsSync(foreignPayload));
+  assert.ok(
+    lstatSync(join(store.layout.versions, inside)).isSymbolicLink(),
+  );
+  assert.ok(!readdirSync(store.layout.versions).includes(outside));
+});
+
 test("current-only garbage collection takes the rollback slot in settled and unsettled state", (t) => {
   const settledStore = createVersionStore(home(t));
   const settledPrevious = "0.3.13-333333333333";

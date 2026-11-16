@@ -32,6 +32,7 @@ import { classifyRoot, isManagedInstall } from "../lib/version-layout.ts";
 import {
   acquireUpdateLock,
   createVersionStore,
+  KEEP,
   parseVersionName,
   writeJson,
 } from "../lib/version-store.ts";
@@ -588,6 +589,14 @@ export function createVersionUpdateCommand(
       systemdLifecycle.restartServices();
       // Or the next update believes it still owes the move this just undid.
       store.settle(previous);
+      // The version left behind is a way back, not a serving: collect its
+      // `.eve` cache like any version switch does. A failed collection must
+      // not call the rollback itself failed - the next update's cleanup retries.
+      try {
+        store.gc(KEEP);
+      } catch (error) {
+        runtime.warn(`version cleanup after rollback failed: ${String(error)}`);
+      }
       runtime.ok(`${from ?? "the broken version"} → ${previous}`);
       // Nothing pins a version: upstream still resolves to the one left behind,
       // and with two builds on disk another rollback is a way back onto it too.

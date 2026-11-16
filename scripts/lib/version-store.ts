@@ -41,6 +41,14 @@ const LEFTOVER = [FLIP_PREFIX, ".probe-"];
 const VERSION_ORDER = new Intl.Collator("en", { numeric: true }).compare;
 /** What a version borrows from the installation; the rest of `.eve` is a build cache. */
 export const STATE_DIRS = ["data", "vault", ".eve/.workflow-data"];
+/**
+ * The only thing a demoted version's `.eve` may lose: cache a start writes
+ * again - sandbox prewarm locks and templates. Session payloads under
+ * `sandbox-cache/<backend>/sessions/` stay: a rollback reattaches to them by
+ * the persisted root path, and removing them is losing data. Anything the
+ * collection does not name here stays where it is.
+ */
+const EVE_COLLECTABLE = ["sandbox-cache/template-locks"];
 /** The active version plus one to roll back to; a build takes the rollback slot. Disks on these boxes are small. */
 export const KEEP = 2;
 
@@ -610,6 +618,32 @@ export function createVersionStore(
     const removed = finished.filter((name) => !kept.has(name));
     for (const name of removed)
       rmSync(join(layout.versions, name), { recursive: true, force: true });
+    // A demoted version stays as a way back, not as a serving: the collection
+    // takes only what a start writes again and leaves every other byte -
+    // session payloads a rollback can still reattach to above all.
+    for (const name of kept) {
+      if (name === active) continue;
+      const dir = versionDir(name);
+      // A linked version is an alias: the `.eve` it shows is the link
+      // target's own, and stripping through it empties somebody's payload.
+      if (!existsSync(dir) || lstatSync(dir).isSymbolicLink()) continue;
+      const eve = join(dir, ".eve");
+      // A linked `.eve` is foreign state: its entries are somebody else's.
+      if (!existsSync(eve) || lstatSync(eve).isSymbolicLink()) continue;
+      for (const entry of EVE_COLLECTABLE)
+        rmSync(join(eve, entry), { recursive: true, force: true });
+      const cache = join(eve, "sandbox-cache");
+      if (!existsSync(cache) || lstatSync(cache).isSymbolicLink()) continue;
+      for (const backend of readdirSync(cache, { withFileTypes: true })) {
+        // A linked backend directory shows somebody else's cache.
+        if (!backend.isDirectory() || backend.isSymbolicLink()) continue;
+        const templates = join(cache, backend.name, "templates");
+        if (!existsSync(templates) || lstatSync(templates).isSymbolicLink())
+          continue;
+        for (const template of readdirSync(templates))
+          rmSync(join(templates, template), { recursive: true, force: true });
+      }
+    }
     return removed.sort();
   }
 
