@@ -249,7 +249,6 @@ class Machine {
           now: () => 1_000,
           logImpl: () => {},
           resetPendingImpl: () => false,
-          compactingImpl: () => false,
         });
         if (result === "queued" || result === "delivered")
           this.routed[step.author] = true;

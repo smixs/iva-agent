@@ -451,8 +451,8 @@ export async function wireTurn(
       tools: [],
     },
     compaction: {
-      threshold: options.compact ? 1 : 100000,
-      recentWindowSize: 1,
+      threshold: options.compact ? 500 : 100000,
+      recentWindowTokens: 1, summaryMaxOutputTokens: 400,
     },
     continuationToken: "fixture",
     sessionId: "fixture",

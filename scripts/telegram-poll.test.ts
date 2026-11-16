@@ -765,8 +765,7 @@ test("reapStaleRuns flips one stale run, resets Eve, notifies, and removes worki
     `Предыдущий ход оборвался на твоё сообщение. Повторить?\n\n<tg-button-row><tg-button type="callback_data" data="${String(data)}">Повторить</tg-button></tg-button-row>`,
   );
 });
-
-test("reapStaleRuns closes an abandoned compaction like a stale turn, but silently", async () => {
+test("reapStaleRuns closes a legacy compacting record like a stale turn, but silently", async () => {
   const compaction = {
     status: "running",
     generation: 3,
@@ -790,7 +789,6 @@ test("reapStaleRuns closes an abandoned compaction like a stale turn, but silent
   assert.equal(await reapStaleRuns(deps(reaperNow - 31_000)), 1);
   const patch = calls[0]?.[3] as StatusRecord;
   assert.equal(patch.status, "idle");
-  assert.equal(patch.compacting, null);
   // Запроса человека в пересказе не было: сессию сбрасываем, «повтори запрос» не шлём.
   assert.deepEqual(
     calls.map((call) => call[0]),

@@ -465,12 +465,11 @@ test("R5 compaction through makeTextModel records the selected helper model (A13
       model: "future-helper",
       chatModelSeesImages: () => Promise.resolve(false),
     }),
-    { threshold: 1, recentWindowSize: 1 },
+    { threshold: 1, recentWindowTokens: 1, summaryMaxOutputTokens: 400 },
     undefined,
     undefined,
     undefined,
     undefined,
-    true,
   );
   assert.ok(requests.includes("future-helper"));
   const rows = (await readFile(join(home, "usage.jsonl"), "utf8"))

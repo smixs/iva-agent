@@ -5,8 +5,8 @@ The repository keeps bounded models, one per section below: the directory lock (
 floor (`UpdateLock`, `UpdateRun`, `UpdateJob`, `UpdateBranch`, `UpdateFloor`), restart recovery (`RestartRecovery`),
 the half-hourly proactive run (`Proactive`), plugin proposals and plugin modes (`PluginProposal`, `PluginMode`),
 the nightly backup against an oversized vault file and the commit of the vault (`BrainOversize`, `VaultCommit`),
-the draft stop of a turn, the compaction between turns, the tap on a model's button and the drain of the Bridge
-queue in batches (`DraftStop`, `IdleCompaction`, `ButtonTap`, `QueueDrain`), the userbot login (`UserbotLogin`),
+the draft stop of a turn, the tap on a model's button and the drain of the Bridge
+queue in batches (`DraftStop`, `ButtonTap`, `QueueDrain`), the userbot login (`UserbotLogin`),
 the launchd unit (`LaunchdUnit`), the helper run, its outcome and the goal check (`Helpers`, `GoalCheck`), the chat
 record (`ChatRecord`), the status message of a long turn (`ProgressMessage`), the reminder row and its turn (`ReminderLifecycle`, `TurnLifecycle`), the reset intent of a
 private chat (`ResetIntent`) and the run of a schedule (`JobRun`). Run them from a temporary directory because TLC writes state files beside the model. Every `*-check.sh` takes `tlc` from `PATH`, and `~/.local/bin/tlc` otherwise; `TLC=` names another path, `TLC_TIMEOUT` and `JAVA_TOOL_OPTIONS` set the time and the heap.
@@ -264,12 +264,11 @@ or network timeout preserves the count without increasing it.
 
 Two turns may use the same session. Stop reads the draft id and pair once, then
 cancel uses that snapshot even if another turn has started. Duplicate updates
-can cancel a core turn only once. Compaction has a null turn id. An additional
-initial case supplies an inconsistent persisted compaction record with a positive
+can cancel a core turn only once. An additional
+initial case supplies an inconsistent persisted record with a null turn and a positive
 draft id to check the null-turn guard independently of the record writer.
 Turn completion releases the chat record only when its session and turn still
-match. Compaction release checks its session and the compacting flag. Both keep
-a record acquired by another owner.
+match, and keeps a record acquired by another owner.
 
 Reset and takeover can change the chat record in another process. Each typing
 tick compares status, session, turn and draft id and closes a stale stream.
@@ -284,7 +283,7 @@ violate their named state invariant: missing draft comparison (`StopOwnDraft`),
 cancel with a null turn (`StopHasTurn`), a frame after final delivery
 (`NoFrameAfterFinal`), a missing record check (`SelfCheckCloses`), resetting the
 rejection count on a 429 or timeout (`FailurePolicy`), releasing another owner's
-record at turn completion or compaction end (two mutants, `ForeignRecordPreserved`),
+record at turn completion (`ForeignRecordPreserved`),
 retaining a pre-restart pause (`RestartForgetsPause`), and starting an older
 turn's frame after a newer final answer (`NoOlderInFlightAfterFinal`). The main
 configuration also checks `StopOnce`, `FramesOnlyWhileOpen`, `FinalAfterClose`
@@ -306,21 +305,6 @@ parsing, real timer deadlines and the live Telegram client have separate checks.
 LOG_DIR="$PWD/.scratch/draft-stop-results" specs/draft-stop-check.sh
 ```
 
-## IdleCompaction
-
-`IdleCompaction.tla` models the compaction between turns (ADR-0021) and was written after the code: it checks the code, not a design. One eve session in one chat: the bridge (routing under queue or steer, replies to bot messages, the disk queue, the drain, the reaper), the chat status record, the process memory of `agent/lib/idle-compaction.ts` (with the open ask `reclaim`), eve's input buffer, control queue and current action, the compact POST that the `session.waiting` handler awaits with its outcomes (accepted, refused, unknown, accepted after the client's timeout), the `compaction.requested` hook that claims the chat again, `/stop` and steer aborts in eve's order (parking, `turn.cancelled`, parking), and a restart with the ExecStartPre quarantine. The comment in the model maps every action to its function and lists the assumptions about eve (facts Ф3–Ф13 of the spec).
-
-Checked on the code with a late compact request allowed, queue and steer (`IdleCompaction.cfg`, `-steer`): every invariant of spec section 7 (`QueuedWhileCompacting`, `CompactionGuarded`, `TurnRecordKept`, `NoFalseInterruptNotice`, `NoCancelMarkForCompaction`, `CompactingNeverInTurn`, `OffOnlyAfterUselessCompaction`, `AtMostOneAskPerTurn`, `NoStackedCompaction`, `NoAskOverCompactingRecord`, `NoAskWhileOff`) and the liveness `NoLostMessage` and `ChatFreed`. With a restart (`-restart`, `-restart-steer`) the safety invariants and `NoHangAfterRestart` hold, except `CompactionGuarded` and `QueuedWhileCompacting` (F7, `-restart-guarded`): a late request queued in eve survives the restart while the process memory does not. The proposed repair `BeginAnyIdle` (R5, a model switch, not code) makes `-r5` and `-r5-steer` pass every safety invariant. The drain hands eve the queued messages as one batch, and a message waits behind a non-empty queue under steer too (route R1 of `.scratch/work/wave-1010/l5/spec-v2.md`).
-
-Findings that must fail: the window between the start of a late compaction and its hook (`-window`: `QueuedInRequestWindow`; `-window-restart`: `NoHangInRequestWindow`, F6); a message already in eve's input lost without a notice by a restart mid-compaction (`-silentloss`) and waiting in that input (`-inbox`); a compaction longer than `RUN_STALE_MS` reaped while a buffered turn runs without a record (`-turnhang`, outside the feature).
-
-Witnesses must fail: `-offfail` (R3 off: `OffOnlyAfterUselessCompaction`), `-nobeginclaim` (no claim on `compaction.requested`: `CompactionGuarded`), `-noaskguard` (a second ask while one is open: `NoStackedCompaction`), `-releasebysession` (on the base without the await: `TurnRecordKept`), `-noclaim` (`QueuedWhileCompacting`), `-noopenguard` (`OffOnlyAfterUselessCompaction`), `-noisyreap` (`NoFalseInterruptNotice`), `-turnkeeps` (`CompactingNeverInTurn`), `-dueagain` (`AtMostOneAskPerTurn`), `-offnotchecked` (`NoAskWhileOff`), `-repliesdirect` (`QueuedWhileCompacting`), `-noreap` (`ChatFreed`). `-void` (no await) and `-noparkrelease` pass: the hook's claim covers the first, the reaper the second.
-
-The draft/stop change retires the queued status message. This model retains queue ownership, buffered input, compaction and recovery; `DraftStop.tla` covers the new stream lifecycle.
-
-```sh
-specs/idle-compaction-check.sh
-```
 
 ## ButtonTap
 
@@ -682,8 +666,8 @@ process. A restart of the agent forgets every process memory and keeps the file;
 recovery before the start may mark the record or fail. The Bridge can crash and
 come back.
 
-A chat is in one of eight states. Busy: `accepted` (a message is accepted, the
-turn has not started), `turn`, `compacting`. `stale` is a busy record without a
+A chat is in one of seven states. Busy: `accepted` (a message is accepted, the
+turn has not started), `turn`. `stale` is a busy record without a
 write for the stale interval, or marked by recovery; the Bridge no longer waits
 for it and the reaper frees it. Free: `free`, and three marked free states read by
 precedence — `retiring` (the session leaves after its turn), `retry-offered`
@@ -693,11 +677,10 @@ precedence — `retiring` (the session leaves after its turn), `retry-offered`
 
 Checked invariants:
 
-1. `OneState`: every reachable record satisfies exactly one of eight
+1. `OneState`: every reachable record satisfies exactly one of seven
    independent state predicates.
-2. `TurnFieldsOnlyWhenBusy`: `ingress`, `session`, `turn` and `compacting` are
-   filled only while the record is busy; a compaction has a session and no turn;
-   a turn id needs a session.
+2. `TurnFieldsOnlyWhenBusy`: `ingress`, `session` and `turn` are
+   filled only while the record is busy; a turn id needs a session.
 3. `ReleasedByOwnerOrReaper`: a busy record becomes free through its owner (the
    turn by session and turn, the session by itself, an accepted message by its
    ingress id), through the reaper after the deadline, or through a reset.
@@ -709,10 +692,8 @@ Checked invariants:
 
 Mutants that must fail: a turn's terminal write that compares the session
 without the turn (`ReleasedByOwnerOrReaper`); the reaper that frees a live
-record (`ReleasedByOwnerOrReaper`); a release that leaves `compacting` on a
-free chat (`TurnFieldsOnlyWhenBusy`, and `OneState` in a second
-configuration); the reaper switched off (`FreeAfterRestart`); the id of the status
-message cleared with the turn fields (`ProgressIdKept`).
+record (`ReleasedByOwnerOrReaper`); the reaper switched off (`FreeAfterRestart`);
+the id of the status message cleared with the turn fields (`ProgressIdKept`).
 
 Run `sh specs/chat-record-check.sh`. `scripts/chat-record.test.ts` replays
 each counterexample on the real writers and names the invariant in the test
@@ -724,7 +705,7 @@ and its in-flight phases (`QueueDrain.tla`); the two awaits inside one session
 retirement and the choice of the reset target; the file lock (`FileLock.tla`);
 wall-clock values. The model assumes that eve handles the events of one session
 in order, so a session-level release never overlaps a turn of that session.
-`IdleCompaction`, `RestartRecovery`, `DraftStop`, `DeferredRestart` and
+`RestartRecovery`, `DraftStop`, `DeferredRestart` and
 `TurnLifecycle` keep their own scenarios over the same record.
 
 ## ProgressMessage

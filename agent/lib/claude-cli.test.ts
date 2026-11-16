@@ -2016,7 +2016,7 @@ test("обрыв до первой части ответа: eve просит ш�
         tools: [],
         modelReference: { id: "test/model" },
       },
-      compaction: { threshold: 100_000, recentWindowSize: 100 },
+      compaction: { threshold: 100_000, recentWindowTokens: 100, summaryMaxOutputTokens: 400 },
       continuationToken: "test",
       sessionId: "test",
       history: [],

@@ -2097,8 +2097,7 @@ const { compactMessages } = (await import(
     telemetry?: unknown,
     headers?: unknown,
     abortSignal?: unknown,
-    force?: boolean,
-  ) => Promise<unknown[]>;
+  ) => Promise<unknown[] | null>;
 };
 
 function codexSse(text: string): Response {
@@ -2192,7 +2191,7 @@ await test("codex: 400 на запрос стрима — generateText отве�
 });
 
 /** Настоящий пересказ eve моделью шага codex, как его зовёт tool-loop. */
-function compactWithCodex(codex: ProviderModule): Promise<unknown[]> {
+function compactWithCodex(codex: ProviderModule): Promise<unknown[] | null> {
   return compactMessages(
     [
       { role: "user", content: "расскажи про план ".repeat(40) },
@@ -2204,12 +2203,14 @@ function compactWithCodex(codex: ProviderModule): Promise<unknown[]> {
       chatModelSeesImages: blindToImages,
       usage: { sessionId: "s1", turnId: "turn_3", step: 2 },
     }),
-    { threshold: 100_000, recentWindowSize: 1, thresholdPercent: 0.7 },
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    true,
+    // recentWindowTokens: 1 складывает всё, кроме последнего сообщения, в пересказ;
+    // порог 100 пропускает пересказанную историю, но не исходную.
+    {
+      threshold: 100,
+      recentWindowTokens: 1,
+      summaryMaxOutputTokens: 8_192,
+      thresholdPercent: 0.7,
+    },
   );
 }
 
