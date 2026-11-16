@@ -5,6 +5,7 @@ import {
   COMPACTION_PROMPT_ENVELOPE,
   COMPACTION_RESUMPTION_MESSAGE,
   createCompactionPrompt,
+  renderResumptionReplay,
   stubContentOutputFileParts,
   TODO_COMPACTION_PRESERVATION_LABEL,
   TRANSCRIPT_PAYLOAD_LIMIT,
@@ -250,7 +251,7 @@ export async function compactMessages(
       return stripped;
     }
 
-    if (kept.length === 0) {
+    if (kept.length === 0 || isRealUserMessage(kept[0])) {
       return null;
     }
     kept = kept.slice(1);
@@ -325,40 +326,45 @@ function withResumptionGuard(
   }
 
   const replay = findLastRealUserMessage(conversation);
-  const alreadyKept =
-    replay !== undefined &&
-    messages.some((message) => message.role === "user" && message.content === replay.content);
+  const alreadyKept = replay !== undefined && messages.includes(replay);
 
   return [
     ...messages,
-    replay !== undefined && !alreadyKept
-      ? replay
-      : { content: COMPACTION_RESUMPTION_MESSAGE, role: "user" },
+    replay === undefined || alreadyKept
+      ? { content: COMPACTION_RESUMPTION_MESSAGE, role: "user" }
+      : { content: renderResumptionReplay(replay), role: "user" },
   ];
 }
 
 /**
  * Latest user message authored by the user rather than synthesized by the
  * framework (resumption prompts, checkpoint markers, and todo preservation
- * messages are all `role: "user"` but carry no user intent).
+ * messages are all `role: "user"` but carry no user intent). Multipart
+ * content only ever arrives from the user, so it always counts.
  */
 function findLastRealUserMessage(conversation: readonly ModelMessage[]): ModelMessage | undefined {
   for (let index = conversation.length - 1; index >= 0; index -= 1) {
     const message = conversation[index];
-    if (message?.role !== "user" || typeof message.content !== "string") {
-      continue;
+    if (isRealUserMessage(message)) {
+      return message;
     }
-    if (
-      message.content === COMPACTION_RESUMPTION_MESSAGE ||
-      message.content === COMPACTION_CHECKPOINT_MARKER ||
-      message.content.startsWith(TODO_COMPACTION_PRESERVATION_LABEL)
-    ) {
-      continue;
-    }
-    return message;
   }
 
   return undefined;
+}
+
+function isRealUserMessage(message: ModelMessage | undefined): boolean {
+  if (message?.role !== "user") {
+    return false;
+  }
+  if (typeof message.content !== "string") {
+    return true;
+  }
+  return (
+    message.content !== COMPACTION_RESUMPTION_MESSAGE &&
+    message.content !== COMPACTION_CHECKPOINT_MARKER &&
+    !message.content.startsWith(TODO_COMPACTION_PRESERVATION_LABEL)
+  );
 }
 
 function extractPreviousCheckpoint(messages: readonly ModelMessage[]): {
@@ -430,11 +436,37 @@ function assistantMessageText(message: ModelMessage): string {
 }
 
 /**
+ * Headroom the summary head takes on the {@link estimateTokens} ruler: the
+ * checkpoint marker, the capped resumption replay, and JSON framing. A kept
+ * tail must leave this much room under the threshold on top of the summary
+ * itself (bounded by `summaryMaxOutputTokens`).
+ */
+const COMPACTION_HEAD_RESERVE_TOKENS = 1_024;
+
+/**
+ * Tokens the kept tail must leave for the summary head. The honest bound is
+ * the summary cap plus fixed headroom; degenerate configs where that already
+ * exceeds the threshold fall back to a quarter of it, so a small tail can
+ * still be attempted — the fit loop then either accepts or rejects, it never
+ * silently drops a real user message.
+ */
+function summaryHeadReserveTokens(config: CompactionConfig): number {
+  return Math.min(
+    config.summaryMaxOutputTokens + COMPACTION_HEAD_RESERVE_TOKENS,
+    Math.max(64, Math.floor(config.threshold / 4)),
+  );
+}
+
+/**
  * The verbatim tail kept through compaction: the newest messages fitting the
  * configured token budget. At least one message always lands in the older
  * region so there is something to compact; a tool call/result pair is never
  * split because the tail never opens with a bare result (see
  * {@link splitMessagesForCompaction}).
+ *
+ * The tail must also fit next to the summary head — whatever cannot is left
+ * in the older region, so the summarizer sees every message the rebuilt
+ * history might drop.
  */
 function selectRecentWindow(
   messages: readonly ModelMessage[],
@@ -443,6 +475,7 @@ function selectRecentWindow(
   const maxKeep = Math.max(messages.length - 1, 0);
   const recent: ModelMessage[] = [];
   let recentTokens = 0;
+  const headroom = config.threshold - summaryHeadReserveTokens(config);
 
   for (let index = messages.length - 1; index >= 0 && recent.length < maxKeep; index -= 1) {
     const message = messages[index];
@@ -451,7 +484,10 @@ function selectRecentWindow(
     }
 
     const messageTokens = estimateTokens([message]);
-    if (recent.length > 0 && recentTokens + messageTokens > config.recentWindowTokens) {
+    if (
+      recentTokens + messageTokens > headroom ||
+      (recent.length > 0 && recentTokens + messageTokens > config.recentWindowTokens)
+    ) {
       break;
     }
 
