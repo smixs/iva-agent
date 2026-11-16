@@ -1,6 +1,5 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { dataDir } from "./data-dir.ts";
+import { readAlertState } from "../../packages/alert-state/index.ts";
 
 export const authKey = (provider: string) => `model-auth:${provider}`;
 export const authFactKey = (provider: string) => `model-auth-fact:${provider}`;
@@ -30,22 +29,11 @@ export function parseAuthStatus(essence: string): ModelAuthStatus | null {
 
 /** Read-only consumers. The agent dispatcher is the sole writer. */
 export function readModelAuthStatuses(dir = dataDir()): ModelAuthStatus[] {
-  try {
-    const state = JSON.parse(
-      readFileSync(join(dir, "alert-state.json"), "utf8"),
-    ) as Record<string, { essence?: unknown }>;
-    return Object.entries(state).flatMap(([key, value]) => {
-      if (
-        !key.startsWith("model-auth-fact:") ||
-        typeof value?.essence !== "string"
-      )
-        return [];
-      const status = parseAuthStatus(value.essence);
-      return status ? [status] : [];
-    });
-  } catch {
-    return [];
-  }
+  return Object.entries(readAlertState(dir)).flatMap(([key, value]) => {
+    if (!key.startsWith("model-auth-fact:")) return [];
+    const status = parseAuthStatus(value.essence);
+    return status ? [status] : [];
+  });
 }
 export function pendingModelAuth(dir = dataDir()): ModelAuthStatus[] {
   return readModelAuthStatuses(dir).filter(

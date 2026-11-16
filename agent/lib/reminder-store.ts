@@ -31,7 +31,7 @@ import {
 import { nextCronRunMs } from "./reminder-time.ts";
 import { listChatStatuses, RUN_STALE_MS } from "./run-status.ts";
 import { isRecord, isSafeInteger } from "../../packages/guards/index.ts";
-import { alertDue } from "../../packages/alert-state/index.ts";
+import { alertDue, alertResolved } from "../../packages/alert-state/index.ts";
 
 export const REMINDER_SCHEMA_VERSION = 2;
 /** Сколько держим сработавшую разовую строку: столько владелец видит факт в remind list. */
@@ -1032,16 +1032,6 @@ export function reminderPhase(
   return now < (pulse || row.firedAt) + span ? "running" : "abandoned";
 }
 
-export async function clearCommandAlert(id: string): Promise<void> {
-  const file = join(dataDir(), "alert-state.json");
-  await mutate(
-    file,
-    async () => {
-      const state = await loadJsonStrict<unknown>(file, {});
-      if (!isRecord(state) || !Object.hasOwn(state, `schedule-${id}`)) return;
-      delete state[`schedule-${id}`];
-      await saveJsonAtomic(file, state, { mode: 0o600 });
-    },
-    join(dataDir(), "alert-state.lock"),
-  );
+export function clearCommandAlert(id: string): void {
+  alertResolved(dataDir(), `schedule-${id}`);
 }
