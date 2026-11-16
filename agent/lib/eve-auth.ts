@@ -62,6 +62,7 @@ const HELPER_MODEL_TURNS = new Set<unknown>([
   "watch",
   "brief",
   "insight",
+  "reminder",
 ]);
 
 /** Model selection is shared with isolated background turns; helper rights stay separate. */

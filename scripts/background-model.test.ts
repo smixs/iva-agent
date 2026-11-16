@@ -17,8 +17,8 @@ process.env.OLLAMA_CONTEXT_WINDOW = "8000";
 process.env.HELPER_MODEL = "helper-fixture";
 after(() => rmSync(home, { recursive: true, force: true }));
 const { stepModelChoice } = await import("../agent/agent.ts");
-const kinds = ["helper", "watch", "brief", "insight"];
-const chatKinds = ["reminder", "signal", "alert", undefined];
+const kinds = ["helper", "watch", "brief", "insight", "reminder"];
+const chatKinds = ["signal", "alert", undefined];
 const context = (
   kind: string | undefined,
   authenticator = "iva-bearer",
@@ -30,7 +30,7 @@ const context = (
   },
 });
 
-test("background model: authenticated helper, Watch, Brief and Insight share model and window", () => {
+test("background model: authenticated helper, Watch, Brief, Insight and reminder share model and window", () => {
   for (const side of ["initiator", "current"])
     for (const kind of [...kinds, ...chatKinds]) {
       const choice = stepModelChoice(context(kind, "iva-bearer", side));
@@ -92,11 +92,11 @@ test("background model: Claude defaults, explicit chat and selected model window
       ),
     ) as { model: string; window: number }[];
     assert.deepEqual(
-      result.slice(0, 4),
+      result.slice(0, kinds.length),
       kinds.map(() => ({ model: expectedModel, window: expectedWindow })),
     );
     assert.deepEqual(
-      result.slice(4),
+      result.slice(kinds.length),
       chatKinds.map(() => ({
         model: "claude-opus-5-5",
         window: override ? Number(override) : 1000000,
