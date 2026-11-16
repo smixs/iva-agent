@@ -89,16 +89,17 @@ async function runIndex(
   vault: string,
   url: string,
   model?: string,
-): Promise<string> {
-  const { stdout } = await run(process.execPath, [SCRIPT], {
+  env?: NodeJS.ProcessEnv,
+): Promise<{ stdout: string; stderr: string }> {
+  return run(process.execPath, [SCRIPT], {
     env: {
       ...process.env,
       ASSISTANT_VAULT_DIR: vault,
       MEMORY_EMBED_URL: url,
       ...(model ? { MEMORY_EMBED_MODEL: model } : {}),
+      ...env,
     },
   });
-  return stdout;
 }
 
 const readIndex = (vault: string): IndexFile =>
@@ -562,6 +563,64 @@ test("битая карточка пропускается, соседние п�
       Object.hasOwn(index.hashes, "cards/sayyora.md"),
       false,
       "битую карточку нельзя отмечать как посчитанную: починят — пересчитаем",
+    );
+  } finally {
+    await stub.close();
+  }
+});
+
+// check-ignore отвечает отказом (128), а не «игнорируется»/«нет»: старый git без
+// --stdin, обрезанная сборка, ошибка самой команды. Отказ — не разрешение писать:
+// строка уходит в журнал, .gitignore владельца остаётся побайтно тем же, индекс
+// собирается как обычно. Обёртка роняет только check-ignore, остальные вызовы
+// отдаёт настоящему git, убрав свой каталог из PATH, чтобы не зациклиться.
+test("отказ check-ignore не трогает .gitignore владельца", async () => {
+  const stub = await embedStub();
+  const vault = makeVault();
+  const git = (...args: string[]) =>
+    execFileSync("git", ["-C", vault, ...args], { encoding: "utf8" }).trim();
+  try {
+    writeFileSync(join(vault, "cards", "ivan.md"), card("Иван", "Монтажёр."));
+    const ownerGitignore = "# owner rules\n*.log\n";
+    writeFileSync(join(vault, ".gitignore"), ownerGitignore);
+    git("init", "-q");
+    git("config", "user.email", "owner@example.invalid");
+    git("config", "user.name", "Owner");
+    git("add", "-A");
+    git("commit", "-qm", "owner state");
+
+    // Обёртка живёт в vault и убирается вместе с ним; создаётся после add -A,
+    // поэтому под git не попадает.
+    const fakeBin = join(vault, "fakebin");
+    mkdirSync(fakeBin);
+    writeFileSync(
+      join(fakeBin, "git"),
+      "#!/bin/sh\n" +
+        'for arg in "$@"; do\n' +
+        '  if [ "$arg" = "check-ignore" ]; then\n' +
+        '    echo "stub git: check-ignore unavailable" >&2\n' +
+        "    exit 128\n" +
+        "  fi\n" +
+        "done\n" +
+        'PATH="${PATH#*:}"; export PATH\n' +
+        'exec git "$@"\n',
+      { mode: 0o755 },
+    );
+
+    // execFile бросает на любом ненулевом выходе: resolved await — это exit 0.
+    const { stderr } = await runIndex(vault, stub.url, undefined, {
+      PATH: `${fakeBin}:${process.env.PATH ?? ""}`,
+    });
+
+    assert.match(stderr, /embed-index: не смог проверить ignore \.index/u);
+    assert.equal(
+      readFileSync(join(vault, ".gitignore"), "utf8"),
+      ownerGitignore,
+      "отказ check-ignore — не «не игнорируется»: файл владельца не тронут",
+    );
+    assert.ok(
+      existsSync(join(vault, ".index", "embeddings.json")),
+      "индекс собран, ночь не упала",
     );
   } finally {
     await stub.close();
