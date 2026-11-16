@@ -11,12 +11,14 @@ import { spawnSync } from "node:child_process";
 import {
   readFileSync,
   mkdirSync,
+  realpathSync,
   renameSync,
+  rmSync,
   writeFileSync,
   statSync,
 } from "node:fs";
 import { createHash } from "node:crypto";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { join, relative, resolve, sep } from "node:path";
 import {
   embedTexts,
   embeddingModelName,
@@ -35,72 +37,127 @@ const VAULT = (): string => (vaultCache ??= vaultDirOrExit());
 const SCOPE = ["cards", "summaries", "weekly", "monthly", "yearly"];
 
 // `.index/` — производный кэш, в ночной бэкап vault ему не место. Шаблон .gitignore
-// закрывает новые vault; установленные до правила закрывает сам писатель: строка в
-// .git/info/exclude читается check-ignore так же, как .gitignore владельца, но его
-// файл не трогается и в бэкап не уезжает. Уже закоммиченный кэш ignore не вытеснит —
-// снимаем с учёта: файл остаётся на диске, а в историю и remote он больше не пишется.
+// закрывает новые vault; установленные до правила закрывает сам писатель: `.index/`
+// дописывается в .gitignore владельца в конец — чужие строки не трогаются, а ранняя
+// негация `!.index` последним совпадением проигрывает (info/exclude так не защитить:
+// по приоритету он ниже .gitignore). Уже закоммиченный кэш ignore не вытеснит —
+// снимаем с учёта: файл остаётся на диске, а удаление доходит до HEAD своим коммитом,
+// собранным в отдельном индексе: застейдженный набор владельца в него не попадает.
 // Любой отказ — строка в журнал, ночь не роняется.
 function keepIndexOutOfBackup(vault: string): void {
-  const git = (args: readonly string[]) =>
+  const git = (args: readonly string[], index?: string) =>
     spawnSync("git", [...args], {
       cwd: vault,
       encoding: "utf8",
-      env: gitEnv(),
+      env: index !== undefined ? { ...gitEnv(), GIT_INDEX_FILE: index } : gitEnv(),
     });
-  const excludeAt = git(["rev-parse", "--git-path", "info/exclude"]);
-  if (excludeAt.status !== 0) return; // vault не репозиторий — и бэкапа нет
+  // Только собственный репозиторий: vault внутри чужого (например dev-checkout)
+  // сам репозиторием не является, и без этой проверки каждая git-запись ниже
+  // ушла бы в чужой индекс и чужой exclude.
+  const top = git(["rev-parse", "--show-toplevel"]);
+  if (top.status !== 0) return; // vault не репозиторий — и бэкапа нет
   try {
-    const file = resolve(vault, excludeAt.stdout.trim());
-    let current = "";
-    try {
-      current = readFileSync(file, "utf8");
-    } catch {
-      /* exclude ещё нет */
-    }
-    const present = new Set(current.split("\n").map((line) => line.trim()));
-    if (!present.has(".index") && !present.has(".index/")) {
-      const next = `${current}${current === "" || current.endsWith("\n") ? "" : "\n"}.index/\n`;
-      mkdirSync(dirname(file), { recursive: true });
-      const tmp = `${file}.tmp`;
-      writeFileSync(tmp, next, "utf8");
-      renameSync(tmp, file);
-    }
-  } catch (error) {
-    console.error(
-      `embed-index: не смог исключить .index из бэкапа: ${error instanceof Error ? error.message : String(error)}`,
-    );
+    if (realpathSync(top.stdout.trim()) !== realpathSync(vault)) return;
+  } catch {
+    return;
   }
-  // Попавший под git кэш снимается с учёта; staged-удаление от прошлой неудачи — коммитим.
+  // Попавший под git кэш снимается с учёта до проверки ignore: tracked-путь
+  // check-ignore не читает. Файл на диске остаётся.
   if (
     git(["ls-files", "-z", "--", ".index"]).stdout !== "" &&
-    git(["rm", "-r", "--cached", "--quiet", "--", ".index"]).status !== 0
+    git(["rm", "-r", "-f", "--cached", "--quiet", "--", ".index"]).status !== 0
   )
     return;
-  // Коммитим всё застейдженное — но только если застейджено ровно удаление `.index`:
-  // чужой застейдженный набор (Obsidian-git, руки владельца) в наш коммит не попадает.
-  const staged = git(["diff", "--cached", "--name-only", "-z"]).stdout;
-  const ours = staged.split("\0").filter((path) => path !== "");
+  // Эффективное исключение, а не наличие строки: при `!.index/` или `!.index/**`
+  // в .gitignore владельца дописанная в конец `.index/` снова решает.
+  if (git(["check-ignore", "-q", "--", ".index/embeddings.json"]).status !== 0)
+    try {
+      const file = join(vault, ".gitignore");
+      let current = "";
+      try {
+        current = readFileSync(file, "utf8");
+      } catch (error) {
+        // Нечитаемый .gitignore не перезаписываем: правила владельца исчезли бы молча.
+        if ((error as NodeJS.ErrnoException | null)?.code !== "ENOENT")
+          throw error;
+      }
+      const next = `${current}${current === "" || current.endsWith("\n") ? "" : "\n"}.index/\n`;
+      const tmp = `${file}.tmp-${process.pid}`;
+      writeFileSync(tmp, next, "utf8");
+      renameSync(tmp, file);
+    } catch (error) {
+      console.error(
+        `embed-index: не смог исключить .index из бэкапа: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  // Удаление доходит до HEAD этой же ночью: коммит собирается от HEAD в своём
+  // GIT_INDEX_FILE, поэтому чужой застейдженный набор (Obsidian-git, руки
+  // владельца) в него не попадает, а застейдженное удаление `.index` в общем
+  // индексе новый HEAD поглощает сам.
+  const head = git(["rev-parse", "--verify", "HEAD"]);
   if (
-    ours.length === 0 ||
-    !ours.every((path) => path === ".index" || path.startsWith(".index/"))
+    head.status !== 0 ||
+    git(["ls-tree", "--name-only", "HEAD", "--", ".index"]).stdout.trim() === ""
   )
     return;
-  const message = "brain: untrack derived .index cache";
-  if (git(["commit", "--quiet", "-m", message]).status === 0) return;
-  const retried = git([
-    "-c",
-    "user.name=Iva",
-    "-c",
-    "user.email=iva@localhost",
-    "commit",
-    "--quiet",
-    "-m",
-    message,
-  ]);
-  if (retried.status !== 0)
-    console.error(
-      `embed-index: не смог снять .index с учёта: ${(retried.stderr || retried.stdout || "git commit failed").trim().split("\n")[0]}`,
-    );
+  const gitDir = git(["rev-parse", "--git-dir"]);
+  if (gitDir.status !== 0) return;
+  const index = resolve(
+    vault,
+    gitDir.stdout.trim(),
+    `embed-index-${process.pid}`,
+  );
+  try {
+    if (
+      git(["read-tree", "HEAD"], index).status !== 0 ||
+      git(["rm", "-r", "-f", "--cached", "--quiet", "--", ".index"], index)
+        .status !== 0
+    )
+      return;
+    const tree = git(["write-tree"], index);
+    if (tree.status !== 0) return;
+    const message = "brain: untrack derived .index cache";
+    const parent = head.stdout.trim();
+    let commit = git([
+      "commit-tree",
+      tree.stdout.trim(),
+      "-p",
+      parent,
+      "-m",
+      message,
+    ]);
+    if (commit.status !== 0)
+      commit = git([
+        "-c",
+        "user.name=Iva",
+        "-c",
+        "user.email=iva@localhost",
+        "commit-tree",
+        tree.stdout.trim(),
+        "-p",
+        parent,
+        "-m",
+        message,
+      ]);
+    if (commit.status !== 0) {
+      console.error(
+        `embed-index: не смог снять .index с учёта: ${(commit.stderr || commit.stdout || "git commit failed").trim().split("\n")[0]}`,
+      );
+      return;
+    }
+    // HEAD мог уйти за время сборки дерева: старое значение сторожит чужой коммит.
+    if (
+      git(["update-ref", "-m", message, "HEAD", commit.stdout.trim(), parent])
+        .status !== 0
+    )
+      console.error("embed-index: не смог довести удаление .index до HEAD");
+  } finally {
+    try {
+      rmSync(index, { force: true });
+    } catch {
+      /* временный индекс — best effort */
+    }
+  }
 }
 
 keepIndexOutOfBackup(VAULT());
