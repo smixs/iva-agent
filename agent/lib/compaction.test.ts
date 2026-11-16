@@ -7,7 +7,7 @@ import {
 
 // Порог свёртки — решение владельца 24.10.2026: T = min(300 000, ⌊0,8·W⌋).
 // Тест держит обе части формулы на реальных окнах провайдеров.
-test("compactionThreshold: минимум из 80% окна и 300 тыс.", () => {
+void test("compactionThreshold: минимум из 80% окна и 300 тыс.", () => {
   assert.equal(compactionThreshold(131_072), 104_857); // 0.8·131072 = 104857.6
   assert.equal(compactionThreshold(272_000), 217_600); // окно Codex
   assert.equal(compactionThreshold(200_000), 160_000); // старые Claude
@@ -15,7 +15,7 @@ test("compactionThreshold: минимум из 80% окна и 300 тыс.", () 
   assert.equal(compactionThreshold(500_000), 300_000); // уже за потолком
 });
 
-test("compactionThresholdPercent: доля окна, которую eve применяет к W модели", () => {
+void test("compactionThresholdPercent: доля окна, которую eve применяет к W модели", () => {
   assert.equal(compactionThresholdPercent(272_000), 0.8);
   // ⌊0,8·W⌋/W и ⌊·⌋ на обратном пути возвращают порог eve ровно.
   assert.equal(
