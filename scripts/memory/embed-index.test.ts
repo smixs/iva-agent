@@ -8,7 +8,7 @@ import "../lib/ts-esm-hooks.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
-import { execFile } from "node:child_process";
+import { execFile, execFileSync, spawnSync } from "node:child_process";
 import { promisify } from "node:util";
 import {
   existsSync,
@@ -273,6 +273,69 @@ test("битый индекс переживается, временный фа�
       [],
     );
     assert.ok(existsSync(join(vault, ".index", "embeddings.json")));
+  } finally {
+    await stub.close();
+  }
+});
+
+// Установка до правила `.index/` в шаблоне .gitignore: кэш уже закоммичен и каждую
+// ночь уезжает в бэкап vault. Писатель сам ставит исключение в .git/info/exclude —
+// .gitignore владельца не трогается — и снимает кэш с учёта: на диске он остаётся,
+// а в историю и remote больше не пишется. Повторная сборка ничего не дублирует.
+test("старая установка: кэш исключается из бэкапа и снимается с учёта", async () => {
+  const stub = await embedStub();
+  const vault = makeVault();
+  const git = (...args: string[]) =>
+    execFileSync("git", ["-C", vault, ...args], { encoding: "utf8" }).trim();
+  try {
+    writeFileSync(join(vault, "cards", "ivan.md"), card("Иван", "Монтажёр."));
+    git("init", "-q");
+    git("config", "user.email", "owner@example.invalid");
+    git("config", "user.name", "Owner");
+    // Состояние дефекта: embeddings.json уже в истории vault и уходит в бэкап.
+    mkdirSync(join(vault, ".index"), { recursive: true });
+    writeFileSync(join(vault, ".index", "embeddings.json"), "{}");
+    git("add", "-A");
+    git("commit", "-qm", "owner state");
+
+    await runIndex(vault, stub.url);
+
+    assert.match(
+      readFileSync(join(vault, ".git", "info", "exclude"), "utf8"),
+      /^\.index\/$/mu,
+    );
+    assert.equal(
+      spawnSync("git", ["-C", vault, "check-ignore", ".index/x"]).status,
+      0,
+      "check-ignore больше не берёт .index",
+    );
+    assert.equal(git("ls-files", "--", ".index"), "");
+    assert.equal(
+      git("ls-tree", "-r", "--name-only", "HEAD", "--", ".index"),
+      "",
+      "кэш вышел из истории",
+    );
+    assert.ok(
+      existsSync(join(vault, ".index", "embeddings.json")),
+      "на диске кэш остаётся",
+    );
+    assert.match(
+      git("log", "--format=%s", "-3"),
+      /untrack derived \.index cache/u,
+    );
+    assert.equal(git("status", "--porcelain"), "");
+
+    await runIndex(vault, stub.url);
+    assert.equal(
+      git("status", "--porcelain"),
+      "",
+      "повтор не оставляет следов",
+    );
+    assert.equal(
+      git("rev-list", "--count", "HEAD"),
+      "2",
+      "новых коммитов про .index нет",
+    );
   } finally {
     await stub.close();
   }

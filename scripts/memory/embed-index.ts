@@ -7,6 +7,7 @@
 // Индекс — производный, не в vault (markdown остаётся портируемым); потерялся — пересобери.
 // Текст карточки берём из agent/lib/card-index.ts — там же его берут BM25-колонки
 // memory_search: в hybrid обе половины обязаны индексировать ОДНО и то же.
+import { spawnSync } from "node:child_process";
 import {
   readFileSync,
   mkdirSync,
@@ -15,7 +16,7 @@ import {
   statSync,
 } from "node:fs";
 import { createHash } from "node:crypto";
-import { join, relative, sep } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import {
   embedTexts,
   embeddingModelName,
@@ -23,6 +24,7 @@ import {
   hasEmbeddingKey,
 } from "../../agent/lib/embeddings.ts";
 import { embedText } from "../../agent/lib/card-index.ts";
+import { gitEnv } from "../../agent/lib/vault-commit.ts";
 import { vaultDirOrExit } from "../lib/vault-boundary.ts";
 import { vaultMarkdownFiles } from "../../packages/vault-walk/index.ts";
 
@@ -31,6 +33,77 @@ let vaultCache: string | null = null;
 // граница процесса — одна строка причины и код 1, а не стек на импорте модуля.
 const VAULT = (): string => (vaultCache ??= vaultDirOrExit());
 const SCOPE = ["cards", "summaries", "weekly", "monthly", "yearly"];
+
+// `.index/` — производный кэш, в ночной бэкап vault ему не место. Шаблон .gitignore
+// закрывает новые vault; установленные до правила закрывает сам писатель: строка в
+// .git/info/exclude читается check-ignore так же, как .gitignore владельца, но его
+// файл не трогается и в бэкап не уезжает. Уже закоммиченный кэш ignore не вытеснит —
+// снимаем с учёта: файл остаётся на диске, а в историю и remote он больше не пишется.
+// Любой отказ — строка в журнал, ночь не роняется.
+function keepIndexOutOfBackup(vault: string): void {
+  const git = (args: readonly string[]) =>
+    spawnSync("git", [...args], {
+      cwd: vault,
+      encoding: "utf8",
+      env: gitEnv(),
+    });
+  const excludeAt = git(["rev-parse", "--git-path", "info/exclude"]);
+  if (excludeAt.status !== 0) return; // vault не репозиторий — и бэкапа нет
+  try {
+    const file = resolve(vault, excludeAt.stdout.trim());
+    let current = "";
+    try {
+      current = readFileSync(file, "utf8");
+    } catch {
+      /* exclude ещё нет */
+    }
+    const present = new Set(current.split("\n").map((line) => line.trim()));
+    if (!present.has(".index") && !present.has(".index/")) {
+      const next = `${current}${current === "" || current.endsWith("\n") ? "" : "\n"}.index/\n`;
+      mkdirSync(dirname(file), { recursive: true });
+      const tmp = `${file}.tmp`;
+      writeFileSync(tmp, next, "utf8");
+      renameSync(tmp, file);
+    }
+  } catch (error) {
+    console.error(
+      `embed-index: не смог исключить .index из бэкапа: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  // Попавший под git кэш снимается с учёта; staged-удаление от прошлой неудачи — коммитим.
+  if (
+    git(["ls-files", "-z", "--", ".index"]).stdout !== "" &&
+    git(["rm", "-r", "--cached", "--quiet", "--", ".index"]).status !== 0
+  )
+    return;
+  // Коммитим всё застейдженное — но только если застейджено ровно удаление `.index`:
+  // чужой застейдженный набор (Obsidian-git, руки владельца) в наш коммит не попадает.
+  const staged = git(["diff", "--cached", "--name-only", "-z"]).stdout;
+  const ours = staged.split("\0").filter((path) => path !== "");
+  if (
+    ours.length === 0 ||
+    !ours.every((path) => path === ".index" || path.startsWith(".index/"))
+  )
+    return;
+  const message = "brain: untrack derived .index cache";
+  if (git(["commit", "--quiet", "-m", message]).status === 0) return;
+  const retried = git([
+    "-c",
+    "user.name=Iva",
+    "-c",
+    "user.email=iva@localhost",
+    "commit",
+    "--quiet",
+    "-m",
+    message,
+  ]);
+  if (retried.status !== 0)
+    console.error(
+      `embed-index: не смог снять .index с учёта: ${(retried.stderr || retried.stdout || "git commit failed").trim().split("\n")[0]}`,
+    );
+}
+
+keepIndexOutOfBackup(VAULT());
 
 if (!hasEmbeddingKey()) {
   console.error(

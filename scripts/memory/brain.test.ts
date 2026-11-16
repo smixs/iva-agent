@@ -400,7 +400,7 @@ globalThis.fetch = async (url, init) => {
   const backedUp = () =>
     git(bare, "rev-parse", "HEAD") === git(fx.vault, "rev-parse", "HEAD") &&
     git(fx.vault, "status", "--porcelain") === "";
-  return { run, index, called, backedUp };
+  return { run, index, called, backedUp, vault: fx.vault };
 }
 
 void test("Brain при hybrid пересобирает индекс эмбеддингов и делает бэкап", (t) => {
@@ -413,6 +413,12 @@ void test("Brain при hybrid пересобирает индекс эмбед�
   };
   assert.deepEqual(Object.keys(vectors), ["cards/a.md"]);
   assert.ok(fx.backedUp());
+  // Производный кэш в бэкап не уходит: ни в индексе, ни в истории vault.
+  assert.equal(git(fx.vault, "ls-files", "--", ".index"), "");
+  assert.equal(
+    git(fx.vault, "ls-tree", "-r", "--name-only", "HEAD", "--", ".index"),
+    "",
+  );
 });
 
 void test("Brain без hybrid индекс эмбеддингов не трогает", (t) => {
