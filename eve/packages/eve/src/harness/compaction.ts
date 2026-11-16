@@ -13,8 +13,6 @@ import { estimateTokens } from "#harness/token-estimate.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { CompactionConfig, ToolLoopHarnessConfig } from "#harness/types.js";
 
-const COMPACTION_SUMMARY_RESERVE_TOKENS = 2_048;
-
 /**
  * Element type of a non-string `ModelMessage.content` array.
  */
@@ -172,9 +170,14 @@ function evaluateThreshold(
 
 /**
  * Compacts messages by escalation: try each {@link CompactionHeuristic} in
- * order, then fall back to summarizing the older region with the compaction
- * model — keeping the recent tail verbatim when it fits, degrading it to
- * text-only, then shrinking the window.
+ * order, then fall back to one summarization call over the older region —
+ * keeping the recent tail verbatim when it fits, degrading it to text-only,
+ * then shrinking the tail, all without further model calls.
+ *
+ * Returns `null` when the summary is rejected: it must be shorter than the
+ * region it replaces and leave the rebuilt history under the threshold. The
+ * caller then keeps the history unchanged and gates the next attempt on
+ * input growth.
  */
 export async function compactMessages(
   messages: ModelMessage[],
@@ -184,68 +187,73 @@ export async function compactMessages(
   telemetry?: TelemetryOptions,
   headers?: Record<string, string>,
   abortSignal?: AbortSignal,
-  forceSummary = false,
-): Promise<ModelMessage[]> {
+): Promise<ModelMessage[] | null> {
   const { conversation, previousCheckpoint } = extractPreviousCheckpoint(messages);
-  const recentConfig = forceSummary ? { ...config, recentWindowSize: 1 } : config;
-  let keep = selectRecentWindowSize(conversation, recentConfig);
+  const recent = selectRecentWindow(conversation, config);
+  const { older, recent: tail } = splitMessagesForCompaction(conversation, recent.length);
 
-  if (!forceSummary) {
-    const { older, recent } = splitMessagesForCompaction(conversation, keep);
-    if (older.length === 0 && previousCheckpoint === undefined) {
-      return keepNonToolResultMessages(recent);
-    }
+  if (older.length === 0 && previousCheckpoint === undefined) {
+    return keepNonToolResultMessages(tail);
+  }
 
-    for (const heuristic of COMPACTION_HEURISTICS) {
-      const outcome = heuristic({ config, conversation, older, previousCheckpoint, recent });
-      if (outcome.type === "within-limit") {
-        return outcome.messages;
-      }
+  for (const heuristic of COMPACTION_HEURISTICS) {
+    const outcome = heuristic({ config, conversation, older, previousCheckpoint, recent: tail });
+    if (outcome.type === "within-limit") {
+      return outcome.messages;
     }
   }
 
+  const summaryPrompt = createCompactionPrompt({
+    messages: older,
+    previousCheckpoint,
+    transcriptBudgetTokens: config.threshold,
+  });
+
+  const result = await generateText({
+    abortSignal,
+    headers,
+    maxOutputTokens: config.summaryMaxOutputTokens,
+    model,
+    prompt: summaryPrompt.prompt,
+    providerOptions,
+    system: summaryPrompt.system,
+    telemetry: telemetry ? { ...telemetry, functionId: "eve.compaction" } : undefined,
+    temperature: 0,
+  });
+
+  const summaryHead: ModelMessage[] = [
+    { content: COMPACTION_CHECKPOINT_MARKER, role: "user" },
+    { content: result.text, role: "assistant" },
+  ];
+
+  // A summary that is not shorter than the region it replaces buys nothing:
+  // keep the history and let the caller wait for the input to grow.
+  if (estimateTokens(summaryHead) >= estimateTokens(older)) {
+    return null;
+  }
+
+  // Prefer keeping the recent tail verbatim — surviving tool results are the
+  // model's evidence that work already ran. Degrade to text-only, then drop
+  // the oldest kept messages, only under threshold pressure. No new calls.
+  let kept = tail;
   while (true) {
-    const { older, recent } = splitMessagesForCompaction(conversation, keep);
-
-    const summaryPrompt = createCompactionPrompt({
-      messages: older,
-      previousCheckpoint,
-      transcriptBudgetTokens: config.threshold,
-    });
-
-    const result = await generateText({
-      abortSignal,
-      headers,
-      model,
-      prompt: summaryPrompt.prompt,
-      providerOptions,
-      system: summaryPrompt.system,
-      telemetry: telemetry ? { ...telemetry, functionId: "eve.compaction" } : undefined,
-      temperature: 0,
-    });
-
-    const summaryHead: ModelMessage[] = [
-      { content: COMPACTION_CHECKPOINT_MARKER, role: "user" },
-      { content: result.text, role: "assistant" },
-    ];
-
-    // Prefer keeping the recent tail verbatim — surviving tool results are the
-    // model's evidence that work already ran. Degrade to text-only, then to a
-    // smaller window, only under threshold pressure.
-    const verbatim = withResumptionGuard([...summaryHead, ...recent], conversation);
+    const verbatim = withResumptionGuard([...summaryHead, ...kept], conversation);
     if (evaluateThreshold(verbatim, config, "estimate").type === "within-limit") {
       return verbatim;
     }
 
     const stripped = withResumptionGuard(
-      [...summaryHead, ...keepNonToolResultMessages(recent)],
+      [...summaryHead, ...keepNonToolResultMessages(kept)],
       conversation,
     );
-    if (evaluateThreshold(stripped, config, "estimate").type === "within-limit" || keep === 0) {
+    if (evaluateThreshold(stripped, config, "estimate").type === "within-limit") {
       return stripped;
     }
 
-    keep -= 1;
+    if (kept.length === 0) {
+      return null;
+    }
+    kept = kept.slice(1);
   }
 }
 
@@ -421,38 +429,37 @@ function assistantMessageText(message: ModelMessage): string {
     .trim();
 }
 
-function selectRecentWindowSize(
+/**
+ * The verbatim tail kept through compaction: the newest messages fitting the
+ * configured token budget. At least one message always lands in the older
+ * region so there is something to compact; a tool call/result pair is never
+ * split because the tail never opens with a bare result (see
+ * {@link splitMessagesForCompaction}).
+ */
+function selectRecentWindow(
   messages: readonly ModelMessage[],
   config: CompactionConfig,
-): number {
-  const maxKeep = Math.min(config.recentWindowSize, Math.max(messages.length - 1, 0));
-  const reserve = resolveCompactionSummaryReserve(config);
-  let keep = 0;
+): ModelMessage[] {
+  const maxKeep = Math.max(messages.length - 1, 0);
+  const recent: ModelMessage[] = [];
   let recentTokens = 0;
 
-  for (let index = messages.length - 1; index >= 0 && keep < maxKeep; index -= 1) {
+  for (let index = messages.length - 1; index >= 0 && recent.length < maxKeep; index -= 1) {
     const message = messages[index];
     if (message === undefined) {
       continue;
     }
 
     const messageTokens = estimateTokens([message]);
-    if (recentTokens + messageTokens + reserve > config.threshold) {
+    if (recent.length > 0 && recentTokens + messageTokens > config.recentWindowTokens) {
       break;
     }
 
+    recent.unshift(message);
     recentTokens += messageTokens;
-    keep += 1;
   }
 
-  return keep;
-}
-
-function resolveCompactionSummaryReserve(config: CompactionConfig): number {
-  return Math.min(
-    COMPACTION_SUMMARY_RESERVE_TOKENS,
-    Math.max(64, Math.floor(config.threshold / 4)),
-  );
+  return recent;
 }
 
 function splitMessagesForCompaction(
