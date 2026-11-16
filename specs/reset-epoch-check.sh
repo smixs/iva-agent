@@ -18,11 +18,21 @@
 # задетого remote-дефектом (пара fence проверяется по DropOnlyByNewer — потери
 # помеченных записей снятием границей, gone не считается; немаркированная
 # ветка от FenceRule не зависит, её потерю показывает свидетель
-# ResetEpoch-abandon-loss по DropAllByNewer). Свидетель пропажи намерения и
-# свидетель запоздалого remote нарушают свой инвариант первым (поиск в ширину,
-# негативные прогоны в один поток — самый короткий контрпример). Любой сбой
-# tlc или несовпадение ожидания — ненулевой выход. Файлы состояний TLC пишет
-# во временную папку.
+# ResetEpoch-abandon-loss по DropAllByNewer). Перенесённые из ResetIntent
+# проверки (T348): ConfirmOnce и EscalationOnce — инварианты основного cfg и
+# контроля живости, Finished — temporal property контроля ResetEpoch-live при
+# ограниченных отказах и одном перезапуске; мутант ResetEpoch-live-nofair
+# снимает fairness и краснеет по Finished статтерингом, мутант
+# ResetEpoch-confirm-recovery подаёт подтверждение ещё и из сверки и краснеет
+# по ConfirmOnce, а свидетель ResetEpoch-escalate показывает, что эскалация в
+# модели достижима (NoEscalation красный) — иначе EscalationOnce проверял бы
+# пустое место. Отказы и перезапуск раздувают пространство, поэтому cfg без
+# жизненного цикла выключают их константами MaxFails = 0 / MaxRestarts = 0:
+# ветки FailStep и Restart мертвы, пространство совпадает с моделью до T348.
+# Свидетель пропажи намерения и свидетель запоздалого remote
+# нарушают свой инвариант первым (поиск в ширину, негативные прогоны в один
+# поток — самый короткий контрпример). Любой сбой tlc или несовпадение
+# ожидания — ненулевой выход. Файлы состояний TLC пишет во временную папку.
 set -u
 cd "$(dirname "$0")" || exit 2
 . ./tlc-result.sh || exit 2
@@ -64,6 +74,10 @@ check ResetEpoch-late-remote-order-fence none
 check ResetEpoch-late-remote-order RemoteInOrder
 check ResetEpoch-remote-timeout-fence none
 check ResetEpoch-remote-timeout LossOnlyByNewer
+check ResetEpoch-live none
+check ResetEpoch-live-nofair Finished
+check ResetEpoch-confirm-recovery ConfirmOnce
+check ResetEpoch-escalate NoEscalation
 check ResetEpoch none
 echo "reset-epoch-check: $ok ok, $failed failed"
 [ "$failed" -eq 0 ]
