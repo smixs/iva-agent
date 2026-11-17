@@ -418,8 +418,14 @@ void test(
           });
           assert.equal(compact.status, CONFIG.httpOK);
           const accepted = (await compact.json()) as { text: string };
-          assert.match(accepted.text, /After a restart, repeat \/compact/u);
+          assert.match(accepted.text, /next answer/u);
           logs.push(`manual acceptance: ${accepted.text}`);
+          // Пометку забирает следующий шаг модели: сообщение его и запускает.
+          const trigger = await post(port, bearer, "/restart-hang/send", {
+            address: CONFIG.address,
+            message: "TRIGGER_COMPACTION_STEP1",
+          });
+          assert.equal(trigger.status, CONFIG.httpOK);
         } else {
           const trigger = await post(port, bearer, "/restart-hang/send", {
             address: CONFIG.address,

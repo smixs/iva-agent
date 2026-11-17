@@ -64,9 +64,9 @@ For `claude` there is no API key either: install the CLI on the server as the se
 
 If Claude's access token comes from an external synchronization service, Iva can wait through its rotation after HTTP 401 and safely repeat the same call once, before any useful output or tool action in the current turn. Set `claude.authRotationWaitMs` in `data/settings.json` (for example, `{"claude":{"authRotationWaitMs":120000}}`); the default window is 120 seconds. Iva watches `.credentials.json` in `CLAUDE_CONFIG_DIR`, otherwise `~/.claude`, and makes one final call when the access changes or the window ends. Each active attempt retains its usual first-output deadline. A successful repeat stays silent; a final authentication failure with an access-only token asks you to check the external synchronization service. The service that owns the credentials continues to manage refresh.
 
-**Don't inflate the context window.** Iva compacts the conversation between turns once a turn's input reaches 60% of this number (or 110,000 tokens, whichever is smaller), and inside a turn a quarter above that as a safety net. Set it above the model's real window and the compactor fires too late — the request overflows before the conversation gets trimmed. When you switch models, enter the new model's actual window, not a rounder bigger one.
+**Don't inflate the context window.** Before every model step eve compacts the session once the estimated input reaches `min(300,000, 80% of this number)` tokens, keeping the last ~20,000 tokens verbatim. Set the window above the model's real window and the compactor fires too late — the request overflows before the conversation gets trimmed. When you switch models, enter the new model's actual window, not a rounder bigger one.
 
-Use `/compact` to compress an idle conversation with at least 30,000 measured input tokens. Iva confirms completion, then reports the before/after size with the next answer using its first measured model input. During an answer, repeat the command after it finishes. After a restart, one completed turn supplies the input measurement.
+Use `/compact` to mark a session for compression. The mark is durable: the next model step compacts the session before answering, and the reply tells you when it is armed.
 
 ## Telegram
 

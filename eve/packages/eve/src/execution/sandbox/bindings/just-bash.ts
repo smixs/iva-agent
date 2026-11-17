@@ -8,6 +8,7 @@ import {
   createFileBackedInternalSandboxSession,
   pathExists,
   resolveLocalBackendSessionRootPath,
+  resolveLocalBackendSessionsDirectory,
   resolveLocalBackendTemplateRootPath,
   resolveLocalBackendTemplatesDirectory,
   touchDirectory,
@@ -35,8 +36,10 @@ import type {
 } from "#public/definitions/sandbox-backend.js";
 import { SandboxTemplateNotProvisionedError } from "#public/definitions/sandbox-backend.js";
 import type { JustBashSandboxCreateOptions } from "#public/sandbox/just-bash-sandbox.js";
+import { toErrorMessage } from "#shared/errors.js";
 
 const JUST_BASH_CACHE_DIRECTORY_NAME = "just-bash";
+const SESSION_KEY_PREFIX = "eve-sbx-ses-";
 
 /**
  * Stable backend name. Participates in template/session key derivation
@@ -165,9 +168,83 @@ export function createJustBashSandboxBackend(
         sessionKey: createInput.sessionKey,
       });
 
+      // Every finished run leaves one session directory behind and
+      // nothing else removes them; pruning on create is the one place
+      // that runs in every process that produces sessions. It runs
+      // after the session lands and off the awaited path so a slow
+      // pass never delays the turn.
+      void pruneJustBashSandboxSessions({
+        appRoot: createInput.runtimeContext.appRoot,
+        excludePaths: [sessionRootPath],
+        isSessionFinished: createInput.runtimeContext.isSessionFinished,
+      }).catch((error: unknown) => {
+        console.warn(
+          `eve: failed to prune finished sandbox sessions: ${toErrorMessage(error)}`,
+        );
+      });
+
       return createJustBashHandle(sandbox, JUST_BASH_BACKEND_NAME);
     },
   };
+}
+
+/**
+ * Removes just-bash sandbox session directories whose owning session
+ * has finished.
+ *
+ * The session lifecycle is the only deletion witness — never age or
+ * size: each candidate name is a session key, and the supplied
+ * `isSessionFinished` resolves whether that session's owner is done.
+ * A directory whose owner cannot be proven finished (no resolver, an
+ * unparseable name, a lookup error) is always kept, so a live or
+ * resumable session is never collected. Paths in `excludePaths` are
+ * kept unconditionally — callers pass the session they just opened.
+ */
+export async function pruneJustBashSandboxSessions(input: {
+  readonly appRoot: string;
+  readonly excludePaths?: ReadonlyArray<string>;
+  readonly isSessionFinished?: (sessionKey: string) => Promise<boolean>;
+}): Promise<void> {
+  const isSessionFinished = input.isSessionFinished;
+  if (isSessionFinished === undefined) {
+    return;
+  }
+
+  const sessionsDirectory = resolveLocalBackendSessionsDirectory(
+    resolveSandboxCacheDirectory(input.appRoot),
+    JUST_BASH_CACHE_DIRECTORY_NAME,
+  );
+  const excluded = new Set(input.excludePaths ?? []);
+
+  let entries: Dirent<string>[];
+  try {
+    entries = await readdir(sessionsDirectory, { withFileTypes: true });
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+      return;
+    }
+    throw error;
+  }
+
+  await Promise.all(
+    entries
+      .filter((entry) => entry.isDirectory() && entry.name.startsWith(SESSION_KEY_PREFIX))
+      .map(async (entry) => {
+        const path = join(sessionsDirectory, entry.name);
+        if (excluded.has(path)) {
+          return;
+        }
+        let finished = false;
+        try {
+          finished = await isSessionFinished(entry.name);
+        } catch {
+          finished = false;
+        }
+        if (finished) {
+          await rm(path, { force: true, recursive: true });
+        }
+      }),
+  );
 }
 
 /**

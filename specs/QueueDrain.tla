@@ -57,8 +57,7 @@
 \*                без id пачки; закреп снят. ACK_ROLLED_BACK: очередь прежняя, закреп остаётся.
 \*                FATAL_DURABILITY — то же, что Restart
 \*   Settle       проход слива видит фазу running и свободный чат: inFlight.delete (routing.ts:416)
-\*   Busy / Free  свёртка между ходами занимает свободный чат (agent/lib/idle-compaction.ts) /
-\*                ход или свёртка кончились (agent/channels/telegram.ts)
+\*   Free         ход кончился (agent/channels/telegram.ts)
 \*   LedgerLoss   recordCompletedUpdate упала после принятия (telegram-acceptance.ts:457) или id
 \*                вытеснен из последних 200 (:53)
 \*   Switch       владелец переключает «Очередь» / «Перебивать» в /menu (data/settings.json;

@@ -8,7 +8,7 @@ import "../lib/ts-esm-hooks.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
-import { execFile } from "node:child_process";
+import { execFile, execFileSync, spawnSync } from "node:child_process";
 import { promisify } from "node:util";
 import {
   existsSync,
@@ -89,16 +89,17 @@ async function runIndex(
   vault: string,
   url: string,
   model?: string,
-): Promise<string> {
-  const { stdout } = await run(process.execPath, [SCRIPT], {
+  env?: NodeJS.ProcessEnv,
+): Promise<{ stdout: string; stderr: string }> {
+  return run(process.execPath, [SCRIPT], {
     env: {
       ...process.env,
       ASSISTANT_VAULT_DIR: vault,
       MEMORY_EMBED_URL: url,
       ...(model ? { MEMORY_EMBED_MODEL: model } : {}),
+      ...env,
     },
   });
-  return stdout;
 }
 
 const readIndex = (vault: string): IndexFile =>
@@ -278,6 +279,264 @@ test("битый индекс переживается, временный фа�
   }
 });
 
+// Установка до правила `.index/` в шаблоне .gitignore: кэш уже закоммичен и каждую
+// ночь уезжает в бэкап vault. Писатель сам дописывает `.index/` в .gitignore
+// владельца (чужие строки не трогаются) и снимает кэш с учёта: на диске он
+// остаётся, а из HEAD уходит своим коммитом. Повторная сборка ничего не дублирует.
+test("старая установка: кэш исключается из бэкапа и снимается с учёта", async () => {
+  const stub = await embedStub();
+  const vault = makeVault();
+  const git = (...args: string[]) =>
+    execFileSync("git", ["-C", vault, ...args], { encoding: "utf8" }).trim();
+  try {
+    writeFileSync(join(vault, "cards", "ivan.md"), card("Иван", "Монтажёр."));
+    git("init", "-q");
+    git("config", "user.email", "owner@example.invalid");
+    git("config", "user.name", "Owner");
+    // Состояние дефекта: embeddings.json уже в истории vault и уходит в бэкап.
+    mkdirSync(join(vault, ".index"), { recursive: true });
+    writeFileSync(join(vault, ".index", "embeddings.json"), "{}");
+    git("add", "-A");
+    git("commit", "-qm", "owner state");
+
+    await runIndex(vault, stub.url);
+
+    assert.match(
+      readFileSync(join(vault, ".gitignore"), "utf8"),
+      /^\.index\/$/mu,
+    );
+    assert.equal(
+      spawnSync("git", ["-C", vault, "check-ignore", ".index/x"]).status,
+      0,
+      "check-ignore больше не берёт .index",
+    );
+    assert.equal(git("ls-files", "--", ".index"), "");
+    assert.equal(
+      git("ls-tree", "-r", "--name-only", "HEAD", "--", ".index"),
+      "",
+      "кэш вышел из истории этой же ночью",
+    );
+    assert.ok(
+      existsSync(join(vault, ".index", "embeddings.json")),
+      "на диске кэш остаётся",
+    );
+    assert.match(
+      git("log", "--format=%s", "-3"),
+      /untrack derived \.index cache/u,
+    );
+    assert.equal(
+      git("diff", "--cached", "--name-only"),
+      "",
+      "индекс чист от .index",
+    );
+
+    await runIndex(vault, stub.url);
+    assert.equal(
+      git("rev-list", "--count", "HEAD"),
+      "2",
+      "новых коммитов про .index нет",
+    );
+    assert.equal(
+      readFileSync(join(vault, ".gitignore"), "utf8")
+        .split("\n")
+        .filter((line) => line === ".index/").length,
+      1,
+      "повторная ночь не дописывает .index/ второй раз",
+    );
+    assert.ok(
+      !git("status", "--porcelain")
+        .split("\n")
+        .some((line) => line.includes(".index")),
+      "повтор не оставляет следов .index",
+    );
+  } finally {
+    await stub.close();
+  }
+});
+
+// check-ignore шёл через GIT_LITERAL_PATHSPECS, который эта команда не знает:
+// git 2.54 отвечал 128, ошибка читалась как «не игнорируется» и каждая ночь
+// дописывала `.index/` в .gitignore заново. Держим обе стороны: строки нет —
+// дописываем ровно один раз, строка есть — файл владельца остаётся байт-в-байт.
+test("повторные ночи не дублируют .index/ в .gitignore", async () => {
+  const vault = makeVault();
+  const git = (...args: string[]) =>
+    execFileSync("git", ["-C", vault, ...args], { encoding: "utf8" }).trim();
+  writeFileSync(join(vault, "cards", "ivan.md"), card("Иван", "Монтажёр."));
+  writeFileSync(join(vault, ".gitignore"), "# owner rules\n*.log\n");
+  git("init", "-q");
+  git("config", "user.email", "owner@example.invalid");
+  git("config", "user.name", "Owner");
+  git("add", "-A");
+  git("commit", "-qm", "owner state");
+
+  // Без ключа сборка выходит сразу после сторожа — проверяется именно он.
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    ASSISTANT_VAULT_DIR: vault,
+  };
+  delete env.JINA_API_KEY;
+  delete env.DEEPINFRA_API_KEY;
+  delete env.MEMORY_EMBED_URL;
+  for (let i = 0; i < 3; i++) await run(process.execPath, [SCRIPT], { env });
+
+  const written = readFileSync(join(vault, ".gitignore"), "utf8");
+  assert.equal(
+    written.split("\n").filter((line) => line === ".index/").length,
+    1,
+    "три ночи подряд — ровно одна строка .index/",
+  );
+  for (let i = 0; i < 2; i++) await run(process.execPath, [SCRIPT], { env });
+  assert.equal(
+    readFileSync(join(vault, ".gitignore"), "utf8"),
+    written,
+    "исключённый .index: .gitignore владельца не тронут",
+  );
+});
+
+// Vault, лежащий внутри чужого репозитория (dev-checkout с vault/ подряд), сам
+// репозиторием не является: вся git-работа писателя обязана молчать, иначе
+// `rm --cached` и `commit` уходят в чужой индекс и чужую историю.
+test("vault внутри чужого репозитория: индекс и история родителя не тронуты", async () => {
+  const parent = makeVault();
+  const vault = join(parent, "vault");
+  const git = (...args: string[]) =>
+    execFileSync("git", ["-C", parent, ...args], { encoding: "utf8" }).trim();
+  mkdirSync(join(vault, "cards"), { recursive: true });
+  writeFileSync(join(vault, "cards", "ivan.md"), card("Иван", "Монтажёр."));
+  mkdirSync(join(vault, ".index"), { recursive: true });
+  writeFileSync(join(vault, ".index", "embeddings.json"), "{}");
+  git("init", "-q");
+  git("config", "user.email", "owner@example.invalid");
+  git("config", "user.name", "Owner");
+  git("add", "-A");
+  git("commit", "-qm", "parent state");
+  const headBefore = git("rev-parse", "HEAD");
+
+  // Без ключа и эндпоинта сборка выходит сразу — проверяется только сторож.
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    ASSISTANT_VAULT_DIR: vault,
+  };
+  delete env.JINA_API_KEY;
+  delete env.DEEPINFRA_API_KEY;
+  delete env.MEMORY_EMBED_URL;
+  await run(process.execPath, [SCRIPT], { env });
+
+  assert.equal(
+    git("rev-parse", "HEAD"),
+    headBefore,
+    "чужая история без нашего коммита",
+  );
+  assert.equal(
+    git("diff", "--cached", "--name-only"),
+    "",
+    "чужой индекс без нашего staged-удаления",
+  );
+  assert.notEqual(
+    git("ls-files", "--", "vault/.index/embeddings.json"),
+    "",
+    "файл остаётся под git родителя",
+  );
+  const exclude = join(parent, ".git", "info", "exclude");
+  assert.ok(
+    !existsSync(exclude) || !readFileSync(exclude, "utf8").includes(".index"),
+    "exclude родителя без нашей строки",
+  );
+  assert.ok(
+    !existsSync(join(vault, ".gitignore")),
+    ".gitignore внутри чужого vault не создан",
+  );
+});
+
+// Чужой застейдженный набор не повод откладывать снятие кэша и не добыча нашего
+// коммита: удаление `.index` доходит до HEAD этой же ночью своим коммитом, а
+// застейдженный владельцем файл остаётся застейдженным у владельца.
+test("staged owner.md не мешает снять .index и в наш коммит не попадает", async () => {
+  const stub = await embedStub();
+  const vault = makeVault();
+  const git = (...args: string[]) =>
+    execFileSync("git", ["-C", vault, ...args], { encoding: "utf8" }).trim();
+  try {
+    writeFileSync(join(vault, "cards", "ivan.md"), card("Иван", "Монтажёр."));
+    writeFileSync(join(vault, "owner.md"), "v1\n");
+    git("init", "-q");
+    git("config", "user.email", "owner@example.invalid");
+    git("config", "user.name", "Owner");
+    mkdirSync(join(vault, ".index"), { recursive: true });
+    writeFileSync(join(vault, ".index", "embeddings.json"), "{}");
+    git("add", "-A");
+    git("commit", "-qm", "owner state");
+    // Незакоммиченная правка владельца ждёт своего коммита в индексе.
+    writeFileSync(join(vault, "owner.md"), "v2\n");
+    git("add", "--", "owner.md");
+
+    await runIndex(vault, stub.url);
+
+    assert.equal(
+      git("ls-tree", "-r", "--name-only", "HEAD", "--", ".index"),
+      "",
+      "кэш вышел из HEAD этой же ночью",
+    );
+    assert.equal(git("ls-files", "--", ".index"), "");
+    assert.equal(
+      git("diff", "--cached", "--name-only"),
+      "owner.md",
+      "staged-правка владельца на месте",
+    );
+    const shown = git("show", "--format=%s", "--name-only", "HEAD");
+    assert.match(shown, /untrack derived \.index cache/u);
+    assert.ok(
+      !shown.includes("owner.md"),
+      "чужой файл не в нашем коммите",
+    );
+    assert.equal(git("rev-list", "--count", "HEAD"), "2");
+  } finally {
+    await stub.close();
+  }
+});
+
+// `!.index/` и `!.index/**` в .gitignore владельца сильнее info/exclude: исключение
+// обязано держаться строкой в том же .gitignore, а сами чужие строки — остаться.
+test("негации в .gitignore владельца сохраняются, исключение всё равно действует", async () => {
+  const stub = await embedStub();
+  const vault = makeVault();
+  const git = (...args: string[]) =>
+    execFileSync("git", ["-C", vault, ...args], { encoding: "utf8" }).trim();
+  try {
+    writeFileSync(join(vault, "cards", "ivan.md"), card("Иван", "Монтажёр."));
+    writeFileSync(join(vault, ".gitignore"), "!.index/\n!.index/**\n");
+    git("init", "-q");
+    git("config", "user.email", "owner@example.invalid");
+    git("config", "user.name", "Owner");
+    mkdirSync(join(vault, ".index"), { recursive: true });
+    writeFileSync(join(vault, ".index", "embeddings.json"), "{}");
+    git("add", "-f", "--", ".index/embeddings.json", ".gitignore");
+    git("add", "-A", "--", "cards");
+    git("commit", "-qm", "owner state");
+
+    await runIndex(vault, stub.url);
+
+    const gitignore = readFileSync(join(vault, ".gitignore"), "utf8");
+    assert.ok(gitignore.includes("!.index/"), "чужая негация на месте");
+    assert.ok(gitignore.includes("!.index/**"), "чужая негация на месте");
+    assert.match(gitignore, /\.index\/\n?$/u, "наша строка дописана в конец");
+    assert.equal(
+      spawnSync("git", ["-C", vault, "check-ignore", ".index/x"]).status,
+      0,
+      "исключение действует",
+    );
+    assert.equal(git("ls-files", "--", ".index"), "");
+    assert.equal(
+      git("ls-tree", "-r", "--name-only", "HEAD", "--", ".index"),
+      "",
+      "кэш вышел из HEAD",
+    );
+  } finally {
+    await stub.close();
+  }
+});
+
 // Карточку правит человек, и одна незакрытая кавычка не имеет права остановить ночную
 // сборку: до обёртки parseFrontmatterOrSkip такой файл ронял весь прогон исключением,
 // и индекс не обновлялся, пока файл не найдут глазами.
@@ -304,6 +563,64 @@ test("битая карточка пропускается, соседние п�
       Object.hasOwn(index.hashes, "cards/sayyora.md"),
       false,
       "битую карточку нельзя отмечать как посчитанную: починят — пересчитаем",
+    );
+  } finally {
+    await stub.close();
+  }
+});
+
+// check-ignore отвечает отказом (128), а не «игнорируется»/«нет»: старый git без
+// --stdin, обрезанная сборка, ошибка самой команды. Отказ — не разрешение писать:
+// строка уходит в журнал, .gitignore владельца остаётся побайтно тем же, индекс
+// собирается как обычно. Обёртка роняет только check-ignore, остальные вызовы
+// отдаёт настоящему git, убрав свой каталог из PATH, чтобы не зациклиться.
+test("отказ check-ignore не трогает .gitignore владельца", async () => {
+  const stub = await embedStub();
+  const vault = makeVault();
+  const git = (...args: string[]) =>
+    execFileSync("git", ["-C", vault, ...args], { encoding: "utf8" }).trim();
+  try {
+    writeFileSync(join(vault, "cards", "ivan.md"), card("Иван", "Монтажёр."));
+    const ownerGitignore = "# owner rules\n*.log\n";
+    writeFileSync(join(vault, ".gitignore"), ownerGitignore);
+    git("init", "-q");
+    git("config", "user.email", "owner@example.invalid");
+    git("config", "user.name", "Owner");
+    git("add", "-A");
+    git("commit", "-qm", "owner state");
+
+    // Обёртка живёт в vault и убирается вместе с ним; создаётся после add -A,
+    // поэтому под git не попадает.
+    const fakeBin = join(vault, "fakebin");
+    mkdirSync(fakeBin);
+    writeFileSync(
+      join(fakeBin, "git"),
+      "#!/bin/sh\n" +
+        'for arg in "$@"; do\n' +
+        '  if [ "$arg" = "check-ignore" ]; then\n' +
+        '    echo "stub git: check-ignore unavailable" >&2\n' +
+        "    exit 128\n" +
+        "  fi\n" +
+        "done\n" +
+        'PATH="${PATH#*:}"; export PATH\n' +
+        'exec git "$@"\n',
+      { mode: 0o755 },
+    );
+
+    // execFile бросает на любом ненулевом выходе: resolved await — это exit 0.
+    const { stderr } = await runIndex(vault, stub.url, undefined, {
+      PATH: `${fakeBin}:${process.env.PATH ?? ""}`,
+    });
+
+    assert.match(stderr, /embed-index: не смог проверить ignore \.index/u);
+    assert.equal(
+      readFileSync(join(vault, ".gitignore"), "utf8"),
+      ownerGitignore,
+      "отказ check-ignore — не «не игнорируется»: файл владельца не тронут",
+    );
+    assert.ok(
+      existsSync(join(vault, ".index", "embeddings.json")),
+      "индекс собран, ночь не упала",
     );
   } finally {
     await stub.close();

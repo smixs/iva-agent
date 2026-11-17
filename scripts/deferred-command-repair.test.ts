@@ -244,27 +244,6 @@ void test("R5: helper/goal running state holds the lifecycle request", async (t)
   });
   assert.equal(launches, 0);
 });
-void test("R5: compaction transition keeps the chat busy before session.waiting", (t) => {
-  const d = fx(t);
-  const draftUrl = new URL("../agent/lib/telegram-draft.ts", import.meta.url)
-    .href;
-  const statusUrl = new URL("../agent/lib/run-status.ts", import.meta.url).href;
-  execFileSync(
-    process.execPath,
-    [
-      "--input-type=module",
-      "-e",
-      `
-    const status=await import(${JSON.stringify(statusUrl)});
-    const draft=await import(${JSON.stringify(draftUrl)});
-    status.setChatStatus('42:',{status:'running',sessionId:'s',turnId:'t'});
-    await draft.finishTelegramStatus({telegram:{chatId:42}},'s','completed','t',true);
-    if(status.getChatStatus('42:')?.status!=='running')throw Error('compaction gap');
-  `,
-    ],
-    { env: { ...process.env, ASSISTANT_DATA_DIR: d } },
-  );
-});
 void test("R6D: completed outcome wins over a recycled live foreign pid", async (t) => {
   const d = fx(t);
   putActive(d, { pid: process.pid, result: true });

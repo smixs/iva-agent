@@ -1,8 +1,8 @@
 /* eslint-disable @typescript-eslint/no-unnecessary-type-assertion -- conversion keeps the injectable fetch boundary source-compatible. */
-// Просьба к eve пересказать историю сессии — штатный роут eve-канала
+// Просьба к eve пометить сессию к свёртке — штатный роут eve-канала
 // POST /eve/v1/session/:sessionId/compact под общим токеном внутренних клиентов Ивы
-// (agent/lib/eve-auth.ts). Событийные обработчики канала публичный compact() не получают,
-// поэтому канал зовёт роут собственного процесса.
+// (agent/lib/eve-auth.ts). Пометку поглощает свёртка перед следующим шагом модели;
+// канал чат под неё не занимает и историю не трогает.
 import { localChannelUrl } from "./telegram-cancel-route.ts";
 
 /** Адрес роута свёртки сессии по правилу хоста собственных роутов канала. */
@@ -19,7 +19,7 @@ type FetchResponse = { status: number };
 type FetchImpl = (url: string, init: RequestInit) => Promise<FetchResponse>;
 
 /**
- * true — eve приняла просьбу (202) и поставит пересказ за активным ходом.
+ * true — eve приняла просьбу (202): сессия помечена, свёртка пойдёт перед следующим шагом.
  * false — eve отказала: сессии уже нет (200 no_active_session) или запрос отвергнут (4xx).
  * Исключение — исход неизвестен: ответа нет (таймаут, обрыв) или eve ответила сбоем
  * диспетчера (5xx), после которого просьба могла остаться в её очереди.

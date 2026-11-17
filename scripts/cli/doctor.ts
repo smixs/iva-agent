@@ -1269,9 +1269,9 @@ async function readChatStates(
   }
 }
 
-/** Чем заняты чаты: «1 turn, 1 compacting»; пусто — все свободны. */
+/** Чем заняты чаты: «1 turn, 1 stale»; пусто — все свободны. */
 function busyChatsLine(states: ChatStates): string {
-  return ["accepted", "turn", "compacting", "stale"]
+  return ["accepted", "turn", "stale"]
     .map((name) => [name, states.filter((state) => state === name).length])
     .filter(([, count]) => count !== 0)
     .map(([name, count]) => `${count} ${name}`)

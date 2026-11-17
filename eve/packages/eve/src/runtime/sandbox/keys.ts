@@ -145,6 +145,38 @@ function buildRuntimeSandboxSessionKey(
 }
 
 /**
+ * Inverse of {@link buildRuntimeSandboxSessionKey}: recovers the durable
+ * session id a session key was built for, or `undefined` when the value
+ * is not a session key of this backend. The session id sits between the
+ * version and node segments and never contains `-`; the node segment may,
+ * so only the span up to the next `-` belongs to the session id.
+ */
+export function sessionIdFromRuntimeSandboxSessionKey(input: {
+  readonly backendName: string;
+  readonly sessionKey: string;
+}): string | undefined {
+  const prefix = `eve-sbx-ses-${input.backendName}-`;
+  if (!input.sessionKey.startsWith(prefix)) {
+    return undefined;
+  }
+
+  const remainder = input.sessionKey.slice(prefix.length);
+  const versionSeparator = remainder.indexOf("-", remainder.indexOf("-") + 1);
+  if (versionSeparator === -1) {
+    return undefined;
+  }
+
+  const tail = remainder.slice(versionSeparator + 1);
+  const nodeSeparator = tail.indexOf("-");
+  if (nodeSeparator === -1) {
+    return undefined;
+  }
+
+  const sessionId = tail.slice(0, nodeSeparator);
+  return sessionId === "" ? undefined : sessionId;
+}
+
+/**
  * Resolves the eve package version that participates in template keys.
  *
  * Build-time prewarm and deployed runtime must derive the same key, but a

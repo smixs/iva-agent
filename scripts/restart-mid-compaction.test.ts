@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
+import { createServer, type Server } from "node:http";
 import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -20,11 +21,65 @@ import {
   envFor,
   killEve,
   post,
-  startProvider,
 } from "./fixtures/restart-app.ts";
 
+const SUMMARY_PROMPT = "CONTEXT CHECKPOINT COMPACTION";
+const SUMMARY_ANSWER = "RESTARTED_SUMMARY";
+
+// Провайдер как в матрице, но без барьеров: отвечает на всё и ведёт журнал запросов,
+// чтобы тест видел, пришёл ли запрос пересказа после перезапуска.
+async function startLoggingProvider(): Promise<{
+  baseUrl: string;
+  requests: string[];
+  close(): Promise<void>;
+}> {
+  const requests: string[] = [];
+  const sockets = new Set<import("node:net").Socket>();
+  const server: Server = createServer((request, response) => {
+    let body = "";
+    request.setEncoding("utf8");
+    request.on("data", (chunk) => (body += String(chunk)));
+    request.on("end", () => {
+      requests.push(body);
+      const summary = body.includes(SUMMARY_PROMPT);
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      const text = summary ? SUMMARY_ANSWER : "RECOVERED";
+      response.end(
+        `data: ${JSON.stringify({
+          id: "chatcmpl-restart",
+          object: "chat.completion.chunk",
+          created: 1,
+          model: "iva-restart",
+          choices: [{ index: 0, delta: { content: text }, finish_reason: null }],
+        })}\n\ndata: ${JSON.stringify({
+          choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+          usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+        })}\n\ndata: [DONE]\n\n`,
+      );
+    });
+  });
+  server.on("connection", (socket) => {
+    sockets.add(socket);
+    socket.on("close", () => sockets.delete(socket));
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  return {
+    baseUrl: `http://127.0.0.1:${address.port}/v1`,
+    requests,
+    close: async () => {
+      for (const socket of sockets) socket.destroy();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    },
+  };
+}
+
 void test(
-  "startup retires a session killed mid-compaction, stays silent, and drains its queued message",
+  "a compaction pass killed mid-flight frees the chat and the queued message drains",
   {
     timeout: 180_000,
   },
@@ -32,8 +87,7 @@ void test(
     const sandbox = await mkdtemp(
       join(tmpdir(), "iva-restart-mid-compaction-"),
     );
-    // Ход отвечает сразу, а пересказ между ходами замирает в провайдере до перезапуска.
-    const provider = await startProvider("CONTEXT CHECKPOINT COMPACTION");
+    const provider = await startLoggingProvider();
     let eve: EveProcess | null = null;
     t.after(async () => {
       await stopEve(eve);
@@ -48,7 +102,12 @@ void test(
     );
     const port = await freePort();
     const bearer = randomBytes(24).toString("hex");
-    const env = envFor(sandbox, app, port, provider.baseUrl, bearer);
+    const env: NodeJS.ProcessEnv = {
+      ...envFor(sandbox, app, port, provider.baseUrl, bearer),
+      // Матричные барьеры не выставлены: чекпоинты только пишут журнал, а запись
+      // статуса чата в канале включается тем же флагом.
+      COMPACT_STEP1_MATRIX: "1",
+    };
     Object.assign(process.env, {
       ASSISTANT_DATA_DIR: env.ASSISTANT_DATA_DIR,
       ASSISTANT_HOST: `http://127.0.0.1:${port}`,
@@ -84,32 +143,32 @@ void test(
 
     eve = startEve(app, env, port, () => {});
     await waitForHealth(port, eve);
-    // Канал на парковке сессии занимает чат и ждёт ответа роута свёртки внутри обработчика
-    // (scripts/fixtures/restart-hang-channel.ts делает это теми же модулями, что канал Telegram).
+    // На парковке канал ставит сессии пометку свёртки штатным роутом — без захвата чата;
+    // саму свёртку сделает следующий шаг (scripts/fixtures/restart-hang-channel.ts).
     await writeFile(join(app, "data/compact-on-waiting"), "");
     const started = await post(port, bearer, "/restart-hang/send", {
       address: "1::",
       message: "remember the word aubergine",
     });
     assert.equal(started.status, 200);
-    const { sessionId } = (await started.json()) as { sessionId: string };
     await replies(1, "the first turn did not complete");
 
-    // Запрос пересказа дошёл до провайдера: eve приняла просьбу, пока обработчик её ждал, и
-    // ручной compact нашёл модель шага (собственный eve).
-    await provider.blocked;
+    // Пометка принята и чат свободен — занятия записью running под свёртку больше нет.
+    const compactFile = join(app, "data/restart-hang-compact.jsonl");
+    {
+      const deadline = Date.now() + 30_000;
+      for (;;) {
+        const content = await readFile(compactFile, "utf8").catch(() => "");
+        if (content.trim().length > 0) break;
+        if (Date.now() >= deadline)
+          assert.fail("the parked session did not take the /compact mark");
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+    }
     const asked = JSON.parse(
-      (await readFile(join(app, "data/restart-hang-compact.jsonl"), "utf8"))
-        .trim()
-        .split("\n")[0] ?? "{}",
-    ) as { outcome?: string; ms?: number };
-    assert.equal(asked.outcome, "true", "eve приняла просьбу");
-    assert.ok(
-      typeof asked.ms === "number" && asked.ms < 3_000,
-      `ожидание ответа внутри обработчика парковки не виснет: ${String(asked.ms)} мс`,
-    );
-    assert.equal(status.getChatStatus("1:")?.sessionId, sessionId);
-    assert.equal(status.getChatStatus("1:")?.compacting, true);
+      (await readFile(compactFile, "utf8")).trim().split("\n")[0] ?? "{}",
+    ) as { outcome?: string };
+    assert.equal(asked.outcome, "true", "eve приняла пометку свёртки");
     await queue.enqueueTelegramQueueUpdate("1:", {
       update_id: 2,
       message: {
@@ -121,7 +180,31 @@ void test(
       },
     });
 
+    // Следующее сообщение поднимает проход свёртки по пометке: emit
+    // compaction.requested ждёт обработчик, а барьер внутри него подвешивает
+    // проход посередине — запись running, тело прохода ещё не закончено.
+    await writeFile(join(app, "data/restart-hang-barrier"), "before-summary");
+    const second = await post(port, bearer, "/restart-hang/send", {
+      address: "1::",
+      message: "compact the word now",
+    });
+    assert.equal(second.status, 200);
+    {
+      const blockedFile = join(app, "data/restart-hang-blocked");
+      const deadline = Date.now() + 30_000;
+      for (;;) {
+        const blocked = await readFile(blockedFile, "utf8").catch(() => "");
+        if (blocked.trim() === "before-summary") break;
+        if (Date.now() >= deadline)
+          assert.fail("the marked step did not reach compaction.requested");
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+    }
+
+    // Обрыв посередине прохода: восстановление видит running, убирает мёртвый
+    // workflow-стор и помечает ход прерванным — застрявшей свёртки не остаётся.
     await killEve(eve);
+    await rm(join(app, "data/restart-hang-barrier"), { force: true });
     await runNode(
       [join(app, "scripts/recover-interrupted-turns.ts")],
       app,
@@ -131,10 +214,8 @@ void test(
     eve = startEve(app, env, port, () => {});
     await waitForHealth(port, eve);
 
-    // Восстановление само освободило запись пересказа: мосту нечего закрывать и не о чем
-    // сообщать — запроса человека в пересказе не было.
-    assert.equal(status.getChatStatus("1:")?.status, "idle");
-    assert.equal(status.getChatStatus("1:")?.compacting, undefined);
+    // Прерванный проход — честное прерывание хода с вопросом человека: жнец
+    // просит повторить, молча проигранных записей не остаётся.
     const notices: string[] = [];
     assert.equal(
       await queue.reapStaleRuns({
@@ -144,13 +225,9 @@ void test(
         },
         logImpl: () => {},
       }),
-      0,
-    );
-    assert.deepEqual(notices, []);
-    assert.equal(
-      (await queue.loadQueue({ strict: true })).queues["1:"]?.length,
       1,
     );
+    assert.equal(notices.length, 1);
 
     const remaining = await routing.drainReadyQueueHeads({
       deliverImpl: async (update) => {
@@ -166,6 +243,26 @@ void test(
     });
     assert.equal(remaining, 0);
     await replies(2, "the queued message did not complete after restart");
+
+    // Проход начался по пометке и был убит до вызова пересказа: журнал ровно из
+    // одной точки, вызова модели-пересказчика не было.
+    const compactions = (
+      await readFile(join(app, "data/restart-hang-compactions.jsonl"), "utf8")
+    )
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => (JSON.parse(line) as { point: string }).point);
+    assert.deepEqual(
+      compactions,
+      ["requested"],
+      "проход начался по пометке и убит до вызова пересказа",
+    );
+    const summaries = provider.requests.filter((body) =>
+      body.includes(SUMMARY_PROMPT),
+    ).length;
+    assert.equal(summaries, 0, "вызов пересказа убит барьером — провайдер его не видел");
+    assert.equal(status.getChatStatus("1:")?.status, "idle");
 
     const reset = await post(port, bearer, "/eve/v1/telegram/reset", {
       address: { chatId: "1" },

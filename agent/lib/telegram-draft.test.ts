@@ -494,7 +494,7 @@ await test("PBT смешивает ходы, шаги, инструменты, �
         let step = 0;
         let words: string[] = [];
         let tool = false;
-        let phase: "idle" | "running" | "final" | "compacting" = "idle";
+        let phase: "idle" | "running" | "final" | "held" = "idle";
         let flow: InstanceType<typeof status.TelegramDraftStream> | undefined;
         const frames = () =>
           calls.filter((c) => c.method === "sendRichMessageDraft");
@@ -507,7 +507,6 @@ await test("PBT смешивает ходы, шаги, инструменты, �
           sessionId: null,
           turnId: null,
           draftId: null,
-          compacting: null,
           resetAt: null,
         });
         try {
@@ -617,11 +616,8 @@ await test("PBT смешивает ходы, шаги, инструменты, �
                 sessionId,
                 "completed",
               );
-              runStatus.setChatStatus(
-                key,
-                chatTakeOverPatch({ sessionId, compacting: true }),
-              );
-              phase = "compacting";
+              runStatus.setChatStatus(key, chatTakeOverPatch({ sessionId }));
+              phase = "held";
             }
             if (op === "end") {
               await status.finishTelegramStatus(
@@ -637,7 +633,6 @@ await test("PBT смешивает ходы, шаги, инструменты, �
                 sessionId: null,
                 turnId: null,
                 draftId: null,
-                compacting: null,
                 ingressId: null,
                 ingressAt: null,
                 turnAt: null,

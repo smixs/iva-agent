@@ -124,7 +124,7 @@ export async function usageProbe() {
             system: "",
             tools: [],
           },
-          compaction: { threshold: 100000, recentWindowSize: 1 },
+          compaction: { threshold: 100000, recentWindowTokens: 1, summaryMaxOutputTokens: 400 },
           continuationToken: "fixture",
           sessionId: kind,
           history: [],

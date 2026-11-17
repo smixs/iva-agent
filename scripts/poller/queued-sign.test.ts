@@ -1,7 +1,7 @@
 // Знак очереди (лоадер под сообщением, которое ждёт за живым ходом) живёт в записи чата полями
 // queued*. Bridge переводит запись в idle без хода-наследника в трёх местах: жнец протухшего
 // хода, /new и сорвавшаяся прямая доставка. Везде знак уходит из чата и из записи
-// (specs/IdleCompaction.tla, SignOwned).
+// (SignOwned).
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";

@@ -46,18 +46,12 @@ const startTurn = (chatKey: string, sessionId: string, turnId: string) =>
     draftId: 7,
     ...io,
   });
-const finishTurn = (
-  chatKey: string,
-  sessionId: string,
-  turnId?: string,
-  keepBusy = false,
-) =>
+const finishTurn = (chatKey: string, sessionId: string, turnId?: string) =>
   finishTelegramStatus(
     channelOf(chatKey) as never,
     sessionId,
     "completed",
     turnId,
-    keepBusy,
   );
 // Жнец Bridge над одним чатом: остальные записи каталога этому тесту чужие.
 const reap = (chatKey: string, at: number) =>
@@ -86,7 +80,6 @@ function namedStates(raw: Record<string, unknown>, now: number): string[] {
     "turnAt",
     "firstOutputAt",
     "latencyLogged",
-    "compacting",
   ].every((field) => raw[field] === undefined);
   const idle = !running && noTurnFields;
   const retire = raw.retireAfterTurn !== undefined;
@@ -101,14 +94,8 @@ function namedStates(raw: Record<string, unknown>, now: number): string[] {
       live &&
       raw.sessionId === undefined &&
       raw.ingressId !== undefined &&
-      raw.turnId === undefined &&
-      raw.compacting === undefined,
-    turn: live && raw.sessionId !== undefined && raw.compacting === undefined,
-    compacting:
-      live &&
-      raw.sessionId !== undefined &&
-      raw.compacting === true &&
       raw.turnId === undefined,
+    turn: live && raw.sessionId !== undefined,
     stale: running && !live,
   };
   return Object.keys(is).filter((name) => is[name]);
@@ -148,25 +135,8 @@ const steps: Record<string, Step> = {
       ? undefined
       : finishTurn(key, own.sessionId, own.turnId);
   },
-  finishIntoCompaction: (key) => {
-    const own = getChatStatus(key);
-    return own?.sessionId === undefined || own.turnId === undefined
-      ? undefined
-      : finishTurn(key, own.sessionId, own.turnId, true);
-  },
   lateFinish: (key) => finishTurn(key, session(key, 1), "t-gone"),
   sessionEnds: (key) => finishTurn(key, session(key, 1)),
-  compact: (key, at) =>
-    turns.takeOverTelegramChat({
-      chatKey: key,
-      patch: turns.chatTakeOverPatch({
-        sessionId: session(key, 1),
-        compacting: true,
-      }),
-      now: () => at,
-      refuseImpl: (status) => status?.resetAt !== undefined,
-      ...io,
-    }),
   reminderTurn: (key, at) =>
     turns.takeOverTelegramChat({
       chatKey: key,
@@ -289,23 +259,23 @@ void test("ReleasedByOwnerOrReaper: the reaper leaves a live record and frees it
   assert.equal(chatState(getChatStatus(key)), "retry-offered");
 });
 
-void test("TurnFieldsOnlyWhenBusy: a writer that leaves compacting on a free chat gets an error and the record stays whole", () => {
-  // Контрпример мутанта leave-compacting: TurnStart, TurnEnd, ReleaseIntoCompaction, CompactEnd.
+void test("TurnFieldsOnlyWhenBusy: a writer that clears a busy record field-by-field and misses one gets an error and the record stays whole", () => {
+  // Контрпример мутанта leave-turn-field: TurnStart, TurnEnd с частичной очисткой.
   const key = freshChat();
   setChatStatusIf(
     key,
     {},
-    { status: "running", sessionId: "s", compacting: true },
+    { status: "running", sessionId: "s", turnId: "t" },
   );
   const before = rawOf(key);
   assert.throws(
     () =>
       setChatStatusIf(
         key,
-        { sessionId: "s", compacting: true },
+        { sessionId: "s" },
         { status: "idle", sessionId: null },
       ),
-    /TurnFieldsOnlyWhenBusy.*compacting/u,
+    /TurnFieldsOnlyWhenBusy.*turnId/u,
   );
   assert.deepEqual(rawOf(key), before);
 });
@@ -328,7 +298,7 @@ void test("TurnFieldsOnlyWhenBusy: outside a test run the same write goes throug
   setChatStatusIf(
     key,
     {},
-    { status: "running", sessionId: "s", compacting: true },
+    { status: "running", sessionId: "s", turnId: "t" },
   );
   const env = { ...process.env };
   delete env.NODE_TEST_CONTEXT;
@@ -339,7 +309,7 @@ void test("TurnFieldsOnlyWhenBusy: outside a test run the same write goes throug
       "-e",
       `const { setChatStatusIf } = await import("#lib/run-status.ts");
        const written = setChatStatusIf(${JSON.stringify(key)},
-         { sessionId: "s", compacting: true }, { status: "idle", sessionId: null });
+         { sessionId: "s" }, { status: "idle", sessionId: null });
        if (written === null) process.exit(3);`,
     ],
     { env, encoding: "utf8" },
@@ -348,10 +318,10 @@ void test("TurnFieldsOnlyWhenBusy: outside a test run the same write goes throug
   const journal = live.stderr;
   const raw = rawOf(key);
   assert.equal(raw.status, "idle");
-  assert.equal(raw.compacting, undefined);
+  assert.equal(raw.turnId, undefined);
   assert.deepEqual(records.chatRecordViolations(raw), []);
   assert.equal(chatState(getChatStatus(key)), "free");
-  assert.match(journal, /TurnFieldsOnlyWhenBusy.*compacting/u);
+  assert.match(journal, /TurnFieldsOnlyWhenBusy.*turnId/u);
 });
 
 void test("FreeAfterRestart: with no owner left every busy record is freed by the reaper, with and without recovery", async () => {
@@ -360,7 +330,6 @@ void test("FreeAfterRestart: with no owner left every busy record is freed by th
     accepted: (key) =>
       turns.publishTelegramEarlyStatus({ chatKey: key, ...io }),
     turn: (key) => startTurn(key, "s", "turn-1"),
-    compacting: (key) => steps.compact(key, Date.now()),
     "reminder turn": (key) => steps.reminderTurn(key, Date.now()),
   };
   for (const [name, claim] of Object.entries(claims)) {
@@ -423,7 +392,9 @@ void test("a record written by 0.5.11 reads into its state and keeps every field
       },
     ],
     [
-      "compacting",
+      // Свёртка версии до 24.10.2026: её запись читается как обычный занятый чат —
+      // «compacting» перестало быть полем схемы и переживает запись как незнакомое.
+      "turn",
       {
         status: "running",
         generation: 2,

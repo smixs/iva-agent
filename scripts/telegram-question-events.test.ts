@@ -243,23 +243,12 @@ test("authored rich question rekeys a group session through public Eve continuat
   assert.deepEqual(harness.rekeys, [`-7:42:${String(preview.messageId)}`]);
 });
 
-test("preview delivery preserves ADR-0021 compaction claim and never repeats its request", async (t) => {
+test("preview delivery survives a duplicate resolution: it retries only the accepted preview", async (t) => {
   t.mock.method(console, "error", () => {});
   t.after(() => {
     failEdits = false;
     onPreviewEdit = undefined;
   });
-  const [
-    { recordStepInput },
-    { idleCompactionLimit },
-    { providerConfig },
-    { getChatStatus },
-  ] = await Promise.all([
-    import("../agent/lib/idle-compaction.ts"),
-    import("../agent/lib/compaction.ts"),
-    import("../agent/provider.ts"),
-    import("../agent/lib/run-status.ts"),
-  ]);
   const sessionId = "question-compaction";
   const harness = context(
     {
@@ -280,33 +269,10 @@ test("preview delivery preserves ADR-0021 compaction claim and never repeats its
       { requestId: "q", outcome: "answered", response: { optionId: "yes" } },
     ],
   });
-  recordStepInput(
-    sessionId,
-    idleCompactionLimit(providerConfig.contextWindow) + 1,
-  );
   await harness.emit("turn.completed", { turnId: "turn_0" });
   assert.ok(harness.state.questionPreviews?.q.settledStatus);
-  const observedClaims: Array<{
-    sessionId: unknown;
-    compacting: unknown;
-    status: unknown;
-  }> = [];
-  onPreviewEdit = () => {
-    const status = getChatStatus("977:");
-    observedClaims.push({
-      sessionId: status?.sessionId,
-      compacting: status?.compacting,
-      status: status?.status,
-    });
-  };
-  const before = calls.filter(({ method }) => method === "compact").length;
   await harness.emit("session.waiting", {});
-  assert.equal(
-    calls.filter(({ method }) => method === "compact").length,
-    before + 1,
-  );
-  assert.equal(getChatStatus("977:")?.compacting, true);
-  // Duplicate resolution retries only the accepted preview while compaction owns the chat.
+  // Duplicate resolution retries only the accepted preview.
   await harness.emit("input.resolved", {
     resolutions: [
       { requestId: "q", outcome: "answered", response: { optionId: "yes" } },
@@ -320,23 +286,4 @@ test("preview delivery preserves ADR-0021 compaction claim and never repeats its
   });
   assert.deepEqual(harness.state.questionPreviews, {});
   assert.deepEqual(harness.state.hitlCallbacks, {});
-  assert.equal(
-    calls.filter(({ method }) => method === "compact").length,
-    before + 1,
-  );
-  assert.equal(getChatStatus("977:")?.compacting, true);
-  assert.ok(observedClaims.length >= 3);
-  for (const observed of observedClaims)
-    assert.deepEqual(observed, {
-      sessionId,
-      compacting: true,
-      status: "running",
-    });
-  onPreviewEdit = undefined;
-  await harness.emit("session.waiting", {});
-  assert.equal(getChatStatus("977:")?.status, "idle");
-  assert.equal(
-    calls.filter(({ method }) => method === "compact").length,
-    before + 1,
-  );
 });

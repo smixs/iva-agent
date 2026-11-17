@@ -54,14 +54,21 @@ type ErrorLike = {
 };
 type RunStatus = ChatRecord;
 type ResetResult = { status?: unknown; [key: string]: unknown };
-type ResetRequest = { chatKey: string; target: TelegramResetTarget };
+type ResetRequest = {
+  chatKey: string;
+  target: TelegramResetTarget;
+  // Эпоха намерения на проводе: роут отклоняет вызов, чья эпоха уже упала по
+  // этому ключу, — запоздавшее после таймаута исполнение старого remote не
+  // сбросит свежий разговор (T341).
+  resetEpoch?: number;
+};
 type ResetRequestImpl = (request: ResetRequest) => Promise<ResetResult>;
 type CompleteStateImpl = (
   chatKey: string,
   options: {
     clearQueue?: boolean;
     discardThroughUpdateId?: number;
-    resetRequestedAt?: number;
+    resetFence?: number;
   },
 ) => Promise<void>;
 type LogImpl = (...args: unknown[]) => void;
@@ -88,6 +95,14 @@ export type QueuePhase =
   | { state: "running"; baselineGeneration: number; generation: number };
 
 const errorMessage = (error: unknown) => (error as ErrorLike).message;
+// Отметка запроса сброса из записанного намерения: главный путь и сверка после
+// перезапуска отсекают очередь по одному и тому же времени.
+const resetIntentRequestedAt = (intent: unknown): number | undefined =>
+  typeof intent === "object" &&
+  intent !== null &&
+  Number.isSafeInteger((intent as { requestedAt?: unknown }).requestedAt)
+    ? (intent as { requestedAt: number }).requestedAt
+    : undefined;
 const withResetPhase = (error: unknown, resetPhase: string) => {
   (error as ErrorLike).resetPhase = resetPhase;
 };
@@ -108,12 +123,15 @@ const queueInFlight = new Map<string, QueuePhase>();
 const queueBatchPins = new Map<string, readonly number[]>();
 const queueDrainRotation: { afterKey: string | null } = { afterKey: null };
 // Память Bridge об Интенте сброса чата — вход resetIntentPhase вместе с файлом намерения.
-// recorded — зеркало файла: ограда доставки очереди чата. retryAt, failures, escalated —
+// recorded — зеркало файла: ограда доставки очереди чата. requestedAt — эпоха ожидающего
+// намерения (его запрос): поступающие элементы помечаются ею, и граница сброса не зависит
+// ни от update_id, ни от миллисекундного штампа. retryAt, failures, escalated —
 // отсрочка повтора, счёт отказов и доставленная эскалация. Перезапуск их теряет, сверка при
-// старте восстанавливает recorded с диска. Remove the backoff and the delivery fence when
-// vercel/eve#2876 is fixed in the installed eve.
+// старте восстанавливает recorded и requestedAt с диска. Remove the backoff and the
+// delivery fence when vercel/eve#2876 is fixed in the installed eve.
 type ResetIntentMemory = {
   recorded: boolean;
+  requestedAt?: number;
   retryAt: number;
   failures: number;
   escalated: boolean;
@@ -178,7 +196,7 @@ async function serializeResetIntentMutation<T>(
 // Очередь сброса чата в процессе Bridge: главный путь (/new, /restart, отставка сессии) и
 // сверка намерения одного чата идут по одной. Без неё запоздалый удалённый сброс сверки
 // стирает сессию, в которую главный путь уже доставил следующее сообщение
-// (specs/ResetIntent.tla: RecLoad и NewStart под одной очередью чата).
+// (specs/ResetEpoch.tla: поток /new и сверка одного чата идут по одной).
 const chatResetTails = new Map<string, Promise<void>>();
 
 async function serializeChatReset<T>(
@@ -226,6 +244,13 @@ function resetMemoryOf(chatKey: string): ResetIntentMemory {
   return resetIntentMemory.get(chatKey) ?? NO_RESET_INTENT_MEMORY;
 }
 
+// Эпоха ожидающего намерения чата (requestedAt записанного намерения) или
+// undefined — pendingResetFences цепочки сброса.
+const pendingResetEpoch = (chatKey: string): number | undefined => {
+  const memory = resetIntentMemory.get(chatKey);
+  return memory?.recorded === true ? memory.requestedAt : undefined;
+};
+
 function rememberResetIntent(
   chatKey: string,
   patch: Partial<ResetIntentMemory>,
@@ -248,7 +273,8 @@ function resetRetryPending(chatKey: string, now: number): boolean {
   return resetMemoryOf(chatKey).retryAt > now;
 }
 
-// Фаза Интента сброса чата по записи и памяти Bridge (specs/ResetIntent.tla, Phase).
+// Фаза намерения сброса чата по записи и памяти Bridge (specs/ResetEpoch.tla:
+// pending-намерение pFence, память поллинга и backoff).
 export function privateResetIntentPhase(
   chatKey: string,
   now: () => number = Date.now,
@@ -305,7 +331,7 @@ export async function writeQueueAtomic(
 export async function clearChatQueue(
   chatKey: string,
   discardThroughUpdateId?: number,
-  resetRequestedAt?: number,
+  resetFence?: number,
   {
     clearQueueFileKeyImpl = clearQueueFileKey,
   }: {
@@ -315,10 +341,7 @@ export async function clearChatQueue(
   await serializeQueueMutation(async () => {
     // Reset cleanup must fail loudly: completeScopedResetState keeps the old
     // running status until this atomic rewrite succeeds.
-    if (
-      discardThroughUpdateId === undefined &&
-      resetRequestedAt === undefined
-    ) {
+    if (discardThroughUpdateId === undefined && resetFence === undefined) {
       await clearQueueFileKeyImpl(QUEUE_FILE, chatKey);
       return;
     }
@@ -326,11 +349,28 @@ export async function clearChatQueue(
     const current = Object.hasOwn(loaded.document.queues, chatKey)
       ? loaded.document.queues[chatKey]
       : [];
+    // Живая эпоха читается внутри мутации: если за ожидание блокировки чат получил
+    // новое /new, чистка прежнего намерения работает уже как чистка новой эпохи и
+    // не трогает её элементы. Переданная граница — запасной путь для вызовов без
+    // назначенной эпохи. update_id Telegram не обязан расти, а миллисекундный штамп
+    // не различает «до» и «после» внутри одной отсечки: элемент живёт, если его
+    // приняли под живой границей. Пометка новее границы тоже живая: это наследие
+    // отменённого намерения, сброс не состоялся, и терять такие сообщения нельзя —
+    // то же правило, что в promoteReadyInbox. Запись без пометки эпохи (до появления пометок)
+    // доказывает «после» только строго бо́льшим временем постановки: равенство «до»
+    // и «после» не отличает, и такая запись уходит. update_id — запасной путь для
+    // вызовов без отметки границы.
+    const fence =
+      resetFence !== undefined
+        ? (resetEpochFor(chatKey) ?? resetFence)
+        : undefined;
     const retained = current.filter((item) =>
-      discardThroughUpdateId !== undefined
-        ? item.updateId > discardThroughUpdateId
-        : typeof item.enqueuedAt === "number" &&
-          item.enqueuedAt >= (resetRequestedAt as number),
+      fence !== undefined
+        ? item.resetFence !== undefined
+          ? item.resetFence >= fence
+          : typeof item.enqueuedAt === "number" && item.enqueuedAt > fence
+        : discardThroughUpdateId !== undefined &&
+          item.updateId > discardThroughUpdateId,
     );
     if (retained.length === current.length) return;
     const queues = Object.fromEntries(Object.entries(loaded.document.queues));
@@ -346,11 +386,29 @@ export async function clearChatQueue(
 export const enqueueTelegramQueueUpdate = (
   chatKey: string,
   update: TelegramQueueUpdate,
-  enqueueImpl: typeof enqueueQueueFile = enqueueQueueFile,
+  enqueuedAt?: number,
+  {
+    resetFence,
+    enqueueImpl = enqueueQueueFile,
+  }: {
+    // Эпоха, которой пометить элемент: явная из durable-inbox записи (или null —
+    // записи без пометки), либо текущая эпоха чата при прямой постановке.
+    resetFence?: number | null;
+    enqueueImpl?: typeof enqueueQueueFile;
+  } = {},
 ) =>
-  serializeQueueMutation(() =>
-    enqueueImpl(QUEUE_FILE, chatKey, update, { strict: true }),
-  );
+  serializeQueueMutation(() => {
+    // resetFence === undefined — прямая постановка: элемент помечается эпохой,
+    // действующей на момент записи в очередь.
+    const fields = resetFenceFields(
+      resetFence === undefined ? resetEpochFor(chatKey) : resetFence,
+    );
+    return enqueueImpl(QUEUE_FILE, chatKey, update, {
+      strict: true,
+      ...(enqueuedAt === undefined ? {} : { now: () => enqueuedAt }),
+      ...(fields === undefined ? {} : { itemFields: fields }),
+    });
+  });
 
 export const acknowledgeTelegramQueueItems = (
   chatKey: string,
@@ -360,33 +418,56 @@ export const acknowledgeTelegramQueueItems = (
     acknowledgeQueueItems(QUEUE_FILE, chatKey, updateIds),
   );
 
+// resetFence === null — вызывающий явно передал «принято без эпохи» (запись из
+// durable inbox до появления пометок); undefined — пометить текущей эпохой чата.
+const resetFenceFields = (fence: number | null | undefined) =>
+  typeof fence === "number" ? { resetFence: fence } : undefined;
+
+// Граница жива, пока её эпоха — текущая для чата (или эпохи ещё нет: прямой
+// вызов вне потока сброса). Новое /new сменяет эпоху — прежняя граница устаревает,
+// и её завершение не вправе трогать очередь и статус чужой эпохи.
+const resetFenceIsLive = (chatKey: string, resetFence: number) => {
+  const live = resetEpochFor(chatKey);
+  return live === undefined || live === resetFence;
+};
+
 export async function completeScopedResetState(
   chatKey: string,
   {
     clearQueue = false,
     discardThroughUpdateId,
-    resetRequestedAt,
+    resetFence,
     clearQueueImpl = clearChatQueue,
     setStatusImpl = setChatStatus,
   }: {
     clearQueue?: boolean;
     discardThroughUpdateId?: number;
-    resetRequestedAt?: number;
+    resetFence?: number;
     clearQueueImpl?: (
       chatKey: string,
       discardThroughUpdateId?: number,
-      resetRequestedAt?: number,
+      resetFence?: number,
     ) => Promise<void>;
     setStatusImpl?: (chatKey: string, patch: ChatRecordPatch) => unknown;
   } = {},
 ) {
+  // Завершение устаревшего намерения ничего не делает: живую эпоху чистит её
+  // собственный сброс, а чужая запись статуса стёрла бы её состояние.
+  const fenceWentStale = () =>
+    clearQueue &&
+    resetFence !== undefined &&
+    !resetFenceIsLive(chatKey, resetFence);
+  if (fenceWentStale()) return;
   // For private chats the queue belongs to the reset session, so clear it
   // before exposing an idle tombstone. A failed cleanup leaves the old running
   // status in place and lets a repeated /new retry safely.
   if (clearQueue) {
-    await clearQueueImpl(chatKey, discardThroughUpdateId, resetRequestedAt);
+    await clearQueueImpl(chatKey, discardThroughUpdateId, resetFence);
   }
+  // За время чистки очереди эпоха могла смениться: статус трогать уже нельзя.
+  if (fenceWentStale()) return;
 
+  const previousEpoch = getChatStatus(chatKey)?.resetEpoch;
   setStatusImpl(chatKey, {
     status: "idle",
     ...TURN_FIELDS_CLEARED,
@@ -398,22 +479,57 @@ export async function completeScopedResetState(
     restartRetryMedia: null,
     ...QUEUED_STATUS_CLEARED,
     resetAt: Date.now(),
+    // Граница успешного сброса durable и не падает: эпоху ниже уже записанной
+    // вернуть нельзя — помеченные ею элементы снова выглядели бы «после». Прежняя
+    // эпоха могла остаться выше fence у намерения, записанного до отката часов.
+    ...(clearQueue && resetFence !== undefined
+      ? {
+          resetEpoch: Math.max(
+            resetFence,
+            Number.isSafeInteger(previousEpoch)
+              ? (previousEpoch as number)
+              : resetFence,
+          ),
+        }
+      : {}),
   });
 }
+
+// Последняя durable эпоха чата: requestedAt ожидающего намерения или resetEpoch,
+// оставленный успешным сбросом в статусе. Основание монотонного шага /new.
+const lastDurableResetEpoch = (chatKey: string): number => {
+  const statusEpoch = getChatStatus(chatKey)?.resetEpoch;
+  return Math.max(
+    pendingResetEpoch(chatKey) ?? -1,
+    Number.isSafeInteger(statusEpoch) ? (statusEpoch as number) : -1,
+  );
+};
 
 export async function persistPrivateResetIntent(
   chatKey: string,
   discardThroughUpdateId?: number,
   {
     persistImpl = persistTelegramResetIntent,
-  }: { persistImpl?: typeof persistTelegramResetIntent } = {},
+    now = Date.now,
+  }: {
+    persistImpl?: typeof persistTelegramResetIntent;
+    now?: () => number;
+  } = {},
 ) {
   return serializeResetIntentMutation(chatKey, async () => {
+    // Эпоха — монотонный счётчик, а не показание часов: /new в ту же миллисекунду
+    // или после отката часов обязан получить эпоху выше последней durable, иначе
+    // принятое под прежней эпохой переживёт чистку новой границы.
+    const floor = lastDurableResetEpoch(chatKey) + 1;
     const intent = await persistImpl(RESET_INTENT_DIR, chatKey, {
       discardThroughUpdateId,
+      now: () => Math.max(now(), floor),
     });
     recordResetIntentMutation(chatKey);
-    rememberResetIntent(chatKey, { recorded: true });
+    rememberResetIntent(chatKey, {
+      recorded: true,
+      requestedAt: intent.requestedAt,
+    });
     return intent;
   });
 }
@@ -432,8 +548,11 @@ export async function loadPrivateResetIntents({
         (resetIntentKeyRevision.get(intent.chatKey) ?? 0) <= scan.revision,
     );
     const loadedKeys = new Set(unchangedIntents.map(({ chatKey }) => chatKey));
-    for (const { chatKey } of unchangedIntents) {
-      rememberResetIntent(chatKey, { recorded: true });
+    for (const intent of unchangedIntents) {
+      rememberResetIntent(intent.chatKey, {
+        recorded: true,
+        requestedAt: intent.requestedAt,
+      });
     }
     for (const [chatKey, memory] of resetIntentMemory) {
       if (
@@ -441,7 +560,10 @@ export async function loadPrivateResetIntents({
         !loadedKeys.has(chatKey) &&
         (resetIntentKeyRevision.get(chatKey) ?? 0) <= scan.revision
       ) {
-        rememberResetIntent(chatKey, { recorded: false });
+        rememberResetIntent(chatKey, {
+          recorded: false,
+          requestedAt: undefined,
+        });
       }
     }
     return unchangedIntents;
@@ -455,26 +577,114 @@ export async function clearPrivateResetIntent(
   chatKey: string,
   {
     clearImpl = clearTelegramResetIntent,
+    expectedRequestedAt,
   }: {
     clearImpl?: typeof clearTelegramResetIntent;
+    // Снимать только если намерение ещё это: пока завершался сброс, новое /new
+    // могло записать своё — чужое намерение удалять нельзя. Проверка внутри
+    // сериализованной мутации, гонки с persist у неё нет.
+    expectedRequestedAt?: number;
   } = {},
-) {
-  await serializeResetIntentMutation(chatKey, async () => {
+): Promise<boolean> {
+  return serializeResetIntentMutation(chatKey, async () => {
+    if (
+      expectedRequestedAt !== undefined &&
+      pendingResetEpoch(chatKey) !== expectedRequestedAt
+    ) {
+      return false;
+    }
     await clearImpl(RESET_INTENT_DIR, chatKey);
     recordResetIntentMutation(chatKey);
     rememberResetIntent(chatKey, NO_RESET_INTENT_MEMORY);
+    return true;
   });
 }
 
 export const hasPrivateResetIntent = (chatKey: string) =>
   resetIntentFences(privateResetIntentPhase(chatKey));
 
-const requestResetFromIntent: ResetRequestImpl = ({ target }) =>
+const clearIntentIfCurrent = (
+  chatKey: string,
+  expectedRequestedAt?: number,
+): Promise<boolean> =>
+  clearPrivateResetIntent(chatKey, { expectedRequestedAt });
+
+// Граница сброса, действующая для чата сейчас: пока намерение ожидает, это его
+// requestedAt; после успешного /new её хранит resetEpoch в статусе чата. Элемент,
+// принятый в другую эпоху, текущему разговору не принадлежит.
+export function resetEpochFor(chatKey: string): number | undefined {
+  const pending = pendingResetEpoch(chatKey);
+  if (pending !== undefined) return pending;
+  const epoch = getChatStatus(chatKey)?.resetEpoch;
+  return Number.isSafeInteger(epoch) ? (epoch) : undefined;
+}
+
+const requestResetFromIntent: ResetRequestImpl = ({
+  chatKey,
+  target,
+  resetEpoch,
+}) =>
   requestTelegramReset({
     url: RESET_ROUTE,
     secret: SECRET as string,
     target,
+    chatKey,
+    resetEpoch,
   });
+
+// Один remote-сброс на чат одновременно: свой /new, сверка намерений и жнец
+// протухших ходов делят слот. Второй ждёт конца чужого вызова, а выпускает
+// свой, только если remote за его эпоху ещё не падал — дубль не существует, и
+// запоздать ему некуда. «Упавший за эпоху» — отметка этого процесса плюс
+// durable свидетель: resetEpoch статус пишет уже после падения remote.
+const remoteResetSlots = new Map<string, Promise<unknown>>();
+const remoteResetLandedEpochs = new Map<string, number>();
+
+const remoteLandedEpoch = (chatKey: string): number => {
+  const statusEpoch = getChatStatus(chatKey)?.resetEpoch;
+  return Math.max(
+    remoteResetLandedEpochs.get(chatKey) ?? -1,
+    Number.isSafeInteger(statusEpoch) ? (statusEpoch as number) : -1,
+  );
+};
+
+async function remoteResetSlot<T>(
+  chatKey: string,
+  work: () => Promise<T>,
+): Promise<T> {
+  const previous = remoteResetSlots.get(chatKey) ?? Promise.resolve();
+  const run = previous.then(work);
+  const tail: Promise<void> = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  remoteResetSlots.set(chatKey, tail);
+  try {
+    return await run;
+  } finally {
+    if (remoteResetSlots.get(chatKey) === tail)
+      remoteResetSlots.delete(chatKey);
+  }
+}
+
+// Выпуск remote внутри слота: вызов уходит, только если remote за эту эпоху ещё
+// не падал. Возвращает null, когда выпускать было нечего, — запоздалый вызов
+// старого намерения так и не существует.
+async function issueRemoteReset(
+  chatKey: string,
+  resetFence: number | undefined,
+  issue: () => Promise<ResetResult>,
+): Promise<ResetResult | null> {
+  if (resetFence !== undefined && remoteLandedEpoch(chatKey) >= resetFence)
+    return null;
+  const result = await issue();
+  if (resetFence !== undefined)
+    remoteResetLandedEpochs.set(
+      chatKey,
+      Math.max(remoteResetLandedEpochs.get(chatKey) ?? -1, resetFence),
+    );
+  return result;
+}
 
 export async function releaseScopedSession(
   chatKey: string,
@@ -482,14 +692,26 @@ export async function releaseScopedSession(
   {
     requestResetImpl = requestResetFromIntent,
     logImpl = log,
+    resetFence,
   }: {
     requestResetImpl?: ResetRequestImpl;
     logImpl?: LogImpl;
+    // Эпоха намерения, чей remote выпускаем: уже упавший за неё вызов не
+    // дублируем. Без эпохи (жнец протухших ходов) слот всё равно держит порядок.
+    resetFence?: number;
   } = {},
 ) {
   let result;
   try {
-    result = await requestResetImpl({ chatKey, target });
+    result = (await remoteResetSlot(chatKey, async () =>
+      issueRemoteReset(chatKey, resetFence, () =>
+        requestResetImpl({
+          chatKey,
+          target,
+          ...(resetFence === undefined ? {} : { resetEpoch: resetFence }),
+        }),
+      ),
+    )) ?? { status: "already_reset" };
   } catch (error) {
     withResetPhase(error, "remote");
     throw error;
@@ -522,21 +744,57 @@ type ScopedResetOptions = {
   ) => Promise<unknown>;
   requestResetImpl?: ResetRequestImpl;
   completeStateImpl?: CompleteStateImpl;
-  clearIntentImpl?: (chatKey: string) => Promise<unknown>;
+  clearIntentImpl?: (
+    chatKey: string,
+    expectedRequestedAt?: number,
+  ) => Promise<unknown>;
   logImpl?: LogImpl;
   now?: () => number;
   retryAfterMs?: number;
+  /** Внутреннее: эпоха уже записанного намерения (performScopedReset ставит её до очереди). */
+  resetFence?: number;
 };
 
 // Главный путь сброса держит очередь чата до снятия намерения: сверка того же чата ждёт,
-// а доставка из его очереди стоит, пока сброс идёт (chatResetInFlight).
+// а доставка из его очереди стоит, пока сброс идёт (chatResetInFlight). Запись
+// намерения идёт до очереди: пока сверка держит её своим remote, новый /new обязан
+// перезаписать намерение и встать на слот remote — иначе обе стороны ждали бы друг
+// друга (specs/ResetEpoch.tla: NewPersist не ждёт упавший чужой remote).
 export async function performScopedReset(
   chatKey: string,
   target: TelegramResetTarget,
-  options: ScopedResetOptions = {},
+  {
+    clearQueue = false,
+    discardThroughUpdateId,
+    persistIntentImpl = persistPrivateResetIntent,
+    now = Date.now,
+    retryAfterMs = RESET_INTENT_RETRY_MS,
+    ...rest
+  }: ScopedResetOptions = {},
 ) {
+  let resetFence: number | undefined;
+  if (clearQueue) {
+    try {
+      resetFence = resetIntentRequestedAt(
+        await persistIntentImpl(chatKey, discardThroughUpdateId),
+      );
+    } catch (error) {
+      withResetPhase(error, "intent");
+      withResetFailures(error, recordResetFailure(chatKey));
+      deferResetRetry(chatKey, now(), retryAfterMs);
+      throw error;
+    }
+  }
   return serializeChatReset(chatKey, () =>
-    performScopedResetUnderQueue(chatKey, target, options),
+    performScopedResetUnderQueue(chatKey, target, {
+      clearQueue,
+      discardThroughUpdateId,
+      persistIntentImpl,
+      now,
+      retryAfterMs,
+      resetFence,
+      ...rest,
+    }),
   );
 }
 
@@ -546,13 +804,13 @@ async function performScopedResetUnderQueue(
   {
     clearQueue = false,
     discardThroughUpdateId,
-    persistIntentImpl = persistPrivateResetIntent,
     requestResetImpl = requestResetFromIntent,
     completeStateImpl = completeScopedResetState,
-    clearIntentImpl = clearPrivateResetIntent,
+    clearIntentImpl = clearIntentIfCurrent,
     logImpl = log,
     now = Date.now,
     retryAfterMs = RESET_INTENT_RETRY_MS,
+    resetFence,
   }: ScopedResetOptions,
 ) {
   if (clearQueue && resetRetryPending(chatKey, now())) {
@@ -560,20 +818,11 @@ async function performScopedResetUnderQueue(
     withResetPhase(error, "backoff");
     throw error;
   }
-  if (clearQueue) {
-    try {
-      await persistIntentImpl(chatKey, discardThroughUpdateId);
-    } catch (error) {
-      withResetPhase(error, "intent");
-      withResetFailures(error, recordResetFailure(chatKey));
-      deferResetRetry(chatKey, now(), retryAfterMs);
-      throw error;
-    }
-  }
   try {
     await releaseScopedSession(chatKey, target, {
       requestResetImpl,
       logImpl,
+      resetFence,
     });
   } catch (error) {
     if (clearQueue) {
@@ -583,7 +832,11 @@ async function performScopedResetUnderQueue(
     throw error;
   }
   try {
-    await completeStateImpl(chatKey, { clearQueue, discardThroughUpdateId });
+    await completeStateImpl(chatKey, {
+      clearQueue,
+      discardThroughUpdateId,
+      resetFence,
+    });
   } catch (error) {
     withResetPhase(error, "cleanup");
     if (clearQueue) {
@@ -594,7 +847,7 @@ async function performScopedResetUnderQueue(
   }
   if (clearQueue) {
     try {
-      await clearIntentImpl(chatKey);
+      await clearIntentImpl(chatKey, resetFence);
     } catch (error) {
       withResetPhase(error, "intent-cleanup");
       withResetFailures(error, recordResetFailure(chatKey));
@@ -609,7 +862,7 @@ export async function reconcileScopedResetIntents({
   loadIntentsImpl = loadPrivateResetIntents,
   requestResetImpl = requestResetFromIntent,
   completeStateImpl = completeScopedResetState,
-  clearIntentImpl = clearPrivateResetIntent,
+  clearIntentImpl = clearIntentIfCurrent,
   logImpl = log,
   sendImpl = sendStaleRunNotice,
   trImpl = tr,
@@ -621,7 +874,10 @@ export async function reconcileScopedResetIntents({
   loadIntentsImpl?: typeof loadPrivateResetIntents;
   requestResetImpl?: ResetRequestImpl;
   completeStateImpl?: CompleteStateImpl;
-  clearIntentImpl?: (chatKey: string) => Promise<unknown>;
+  clearIntentImpl?: (
+    chatKey: string,
+    expectedRequestedAt?: number,
+  ) => Promise<unknown>;
   logImpl?: LogImpl;
   sendImpl?: (chatKey: string, text: string) => Promise<unknown>;
   trImpl?: (en: string, ru: string) => string;
@@ -644,7 +900,8 @@ export async function reconcileScopedResetIntents({
       async () => {
         // Пока сверка ждала очередь, главный путь мог сбросить сессию по новому /new и
         // снять файл. Сверка исполняет сброс только для намерения, которое всё ещё лежит
-        // на диске в том же виде (specs/ResetIntent.tla, RecReread).
+        // на диске в том же виде (specs/ResetEpoch.tla: перечитывание намерения
+        // внутри слота чата — часть сверок Guards).
         const current = (await loadIntentsImpl()).find(
           (loaded) => loaded.chatKey === intent.chatKey,
         );
@@ -653,21 +910,48 @@ export async function reconcileScopedResetIntents({
           current.discardThroughUpdateId !== intent.discardThroughUpdateId
         )
           return false;
+        // Сверка работает только с живым намерением: пока длился её обход, чат мог
+        // получить новое /new, и тогда удалённый сброс и локальная чистка принадлежат
+        // уже новой эпохе — устаревшая запись ничего не трогает.
+        const intentIsCurrent = () =>
+          pendingResetEpoch(intent.chatKey) === intent.requestedAt;
+        if (!intentIsCurrent()) return false;
         const attemptedAt = now();
         if (resetRetryPending(intent.chatKey, attemptedAt)) return false;
         const target = { address } as const;
         try {
-          const result = await requestResetImpl({
-            chatKey: intent.chatKey,
-            target,
+          // Слот remote-сброса един на чат и делится с /new: пока чужой вызов летит,
+          // свой ждёт, а войдя в слот, выпускают только живое намерение без упавшего
+          // за эту эпоху remote — запоздалого вызова не существует.
+          const result = await remoteResetSlot(intent.chatKey, async () => {
+            if (!intentIsCurrent()) return null;
+            return issueRemoteReset(intent.chatKey, intent.requestedAt, () =>
+              requestResetImpl({
+                chatKey: intent.chatKey,
+                target,
+                resetEpoch: intent.requestedAt,
+              }),
+            );
           });
-          logResetOutcome(logImpl, intent.chatKey, target, result);
+          if (result !== null)
+            logResetOutcome(logImpl, intent.chatKey, target, result);
+          // Remote-вызов ждал: за это время намерение могло уступить новому /new.
+          if (!intentIsCurrent()) {
+            logImpl(
+              `reset intent for ${intent.chatKey} superseded; skipping local cleanup`,
+            );
+            return false;
+          }
           await completeStateImpl(intent.chatKey, {
             clearQueue: true,
             discardThroughUpdateId: intent.discardThroughUpdateId,
-            resetRequestedAt: intent.requestedAt,
+            resetFence: intent.requestedAt,
           });
-          await clearIntentImpl(intent.chatKey);
+          const cleared = await clearIntentImpl(
+            intent.chatKey,
+            intent.requestedAt,
+          );
+          if (cleared === false) return false;
           clearResetRetryState(intent.chatKey);
           return true;
         } catch (error) {
@@ -1002,8 +1286,6 @@ export async function retireSettledSessions({
   return retired;
 }
 
-// Брошенный пересказ между ходами — не оборванный ход: запроса человека в нём не было, его
-// сообщения ждут в очереди моста. Сказать «повтори запрос» было бы неправдой.
 async function notifyInterruptedTurn(
   key: string,
   status: RunStatus,
@@ -1011,7 +1293,8 @@ async function notifyInterruptedTurn(
   trImpl: (en: string, ru: string) => string,
   safeLog: (...args: unknown[]) => void,
 ): Promise<void> {
-  if (status.compacting === true) return;
+  // A legacy `compacting` record held no turn: there is nothing to repeat.
+  if ((status as { compacting?: unknown }).compacting === true) return;
   const text = interruptedTurnText({
     question:
       typeof status.turnQuestion === "string" ? status.turnQuestion : "",
@@ -1130,21 +1413,16 @@ export async function reapStaleRuns({
   return reaped;
 }
 
-/** Что сказать человеку, чьё сообщение встало в очередь: чат занят ходом или пересказом. */
+/** Что сказать человеку, чьё сообщение встало в очередь: чат занят ходом. */
 export function queuedNoticeText(
   count: number,
-  status: RunStatus | null | undefined,
+  _status: RunStatus | null | undefined,
   trImpl: (en: string, ru: string) => string = tr,
 ): string {
-  return status?.status === "running" && status.compacting === true
-    ? trImpl(
-        "Compacting the conversation, I'll answer in a moment.",
-        "Сжимаю разговор, скоро отвечу.",
-      )
-    : trImpl(
-        `Queued (${count}). I'll start it automatically when the current task finishes.`,
-        `В очереди: ${count}. Начну автоматически, когда текущая задача завершится.`,
-      );
+  return trImpl(
+    `Queued (${count}). I'll start it automatically when the current task finishes.`,
+    `В очереди: ${count}. Начну автоматически, когда текущая задача завершится.`,
+  );
 }
 
 async function acknowledgeQueued(update: TelegramQueueUpdate, count: number) {

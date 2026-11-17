@@ -377,7 +377,6 @@ export async function publishTelegramTurnStarted({
           turnId,
           draftId,
           wasCancelled: null,
-          compacting: null,
           turnAt:
             current?.sessionId === sessionId && current.turnId === turnId
               ? (current.turnAt ?? now())

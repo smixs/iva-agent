@@ -166,13 +166,12 @@ async function cancelTurnAndConfirm(
     return traceStopOutcome(chatKey, status, "failed");
   }
   // Факт явного Стопа, до POST: terminal-событие может прийти раньше ответа.
-  if (status?.compacting !== true)
-    setChatStatusIf(
-      chatKey,
-      { sessionId, turnId: status?.turnId },
-      { wasCancelled: true },
-      { touch: false },
-    );
+  setChatStatusIf(
+    chatKey,
+    { sessionId, turnId: status?.turnId },
+    { wasCancelled: true },
+    { touch: false },
+  );
   const outcome = await sendTurnCancel({
     ...runtime,
     secret,

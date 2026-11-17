@@ -299,7 +299,7 @@
       "outcome": {
         "output": "done"
       },
-      "threshold": 1,
+      "threshold": 500,
       "thresholdPercent": null
     },
     "task/question-response": {
@@ -603,7 +603,7 @@
         "done": true,
         "output": "done"
       },
-      "threshold": 1,
+      "threshold": 500,
       "thresholdPercent": null
     }
   }
