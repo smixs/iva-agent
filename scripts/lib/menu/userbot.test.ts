@@ -88,7 +88,7 @@ test("userbot menu renders the shared Telethon authorization state", async () =>
 
   assert.equal(calls, 1);
   assert.match(view.text, /Status: login required/);
-  assert.match(view.text, /account-ban risk/);
+  assert.doesNotMatch(view.text, /account-ban risk/);
 });
 
 test("userbot menu surfaces setup exit 1 and keeps the userbot heading", async () => {

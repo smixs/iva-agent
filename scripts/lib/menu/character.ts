@@ -63,20 +63,18 @@ function renderQuestion(st: MenuState, ctx: MenuContext) {
   return ctx.flows.screen(st, text);
 }
 
-// Экран портрета: сводка архетипа + [Принять]/[Пройти заново] с пояснениями.
+// Экран портрета: сводка архетипа + [Принять]/[Пройти заново].
 function renderPortrait(st: MenuState, ctx: MenuContext) {
   const code = st.data.quiz?.code;
   const text = [
     `# ${ctx.tr("🎭 Iva's character", "🎭 Характер Ивы")}`,
     quizSummary(code ?? "", ctx.getLang() === "en" ? "en" : "ru"),
-    `${button(ctx.tr("✅ Accept", "✅ Принять"), `iva_menu:${SID}:apply`, "success")} — ${ctx.tr(
-      "write this character in and use it from the next message.",
-      "записать этот характер и применять со следующего сообщения.",
-    )}`,
-    `${button(ctx.tr("↻ Retake", "↻ Пройти заново"), `iva_menu:${SID}:redo`)} — ${ctx.tr(
-      "answer the 10 questions again.",
-      "ответить на 10 вопросов заново.",
-    )}`,
+    button(
+      ctx.tr("✅ Accept", "✅ Принять"),
+      `iva_menu:${SID}:apply`,
+      "success",
+    ),
+    button(ctx.tr("↻ Retake", "↻ Пройти заново"), `iva_menu:${SID}:redo`),
     menuBackLine(ctx, PARENT),
   ].join("\n\n");
   return ctx.flows.screen(st, text);
@@ -90,13 +88,10 @@ export default {
     const text = [
       `# ${ctx.tr("🎭 Iva's character", "🎭 Характер Ивы")}`,
       ctx.tr(
-        "This is NOT a test of you — it sets what you want Iva to be like. 10 statements, answer yes / rather yes / rather no / no. At the end you'll get a portrait out of 16 archetypes and decide whether to apply it.",
-        "Это НЕ тест тебя — это настройка того, какой ты хочешь видеть иву. 10 утверждений, отвечай да / скорее да / скорее нет / нет. В конце получишь портрет из 16 архетипов и решишь, применять ли его.",
+        "10 statements about what you want Iva to be like.",
+        "10 утверждений о том, какой ты хочешь видеть Иву.",
       ),
-      `${button(ctx.tr("Start", "Начать"), `iva_menu:${SID}:go`)} — ${ctx.tr(
-        "answer the 10 questions.",
-        "ответить на 10 вопросов.",
-      )}`,
+      button(ctx.tr("Start", "Начать"), `iva_menu:${SID}:go`),
       menuBackLine(ctx, PARENT),
     ].join("\n\n");
     return { text };

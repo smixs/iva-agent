@@ -156,23 +156,20 @@ function insightStatus(view: InsightView, T: Translate): string[] {
 }
 
 /** Ряд времён под включённым Insight; время не из ряда галочки не получает. */
-function insightTimes(times: readonly string[], T: Translate): string[] {
+function insightTimes(times: readonly string[]): string[] {
   if (times.length === 0) return [];
   const slot = (arg: (typeof INSIGHT_ROW)[number]) => {
     const [time] = INSIGHT_SLOTS[arg];
     const label = time === times[0] ? `${time} ✓` : time;
     return button(label, `iva_menu:ntc:ins:${arg}`);
   };
-  return [
-    T("Insight time:", "Время инсайта:"),
-    buttonRow(INSIGHT_ROW.map(slot)),
-  ];
+  return [buttonRow(INSIGHT_ROW.map(slot))];
 }
 
 // Кнопка несёт значение, которое надо получить, а не «переключи»: повторный тап по
 // протухшему меню приводит к тому же состоянию, а не мигает туда-обратно.
-function switchLine(on: boolean, label: string, data: string, what: string) {
-  return `${button(`${on ? "✓" : "○"} ${label}`, data)} — ${what}`;
+function switchLine(on: boolean, label: string, data: string) {
+  return button(`${on ? "✓" : "○"} ${label}`, data);
 }
 
 /** Тумблер Insight: включает в заданное конфигом время или выключает. */
@@ -182,10 +179,6 @@ function insightSwitch(times: readonly string[], T: Translate): string {
     on,
     T("Insight", "Инсайт"),
     `iva_menu:ntc:ins:${on ? "0" : INSIGHT_ENABLE_TIME.replace(":", "")}`,
-    T(
-      "once a day: a plugin draft for something you do by hand; installed only after your tap.",
-      "раз в день: черновик плагина под то, что вы делаете руками; ставлю только после «Поставить».",
-    ),
   );
 }
 
@@ -203,20 +196,11 @@ export default {
     const proactive = parseProactive(settings, () => undefined);
     const T = ctx.tr;
     const insight = insightView(ctx.deps.dataDir, proactive);
-    const toggle = (on: boolean, label: string, target: Toggle, what: string) =>
-      switchLine(
-        on,
-        label,
-        `iva_menu:ntc:set:${target}:${on ? "0" : "1"}`,
-        what,
-      );
+    const toggle = (on: boolean, label: string, target: Toggle) =>
+      switchLine(on, label, `iva_menu:ntc:set:${target}:${on ? "0" : "1"}`);
     const text = [
       `# ${T("🔔 Notices", "🔔 Уведомления")}`,
       [
-        T(
-          "Memory reports: what Iva filed overnight and over the week.",
-          "Отчёты памяти: что Ива разложила за ночь и за неделю.",
-        ),
         ...(proactive.briefTimes.length === 0
           ? []
           : [
@@ -231,30 +215,11 @@ export default {
         memoryReportsEnabled(settings),
         T("Memory reports", "Отчёты памяти"),
         "rep",
-        T(
-          "turn the overnight reports on or off.",
-          "включить или выключить отчёты.",
-        ),
       ),
-      toggle(
-        proactive.enabled,
-        T("Writes on her own", "Сама пишет"),
-        "pro",
-        T(
-          "Watch for missed items, the daily brief and Insight. Failures are always reported.",
-          "Присмотр за пропущенным, обзор дня и инсайт. О сбоях пишу всегда.",
-        ),
-      ),
+      toggle(proactive.enabled, T("Writes on her own", "Сама пишет"), "pro"),
       insightSwitch(proactive.insightTimes, T),
-      ...insightTimes(proactive.insightTimes, T),
-      T(
-        "Alerts — problems and updates — always arrive.",
-        "Алерты — о проблемах и обновлениях — приходят всегда.",
-      ),
-      `${button(T("‹ Menu", "‹ Меню"), `iva_menu:${PARENT}:o`)} — ${T(
-        "back to the settings.",
-        "вернуться в настройки.",
-      )}`,
+      ...insightTimes(proactive.insightTimes),
+      button(T("‹ Menu", "‹ Меню"), `iva_menu:${PARENT}:o`),
     ];
     return { text: text.join("\n\n") };
   },

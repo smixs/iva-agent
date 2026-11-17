@@ -297,10 +297,7 @@ export default {
       taskLine,
       schedules,
       reminders,
-      `${button(T("‹ Menu", "‹ Меню"), `iva_menu:${PARENT}:o`)} — ${T(
-        "back to the settings.",
-        "вернуться в настройки.",
-      )}`,
+      button(T("‹ Menu", "‹ Меню"), `iva_menu:${PARENT}:o`),
     ].join("\n\n");
     return { text };
   },

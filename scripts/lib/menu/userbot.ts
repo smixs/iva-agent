@@ -71,20 +71,11 @@ const SVC = "iva-telegram-userbot.service";
 const isPrivate = (st: MenuState) => Number(st.chatId) > 0;
 
 const cancelLine = (ctx: MenuContext) =>
-  `${button(ctx.tr("Cancel", "Отмена"), `iva_menu:${SID}:o`, "danger")} — ${ctx.tr(
-    "leave the prompt without entering anything.",
-    "выйти из ввода, ничего не меняя.",
-  )}`;
+  button(ctx.tr("Cancel", "Отмена"), `iva_menu:${SID}:o`, "danger");
 const refreshLine = (ctx: MenuContext) =>
-  `${button(ctx.tr("🔄 Refresh", "🔄 Обновить"), `iva_menu:${SID}:rf`, "success")} — ${ctx.tr(
-    "check the state again.",
-    "проверить состояние снова.",
-  )}`;
+  button(ctx.tr("🔄 Refresh", "🔄 Обновить"), `iva_menu:${SID}:rf`, "success");
 const turnOffLine = (ctx: MenuContext) =>
-  `${button(ctx.tr("Turn off", "Выключить"), `iva_menu:${SID}:do:off`, "danger")} — ${ctx.tr(
-    "stop the userbot proxy.",
-    "остановить userbot-прокси.",
-  )}`;
+  button(ctx.tr("Turn off", "Выключить"), `iva_menu:${SID}:do:off`, "danger");
 
 // What the owner does next on the login phase the proxy named (specs/UserbotLogin.tla).
 function loginHint(T: Tr, login: UserbotLoginPhase | undefined) {
@@ -215,10 +206,10 @@ async function buildScreen(st: MenuState, ctx: MenuContext): Promise<View> {
         "No API credentials yet. Create an app at https://my.telegram.org (API development tools) — you'll get api_id and api_hash.",
         "Ключей ещё нет. Создай приложение на https://my.telegram.org (API development tools) — получишь api_id и api_hash.",
       ),
-      `${button(T("Enter credentials", "Ввести ключи"), `iva_menu:${SID}:do:creds`)} — ${T(
-        "enter api_id and api_hash in a private chat.",
-        "ввести api_id и api_hash в личном чате.",
-      )}`,
+      button(
+        T("Enter credentials", "Ввести ключи"),
+        `iva_menu:${SID}:do:creds`,
+      ),
       menuBackLine(ctx, PARENT),
     ].join("\n\n");
     return { text };
@@ -229,14 +220,8 @@ async function buildScreen(st: MenuState, ctx: MenuContext): Promise<View> {
       `# ${head}`,
       risk,
       statusLine,
-      T(
-        "Credentials are set. Turn the proxy on — it builds a venv (up to ~3 min).",
-        "Ключи заданы. Включи прокси — соберётся venv (до ~3 мин).",
-      ),
-      `${button(T("Turn on", "Включить"), `iva_menu:${SID}:do:setup`, "success")} — ${T(
-        "start the proxy (builds a venv, up to ~3 min).",
-        "запустить прокси (сборка venv, до ~3 мин).",
-      )}`,
+      T("Turning on takes up to ~3 min.", "Включение займёт до ~3 мин."),
+      button(T("Turn on", "Включить"), `iva_menu:${SID}:do:setup`, "success"),
       refreshLine(ctx),
       menuBackLine(ctx, PARENT),
     ].join("\n\n");
@@ -246,12 +231,7 @@ async function buildScreen(st: MenuState, ctx: MenuContext): Promise<View> {
   if (status.state === "starting") {
     const text = [
       `# ${head}`,
-      risk,
       statusLine,
-      T(
-        "The proxy service is still starting. Refresh in a moment.",
-        "Прокси ещё запускается. Обнови через несколько секунд.",
-      ),
       turnOffLine(ctx),
       refreshLine(ctx),
       menuBackLine(ctx, PARENT),
@@ -262,7 +242,6 @@ async function buildScreen(st: MenuState, ctx: MenuContext): Promise<View> {
   if (status.state === "unreachable") {
     const text = [
       `# ${head}`,
-      risk,
       statusLine,
       T(
         "The service is active, but its health endpoint did not answer. Run `iva userbot diagnose --json` for the fixed diagnostic.",
@@ -275,18 +254,10 @@ async function buildScreen(st: MenuState, ctx: MenuContext): Promise<View> {
     return { text };
   }
 
-  const accountHint =
-    status.state === "unauthorized"
-      ? loginHint(T, status.login)
-      : T(
-          "Proxy and Telegram account are ready.",
-          "Прокси и аккаунт Telegram готовы.",
-        );
   const text = [
     `# ${head}`,
-    risk,
     statusLine,
-    accountHint,
+    ...(status.state === "unauthorized" ? [loginHint(T, status.login)] : []),
     turnOffLine(ctx),
     refreshLine(ctx),
     menuBackLine(ctx, PARENT),
@@ -367,10 +338,10 @@ export default {
                   "Setup failed. Check the service logs, then try again.",
                   "Настройка завершилась с ошибкой. Проверь логи сервиса и повтори.",
                 ),
-                `${button(ctx.tr("Try again", "Повторить"), `iva_menu:${SID}:do:setup`)} — ${ctx.tr(
-                  "run the proxy setup again.",
-                  "запустить настройку прокси заново.",
-                )}`,
+                button(
+                  ctx.tr("Try again", "Повторить"),
+                  `iva_menu:${SID}:do:setup`,
+                ),
                 menuBackLine(ctx, PARENT),
               ].join("\n\n"),
             );

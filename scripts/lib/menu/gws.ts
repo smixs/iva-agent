@@ -54,20 +54,15 @@ const sleep = (ms: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 const cancelLine = (ctx: MenuContext) =>
-  `${button(ctx.tr("Cancel", "Отмена"), `iva_menu:${SID}:o`, "danger")} — ${ctx.tr(
-    "leave the login without changes.",
-    "выйти из входа, ничего не меняя.",
-  )}`;
+  button(ctx.tr("Cancel", "Отмена"), `iva_menu:${SID}:o`, "danger");
 const connectLine = (ctx: MenuContext) =>
-  `${button(ctx.tr("Connect", "Подключить"), `iva_menu:${SID}:do:connect`, "success")} — ${ctx.tr(
-    "get a Google link and finish the login.",
-    "получить ссылку Google и завершить вход.",
-  )}`;
+  button(
+    ctx.tr("Connect", "Подключить"),
+    `iva_menu:${SID}:do:connect`,
+    "success",
+  );
 const checkLine = (ctx: MenuContext) =>
-  `${button(ctx.tr("Check again", "Проверить"), `iva_menu:${SID}:do:check`)} — ${ctx.tr(
-    "re-probe the connection.",
-    "проверить подключение заново.",
-  )}`;
+  button(ctx.tr("Check again", "Проверить"), `iva_menu:${SID}:do:check`);
 
 function errorMessage(error: unknown): string {
   return (error as { readonly message: string }).message;
@@ -134,13 +129,10 @@ function instructions(ctx: MenuContext) {
       "Then paste the downloaded JSON here.",
       "Затем пришли содержимое скачанного JSON сюда.",
     ),
-    `${button(
+    button(
       T("Send client JSON", "Прислать client JSON"),
       `iva_menu:${SID}:do:secret`,
-    )} — ${T(
-      "paste the JSON or attach the file in a private chat.",
-      "вставить JSON или приложить файл в личном чате.",
-    )}`,
+    ),
     menuBackLine(ctx, PARENT),
   ].join("\n\n");
   return { text };
@@ -179,10 +171,6 @@ export default {
           "Client secret is in place, but gws isn't authorized yet.",
           "client_secret.json на месте, но gws ещё не авторизован.",
         ),
-        T(
-          "Tap «Connect» — I'll give you a Google link and finish the login for you.",
-          "Нажми «Подключить» — дам ссылку на Google и завершу вход за тебя.",
-        ),
         connectLine(ctx),
         checkLine(ctx),
         menuBackLine(ctx, PARENT),
@@ -194,18 +182,8 @@ export default {
     // login asks for and keep a re-login button here, the only way to pick up newly added ones.
     const text = [
       head,
-      T(
-        `✅ Google account connected. Login requests: ${SCOPES}.`,
-        `✅ Google-аккаунт подключён. При входе запрашиваются: ${SCOPES}.`,
-      ),
-      T(
-        "Connected before a service was added? Tap «Reconnect» to grant it.",
-        "Подключался раньше, чем в список добавился сервис? Нажми «Переподключить», чтобы выдать права.",
-      ),
-      `${button(T("Reconnect", "Переподключить"), `iva_menu:${SID}:do:connect`)} — ${T(
-        "log in again and grant the current service set.",
-        "войти заново и выдать текущий набор прав.",
-      )}`,
+      T(`✅ Connected: ${SCOPES}.`, `✅ Подключён: ${SCOPES}.`),
+      button(T("Reconnect", "Переподключить"), `iva_menu:${SID}:do:connect`),
       checkLine(ctx),
       menuBackLine(ctx, PARENT),
     ].join("\n\n");

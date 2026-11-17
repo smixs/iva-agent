@@ -27,10 +27,7 @@ export default {
         button(`Русский${mark("ru")}`, "iva_menu:lang:set:ru"),
         button(`English${mark("en")}`, "iva_menu:lang:set:en"),
       ]),
-      `${button(ctx.tr("‹ Menu", "‹ Меню"), "iva_menu:r:o")} — ${ctx.tr(
-        "back to the settings.",
-        "вернуться в настройки.",
-      )}`,
+      button(ctx.tr("‹ Menu", "‹ Меню"), "iva_menu:r:o"),
     ];
     return { text: text.join("\n\n") };
   },

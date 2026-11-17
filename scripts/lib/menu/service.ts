@@ -65,10 +65,7 @@ export type MenuServiceContext = {
 };
 
 function backLine(ctx: MenuServiceContext): string {
-  return `${button(ctx.tr("‹ Back", "‹ Назад"), "iva_menu:svc:o")} — ${ctx.tr(
-    "back to the maintenance list.",
-    "вернуться к списку обслуживания.",
-  )}`;
+  return button(ctx.tr("‹ Back", "‹ Назад"), "iva_menu:svc:o");
 }
 
 const CMDS = new Set<ServiceCommand>(["doc", "cln", "mem"]);
@@ -150,10 +147,7 @@ function progressView(
   const text = [
     `${LOADERS[run.cmd].alt} **${label(run.cmd, T)}** — ${elapsed(run)}`,
     step,
-    `${button(T("✖ Cancel", "✖ Отменить"), "iva_menu:svc:ab", "danger")} — ${T(
-      "stop the command.",
-      "остановить команду.",
-    )}`,
+    button(T("✖ Cancel", "✖ Отменить"), "iva_menu:svc:ab", "danger"),
   ].join("\n\n");
   return { text };
 }
@@ -253,46 +247,26 @@ function idleView(
   ctx: MenuServiceContext,
 ): MenuServiceView {
   const T = ctx.tr;
-  const lines = [
-    `# ${T("🛠 Maintenance", "🛠 Обслуживание")}`,
-    T(
-      "Diagnostics and upkeep for this install.",
-      "Диагностика и уход за инсталляцией.",
-    ),
-  ];
+  const lines = [`# ${T("🛠 Maintenance", "🛠 Обслуживание")}`];
   const run = currentRun();
   if (run && run.status !== "running") lines.push(lastRunLine(run, ctx));
   lines.push(
-    `${button(label("doc", T), "iva_menu:svc:c:doc")} — ${T(
-      "check and auto-repair the install.",
-      "проверить и починить инсталляцию.",
-    )}`,
-    `${button(label("cln", T), "iva_menu:svc:c:cln")} — ${T(
-      "strip the 0.3.0 bloat from memory cards.",
-      "убрать раздутые описания из карточек памяти.",
-    )}`,
-    `${button(label("mem", T), "iva_menu:svc:c:mem")} — ${T(
-      "run the nightly memory cycle now.",
-      "запустить ночной цикл памяти сейчас.",
-    )}`,
-    `${button(T("🔄 Update", "🔄 Обновление"), "iva_menu:svc:up")} — ${T(
-      "check for and install a new version.",
-      "проверить и поставить новую версию.",
-    )}`,
+    button(label("doc", T), "iva_menu:svc:c:doc"),
+    button(label("cln", T), "iva_menu:svc:c:cln"),
+    button(label("mem", T), "iva_menu:svc:c:mem"),
+    button(T("🔄 Update", "🔄 Обновление"), "iva_menu:svc:up"),
     updatesLine(ctx),
     menuStyle() === "rich"
-      ? `${button(T("◀︎ Classic menu", "◀︎ Старое меню"), "iva_menu:svc:menu:classic")} — ${T(
-          "buttons under the message, as before 0.4.2.",
-          "кнопки под сообщением, как до 0.4.2.",
-        )}`
-      : `${button(T("✨ New menu", "✨ Новое меню"), "iva_menu:svc:menu:rich", "success")} — ${T(
-          "buttons inside the message, tables; needs a Telegram client from August 2026.",
-          "кнопки внутри сообщения, таблицы; нужен клиент Telegram от августа 2026.",
-        )}`,
-    `${button(T("‹ Menu", "‹ Меню"), "iva_menu:r:o")} — ${T(
-      "back to the settings.",
-      "вернуться в настройки.",
-    )}`,
+      ? button(
+          T("◀︎ Classic menu", "◀︎ Старое меню"),
+          "iva_menu:svc:menu:classic",
+        )
+      : button(
+          T("✨ New menu", "✨ Новое меню"),
+          "iva_menu:svc:menu:rich",
+          "success",
+        ),
+    button(T("‹ Menu", "‹ Меню"), "iva_menu:r:o"),
   );
   return { text: lines.join("\n\n") };
 }
@@ -302,14 +276,10 @@ function updatesLine(ctx: MenuServiceContext): string {
   const T = ctx.tr;
   const beta = betaOf(ctx.deps.root);
   const name = beta ? T("beta", "бета") : T("stable", "стабильные");
-  return `${button(T(`🧪 Updates: ${name}`, `🧪 Обновления: ${name}`), "iva_menu:svc:beta")} — ${T(
-    beta
-      ? "every accepted change; tap for releases only."
-      : "releases only; tap for every accepted change (beta).",
-    beta
-      ? "всё принятое сразу; нажми — только выпуски."
-      : "только выпуски; нажми — всё принятое сразу (бета).",
-  )}`;
+  return button(
+    T(`🧪 Updates: ${name}`, `🧪 Обновления: ${name}`),
+    "iva_menu:svc:beta",
+  );
 }
 
 /** Чистка трогает vault чужим процессом, а мост в это время свободен: правки владельца в
@@ -470,10 +440,7 @@ function confirmView(
     [
       `# ${label(cmd, T)}`,
       describe(cmd, T),
-      `${button(T("▶ Run", "▶ Запустить"), `iva_menu:svc:go:${cmd}`)} — ${T(
-        "start it now.",
-        "запустить сейчас.",
-      )}`,
+      button(T("▶ Run", "▶ Запустить"), `iva_menu:svc:go:${cmd}`),
       backLine(ctx),
     ].join("\n\n"),
   );

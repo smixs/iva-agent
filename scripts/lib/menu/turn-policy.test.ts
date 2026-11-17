@@ -59,7 +59,6 @@ test("queue is the default and callbacks stay stable in both languages", () => {
   rmSync(settingsPath, { force: true });
 
   const english = screen.render({ page: 4 }, makeContext("en"));
-  assert.match(english.text, /Queue waits for the current reply/);
   assert.deepEqual(labels(english), [
     ["✓ Queue", "iva_menu:turn:set:queue"],
     ["○ Interrupt", "iva_menu:turn:set:steer"],
@@ -67,7 +66,6 @@ test("queue is the default and callbacks stay stable in both languages", () => {
   ]);
 
   const russian = screen.render({ page: 0 }, makeContext("ru"));
-  assert.match(russian.text, /Очередь ждёт текущий ответ/);
   assert.deepEqual(labels(russian), [
     ["✓ Очередь", "iva_menu:turn:set:queue"],
     ["○ Перебивать", "iva_menu:turn:set:steer"],
@@ -76,23 +74,18 @@ test("queue is the default and callbacks stay stable in both languages", () => {
   assert.equal(screen.parent, "r");
 });
 
-// Экран называет то, что делает steer (см. turn-policy.ts), а не «направляет в активный ответ».
-test("the screen says what Interrupt does: stops the reply, starts from the new message, keeps what is done", () => {
+// Экран — заголовок и кнопки, без пояснений (решение владельца 17.11.2026).
+test("the screen holds only the title and the buttons", () => {
   rmSync(settingsPath, { force: true });
-
-  const english = screen.render({ page: 0 }, makeContext("en")).text;
-  assert.match(
-    english,
-    /Interrupt stops the current reply and starts from the new message; what is already done stays\./,
-  );
-  assert.doesNotMatch(english, /into the active reply/);
-
-  const russian = screen.render({ page: 0 }, makeContext("ru")).text;
-  assert.match(
-    russian,
-    /Перебивать обрывает текущий ответ и начинает с нового сообщения, сделанное остаётся\./,
-  );
-  assert.doesNotMatch(russian, /направляет/);
+  for (const lang of ["en", "ru"] as const) {
+    const text = screen.render({ page: 0 }, makeContext(lang)).text;
+    const rest = text
+      .replace(/<tg-button-row>[\s\S]*?<\/tg-button-row>/g, "")
+      .replace(/<tg-button[^>]*>[\s\S]*?<\/tg-button>/g, "")
+      .replace(/^# .*$/m, "")
+      .trim();
+    assert.equal(rest, "", lang);
+  }
 });
 
 test("steer renders selected and a selection preserves other settings", async () => {

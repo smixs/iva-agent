@@ -38,10 +38,7 @@ type MenuContext = {
 };
 
 function cancelLine(ctx: MenuContext): string {
-  return `${button(ctx.tr("Cancel", "Отмена"), `iva_menu:${SID}:o`, "danger")} — ${ctx.tr(
-    "leave the prompt without entering a key.",
-    "выйти из ввода, ничего не меняя.",
-  )}`;
+  return button(ctx.tr("Cancel", "Отмена"), `iva_menu:${SID}:o`, "danger");
 }
 
 // Telegram: id личных чатов положительны, групп/супергрупп — отрицательны. Секреты
@@ -102,8 +99,8 @@ async function restartOffer(
   const text = [
     `# ${ctx.tr("🔍 Web search", "🔍 Веб-поиск")}`,
     ctx.tr(
-      `Search provider set: ${label}. It applies after an agent restart (the search tool reads it at startup).`,
-      `Провайдер поиска: ${label}. Применится после перезапуска агента (инструмент поиска читает провайдера при старте).`,
+      `Search: ${label}. Applies after a restart.`,
+      `Поиск: ${label}. Применится после перезапуска.`,
     ),
     buttonRow([
       button(
@@ -128,24 +125,19 @@ export default {
     const current = currentProvider(env);
     const text = [
       `# ${ctx.tr("🔍 Web search", "🔍 Веб-поиск")}`,
-      ctx.tr(
-        "Pick a provider. ✓ — current, 🔑 — its key is set. Tapping a provider without a key asks for one.",
-        "Выбери провайдера. ✓ — текущий, 🔑 — ключ задан. Тап по провайдеру без ключа попросит его ввести.",
-      ),
       ...Object.entries(SEARCH_CATALOG).map(([id, cat]) => {
         const mark = id === current ? "✓ " : "";
         const keyBadge = env[cat.keyVar] ? " 🔑" : "";
-        const host = cat.url.replace(/^https?:\/\//, "");
-        return `${button(`${mark}${cat.label}${keyBadge}`, `iva_menu:${SID}:set:${id}`)} — ${ctx.tr(
-          `search via ${cat.label}; key at ${host}.`,
-          `искать через ${cat.label}; ключ на ${host}.`,
-        )}`;
+        return button(
+          `${mark}${cat.label}${keyBadge}`,
+          `iva_menu:${SID}:set:${id}`,
+        );
       }),
       // Сменить ключ текущего провайдера (даже если он уже есть).
-      `${button(ctx.tr("🔁 Change key", "🔁 Сменить ключ"), `iva_menu:${SID}:key:${current}`)} — ${ctx.tr(
-        "enter a new key for the current provider.",
-        "ввести новый ключ текущего провайдера.",
-      )}`,
+      button(
+        ctx.tr("🔁 Change key", "🔁 Сменить ключ"),
+        `iva_menu:${SID}:key:${current}`,
+      ),
       menuBackLine(ctx, PARENT),
     ].join("\n\n");
     return { text };

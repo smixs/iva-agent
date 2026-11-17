@@ -316,7 +316,8 @@ export async function currentConfig({
   };
 }
 
-// Кнопка — rich-строка: кнопка стоит в самом тексте сообщения, рядом со своим пояснением.
+// Кнопка — rich-строка: кнопка стоит в самом тексте сообщения, без подписи (подпись кнопки и так
+// говорит, что она делает; решение владельца 17.11.2026).
 // RichButton — переходный тип: пока экраны визарда возвращают старые ряды «text + rows»,
 // строка обязана проходить и в {text, callback_data}. D3 снимает ряды — уйдёт и тип.
 const btn = (
@@ -325,11 +326,9 @@ const btn = (
   style?: RichButtonStyle,
 ): RichButton => button(text, callback_data, style);
 // cancelRow/menuRow — функции (tr на месте вызова), не module-level const с переведённой строкой.
-// Каждая — абзац «кнопка — что она делает» (контракт rich), обёрнутый в старый ряд richRow.
+// Каждая — одна кнопка, обёрнутая в старый ряд richRow.
 const cancelRow = () =>
-  richRow(
-    `${btn(tr("Cancel", "Отмена"), "iva_model:cancel", "danger")} — ${tr("leave without changes", "выйти без изменений")}`,
-  );
+  richRow(btn(tr("Cancel", "Отмена"), "iva_model:cancel", "danger"));
 // Два равноправных варианта без пояснений — один ряд кнопок.
 const retryBackRows = (): RichButton[][] => [
   [
@@ -340,13 +339,11 @@ const retryBackRows = (): RichButton[][] => [
 // Ряд «‹ Меню» на терминальных экранах визарда — возврат в /menu. r:o усыновляет
 // это сообщение даже без живого стейта (движок меню само-чинится после рестарта моста).
 const menuRow = (): RichButton[][] => [
-  richRow(
-    `${btn(tr("‹ Menu", "‹ Меню"), "iva_menu:r:o")} — ${tr("back to settings", "вернуться в настройки")}`,
-  ),
+  richRow(btn(tr("‹ Menu", "‹ Меню"), "iva_menu:r:o")),
 ];
 
-// Rich-карта: кнопка — inline-элемент текста, поэтому у каждой есть пояснение рядом, а
-// ряды (buttonRow) остаются только равноправным коротким вариантам: уровни, модели, да/нет.
+// Rich-карта: кнопка — inline-элемент текста без подписи, ряды (buttonRow) — равноправным
+// коротким вариантам: уровни, модели, да/нет.
 //
 // Блок :233-245 переводит на rich параллельный исполнитель (D1): после его правки те же
 // помощники вернут готовые markdown-абзацы. До неё они ещё отдают ряды объектов — тогда
@@ -360,29 +357,16 @@ const wizardHead = (flow: unknown) =>
     : tr("🧠 Model", "🧠 Модель");
 const cancelLine = () =>
   wizardLine(cancelRow()) ??
-  `${button(tr("Cancel", "Отмена"), "iva_model:cancel", "danger")} — ${tr(
-    "exit without changes.",
-    "выйти без изменений.",
-  )}`;
+  button(tr("Cancel", "Отмена"), "iva_model:cancel", "danger");
 const menuLine = () =>
-  wizardLine(menuRow()) ??
-  `${button(tr("‹ Menu", "‹ Меню"), "iva_menu:r:o")} — ${tr(
-    "back to the settings.",
-    "вернуться в настройки.",
-  )}`;
+  wizardLine(menuRow()) ?? button(tr("‹ Menu", "‹ Меню"), "iva_menu:r:o");
 const retryBackLines = () => {
   const ready = wizardLine(retryBackRows());
   return ready
     ? [ready]
     : [
-        `${button(tr("Retry", "Повторить"), "iva_model:retry")} — ${tr(
-          "ask the provider again.",
-          "спросить провайдера ещё раз.",
-        )}`,
-        `${button(tr("‹ Back", "‹ Назад"), "iva_model:back")} — ${tr(
-          "pick another provider.",
-          "выбрать другого провайдера.",
-        )}`,
+        button(tr("Retry", "Повторить"), "iva_model:retry"),
+        button(tr("‹ Back", "‹ Назад"), "iva_model:back"),
       ];
 };
 
@@ -460,21 +444,11 @@ async function handleModelCmd(
       `| ${escapeRichText(providerLabel)} | ${escapeRichText(model)} | ${escapeRichText(effortLabel(effort))} |`,
     ].join("\n"),
     button(
-      `${tr("Helper and background model", "Модель помощника и фона")}: ${escapeRichText(helperModel)}`,
+      `${tr("Helpers", "Помощники")}: ${escapeRichText(helperModel)}`,
       "iva_model:helper",
     ),
-    tr(
-      "Used by helpers, Watch, Brief and Insight.",
-      "Для помощников, Watch, Brief и Insight.",
-    ),
-    `${button(tr("Change", "Сменить"), "iva_model:chg")} — ${tr(
-      "pick another provider or model.",
-      "выбрать другого провайдера или модель.",
-    )}`,
-    `${button(tr("Keep", "Оставить"), "iva_model:keep")} — ${tr(
-      "change nothing.",
-      "ничего не менять.",
-    )}`,
+    button(tr("Change", "Сменить"), "iva_model:chg"),
+    button(tr("Keep", "Оставить"), "iva_model:keep"),
   ].join("\n\n");
   return wizScreen(st, text);
 }
@@ -617,27 +591,10 @@ export async function resolveThinkCatalogLoad(
 
 async function showProviderScreen(st: WizardState) {
   st.step = "provider";
-  const authNote = (auth: string) => {
-    if (auth === "oauth")
-      return tr(
-        "sign in with the OpenAI subscription.",
-        "вход по подписке OpenAI.",
-      );
-    if (auth === "cli")
-      return tr(
-        "uses the claude CLI signed in on this server — no key.",
-        "работает через CLI claude, залогиненный на этом сервере, — ключа нет.",
-      );
-    return auth === "key-optional"
-      ? tr("the key is optional here.", "ключ тут не обязателен.")
-      : tr("connect with an API key.", "подключение по API-ключу.");
-  };
   const lines = [
     `# ${tr("🧠 Model", "🧠 Модель")}`,
-    tr("Pick a provider:", "Выбери провайдера:"),
-    ...Object.entries(CATALOG).map(
-      ([id, c]) =>
-        `${button(c.label, `iva_model:prov:${id}`)} — ${authNote(c.auth)}`,
+    ...Object.entries(CATALOG).map(([id, c]) =>
+      button(c.label, `iva_model:prov:${id}`),
     ),
     cancelLine(),
   ];
@@ -770,10 +727,7 @@ async function showCliStatusScreen(st: WizardState, status: ClaudeStatus) {
         `Iva calls the claude CLI on this server, and it isn't ready: ${escapeRichText(status.hint)}`,
         `Ива зовёт CLI claude на этом же сервере, а он ещё не готов: ${escapeRichText(status.hint)}`,
       ),
-      `${button(tr("Check again", "Проверить снова"), "iva_model:retry")} — ${tr(
-        "read the status again.",
-        "перечитать статус.",
-      )}`,
+      button(tr("Check again", "Проверить снова"), "iva_model:retry"),
       cancelLine(),
     ].join("\n\n"),
   );
@@ -821,12 +775,7 @@ async function askKeyOrShowModels(
       ),
     ];
     if (optional)
-      lines.push(
-        `${button(tr("No key", "Без ключа"), "iva_model:nokey")} — ${tr(
-          "if the provider is local.",
-          "если провайдер локальный.",
-        )}`,
-      );
+      lines.push(button(tr("No key", "Без ключа"), "iva_model:nokey"));
     lines.push(cancelLine());
     return wizScreen(st, lines.join("\n\n"));
   }

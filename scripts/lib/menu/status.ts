@@ -132,10 +132,7 @@ function buildView(
   const text = [
     `# ${T("📊 Status", "📊 Статус")}`,
     table,
-    `${button(T("🔄 Refresh", "🔄 Обновить"), "iva_menu:st:rf", "success")} — ${T(
-      "read the values again.",
-      "перечитать показатели.",
-    )}`,
+    button(T("🔄 Refresh", "🔄 Обновить"), "iva_menu:st:rf", "success"),
   ].join("\n\n");
   return { text };
 }
