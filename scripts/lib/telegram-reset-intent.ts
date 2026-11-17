@@ -20,7 +20,7 @@ export interface TelegramResetIntent {
   discardThroughUpdateId?: number;
 }
 
-// Фаза Интента сброса личного чата — оператор Phase модели specs/ResetIntent.tla.
+// Фаза намерения сброса личного чата в терминах спеки specs/ResetEpoch.tla (pending-намерение).
 // none — намерения нет; blocked — записать намерение не удалось, /new ждёт отсрочку в
 // Telegram; recorded — намерение записано, очередь чата закрыта до очистки; waiting —
 // записано, шаг сброса отказал и ждёт повтора; escalated — то же, владелец получил

@@ -63,6 +63,11 @@ const markFields = {
   updatedAt: num,
   wasCancelled: mark,
   resetAt: num,
+  // Эпоха последнего успешного сброса чата (requestedAt намерения /new): durable
+  // свидетель «remote за эту эпоху уже падал» и живая граница после снятия
+  // намерения (specs/ResetEpoch.tla, cFence). Не падает: понизить её вернуло бы
+  // помеченным ею элементам вид «после».
+  resetEpoch: num,
   turnQuestion: str,
   turnQuestionMedia: bool,
   queuedIngressId: text,

@@ -245,7 +245,15 @@ export async function routeMessageUpdate(
     queueCountImpl = queueCount,
     replyToBotImpl = isReplyToBot,
     shouldQueueImpl = shouldQueueBusyUpdate,
-    enqueueImpl = enqueueTelegramQueueUpdate,
+    enqueueImpl = (
+      key: string,
+      candidate: TelegramQueueUpdate,
+      enqueuedAt?: number,
+      resetFence?: number | null,
+    ) =>
+      enqueueTelegramQueueUpdate(key, candidate, enqueuedAt, { resetFence }),
+    arrivedAt,
+    resetFence,
     acknowledgeImpl = acknowledgeQueued,
     traceQueuedImpl,
     deliverImpl = pacedDelivery,
@@ -279,7 +287,15 @@ export async function routeMessageUpdate(
     enqueueImpl?: (
       key: string,
       candidate: TelegramQueueUpdate,
+      enqueuedAt?: number,
+      resetFence?: number | null,
     ) => MaybePromise<{ count: number; added?: boolean }>;
+    // Время постановки во входящие inbox: элемент очереди хранит прибытие, а не
+    // промоут, чтобы отсечка сброса по времени видела сообщения до /new.
+    arrivedAt?: number;
+    // Эпоха сброса durable-inbox записи (null — записи без пометки): очередь
+    // хранит эпоху приёма, а не эпоху на момент промоута.
+    resetFence?: number | null;
     acknowledgeImpl?: (
       update: TelegramQueueUpdate,
       count: number,
@@ -327,7 +343,7 @@ export async function routeMessageUpdate(
       }
       let queued;
       try {
-        queued = await enqueueImpl(key, update);
+        queued = await enqueueImpl(key, update, arrivedAt, resetFence);
       } catch (error) {
         logImpl(
           `queue enqueue failed for update ${update.update_id}:`,

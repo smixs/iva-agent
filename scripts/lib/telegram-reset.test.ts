@@ -277,6 +277,247 @@ test("reset route returns no_active_session for an unowned address", async () =>
   });
 });
 
+test("reset client puts the epoch fence on the wire and accepts superseded", async () => {
+  const calls: FetchCall[] = [];
+  const result = await requestTelegramReset({
+    url: "http://127.0.0.1/eve/v1/telegram/reset",
+    secret: "secret",
+    target: { address: { chatId: "524" } },
+    chatKey: "524:",
+    resetEpoch: 7,
+    fetchImpl: async (url, init) => {
+      calls.push({ url, init });
+      return Response.json({ ok: true, status: "superseded" });
+    },
+  });
+  assert.equal(result.status, "superseded");
+  const requestBody = calls[0]?.init.body;
+  if (typeof requestBody !== "string")
+    throw new Error("expected string request body");
+  assert.deepEqual(JSON.parse(requestBody), {
+    address: { chatId: "524" },
+    chatKey: "524:",
+    resetEpoch: 7,
+  });
+});
+
+test("reset route refuses a call whose epoch already landed", async () => {
+  const reasons: unknown[] = [];
+  const operations: ResetOperations = {
+    attachSession: (sessionId) => session(sessionId, reasons),
+    resolveSession: async () => undefined,
+  };
+  const post = (resetEpoch: number) =>
+    handleTelegramResetRequest(
+      new Request("http://local/reset", {
+        method: "POST",
+        headers: { "X-Telegram-Bot-Api-Secret-Token": "secret" },
+        body: JSON.stringify({
+          sessionId: "session-late",
+          chatKey: "9101:",
+          resetEpoch,
+        }),
+      }),
+      operations,
+      "secret",
+    );
+
+  // Свежий /new упал первым; разговор начался заново.
+  assert.equal(
+    ((await (await post(2)).json()) as { status?: unknown }).status,
+    "reset",
+  );
+  assert.equal(reasons.length, 1);
+  // Запоздалый remote старого намерения свежий разговор не трогает.
+  assert.equal(
+    ((await (await post(1)).json()) as { status?: unknown }).status,
+    "superseded",
+  );
+  assert.equal(reasons.length, 1);
+  // Повтор уже упавшей эпохи — тот же отказ.
+  assert.equal(
+    ((await (await post(2)).json()) as { status?: unknown }).status,
+    "superseded",
+  );
+  assert.equal(reasons.length, 1);
+});
+
+test("reset route executes same-key calls one at a time in arrival order", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const order: string[] = [];
+  const operations: ResetOperations = {
+    attachSession: (sessionId) =>
+      ({
+        id: sessionId,
+        reset: async () => {
+          order.push(`start-${sessionId}`);
+          await gate;
+          order.push(`end-${sessionId}`);
+          return { status: "reset" as const, previousSessionId: sessionId };
+        },
+      }) as Session,
+    resolveSession: async () => undefined,
+  };
+  const post = (body: Record<string, unknown>) =>
+    handleTelegramResetRequest(
+      new Request("http://local/reset", {
+        method: "POST",
+        headers: { "X-Telegram-Bot-Api-Secret-Token": "secret" },
+        body: JSON.stringify(body),
+      }),
+      operations,
+      "secret",
+    );
+
+  const first = post({
+    sessionId: "s-1",
+    chatKey: "9102:",
+    resetEpoch: 1,
+  });
+  for (let i = 0; i < 50 && order.length === 0; i += 1) await Promise.resolve();
+  const second = post({
+    sessionId: "s-2",
+    chatKey: "9102:",
+    resetEpoch: 2,
+  });
+  // Чужой ключ слот не держит: его работа стартует, пока первый вызов висит.
+  const other = post({
+    sessionId: "s-other",
+    chatKey: "9103:",
+    resetEpoch: 1,
+  });
+  for (let i = 0; i < 50 && !order.includes("start-s-other"); i += 1)
+    await Promise.resolve();
+  assert.deepEqual(order, ["start-s-1", "start-s-other"]);
+  release();
+  const [firstResponse, secondResponse, otherResponse] = await Promise.all([
+    first,
+    second,
+    other,
+  ]);
+  const bodyOf = async (response: Response) =>
+    (await response.json()) as { status?: unknown };
+  assert.equal((await bodyOf(firstResponse)).status, "reset");
+  assert.equal((await bodyOf(secondResponse)).status, "reset");
+  assert.equal((await bodyOf(otherResponse)).status, "reset");
+  assert.deepEqual(order, [
+    "start-s-1",
+    "start-s-other",
+    "end-s-1",
+    "end-s-other",
+    "start-s-2",
+    "end-s-2",
+  ]);
+});
+
+test("a client timeout leaves the server call alive and the fence absorbs it", async () => {
+  // Возврат S69: вызов F1 дошёл до сервера и висит в session.reset — клиент
+  // по таймауту отпустил слот, серверный вызов жив. F2 ждёт в очереди ключа,
+  // падает после F1, а повтор старой эпохи роут отклоняет без сброса.
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const resets: string[] = [];
+  const operations: ResetOperations = {
+    attachSession: (sessionId) =>
+      ({
+        id: sessionId,
+        reset: async () => {
+          resets.push(sessionId);
+          await gate;
+          return { status: "reset" as const, previousSessionId: sessionId };
+        },
+      }) as Session,
+    resolveSession: async () => undefined,
+  };
+  const fetchImpl = (url: string, init: RequestInit) =>
+    new Promise<Awaited<ReturnType<typeof handleTelegramResetRequest>>>(
+      (resolve, reject) => {
+        const signal = init.signal;
+        if (signal) {
+          signal.addEventListener(
+            "abort",
+            () =>
+              reject(
+                signal.reason instanceof Error
+                  ? signal.reason
+                  : new Error("reset fetch aborted"),
+              ),
+            { once: true },
+          );
+        }
+        handleTelegramResetRequest(new Request(url, init), operations, "secret")
+          .then(resolve, reject);
+      },
+    );
+  const reset = (resetEpoch: number, timeoutMs = 5_000) =>
+    requestTelegramReset({
+      url: "http://local/eve/v1/telegram/reset",
+      secret: "secret",
+      target: { sessionId: `s-e${resetEpoch}` },
+      chatKey: "9104:",
+      resetEpoch,
+      fetchImpl,
+      timeoutMs,
+    });
+
+  const stale = reset(1, 25);
+  await assert.rejects(stale);
+  // Серверный вызов жив: клиент отпустил ожидание, а reset исполняется.
+  for (let i = 0; i < 50 && resets.length === 0; i += 1) await Promise.resolve();
+  assert.deepEqual(resets, ["s-e1"]);
+
+  const fresh = reset(2);
+  for (let i = 0; i < 50; i += 1) await Promise.resolve();
+  release();
+  assert.equal((await fresh).status, "reset");
+  // F1 упал до F2 — порядок приёма сохранён, свежий разговор начался после.
+  assert.deepEqual(resets, ["s-e1", "s-e2"]);
+
+  const replay = await reset(1);
+  assert.equal(replay.status, "superseded");
+  assert.deepEqual(resets, ["s-e1", "s-e2"]);
+});
+
+test("reset route rejects malformed chatKey and resetEpoch", async () => {
+  let called = false;
+  const operations: ResetOperations = {
+    attachSession: () => {
+      called = true;
+      return session("unexpected", []);
+    },
+    resolveSession: async () => {
+      called = true;
+      return undefined;
+    },
+  };
+  const request = (body: string) =>
+    new Request("http://local/reset", {
+      method: "POST",
+      headers: { "X-Telegram-Bot-Api-Secret-Token": "secret" },
+      body,
+    });
+  const cases = [
+    request('{"sessionId":"s","chatKey":""}'),
+    request('{"sessionId":"s","chatKey":7}'),
+    request('{"sessionId":"s","resetEpoch":-1}'),
+    request('{"sessionId":"s","resetEpoch":1.5}'),
+    request('{"sessionId":"s","resetEpoch":"7"}'),
+  ];
+  for (const req of cases) {
+    const response = await handleTelegramResetRequest(
+      req,
+      operations,
+      "secret",
+    );
+    assert.equal(response.status, 400);
+  }
+  assert.equal(called, false);
+});
 test("ResetIntent ExactCut: finishing an older reset cannot forget a newer completed reset", async (t) => {
   const firstReset = deferred();
   const firstEntered = deferred();
@@ -423,7 +664,6 @@ test("ResetIntent ExactCut: a late reset by sessionId keeps the session created 
   assert.deepEqual(old.messages, []);
   assert.deepEqual(current.messages, [102]);
 });
-
 test("reset route rejects auth, malformed targets and conflicting targets", async () => {
   let called = false;
   const operations: ResetOperations = {
@@ -447,10 +687,11 @@ test("reset route rejects auth, malformed targets and conflicting targets", asyn
     request("{ not json"),
     request("{}"),
     request('{"sessionId":"s","chatKey":null}'),
+    request('{"sessionId":"s","chatKey":""}'),
     request('{"sessionId":"s","chatKey":"1:0"}'),
     request('{"sessionId":"s","chatKey":"1:9007199254740992"}'),
     request('{"sessionId":"s","chatKey":"1::2"}'),
-    request('{"address":{"chatId":"1"},"chatKey":"1:"}'),
+    request('{"sessionId":"s","resetEpoch":-1}'),
     request('{"sessionId":""}'),
     request('{"address":{"chatId":"junk"}}'),
     request('{"sessionId":"s","address":{"chatId":"1"}}'),
@@ -467,7 +708,6 @@ test("reset route rejects auth, malformed targets and conflicting targets", asyn
   }
   assert.equal(called, false);
 });
-
 test("reset route parses valid chat keys and rejects malformed metadata (seed 47004)", () => {
   fc.assert(
     fc.property(

@@ -114,7 +114,7 @@ void test("reset intent loader skips a filename that does not match the chat", a
   assert.match(errors[0], /filename does not match its chat key/u);
 });
 
-// Соответствие оператору Phase модели specs/ResetIntent.tla: каждая комбинация записи и памяти.
+// Соответствие состоянию намерения в терминах specs/ResetEpoch.tla: каждая комбинация записи и памяти.
 void test("ResetIntent Phase: the phase of every record and memory combination matches the model", () => {
   const model = (
     recorded: boolean,

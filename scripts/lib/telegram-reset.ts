@@ -136,17 +136,25 @@ export function telegramAddressFromChatKey(
   return { chatId, messageThreadId: parsedThreadId };
 }
 
-/** Calls Iva's Telegram-owned reset route. Both outcomes are successful. */
+/** Calls Iva's Telegram-owned reset route. All route outcomes are successful. */
 export async function requestTelegramReset({
   url,
   secret,
   target,
+  chatKey,
+  resetEpoch,
   fetchImpl = fetch as unknown as FetchImpl,
   timeoutMs = 15_000,
 }: {
   url: string;
   secret: string;
   target: TelegramResetTarget;
+  // chatKey ключит серверную очередь и журнал упавших эпох; resetEpoch — эпоха
+  // намерения (fence). Вызов, чья эпоха уже упала по этому ключу, роут
+  // отклоняет ответом superseded — запоздавшее исполнение после таймаута не
+  // сбросит свежий разговор (T341).
+  chatKey?: string;
+  resetEpoch?: number;
   fetchImpl?: FetchImpl;
   timeoutMs?: number;
 }) {
@@ -156,7 +164,11 @@ export async function requestTelegramReset({
       "Content-Type": "application/json",
       "X-Telegram-Bot-Api-Secret-Token": secret,
     },
-    body: JSON.stringify(target),
+    body: JSON.stringify({
+      ...target,
+      ...(chatKey === undefined ? {} : { chatKey }),
+      ...(resetEpoch === undefined ? {} : { resetEpoch }),
+    }),
     signal: AbortSignal.timeout(timeoutMs),
   });
   if (!response.ok)
@@ -165,7 +177,9 @@ export async function requestTelegramReset({
   const body = (await response.json()) as { ok?: unknown; status?: unknown };
   if (
     body?.ok !== true ||
-    (body.status !== "reset" && body.status !== "no_active_session")
+    (body.status !== "reset" &&
+      body.status !== "no_active_session" &&
+      body.status !== "superseded")
   ) {
     throw new Error("Eve reset route returned an invalid response");
   }
