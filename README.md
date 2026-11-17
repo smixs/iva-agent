@@ -198,7 +198,28 @@ Iva carries eve 0.51.1 sources from vercel/eve in `eve/`, with our changes under
 ## What's New
 
 <details>
-<summary><b>v0.5.13 · 15.11.2026 — expand the latest releases</b></summary>
+<summary><b>v0.5.14 · 17.11.2026 — expand the latest releases</b></summary>
+
+### 17.11.2026
+
+#### v0.5.14
+
+- 🧭 **A menu without needless captions**: `/menu` and the model wizard drop the explanations under buttons; a screen shows the buttons, the current state, errors and warnings.
+- 🧹 **One progress message, gone with the answer**: when work runs longer than a minute, Iva edits one progress message in place and deletes it when the answer arrives.
+- 🗣️ **The answer first, details in a fold**: the gist in a few lines, evidence and long lists under one expandable block.
+- ✋ **A new message mid-work continues it**: Iva takes it as an edit to the interrupted task and goes on from the steps already done.
+- 🔎 **Iva checks a fact about your world against its source**: she reads the chat, letter, calendar or file in the same turn and names the source; what is unchecked she calls unchecked.
+- 🧠 **A long conversation is compacted one way**: the older part is summarized right before the model step, the latest messages stay verbatim; a request not yet summarized is never lost.
+- 🩹 **`/new` cuts the previous conversation exactly**: messages accepted before the reset stay out of the new session.
+- 🔧 **Watch keeps quiet in a live dialog**: it stays out while you are chatting and closes its signal after you reply.
+- 📬 **Watch sees letters from airlines and other automated senders**: unread Updates letters of the last day reach Iva by subject; dropped letters are logged with the reason.
+- 🔧 **Timers start with the right time zone on new systems**: units name the zone the machine actually has.
+- 🛠️ **The chat update starts on an older systemd**: the temporary update unit starts on RHEL and Alma 8 too.
+- 🔧 **Install no longer refuses for a pending reboot when no packages are needed**: it warns and goes on.
+- 🔧 **`.env.example` without comments after a value**: the service and the CLI read the same chat_id.
+- 💾 **The embedding cache stays out of the nightly vault backup**: the derived search cache lives on disk only.
+- 🧹 **Work folders and old versions' cache are cleaned up**: disk space is freed after a turn, a version switch and a rollback.
+- 🔒 **Dependencies without known vulnerabilities**: every `npm audit` finding is cleared.
 
 ### 15.11.2026
 
@@ -239,18 +260,6 @@ Iva carries eve 0.51.1 sources from vercel/eve in `eve/`, with our changes under
 
 - 🧠 **Fable 5.2 on the Claude model screen**: the first button in `/model` → Claude and in setup is now Fable 5.2, and it is the default Claude model. It needs Claude Code CLI 2.1.290 or newer; Fable 5.1 stays available through `CLAUDE_MODEL=claude-fable-5-1` in `.env`.
 - 📊 **Widgets in replies**: Iva draws a live card right in the message instead of lines of text wherever there is something to show: a calendar by day, week and month, the weather, a countdown while you wait, task and reminder lists, a chart with tabs, progress, a checklist. Turn them off in /menu → 💬 Rich replies.
-
-### 03.11.2026
-
-#### v0.5.9
-
-- 🔧 **Briefs and reminders read Telegram again**: scheduled turns and fired reminders read chats through the userbot. Iva still never sends, replies, forwards, edits, deletes, reacts or marks as read on her own.
-- 🔧 **Google Contacts birthdays are complete**: Brief keeps the full list, and a birthday counts as mentioned only after its message is delivered.
-- 🔧 **Plugins of different installations keep their services**: service names are tied to the data folder, so removing, syncing or updating one installation leaves the other's services running.
-- 🔧 **Short button quotes in the daily journal**: a tap keeps the button text and the first quoted line, up to 200 characters.
-- 🔧 **Tool search ranks names first**: literal names beat long descriptions, so Telegram history and the chat list are found again.
-- 🔧 **Iva survives a Claude access rotation**: after an early HTTP 401 she waits for the new access and repeats the call once.
-- 🧠 **The night raises its own limits for long days**: within the configured ceilings it keeps going and retries git with a longer wait; `iva night show|set` shows and changes the limits.
 
 </details>
 
