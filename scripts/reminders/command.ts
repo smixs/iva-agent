@@ -151,7 +151,7 @@ export async function runCommandFire(
       `не выполнилась: ${result.error?.startsWith("timeout") ? `не уложилась в ${commandTimeoutMs(row) / 60_000} мин` : "завершилась с ошибкой"}`,
     );
   if (!(await list(file)).some((candidate) => candidate.id === id))
-    await clearCommandAlert(id);
+    clearCommandAlert(id);
   return 0;
 }
 if (isEntrypoint(import.meta.url))
