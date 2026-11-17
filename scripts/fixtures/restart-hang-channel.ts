@@ -20,6 +20,7 @@ import { chatTakeOverPatch } from "#lib/telegram-turn-start.ts";
 import { handleTelegramCompactRequest } from "#lib/telegram-compact-route.ts";
 import {
   closeIdleCompactionTurn,
+  dropIdleCompactionTurn,
   openIdleCompactionTurn,
   parkIdleCompactionTurn,
   startIdleCompaction,
@@ -31,6 +32,10 @@ const MATRIX_FIXTURE = Object.freeze({
   contextWindowTokens: 131_072,
   chatKey: "1:",
 });
+
+// Аналог draftId нативного драфта: канал Telegram кладёт его в запись на turn.started
+// (publishTelegramTurnStarted), чтобы нативная ■ сверяла драфт с живым ходом.
+let draftSeq = 0;
 
 // Только матрица обрыва включает эти барьеры. Они останавливают настоящий обработчик
 // до/после пересказа; родитель убивает всю группу процесса, не меняя код Ивы/eve.
@@ -113,6 +118,7 @@ export default defineChannel({
       setChatStatus(MATRIX_FIXTURE.chatKey, {
         ...chatTakeOverPatch({ sessionId: ctx.session.id }),
         turnId: data.turnId,
+        draftId: 7000 + ++draftSeq,
       });
     },
     "turn.completed"(_data, _channel, ctx) {
@@ -122,6 +128,35 @@ export default defineChannel({
         ctx.session.id,
         MATRIX_FIXTURE.contextWindowTokens,
       );
+      setChatStatus(MATRIX_FIXTURE.chatKey, {
+        status: "idle",
+        compacting: null,
+      });
+    },
+    // Отменённый ход: как канал Telegram — запись в idle и счёт свёртки снят. Событие
+    // помечаем в журнале с turnId, чтобы тест видел, доехал ли именно этот ход до
+    // терминала и какого.
+    "turn.cancelled"(data, _channel, ctx) {
+      if (process.env.COMPACT_STEP1_MATRIX !== MATRIX_FIXTURE.enabledFlag)
+        return;
+      appendFileSync(
+        join(process.env.ASSISTANT_DATA_DIR ?? "data", "restart-hang-events.jsonl"),
+        `${JSON.stringify({ event: "turn.cancelled", turnId: data.turnId, at: Date.now() })}\n`,
+      );
+      dropIdleCompactionTurn(ctx.session.id);
+      setChatStatus(MATRIX_FIXTURE.chatKey, {
+        status: "idle",
+        compacting: null,
+      });
+    },
+    "turn.failed"(data, _channel, ctx) {
+      if (process.env.COMPACT_STEP1_MATRIX !== MATRIX_FIXTURE.enabledFlag)
+        return;
+      appendFileSync(
+        join(process.env.ASSISTANT_DATA_DIR ?? "data", "restart-hang-events.jsonl"),
+        `${JSON.stringify({ event: "turn.failed", turnId: data.turnId, at: Date.now() })}\n`,
+      );
+      dropIdleCompactionTurn(ctx.session.id);
       setChatStatus(MATRIX_FIXTURE.chatKey, {
         status: "idle",
         compacting: null,
