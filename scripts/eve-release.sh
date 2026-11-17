@@ -3,7 +3,7 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "$0")/.." && pwd -P)"
 cd "$repo_root"
 [[ -z "$(git status --porcelain --untracked-files=all)" ]] || { echo 'Commit changes before preparing eve.' >&2; exit 1; }
-version="0.51.1-iva.11"
+version="0.51.1-iva.12"
 
 publish=false
 if [[ "${1:-}" == --publish ]]; then publish=true; shift; fi
