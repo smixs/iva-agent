@@ -198,7 +198,6 @@ async function systemdDoctorEvents(
         updatedAt?: number;
         ingressId?: string;
         sessionId?: string;
-        compacting?: true;
       };
     }>;
   },
@@ -740,15 +739,12 @@ test("doctor names what each busy chat is doing, in the words of the chat record
         { chatKey: "1:", status: { ...live, ingressId: "i" } },
         { chatKey: "2:", status: { ...live, sessionId: "s" } },
         { chatKey: "3:", status: { ...live, sessionId: "s" } },
-        {
-          chatKey: "4:",
-          status: { ...live, sessionId: "s", compacting: true },
-        },
+        { chatKey: "4:", status: { ...live, sessionId: "s" } },
         { chatKey: "5:", status: { status: "running", sessionId: "s" } },
         { chatKey: "6:", status: { status: "idle", updatedAt: now } },
       ],
     }),
-    [["ok", "chats busy: 1 accepted, 2 turn, 1 compacting, 1 stale"]],
+    [["ok", "chats busy: 1 accepted, 3 turn, 1 stale"]],
   );
   assert.deepEqual(
     await systemdDoctorEvents(root, {

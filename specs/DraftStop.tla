@@ -17,32 +17,32 @@
 \* Input-requested closes and forgets the stream. Continuing after the answer
 \* uses the same lazy recovery, after the closed stream has drained.
 \* A restart also forgets the old process's 429 pause, as telegram-draft.ts does.
-\* Terminal record writes retain a different owner; compaction also checks its flag.
+\* Terminal record writes retain a different owner.
 \* Reject counters and sticky violation flags monitor the three implementation seams.
 \*
-\* Initial orphan case is adversarial persisted input: a compacting record has
-\* turnId=null and a leftover positive draft id. Correct writers clear both;
-\* the stop handler must still reject this snapshot. This case makes the null
-\* guard independently testable rather than relying on well-formed storage.
+\* Initial orphan case is adversarial persisted input: a record of the removed
+\* between-turns compaction had turnId=null and a leftover positive draft id.
+\* Correct writers clear both; the stop handler must still reject this snapshot.
+\* This case makes the null guard independently testable rather than relying on
+\* well-formed storage.
 EXTENDS Naturals, FiniteSets
 CONSTANTS Mutant, MaxTurns, MaxRestarts
 VARIABLE s
 vars == <<s>>
 Turns == 1..MaxTurns
 Drafts == 1..(MaxTurns + MaxRestarts + 1)
-EmptyRecord == [status |-> "idle", session |-> 0, turn |-> 0, draft |-> 0,
-  compacting |-> FALSE]
+EmptyRecord == [status |-> "idle", session |-> 0, turn |-> 0, draft |-> 0]
 EmptyStream == [session |-> 0, turn |-> 0, closed |-> TRUE, inFlight |-> FALSE,
   pause |-> FALSE, disabled |-> FALSE, success |-> FALSE, failures |-> 0,
   rejectsSinceSuccess |-> 0, pending |-> FALSE]
 EmptyStop == [ready |-> FALSE, eventDraft |-> 0, session |-> 0, turn |-> 0, draft |-> 0]
 Init == \E orphan \in BOOLEAN :
   s = [record |-> IF orphan THEN
-         [status |-> "running", session |-> 1, turn |-> 0, draft |-> 1,
-          compacting |-> TRUE] ELSE EmptyRecord,
-    core |-> IF orphan THEN "compacting" ELSE "idle", session |-> 1, turn |-> 0,
+         [status |-> "running", session |-> 1, turn |-> 0, draft |-> 1]
+         ELSE EmptyRecord,
+    core |-> "idle", session |-> 1, turn |-> 0,
     started |-> 0, issued |-> IF orphan THEN 1 ELSE 0, restarts |-> 0,
-    recovering |-> FALSE, compacted |-> orphan,
+    recovering |-> FALSE,
     streams |-> [d \in Drafts |-> EmptyStream], stop |-> EmptyStop,
     finals |-> [t \in Turns |-> "none"], cancels |-> [t \in Turns |-> 0],
     wrongDraft |-> FALSE, emptyTurn |-> FALSE, afterClose |-> FALSE,
@@ -68,8 +68,8 @@ Start(session, publish) ==
      IN s' = [s EXCEPT !.core = "running", !.session = session, !.turn = t,
        !.started = t, !.issued = IF publish THEN d ELSE @, !.recovering = FALSE,
        !.record = IF publish THEN
-         [status |-> "running", session |-> session, turn |-> t, draft |-> d,
-          compacting |-> FALSE] ELSE @,
+         [status |-> "running", session |-> session, turn |-> t, draft |-> d]
+         ELSE @,
        !.streams = IF publish THEN [@ EXCEPT ![d] = NewStream(session, t)] ELSE @]
 
 \* Timer refresh and new text both request the latest frame, never a backlog.
@@ -135,23 +135,10 @@ InputRequested ==
   /\ s' = [s EXCEPT !.streams = ClosePair(@, s.session, s.turn),
        !.recovering = TRUE]
 
-BeginCompaction ==
-  /\ s.core = "idle" /\ ~s.compacted
-  /\ s' = [s EXCEPT !.core = "compacting", !.compacted = TRUE,
-       !.record = [status |-> "running", session |-> s.session, turn |-> 0, draft |-> 0,
-         compacting |-> TRUE]]
-EndCompaction ==
-  /\ s.core = "compacting"
-  /\ LET owns == s.record.session = s.session /\ s.record.compacting
-         record == IF owns \/ Mutant = "compaction-clear-foreign" THEN EmptyRecord ELSE s.record
-     IN s' = [s EXCEPT !.core = "idle", !.record = record,
-       !.foreignRecordLost = @ \/ (~owns /\ record # s.record)]
 OtherProcess(kind) ==
-  \* An external reset/takeover can also race a compaction's late release.
   /\ s.record.status = "running"
   /\ s' = [s EXCEPT !.record = IF kind = "reset" THEN EmptyRecord ELSE
-       [status |-> "running", session |-> 2, turn |-> 0, draft |-> 0,
-        compacting |-> FALSE]]
+       [status |-> "running", session |-> 2, turn |-> 0, draft |-> 0]]
 Tick(d) ==
   /\ ~s.streams[d].closed
   /\ LET stale == ~Matches(d)
@@ -195,7 +182,7 @@ LazyRecover ==
   /\ LET d == s.issued + 1 IN s' = [s EXCEPT !.recovering = FALSE,
        !.issued = d, !.record.draft = d, !.streams[d] = NewStream(s.session, s.turn)]
 
-Next == MessageCompleted \/ TurnEnded \/ SafetyClose \/ BeginCompaction \/ EndCompaction
+Next == MessageCompleted \/ TurnEnded \/ SafetyClose
   \/ Restart \/ LazyRecover \/ InputRequested
   \/ (\E session \in 1..2, publish \in BOOLEAN : Start(session, publish))
   \/ (\E kind \in {"reset", "takeover"} : OtherProcess(kind))
@@ -207,12 +194,11 @@ Next == MessageCompleted \/ TurnEnded \/ SafetyClose \/ BeginCompaction \/ EndCo
 Spec == Init /\ [][Next]_vars
 
 TypeOK ==
-  /\ s.core \in {"idle", "running", "cancelled", "compacting"}
+  /\ s.core \in {"idle", "running", "cancelled"}
   /\ s.turn \in 0..MaxTurns /\ s.started \in 0..MaxTurns
   /\ s.issued \in 0..Cardinality(Drafts) /\ s.restarts \in 0..MaxRestarts
   /\ s.record.status \in {"idle", "running"} /\ s.record.session \in 0..2
   /\ s.record.turn \in 0..MaxTurns /\ s.record.draft \in 0..Cardinality(Drafts)
-  /\ s.record.compacting \in BOOLEAN
   /\ s.foreignRecordLost \in BOOLEAN /\ s.restartPauseKept \in BOOLEAN
   /\ \A d \in Drafts : /\ s.streams[d].turn \in 0..MaxTurns
       /\ s.streams[d].session \in 0..2 /\ s.streams[d].failures \in 0..3

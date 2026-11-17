@@ -233,16 +233,14 @@ export function rewriteRunStatusesForUpdate(
           !Object.is(parsed.generation, snapshot.generation)
         )
           continue;
-        // Both automatic and manual compaction use this record. Retiring its session frees
-        // the chat with a reset tombstone. The manual request and size report live in memory:
-        // /compact warns the owner to repeat it after a restart. Recovery has no persisted
-        // manual request to notify through Bridge. A queued sign (queued* fields)
-        // stays: there is no Bot API before the start to delete it, and the next turn of
-        // the chat deletes it by these fields (specs/IdleCompaction.tla, SignOwned).
+        // A queued sign (queued* fields) stays: there is no Bot API before the start to
+        // delete it, and the next turn of the chat deletes it by these fields (SignOwned).
+        // Legacy `compacting` records of the removed between-turns path retire quietly:
+        // no human request was inside them, so «repeat your request» would be a lie.
         const stamp = Date.now();
         writeRunStatusAtomicSync(
           file,
-          retired && parsed.compacting === true
+          retired && (parsed as { compacting?: unknown }).compacting === true
             ? {
                 ...queuedSignOf(parsed),
                 ...progressMarkOf(parsed),

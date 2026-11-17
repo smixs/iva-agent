@@ -177,6 +177,8 @@ function renderCompactionContentPart(
       return "";
     case "file":
       return renderAttachedFileStub(part.filename, part.mediaType);
+    case "image":
+      return renderAttachedFileStub(undefined, part.mediaType ?? "image");
     case "tool-call":
       return renderTranscriptToolCall(part, conversationTextLimit);
     case "tool-result":
@@ -307,6 +309,22 @@ function renderPayload(value: unknown, limit: number): string {
 // this shape.
 function renderAttachedFileStub(filename: string | undefined, mediaType: string): string {
   return `Attached file ${filename ?? "attachment"} (${mediaType})`;
+}
+
+/**
+ * Resumption text replayed for a real user message the compacted history no
+ * longer carries: conversational text clipped to the degraded limit and
+ * attachments reduced to the same stub the summarizer saw. Replaying the
+ * rendered form — never the raw message — keeps the resumed history inside
+ * the threshold the raw message had just overflowed.
+ */
+export function renderResumptionReplay(message: ModelMessage): string {
+  const rendered = renderCompactionMessageContent(message, DEGRADED_TEXT_LIMIT).trim();
+  if (rendered.length === 0) {
+    return COMPACTION_RESUMPTION_MESSAGE;
+  }
+
+  return capText(rendered, DEGRADED_TEXT_LIMIT);
 }
 
 function renderConversationText(value: string, limit?: number): string {

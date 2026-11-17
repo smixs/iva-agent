@@ -3278,7 +3278,7 @@ test("a Try again tap after a first-request break brings the question to an empt
   const result = await step(
     {
       agent: { system: "Ты Ива.", tools: [], modelReference: { id: "t/m" } },
-      compaction: { threshold: 100_000, recentWindowSize: 100 },
+      compaction: { threshold: 100_000, recentWindowTokens: 100, summaryMaxOutputTokens: 400 },
       continuationToken: "t",
       sessionId: "t",
       history: [],
@@ -3314,8 +3314,8 @@ test("native stop is handled before admission and leaves the next turn and compa
   assert.equal(await handleControl(nativeStop(), deps), true);
   assert.equal(cancels.length, 1);
   assert.equal(status.getChatStatus("7:")?.wasCancelled, undefined);
-  // Свёртка черновика не держит: запись без turnId и draftId, нативный Стоп её не касается.
-  runningTurn({ turnId: null, draftId: null, compacting: true });
+  // Частичная запись хода без turnId и draftId: нативный Стоп её не касается.
+  runningTurn({ turnId: null, draftId: null });
   assert.equal(await handleControl(nativeStop(), deps), true);
   assert.equal(cancels.length, 1);
   assert.equal(status.getChatStatus("7:")?.wasCancelled, undefined);

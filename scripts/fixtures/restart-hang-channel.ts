@@ -18,13 +18,6 @@ import {
 import { setChatStatus } from "#lib/run-status.ts";
 import { chatTakeOverPatch } from "#lib/telegram-turn-start.ts";
 import { handleTelegramCompactRequest } from "#lib/telegram-compact-route.ts";
-import {
-  closeIdleCompactionTurn,
-  dropIdleCompactionTurn,
-  openIdleCompactionTurn,
-  parkIdleCompactionTurn,
-  startIdleCompaction,
-} from "#lib/idle-compaction.ts";
 
 const MATRIX_FIXTURE = Object.freeze({
   enabledFlag: "1",
@@ -71,8 +64,12 @@ export default defineChannel({
       };
       if (typeof body.address !== "string" || typeof body.message !== "string")
         return new Response("invalid body", { status: 400 });
+      // turnPolicy «queue» — та же политика, что канал Telegram ставит доставке
+      // по умолчанию (agent/lib/telegram-acceptance.ts): steer-доставка во время
+      // активного хода пересылает отмену ходу, а очередь — ждёт его конца.
       const session = await from(body.address).send(body.message, {
         auth: null,
+        turnPolicy: "queue",
       });
       return Response.json({ sessionId: session.id });
     }),
@@ -87,24 +84,10 @@ export default defineChannel({
       handleTelegramCompactRequest(
         request,
         args,
-        (key, sessionId) =>
-          startIdleCompaction({
-            sessionId,
-            manual: true,
-            claimImpl: () => {
-              setChatStatus(
-                key,
-                chatTakeOverPatch({ sessionId, compacting: true }),
-              );
-              return true;
-            },
-            requestImpl: (id) =>
-              requestSessionCompact({
-                url: localSessionCompactUrl(id),
-                bearer: process.env.ASSISTANT_BEARER ?? "",
-              }),
-            releaseImpl: () =>
-              setChatStatus(key, { status: "idle", compacting: null }),
+        (sessionId) =>
+          requestSessionCompact({
+            url: localSessionCompactUrl(sessionId),
+            bearer: process.env.ASSISTANT_BEARER ?? "",
           }),
         process.env.TELEGRAM_WEBHOOK_SECRET_TOKEN,
       ),
@@ -114,76 +97,64 @@ export default defineChannel({
     "turn.started"(data, _channel, ctx) {
       if (process.env.COMPACT_STEP1_MATRIX !== MATRIX_FIXTURE.enabledFlag)
         return;
-      openIdleCompactionTurn(ctx.session.id);
       setChatStatus(MATRIX_FIXTURE.chatKey, {
         ...chatTakeOverPatch({ sessionId: ctx.session.id }),
         turnId: data.turnId,
         draftId: 7000 + ++draftSeq,
       });
     },
-    "turn.completed"(_data, _channel, ctx) {
+    "turn.completed"() {
       if (process.env.COMPACT_STEP1_MATRIX !== MATRIX_FIXTURE.enabledFlag)
         return;
-      closeIdleCompactionTurn(
-        ctx.session.id,
-        MATRIX_FIXTURE.contextWindowTokens,
-      );
-      setChatStatus(MATRIX_FIXTURE.chatKey, {
-        status: "idle",
-        compacting: null,
-      });
+      setChatStatus(MATRIX_FIXTURE.chatKey, { status: "idle" });
     },
     // Отменённый ход: как канал Telegram — запись в idle и счёт свёртки снят. Событие
     // помечаем в журнале с turnId, чтобы тест видел, доехал ли именно этот ход до
     // терминала и какого.
-    "turn.cancelled"(data, _channel, ctx) {
+    "turn.cancelled"(data) {
       if (process.env.COMPACT_STEP1_MATRIX !== MATRIX_FIXTURE.enabledFlag)
         return;
       appendFileSync(
         join(process.env.ASSISTANT_DATA_DIR ?? "data", "restart-hang-events.jsonl"),
         `${JSON.stringify({ event: "turn.cancelled", turnId: data.turnId, at: Date.now() })}\n`,
       );
-      dropIdleCompactionTurn(ctx.session.id);
-      setChatStatus(MATRIX_FIXTURE.chatKey, {
-        status: "idle",
-        compacting: null,
-      });
+      setChatStatus(MATRIX_FIXTURE.chatKey, { status: "idle" });
     },
-    "turn.failed"(data, _channel, ctx) {
+    "turn.failed"(data) {
       if (process.env.COMPACT_STEP1_MATRIX !== MATRIX_FIXTURE.enabledFlag)
         return;
       appendFileSync(
         join(process.env.ASSISTANT_DATA_DIR ?? "data", "restart-hang-events.jsonl"),
         `${JSON.stringify({ event: "turn.failed", turnId: data.turnId, at: Date.now() })}\n`,
       );
-      dropIdleCompactionTurn(ctx.session.id);
-      setChatStatus(MATRIX_FIXTURE.chatKey, {
-        status: "idle",
-        compacting: null,
-      });
+      setChatStatus(MATRIX_FIXTURE.chatKey, { status: "idle" });
     },
     async "compaction.requested"() {
+      const dir = process.env.ASSISTANT_DATA_DIR ?? "data";
+      appendFileSync(
+        join(dir, "restart-hang-compactions.jsonl"),
+        `${JSON.stringify({ point: "requested" })}\n`,
+      );
       await checkpoint("before-summary");
     },
     async "compaction.completed"() {
+      const dir = process.env.ASSISTANT_DATA_DIR ?? "data";
+      appendFileSync(
+        join(dir, "restart-hang-compactions.jsonl"),
+        `${JSON.stringify({ point: "completed" })}\n`,
+      );
       await checkpoint("after-summary");
     },
-    // Свёртка между ходами, как её делает канал Telegram: на парковке занять чат и,
-    // не выходя из обработчика, дождаться ответа штатного роута eve. Включается файлом
+    // Пометка свёртки по парковке, как её ставит канал Telegram: без захвата чата —
+    // сама свёртка происходит в eve перед следующим шагом. Включается файлом
     // data/compact-on-waiting; исход и время ожидания пишутся в журнал теста.
     async "session.waiting"(_data, _channel, ctx) {
       const dir = process.env.ASSISTANT_DATA_DIR ?? "data";
-      if (process.env.COMPACT_STEP1_MATRIX === MATRIX_FIXTURE.enabledFlag) {
-        parkIdleCompactionTurn(ctx.session.id);
+      if (process.env.COMPACT_STEP1_MATRIX === MATRIX_FIXTURE.enabledFlag)
         await checkpoint("parked");
-      }
       const flag = join(dir, "compact-on-waiting");
       if (!existsSync(flag)) return;
       rmSync(flag);
-      setChatStatus(
-        "1:",
-        chatTakeOverPatch({ sessionId: ctx.session.id, compacting: true }),
-      );
       const startedAt = Date.now();
       let outcome: string;
       try {

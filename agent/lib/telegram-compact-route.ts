@@ -1,19 +1,15 @@
-// Вход /compact из моста. Захват чата и POST eve остаются общими с автосвёрткой.
+// Вход /compact из моста: роут ставит сессии пометку свёртки — саму свёртку делает eve
+// перед следующим шагом модели. Канал историю не пересказывает и чат под неё не занимает.
 import type { RouteHandlerArgs } from "eve/channels";
 import { verifyTelegramRequest } from "eve/channels/telegram";
 import {
   parseTelegramResetTarget,
   type ResetTarget,
 } from "./telegram-reset-route.ts";
-import { getChatStatus, isCompacting, isRunning } from "./run-status.ts";
-import {
-  idleCompactionAwaitingPark,
-  manualCompactionInput,
-} from "./idle-compaction.ts";
+import { getChatStatus } from "./run-status.ts";
 import { tr } from "./i18n.ts";
 
 export const TELEGRAM_COMPACT_ROUTE = "/eve/v1/telegram/compact";
-export const compactThousands = (tokens: number) => Math.round(tokens / 1000);
 
 async function readCompactRequest(req: Request, secretToken?: string) {
   let raw;
@@ -51,58 +47,34 @@ function resolveCompactSession(
   );
 }
 
-function compactTurnPending(key: string, sessionId?: string) {
-  return (
-    isRunning(key) ||
-    (sessionId !== undefined && idleCompactionAwaitingPark(sessionId))
-  );
-}
-
 export async function handleTelegramCompactRequest(
   req: Request,
   operations: CompactOperations,
-  start: (chatKey: string, sessionId: string) => Promise<boolean>,
+  mark: (sessionId: string) => Promise<boolean>,
   secretToken?: string,
 ): Promise<Response> {
   const parsed = await readCompactRequest(req, secretToken);
   if (parsed instanceof Response) return parsed;
   const { key, target } = parsed;
-  if (isCompacting(key))
-    return Response.json({
-      text: tr(
-        "The conversation is already being compressed. Please wait for the reply.",
-        "Разговор уже сжимается, подожди ответа.",
-      ),
-    });
   const session = await resolveCompactSession(target, operations);
-  if (compactTurnPending(key, session?.id))
+  if (!session || getChatStatus(key)?.resetAt !== undefined)
     return Response.json({
       text: tr(
-        "I'm answering now. Try /compact after I finish.",
-        "Сейчас идёт ответ. Повтори /compact, когда закончу.",
+        "There's nothing to compress yet: the conversation has just been cleared.",
+        "Пока сжимать нечего: разговор только что очищен.",
       ),
     });
-  if (
-    !session ||
-    getChatStatus(key)?.resetAt !== undefined ||
-    manualCompactionInput(session.id) === null
-  )
-    return Response.json({
-      text: tr(
-        "There's nothing to compress yet: the conversation is small or has already been compressed.",
-        "Пока сжимать нечего: разговор небольшой или уже сжат.",
-      ),
-    });
-  const accepted = await start(key, session.id);
+  // Исход просьбы может быть неизвестен (таймаут, сбой диспетчера): тот же честный ответ.
+  const accepted = await mark(session.id).catch(() => false);
   return Response.json({
     text: accepted
       ? tr(
-          "Compressing the conversation. I'll show its new size with the next answer. After a restart, repeat /compact.",
-          "Сжимаю разговор. Новый размер покажу со следующим ответом. После перезапуска повтори /compact.",
+          "I'll compress the conversation before the next answer.",
+          "Сожму разговор перед следующим ответом.",
         )
       : tr(
-          "Compression couldn't be confirmed. Try /compact after the chat is free.",
-          "Подтверждение сжатия пока отсутствует. Повтори /compact, когда чат освободится.",
+          "Compression couldn't be confirmed. Try /compact again.",
+          "Подтверждение сжатия пока отсутствует. Повтори /compact.",
         ),
   });
 }

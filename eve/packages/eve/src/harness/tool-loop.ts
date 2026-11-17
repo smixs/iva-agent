@@ -574,7 +574,8 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       session = {
         ...session,
         compaction: {
-          recentWindowSize: session.compaction.recentWindowSize,
+          recentWindowTokens: session.compaction.recentWindowTokens,
+          summaryMaxOutputTokens: session.compaction.summaryMaxOutputTokens,
           threshold: session.compaction.threshold,
           thresholdPercent: session.compaction.thresholdPercent,
         },
@@ -593,68 +594,13 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     }
 
     if (config.compactOnly === true) {
-      if (session.history.length > 0) {
-        try {
-          const ctx = contextStorage.getStore();
-          if (
-            ctx !== undefined &&
-            config.dispatchDynamicModelEvent !== undefined
-          ) {
-            await config.dispatchDynamicModelEvent({
-              ctx,
-              event: {
-                data: {
-                  sequence: emissionState.sequence,
-                  stepIndex: emissionState.stepIndex,
-                  turnId: activeTurnId(emissionState),
-                },
-                type: "step.started",
-              } as UnstampedMessageStreamEvent,
-              messages: projectHistory([...session.history], session.state),
-            });
-          }
-          const resolvedModel = await resolveActiveRuntimeModel({
-            config,
-            ctx,
-            session,
-          });
-          session = resolvedModel.session;
-
-          const compacted = await maybeCompact({
-            abortSignal: config.abortSignal,
-            auth: ctx?.get(AuthKey) ?? null,
-            emit,
-            emissionState: {
-              ...emissionState,
-              turnId: activeTurnId(emissionState),
-            },
-            force: true,
-            historyProjector: config.historyProjector,
-            messages: [...session.history],
-            model: resolvedModel.model,
-            onCompaction: config.onCompaction,
-            resolveModel: config.resolveModel,
-            runtimeIdentity: config.runtimeIdentity,
-            session,
-            telemetry: stepInstrumentation?.telemetry(),
-          });
-
-          session = {
-            ...compacted.session,
-            compaction: {
-              recentWindowSize: compacted.session.compaction.recentWindowSize,
-              threshold: compacted.session.compaction.threshold,
-              thresholdPercent: compacted.session.compaction.thresholdPercent,
-            },
-            history: compacted.messages,
-          };
-        } catch (error) {
-          logError(log, "manual session compaction failed", error, {
-            sessionId: session.sessionId,
-          });
-        }
-      }
-
+      // A manual compaction request marks the session; the next step runs the
+      // same compaction pass as an automatic one, so /compact never needs the
+      // chat for itself.
+      session = {
+        ...session,
+        compaction: { ...session.compaction, manualRequested: true },
+      };
       await emit?.(createSessionWaitingEvent());
       return { next: null, session };
     }
@@ -3411,13 +3357,19 @@ function createNextCompactionConfig(
   result: HarnessStepResult,
 ): CompactionConfig {
   const next: {
+    failedAttemptInputTokens?: number;
     lastKnownInputTokens?: number;
     lastKnownPromptMessageCount?: number;
-    recentWindowSize: number;
+    manualRequested?: boolean;
+    recentWindowTokens: number;
+    summaryMaxOutputTokens: number;
     threshold: number;
     thresholdPercent?: number;
   } = {
-    recentWindowSize: current.recentWindowSize,
+    failedAttemptInputTokens: current.failedAttemptInputTokens,
+    manualRequested: current.manualRequested,
+    recentWindowTokens: current.recentWindowTokens,
+    summaryMaxOutputTokens: current.summaryMaxOutputTokens,
     threshold: current.threshold,
     thresholdPercent: current.thresholdPercent,
   };
@@ -3447,7 +3399,6 @@ async function maybeCompact(input: {
   readonly auth: SessionAuthContext | null;
   readonly emit?: ToolLoopHarnessConfig["handleEvent"];
   readonly emissionState: ReturnType<typeof getHarnessEmissionState>;
-  readonly force?: boolean;
   readonly historyProjector?: HistoryViewProjector;
   readonly messages: ModelMessage[];
   readonly model: LanguageModel;
@@ -3472,9 +3423,17 @@ async function maybeCompact(input: {
       messages: promptMessages,
       state: session.state,
     }) ?? promptMessages;
+  const manualRequested = session.compaction.manualRequested === true;
+  const inputTokenCount = getInputTokenCount(projectedPromptMessages, session.compaction);
+  // A rejected summary earns no retry until the input grows past the recorded
+  // size; a manual request bypasses the gate because the owner asked directly.
+  const gatedOut =
+    !manualRequested &&
+    session.compaction.failedAttemptInputTokens !== undefined &&
+    inputTokenCount <= session.compaction.failedAttemptInputTokens;
   const needsSummary =
-    input.force === true ||
-    shouldCompact(projectedPromptMessages, session.compaction);
+    (manualRequested || shouldCompact(projectedPromptMessages, session.compaction)) &&
+    !gatedOut;
   const needsMemoryCanonicalization = shouldCanonicalizeMemory(messages);
 
   if (!needsSummary && !needsMemoryCanonicalization) {
@@ -3507,10 +3466,7 @@ async function maybeCompact(input: {
         sequence: emissionState.sequence,
         sessionId: session.sessionId,
         turnId: emissionState.turnId,
-        usageInputTokens: getInputTokenCount(
-          projectedPromptMessages,
-          session.compaction,
-        ),
+        usageInputTokens: inputTokenCount,
       }),
       projectedPromptMessages,
     );
@@ -3531,10 +3487,22 @@ async function maybeCompact(input: {
         input.telemetry,
         buildGatewayAttributionHeaders(compaction.model, input.runtimeIdentity),
         input.abortSignal,
-        input.force === true,
       )
     : [...ordinary];
-  messages = [...canonical.memory, ...compactedOrdinary];
+  messages = [...canonical.memory, ...(compactedOrdinary ?? ordinary)];
+
+  if (needsSummary) {
+    // The mark is spent either way. A rejected summary leaves the history and
+    // records the input size; the next automatic attempt waits for growth.
+    const nextCompaction = { ...session.compaction };
+    delete nextCompaction.manualRequested;
+    if (compactedOrdinary === null) {
+      nextCompaction.failedAttemptInputTokens = inputTokenCount;
+    } else {
+      delete nextCompaction.failedAttemptInputTokens;
+    }
+    session = { ...session, compaction: nextCompaction };
+  }
 
   if (input.onCompaction) {
     for (const msg of input.onCompaction()) {

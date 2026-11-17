@@ -42,8 +42,7 @@ const { compactMessages } = (await import(
     telemetry?: unknown,
     headers?: unknown,
     abortSignal?: unknown,
-    force?: boolean,
-  ) => Promise<unknown[]>;
+  ) => Promise<unknown[] | null>;
 };
 
 type Usage = {
@@ -110,9 +109,12 @@ const HISTORY = [
   { role: "assistant", content: "план такой ".repeat(40) },
   { role: "user", content: "дальше" },
 ];
+// Порог лежит между исходной историей и сжатым вариантом: эвристика не
+// справляется, зовётся модель (её usage и есть объект теста), а краткий
+// пересказ мока проходит ворота приёма и заменяет старый регион.
 const CONFIG = {
-  threshold: 100_000,
-  recentWindowSize: 1,
+  threshold: 200,
+  recentWindowTokens: 20,
   thresholdPercent: 0.7,
 };
 const LABEL: UsageLabel = { sessionId: "s1", turnId: "turn_3", step: 2 };
@@ -190,11 +192,6 @@ await test("компактация eve пишет строку расхода so
       HISTORY,
       model,
       CONFIG,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      true,
     );
     const rows = readEntries(dir);
     assert.equal(rows.length, 1, JSON.stringify(rows));
@@ -529,13 +526,8 @@ await test("компактация проходит, даже если лог н
         HISTORY,
         model,
         CONFIG,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        true,
       );
-      assert.ok(out.length > 0);
+      assert.ok(out !== null && out.length > 0);
     } finally {
       console.error = original;
     }
@@ -592,11 +584,6 @@ await test("R1 compaction usage records each selected step model", () =>
         HISTORY,
         model,
         CONFIG,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        true,
       );
     }
     assert.deepEqual(

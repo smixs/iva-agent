@@ -804,7 +804,6 @@ export async function finishTelegramStatus(
   sessionId: string,
   mode: "completed" | "cancelled" | "failed",
   turnId?: string,
-  keepBusy = false,
 ): Promise<boolean> {
   await closeTelegramDraftTurn(
     sessionId,
@@ -824,9 +823,6 @@ export async function finishTelegramStatus(
         {
           status: "idle",
           ...TURN_FIELDS_CLEARED,
-          ...(keepBusy
-            ? { status: "running", sessionId, compacting: true }
-            : {}),
         },
       ),
     );

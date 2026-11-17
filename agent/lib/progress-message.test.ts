@@ -87,7 +87,7 @@ await test("no patch that clears the turn fields removes progressMessageId (seed
     ],
     [
       "chatTakeOverPatch",
-      turnStart.chatTakeOverPatch({ sessionId: "s2", compacting: true }),
+      turnStart.chatTakeOverPatch({ sessionId: "s2" }),
     ],
     [
       "chatTakeOverPatch (ingress)",
@@ -153,17 +153,18 @@ await test("startup recovery of a retired compacting record keeps progressMessag
       fc.boolean(),
       (id, claimed) => {
         const key = `recover-${id}-${claimed}:`;
+        // Запись свёртки версии до 24.10.2026: такие файлы могут остаться на диске после
+        // обновления — карантин их тихо гасит (см. wf-store.ts).
         runStatus.setChatStatus(key, {
           status: "running",
           sessionId: "s",
           compacting: true,
           ...(claimed ? { progressClaimed: true } : {}),
           progressMessageId: id,
-        });
+        } as never);
         rewriteRunStatusesForUpdate(dataDir, true);
         const after = runStatus.getChatStatus(key);
         assert.equal(after?.status, "idle");
-        assert.equal(after?.compacting, undefined);
         assert.equal(after?.progressMessageId, id);
         assert.equal(runStatus.progressMessageOf(after), "stale");
       },

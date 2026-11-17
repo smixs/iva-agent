@@ -515,7 +515,7 @@ await test("a pin that no longer matches the head is dropped and the batch is ch
   assert.equal(options.pins!.has(KEY), false);
 });
 
-await test("messages queued during compaction reach Iva in one delivery once the chat is free", async () => {
+await test("messages queued while the chat is busy reach Iva in one delivery once the chat is free", async () => {
   const run = bench({ version: 1, queues: {} });
   run.state.running = true;
   const notices: number[] = [];
@@ -530,7 +530,6 @@ await test("messages queued during compaction reach Iva in one delivery once the
         loadQueueImpl: () => Promise.resolve(run.state.document),
         runningImpl: () => run.state.running,
         turnPolicyImpl: () => "queue",
-        compactingImpl: () => true,
         enqueueImpl: (key, candidate) => {
           const result = enqueueItem(
             run.state.document,
@@ -551,7 +550,7 @@ await test("messages queued during compaction reach Iva in one delivery once the
   assert.deepEqual(notices, [1, 2, 3]);
   const options = run.options();
   await routing.drainReadyQueueHeads(options);
-  assert.deepEqual(run.state.deliveries, [], "compaction holds the chat");
+  assert.deepEqual(run.state.deliveries, [], "a busy chat holds the queue");
 
   run.state.running = false;
   await drainAll(run, options);
@@ -584,7 +583,6 @@ function routeOptions(overrides: Partial<RouteOptions> = {}): RouteOptions {
     now: () => 1_000,
     logImpl: () => {},
     resetPendingImpl: () => false,
-    compactingImpl: () => false,
     ...overrides,
   };
 }
@@ -752,7 +750,7 @@ await test("a queued message names why it waits: the chat record state, a pendin
   const busy = { status: "running", sessionId: "s", updatedAt: at } as const;
   for (const statusImpl of [
     () => ({ ...busy, turnId: "t" }),
-    () => ({ ...busy, compacting: true as const }),
+    () => busy,
     () => ({ status: "running" as const, ingressId: "i", updatedAt: at }),
   ])
     assert.equal(
@@ -766,7 +764,7 @@ await test("a queued message names why it waits: the chat record state, a pendin
   );
   assert.deepEqual(reasons, [
     "chat busy: turn",
-    "chat busy: compacting",
+    "chat busy: turn",
     "chat busy: accepted",
     "reset pending",
     "earlier messages wait",

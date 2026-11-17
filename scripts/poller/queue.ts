@@ -1002,8 +1002,6 @@ export async function retireSettledSessions({
   return retired;
 }
 
-// Брошенный пересказ между ходами — не оборванный ход: запроса человека в нём не было, его
-// сообщения ждут в очереди моста. Сказать «повтори запрос» было бы неправдой.
 async function notifyInterruptedTurn(
   key: string,
   status: RunStatus,
@@ -1011,7 +1009,8 @@ async function notifyInterruptedTurn(
   trImpl: (en: string, ru: string) => string,
   safeLog: (...args: unknown[]) => void,
 ): Promise<void> {
-  if (status.compacting === true) return;
+  // A legacy `compacting` record held no turn: there is nothing to repeat.
+  if ((status as { compacting?: unknown }).compacting === true) return;
   const text = interruptedTurnText({
     question:
       typeof status.turnQuestion === "string" ? status.turnQuestion : "",
@@ -1130,21 +1129,16 @@ export async function reapStaleRuns({
   return reaped;
 }
 
-/** Что сказать человеку, чьё сообщение встало в очередь: чат занят ходом или пересказом. */
+/** Что сказать человеку, чьё сообщение встало в очередь: чат занят ходом. */
 export function queuedNoticeText(
   count: number,
-  status: RunStatus | null | undefined,
+  _status: RunStatus | null | undefined,
   trImpl: (en: string, ru: string) => string = tr,
 ): string {
-  return status?.status === "running" && status.compacting === true
-    ? trImpl(
-        "Compacting the conversation, I'll answer in a moment.",
-        "Сжимаю разговор, скоро отвечу.",
-      )
-    : trImpl(
-        `Queued (${count}). I'll start it automatically when the current task finishes.`,
-        `В очереди: ${count}. Начну автоматически, когда текущая задача завершится.`,
-      );
+  return trImpl(
+    `Queued (${count}). I'll start it automatically when the current task finishes.`,
+    `В очереди: ${count}. Начну автоматически, когда текущая задача завершится.`,
+  );
 }
 
 async function acknowledgeQueued(update: TelegramQueueUpdate, count: number) {

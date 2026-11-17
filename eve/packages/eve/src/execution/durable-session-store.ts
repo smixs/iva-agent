@@ -91,8 +91,10 @@ export interface DurableSession {
     readonly system: string;
   };
   readonly compaction?: {
+    readonly failedAttemptInputTokens?: number;
     readonly lastKnownInputTokens?: number;
     readonly lastKnownPromptMessageCount?: number;
+    readonly manualRequested?: boolean;
   };
 }
 
