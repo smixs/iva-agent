@@ -1,7 +1,7 @@
 import { T, actionFrames, widgetFrames, demoCopy, demoMessages, demoProviders, demoMenuEntries, demoMenuInfo, demoMenuCopy, type DemoProvider, type DemoMenuEntry, type ActionId, type DemoLang } from "../data/demo.ts";
 import {
   DEMO_FRAMES, FPS, MARIA_SCENE, RATE, actions, advance, choose, clamp01, clockAt, demoFrame,
-  easeOut, filmFrame, freshDemo, type Choice, freshInteractions, menuCommand, selectInstallFromButton, beginInstallCopy, finishInstallCopy, replayInteractions, chatAt, chatOf, offered, sceneAt, sceneFrames, sceneNeeds, springAt, swapAt, tapPhase,
+  easeOut, filmFrame, followsEnd, freshDemo, type Choice, freshInteractions, menuCommand, selectInstallFromButton, beginInstallCopy, finishInstallCopy, replayInteractions, chatAt, chatOf, offered, sceneAt, sceneFrames, sceneNeeds, springAt, swapAt, tapPhase,
 } from "./demo-state.ts";
 import { mountWidgets } from "./demo-widgets.ts";
 
@@ -32,6 +32,7 @@ function mountDemo(root: HTMLElement) {
   const announcement = get("[data-announcement]");
   const clock = get("[data-demo-clock]");
   const tap = get("[data-tap]");
+  const jump = get<HTMLButtonElement>("[data-jump]");
   const venue = get("[data-venue]");
   const dim = get("[data-dim]");
   const dots = [...iva.querySelectorAll<HTMLElement>("[data-typing] i")];
@@ -62,6 +63,10 @@ function mountDemo(root: HTMLElement) {
   let raf = 0;
   let lastTime: number | null = null;
   let previousScene = -1;
+  // The chat keeps to its newest message until the visitor scrolls up; the film goes on below.
+  let pinned = true;
+  let lastTop = 0;
+  let touching = false;
   let disposed = false;
   let suspended = false;
   const abort = new AbortController();
@@ -198,9 +203,14 @@ function mountDemo(root: HTMLElement) {
     // Match List's bottom anchoring: growing message height moves earlier messages upward.
     // Pausing gives the reader a normal, keyboard-accessible scrollable transcript.
     if (interaction.menu === null && (!userPaused && !focusPaused || reduced)) {
-      view.scrollTop = view.scrollHeight;
+      track();
+      if (pinned && !touching) {
+        view.scrollTop = view.scrollHeight;
+        lastTop = view.scrollTop;
+      }
       for (const chat of chats) chat.view.scrollTop = chat.view.scrollHeight;
     }
+    jump.hidden = pinned || chatActive || interaction.menu !== null;
     tap.hidden = true;
     if (!reduced && !chatActive && interaction.menu === null) {
       // The ring of a touch: on an answer under a card, or where the film itself taps a widget.
@@ -214,6 +224,9 @@ function mountDemo(root: HTMLElement) {
         if (phase.opacity <= .001 || phase.d <= 1) continue;
         const targetBox = touch.el().getBoundingClientRect();
         if (!targetBox.width) continue;
+        // A touch on something scrolled out of the chat's view is not drawn.
+        const viewBox = view.getBoundingClientRect(), y = targetBox.top + targetBox.height / 2;
+        if (y < viewBox.top || y > viewBox.bottom) continue;
         const screenBox = iva.parentElement!.getBoundingClientRect();
         const scale = screenBox.width / 402;
         const d = phase.d * scale;
@@ -247,6 +260,18 @@ function mountDemo(root: HTMLElement) {
       setText(announcement, copy.end);
       root.dataset.announcedComplete = "true";
     }
+  }
+
+  // Whether the chat still follows its end, read off where the visitor left it.
+  function track() {
+    const next = followsEnd(pinned, view.scrollTop, lastTop, view.scrollHeight - view.clientHeight - view.scrollTop);
+    if (next === pinned) return false;
+    pinned = next;
+    return true;
+  }
+  function toEnd() {
+    pinned = true;
+    lastTop = 0;
   }
 
   function renderMenu() {
@@ -376,6 +401,7 @@ function mountDemo(root: HTMLElement) {
     renderCopyFeedback(endCta, true);
   }
   function openMenu(trigger: HTMLElement, toggle = false) {
+    toEnd();
     menuCommand(interaction, toggle ? "toggle" : "open");
     if (interaction.menu === null) {
       sync();
@@ -392,6 +418,7 @@ function mountDemo(root: HTMLElement) {
     get<HTMLButtonElement>("[data-menu-keyboard] button").focus({ preventScroll: true });
   }
   function closeMenu() {
+    toEnd();
     menuCommand(interaction, "close");
     sync();
     restoreMenuFocus();
@@ -422,6 +449,7 @@ function mountDemo(root: HTMLElement) {
     schedule();
   }
   function nextScene() {
+    toEnd();
     const f = filmFrame(state.frame);
     // Manual reduced-motion playback settles pending choices before moving on.
     for (const id of actions) {
@@ -511,6 +539,13 @@ function mountDemo(root: HTMLElement) {
       sync();
     });
   }, on);
+  view.addEventListener("scroll", () => { if (track()) sync(); }, { ...on, passive: true });
+  view.addEventListener("touchstart", () => { touching = true; }, { ...on, passive: true });
+  for (const end of ["touchend", "touchcancel"]) view.addEventListener(end, () => { touching = false; }, { ...on, passive: true });
+  jump.addEventListener("click", () => {
+    toEnd();
+    sync();
+  }, on);
   play.addEventListener("click", () => {
     if (reduced) nextScene();
     else {
@@ -521,6 +556,7 @@ function mountDemo(root: HTMLElement) {
   }, on);
   replay.addEventListener("click", () => {
     state = freshDemo();
+    toEnd();
     widgets.reset();
     interaction = replayInteractions(interaction);
     menuShown = false;

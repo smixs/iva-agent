@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { T, actionFrames, demoMessages, demoMenuEntries, widgetFrames } from "../data/demo.ts";
 import { GAME_TICKS, botTaps, filmTaps, freshGame, stepGame } from "./demo-game.ts";
-import { DEMO_FRAMES, actions, advance, choose, demoFrame, filmFrame, freshDemo, freshInteractions, menuCommand, selectInstall, selectInstallFromButton, beginInstallCopy, finishInstallCopy, replayInteractions, iosPush, chatAt, offered, sceneAt, sceneFrames, springAt, tapPhase } from "./demo-state.ts";
+import { DEMO_FRAMES, actions, advance, choose, demoFrame, filmFrame, freshDemo, freshInteractions, menuCommand, selectInstall, selectInstallFromButton, beginInstallCopy, finishInstallCopy, replayInteractions, iosPush, chatAt, followsEnd, offered, sceneAt, sceneFrames, springAt, tapPhase } from "./demo-state.ts";
 
 test("phone footage keeps scene order; the team brief and Helga fill the stretch of the film's titles", () => {
   assert.equal(filmFrame(0), 360);
@@ -317,4 +317,19 @@ test("menu installation uses the same copy result flow and permits an explicit r
   assert.equal(beginInstallCopy(state), true);
   assert.equal(finishInstallCopy(state, true), true);
   assert.equal(state.copy, "copied");
+});
+test("the chat follows its end until the visitor scrolls up, and again once they are back", () => {
+  // At the end, however it got there.
+  assert.equal(followsEnd(true, 900, 900, 0), true);
+  assert.equal(followsEnd(false, 900, 400, 2), true);
+  // A new message made the chat longer: nobody scrolled.
+  assert.equal(followsEnd(true, 900, 900, 320), true);
+  // The thinking bubble closed and the browser pulled the offset back: nobody scrolled.
+  assert.equal(followsEnd(true, 880, 900, 0), true);
+  // Scrolled up by hand: the film goes on without pulling the chat down.
+  assert.equal(followsEnd(true, 760, 900, 140), false);
+  assert.equal(followsEnd(false, 760, 900, 140), false);
+  assert.equal(followsEnd(false, 760, 760, 700), false);
+  // A drag of a pixel or two is not yet a scroll.
+  assert.equal(followsEnd(true, 898, 900, 2), true);
 });

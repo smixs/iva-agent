@@ -182,6 +182,7 @@ const prepared = messages.map(message => {
           <span class="v7-glass v7-field" aria-hidden="true"><span>{c.message}</span><svg viewBox="0 0 24 24"><path d="M12 20.5A8.5 8.5 0 1 1 20.5 12M20.5 12c-4.6 0-8.5 3.8-8.5 8.5" /></svg></span>
           <span class="v7-glass v7-mic" aria-hidden="true"><svg viewBox="0 0 24 24" data-mic><path d="M9 6a3 3 0 0 1 6 0v5.5a3 3 0 0 1-6 0zM5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3" /></svg><span class="v7-stop" data-stop hidden></span></span>
         </div>
+        {peer === "iva" && <button type="button" class="v7-jump" data-jump aria-label={c.jump} hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9.5l6 6 6-6" /></svg></button>}
         {peer === "iva" && <span class="v7-dim" data-dim aria-hidden="true"></span>}
       </div>
     ))}
@@ -310,6 +311,12 @@ const prepared = messages.map(message => {
   .v7-mic [data-stop]:not([hidden]) { display:block; flex:none; }
   .v7-stop { width:calc(13 * var(--vp)); height:calc(13 * var(--vp)); border-radius:calc(3 * var(--vp)); background:#fff; }
   .v7-screen.is-thinking .v7-mic { background:#17211dd1; }
+  /* Back to the newest message, as in Telegram: shown once the visitor has scrolled up. */
+  .v7-jump { appearance:none; position:absolute; right:calc(10 * var(--vp)); bottom:calc(114 * var(--vp)); display:grid; place-items:center; width:max(34px,calc(40 * var(--vp))); height:max(34px,calc(40 * var(--vp))); padding:0; border:0; border-radius:50%; background:#fff; color:#17211d; box-shadow:0 calc(1 * var(--vp)) calc(2 * var(--vp)) #17211d1f,0 calc(4 * var(--vp)) calc(14 * var(--vp)) #17211d29; cursor:pointer; transition:opacity 160ms ease,transform 160ms cubic-bezier(.23,1,.32,1); }
+  @starting-style { .v7-jump { opacity:0; transform:translateY(calc(6 * var(--vp))) scale(.92); } }
+  .v7-jump::before { content:""; position:absolute; inset:50% auto auto 50%; width:44px; height:44px; transform:translate(-50%,-50%); }
+  .v7-jump svg { width:55%; height:55%; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
+  .v7-jump:focus-visible { outline:2px solid #17211d; outline-offset:2px; }
   .v7-dim { position:absolute; inset:0; background:#0a1410; opacity:0; pointer-events:none; }
   .v7-tap { position:absolute; z-index:5; border-radius:50%; pointer-events:none; background:radial-gradient(circle closest-side,#ffffff4d,#ffffff38 80%,#ffffff73 97%,transparent); box-shadow:0 calc(2 * var(--vp)) calc(6 * var(--vp)) #1028211a; }
   .v7-composer > [aria-hidden="true"] { pointer-events:none; }
@@ -390,7 +397,7 @@ const prepared = messages.map(message => {
   .v7-controls button:disabled { cursor:default; color:#395549; }
   .v7-sr { position:absolute; width:1px; height:1px; padding:0; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
   .v7-demo ::selection { background:#c9e5ff; color:#17211d; }
-  @media (hover:hover) { .v7-choice.is-primary:enabled:hover { background:#0473d6; } .v7-choice.is-secondary:enabled:hover { background:#d5d4d8; } .v7-controls button:enabled:hover { color:#167a63; } }
+  @media (hover:hover) { .v7-choice.is-primary:enabled:hover { background:#0473d6; } .v7-choice.is-secondary:enabled:hover { background:#d5d4d8; } .v7-controls button:enabled:hover { color:#167a63; } .v7-jump:hover { background:#f1f3f5; } }
   @media (max-width:960px) {
     .v7-cue-text { right:auto; left:calc(9.2cqw + 26px); top:calc(205cqw + 26px); font-size:23px; }
     .v7-cue-arrow.is-side { display:none; }

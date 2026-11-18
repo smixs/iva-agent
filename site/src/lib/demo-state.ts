@@ -132,6 +132,13 @@ export function chatAt(state: DemoState, chat: Chat, f = filmFrame(state.frame))
     confirmed: f >= choice.at + 138,
   };
 }
+// The chat follows its newest message only while the visitor is at the end of it. `top` is the
+// scroll offset now, `lastTop` the one the film last set, `gap` what is left below the view.
+// A view that only got longer or shorter did not move by hand; one moved up by hand lets go.
+export function followsEnd(pinned: boolean, top: number, lastTop: number, gap: number): boolean {
+  if (gap <= 2) return true;
+  return pinned && top >= lastTop - 2;
+}
 // Where each scene stands complete, and the answer a scene waits for, if any.
 export const sceneFrames = [360, 700, T(760), T(1075), T(1460), T(1710), T(2190), T(2580), T(2760) - 60, T(3080), T(3340), T(3470), T(3780), actionFrames.order - 10, T(4160), T(4300), T(4510), T(4790), T(5090), T(5470), T(5850), T(6100)];
 export const sceneNeeds: Record<number, ActionId> = { 8: "taxi", 11: "restaurant", 13: "shopping" };
