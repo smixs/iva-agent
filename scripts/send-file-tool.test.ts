@@ -13,7 +13,10 @@ import { join, resolve } from "node:path";
 import test, { type TestContext } from "node:test";
 import type { ToolContext } from "eve/tools";
 
-import type { SendFileAnswer } from "../agent/tools/send_file.ts";
+import type {
+  SendFileAnswer,
+  SendFileInput,
+} from "../agent/tools/send_file.ts";
 
 // Тесты тулов живут в scripts/: файл рядом с тулами eve счёл бы ещё одним тулом и сборка
 // упала бы. Хук резолвинга идёт первым — тулы тянут соседей NodeNext-спецификаторами.
@@ -25,9 +28,13 @@ mkdirSync(join(vault, "attachments", "2026-09-24"), { recursive: true });
 writeFileSync(join(vault, "attachments", "2026-09-24", "report.pdf"), "%PDF-1");
 process.env.ASSISTANT_VAULT_DIR = vault;
 process.env.TELEGRAM_BOT_TOKEN = "123:secret";
+const API = "https://api.telegram.org/bot123:secret/";
 
-const { default: sendFileTool, sendFile } =
-  await import("../agent/tools/send_file.ts");
+const {
+  default: sendFileTool,
+  sendFile,
+  PHOTO_MAX_BYTES,
+} = await import("../agent/tools/send_file.ts");
 
 const REPO = resolve(import.meta.dirname, "..");
 const turnCtx = (attributes: Record<string, unknown>) =>
@@ -38,16 +45,17 @@ const noTurn = {} as unknown as ToolContext;
 
 type Call = { url: string; method: string; form: FormData };
 
-function stubFetch(
-  t: TestContext,
-  reply: unknown = { ok: true, result: { message_id: 77 } },
-): Call[] {
+// Ответы по очереди, последний повторяется.
+function stubFetch(t: TestContext, ...replies: unknown[]): Call[] {
+  const queue =
+    replies.length > 0 ? replies : [{ ok: true, result: { message_id: 77 } }];
   const calls: Call[] = [];
   t.mock.method(
     globalThis,
     "fetch",
     (url: string, init: { method: string; body: FormData }) => {
       calls.push({ url, method: init.method, form: init.body });
+      const reply = queue[calls.length - 1] ?? queue.at(-1);
       return Promise.resolve(
         new Response(JSON.stringify(reply), { status: 200 }),
       );
@@ -72,7 +80,7 @@ function withChatEnv(
   });
 }
 
-const run = (input: { path: string; caption?: string }, ctx: ToolContext) =>
+const run = (input: SendFileInput, ctx: ToolContext) =>
   sendFileTool.execute(input, ctx) as Promise<SendFileAnswer>;
 
 const REFUSAL = /vault\/attachments\/<дата>\/.*send_file/;
@@ -91,7 +99,7 @@ void test("файл из Vault уходит документом в чат и т
   });
   assert.equal(calls.length, 1);
   const [call] = calls;
-  assert.equal(call.url, "https://api.telegram.org/bot123:secret/sendDocument");
+  assert.equal(call.url, `${API}sendDocument`);
   assert.equal(call.method, "POST");
   assert.equal(call.form.get("chat_id"), "-100500");
   assert.equal(call.form.get("message_thread_id"), "12");
@@ -322,4 +330,111 @@ void test("обычный текст и двоичный файл отправл
     assert.ok(document instanceof File);
     assert.deepEqual(Buffer.from(await document.arrayBuffer()), bytes);
   }
+});
+
+function writeAttachment(name: string, bytes: Buffer | string): string {
+  writeFileSync(join(vault, "attachments", name), bytes);
+  return `attachments/${name}`;
+}
+
+void test("картинка JPG/PNG/WebP уходит фото с подписью и темой", async (t) => {
+  const calls = stubFetch(t);
+
+  for (const name of ["pic.png", "pic.JPG", "pic.jpeg", "pic.webp"]) {
+    const answer = await run(
+      { path: writeAttachment(name, "img"), caption: "вот" },
+      turnCtx({ chat_id: "1", message_thread_id: "5" }),
+    );
+    assert.deepEqual(answer, { ok: true, name, bytes: 3, message_id: 77 });
+  }
+
+  assert.equal(calls.length, 4);
+
+  for (const call of calls) {
+    assert.equal(call.url, `${API}sendPhoto`);
+    assert.equal(call.form.get("caption"), "вот");
+    assert.equal(call.form.get("message_thread_id"), "5");
+    assert.equal(call.form.get("document"), null);
+    assert.ok(call.form.get("photo") instanceof File);
+  }
+});
+
+void test("отказ sendPhoto - тот же файл уходит документом", async (t) => {
+  const calls = stubFetch(
+    t,
+    {
+      ok: false,
+      error_code: 400,
+      description: "Bad Request: PHOTO_INVALID_DIMENSIONS",
+    },
+    { ok: true, result: { message_id: 78 } },
+  );
+  const answer = await run(
+    { path: writeAttachment("wide.png", "img") },
+    turnCtx({ chat_id: "1" }),
+  );
+  assert.deepEqual(answer, {
+    ok: true,
+    name: "wide.png",
+    bytes: 3,
+    message_id: 78,
+  });
+
+  const urls = calls.map((call) => call.url);
+  assert.deepEqual(urls, [`${API}sendPhoto`, `${API}sendDocument`]);
+
+  const document = calls[1].form.get("document");
+  assert.ok(document instanceof File);
+  assert.equal(document.name, "wide.png");
+});
+
+void test("отказ и фото, и документа - ошибка документа", async (t) => {
+  stubFetch(
+    t,
+    { ok: false, description: "Bad Request: PHOTO_INVALID_DIMENSIONS" },
+    { ok: false, description: "Bad Request: chat not found" },
+  );
+  const answer = await run(
+    { path: writeAttachment("lost.png", "img") },
+    turnCtx({ chat_id: "1" }),
+  );
+  assert.deepEqual(answer, {
+    ok: false,
+    error: "Telegram: Bad Request: chat not found",
+  });
+});
+
+void test("сбой сети на sendPhoto - без повтора документом", async (t) => {
+  const urls: string[] = [];
+  t.mock.method(globalThis, "fetch", (url: string) => {
+    urls.push(url);
+    return Promise.reject(new Error("socket hang up"));
+  });
+  const answer = await run(
+    { path: writeAttachment("net.png", "img") },
+    turnCtx({ chat_id: "1" }),
+  );
+  assert.equal(answer.ok, false);
+  assert.deepEqual(urls, [`${API}sendPhoto`]);
+});
+
+void test("as: document шлёт картинку документом", async (t) => {
+  const calls = stubFetch(t);
+  await run(
+    { path: writeAttachment("orig.png", "img"), as: "document" },
+    turnCtx({ chat_id: "1" }),
+  );
+  const urls = calls.map((call) => call.url);
+  assert.deepEqual(urls, [`${API}sendDocument`]);
+});
+
+void test("картинка больше предела sendPhoto уходит документом", async (t) => {
+  const calls = stubFetch(t);
+  const big = Buffer.alloc(PHOTO_MAX_BYTES + 1);
+  await run(
+    { path: writeAttachment("big.jpg", big) },
+    turnCtx({ chat_id: "1" }),
+  );
+  const urls = calls.map((call) => call.url);
+  assert.deepEqual(urls, [`${API}sendDocument`]);
 });
