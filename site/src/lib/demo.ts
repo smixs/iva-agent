@@ -204,11 +204,11 @@ function mountDemo(root: HTMLElement) {
     // Pausing gives the reader a normal, keyboard-accessible scrollable transcript.
     if (interaction.menu === null && (!userPaused && !focusPaused || reduced)) {
       track();
-      if (pinned && !touching) {
-        view.scrollTop = view.scrollHeight;
-        lastTop = view.scrollTop;
-      }
-      for (const chat of chats) chat.view.scrollTop = chat.view.scrollHeight;
+      // Only when there is something below: a scroll set on every frame, even to the same
+      // place, keeps the browser from handing a gesture at the chat's end on to the page.
+      if (pinned && !touching && view.scrollHeight - view.clientHeight - view.scrollTop > .5) view.scrollTop = view.scrollHeight;
+      if (pinned) lastTop = view.scrollTop;
+      for (const chat of chats) if (chat.view.scrollHeight - chat.view.clientHeight - chat.view.scrollTop > .5) chat.view.scrollTop = chat.view.scrollHeight;
     }
     jump.hidden = pinned || chatActive || interaction.menu !== null;
     tap.hidden = true;
