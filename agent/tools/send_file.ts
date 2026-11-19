@@ -174,6 +174,7 @@ type TelegramField = "photo" | "document";
 
 type TelegramReply = {
   readonly ok: boolean;
+  readonly rejected: boolean;
   readonly status: number;
   readonly body: unknown;
 };
@@ -188,16 +189,19 @@ type Delivery = {
 };
 
 // Картинка уходит фото, чтобы Telegram показал её в ленте, остальное - документом.
-// Отказ sendPhoto (размеры, соотношение сторон) повторяется документом; сбой сети
-// не повторяется: фото могло дойти.
+// Документ отправляется после sendPhoto только при явном ok:false от Telegram.
+// При сбое сети, обрыве чтения или неизвестном ответе фото могло дойти.
 async function deliver(delivery: Delivery): Promise<SendFileAnswer> {
   const { token, file, asDocument } = delivery;
 
   try {
     if (!asDocument && fitsSendPhoto(file)) {
       const photo = await postToTelegram(delivery, "photo");
-      // Фото дошло - документом не дублируем.
       if (photo.ok) return sent(file, photo.body);
+      if (!photo.rejected)
+        return fail(
+          `Telegram: не удалось подтвердить отправку фото (HTTP ${photo.status})`,
+        );
     }
 
     const document = await postToTelegram(delivery, "document");
@@ -232,10 +236,16 @@ async function postToTelegram(
   const apiMethod = field === "photo" ? "sendPhoto" : "sendDocument";
   const url = `https://api.telegram.org/bot${token}/${apiMethod}`;
   const response = await fetch(url, { method: "POST", body: form, signal });
-  const body: unknown = await response.json().catch(() => null);
-  const ok = response.ok && (body as { ok?: unknown } | null)?.ok === true;
+  const json: Promise<unknown> = response.json();
+  const body = await (field === "photo" ? json : json.catch(() => null));
+  const ok = (body as { ok?: unknown } | null)?.ok;
 
-  return { ok, status: response.status, body };
+  return {
+    ok: response.ok && ok === true,
+    rejected: ok === false,
+    status: response.status,
+    body,
+  };
 }
 
 function sent(file: Readable, body: unknown): SendFileSent {

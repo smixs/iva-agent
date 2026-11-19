@@ -57,7 +57,7 @@ function stubFetch(t: TestContext, ...replies: unknown[]): Call[] {
       calls.push({ url, method: init.method, form: init.body });
       const reply = queue[calls.length - 1] ?? queue.at(-1);
       return Promise.resolve(
-        new Response(JSON.stringify(reply), { status: 200 }),
+        reply instanceof Response ? reply : Response.json(reply),
       );
     },
   );
@@ -362,11 +362,14 @@ void test("картинка JPG/PNG/WebP уходит фото с подпись
 void test("отказ sendPhoto - тот же файл уходит документом", async (t) => {
   const calls = stubFetch(
     t,
-    {
-      ok: false,
-      error_code: 400,
-      description: "Bad Request: PHOTO_INVALID_DIMENSIONS",
-    },
+    Response.json(
+      {
+        ok: false,
+        error_code: 400,
+        description: "Bad Request: PHOTO_INVALID_DIMENSIONS",
+      },
+      { status: 400 },
+    ),
     { ok: true, result: { message_id: 78 } },
   );
   const answer = await run(
@@ -416,6 +419,41 @@ void test("сбой сети на sendPhoto - без повтора докуме
   );
   assert.equal(answer.ok, false);
   assert.deepEqual(urls, [`${API}sendPhoto`]);
+  assert.match(answer.error, /socket hang up/);
+});
+
+void test("sendPhoto без подтверждённого ответа не повторяется документом", async (t) => {
+  const path = writeAttachment("uncertain.png", "img");
+  await t.test("обрыв чтения тела HTTP 200", async (t) => {
+    const body = new ReadableStream({
+      start(controller) {
+        controller.error(new TypeError("response body interrupted"));
+      },
+    });
+    const calls = stubFetch(t, new Response(body, { status: 200 }), {
+      ok: true,
+      result: { message_id: 78 },
+    });
+    const answer = await run({ path }, turnCtx({ chat_id: "1" }));
+    assert.deepEqual(
+      calls.map((call) => call.url),
+      [`${API}sendPhoto`],
+    );
+    assert.deepEqual(answer, {
+      ok: false,
+      error: "отправка не удалась: response body interrupted",
+    });
+  });
+
+  await t.test("JSON без поля ok", async (t) => {
+    const calls = stubFetch(t, {}, { ok: true, result: { message_id: 78 } });
+    const answer = await run({ path }, turnCtx({ chat_id: "1" }));
+    assert.deepEqual(
+      calls.map((call) => call.url),
+      [`${API}sendPhoto`],
+    );
+    assert.equal(answer.ok, false);
+  });
 });
 
 void test("as: document шлёт картинку документом", async (t) => {
