@@ -23,6 +23,16 @@ import {
 // Предел Bot API на sendDocument.
 export const MAX_BYTES = 50 * 1024 * 1024;
 
+// Предел Bot API на sendPhoto: картинка крупнее уходит документом.
+export const PHOTO_MAX_BYTES = 10 * 1024 * 1024;
+const PHOTO_EXT = /\.(?:jpe?g|png|webp)$/i;
+
+export type SendFileInput = {
+  readonly path: string;
+  readonly caption?: string;
+  readonly as?: "document";
+};
+
 export type SendFileSent = {
   readonly ok: true;
   readonly name: string;
@@ -160,45 +170,91 @@ function messageId(body: unknown): number | null {
   return typeof result?.message_id === "number" ? result.message_id : null;
 }
 
-function documentForm(
-  chatId: string,
-  threadId: string | null,
-  caption: string | undefined,
-  file: Readable,
-): FormData {
-  const form = new FormData();
-  form.append("chat_id", chatId);
-  if (threadId) form.append("message_thread_id", threadId);
-  // Подпись - текст модели наружу: тот же гейт, что у Outbox.
-  if (caption) form.append("caption", redactNotice(caption));
-  form.append("document", new File([file.data], file.name));
-  return form;
-}
+type TelegramField = "photo" | "document";
 
-async function postDocument(
-  token: string,
-  form: FormData,
-  file: Readable,
-  signal: AbortSignal | undefined,
-): Promise<SendFileAnswer> {
+type TelegramReply = {
+  readonly ok: boolean;
+  readonly rejected: boolean;
+  readonly status: number;
+  readonly body: unknown;
+};
+
+type Delivery = {
+  readonly token: string;
+  readonly chat: ReminderChat;
+  readonly caption: string | undefined;
+  readonly file: Readable;
+  readonly signal: AbortSignal | undefined;
+  readonly asDocument: boolean;
+};
+
+// Картинка уходит фото, чтобы Telegram показал её в ленте, остальное - документом.
+// Документ отправляется после sendPhoto только при явном ok:false от Telegram.
+// При сбое сети, обрыве чтения или неизвестном ответе фото могло дойти.
+async function deliver(delivery: Delivery): Promise<SendFileAnswer> {
+  const { token, file, asDocument } = delivery;
+
   try {
-    const response = await fetch(
-      `https://api.telegram.org/bot${token}/sendDocument`,
-      { method: "POST", body: form, signal },
-    );
-    const body: unknown = await response.json().catch(() => null);
-    if (!response.ok || (body as { ok?: unknown } | null)?.ok !== true)
-      return fail(telegramError(body, response.status));
-    return {
-      ok: true,
-      name: file.name,
-      bytes: file.data.byteLength,
-      message_id: messageId(body),
-    };
+    if (!asDocument && fitsSendPhoto(file)) {
+      const photo = await postToTelegram(delivery, "photo");
+      if (photo.ok) return sent(file, photo.body);
+      if (!photo.rejected)
+        return fail(
+          `Telegram: не удалось подтвердить отправку фото (HTTP ${photo.status})`,
+        );
+    }
+
+    const document = await postToTelegram(delivery, "document");
+    if (document.ok) return sent(file, document.body);
+
+    return fail(telegramError(document.body, document.status));
   } catch (error) {
     const text = error instanceof Error ? error.message : String(error);
     return fail(`отправка не удалась: ${text.replaceAll(token, "***")}`);
   }
+}
+
+function fitsSendPhoto(file: Readable): boolean {
+  return PHOTO_EXT.test(file.name) && file.data.byteLength <= PHOTO_MAX_BYTES;
+}
+
+async function postToTelegram(
+  delivery: Delivery,
+  field: TelegramField,
+): Promise<TelegramReply> {
+  const { token, chat, caption, file, signal } = delivery;
+
+  const form = new FormData();
+  form.append("chat_id", chat.id);
+  if (chat.threadId) form.append("message_thread_id", chat.threadId);
+
+  // Подпись - текст модели наружу: тот же гейт, что у Outbox.
+  if (caption) form.append("caption", redactNotice(caption));
+
+  form.append(field, new File([file.data], file.name));
+
+  const apiMethod = field === "photo" ? "sendPhoto" : "sendDocument";
+  const url = `https://api.telegram.org/bot${token}/${apiMethod}`;
+  const response = await fetch(url, { method: "POST", body: form, signal });
+  const json: Promise<unknown> = response.json();
+  const body = await (field === "photo" ? json : json.catch(() => null));
+  const ok = (body as { ok?: unknown } | null)?.ok;
+
+  return {
+    ok: response.ok && ok === true,
+    rejected: ok === false,
+    status: response.status,
+    body,
+  };
+}
+
+function sent(file: Readable, body: unknown): SendFileSent {
+  return {
+    ok: true,
+    name: file.name,
+    bytes: file.data.byteLength,
+    message_id: messageId(body),
+  };
 }
 
 // Чат хода с его темой; фоновый ход без чата - чат уведомлений владельца.
@@ -209,13 +265,15 @@ function targetChat(chat: ReminderChat | null): ReminderChat | null {
 }
 
 export async function sendFile(
-  { path, caption }: { readonly path: string; readonly caption?: string },
+  input: SendFileInput,
   chat: ReminderChat | null,
   {
     maxBytes = MAX_BYTES,
     signal,
   }: { readonly maxBytes?: number; readonly signal?: AbortSignal } = {},
 ): Promise<SendFileAnswer> {
+  const { path, caption, as } = input;
+
   const target = targetChat(chat);
   if (target === null)
     return fail(
@@ -230,14 +288,18 @@ export async function sendFile(
     return fail(
       `файл содержит секрет ${name}: удали значение из копии и вызови send_file ещё раз`,
     );
-  const form = documentForm(target.id, target.threadId, caption, file);
-  return postDocument(token, form, file, signal);
+
+  const asDocument = as === "document";
+  return deliver({ token, chat: target, caption, file, signal, asDocument });
 }
+
+const PHOTO_MAX_MB = PHOTO_MAX_BYTES / 1024 / 1024;
 
 export default defineTool({
   description:
-    "Отправить файл документом в чат, где идёт разговор. path - файл из Vault " +
+    "Отправить файл в чат, где идёт разговор. path - файл из Vault " +
     "(от корня vault, vault/… или абсолютный) или из временного каталога; caption - подпись. " +
+    `Картинка JPG/PNG/WebP до ${PHOTO_MAX_MB} МБ уходит фото, остальные файлы и as: "document" - документом. ` +
     "Возвращает { ok, name, bytes, message_id } или { ok: false, error }.",
   inputSchema: z.object({
     path: z
@@ -249,6 +311,10 @@ export default defineTool({
       .max(1024)
       .optional()
       .describe("Подпись к файлу, до 1024 знаков"),
+    as: z
+      .literal("document")
+      .optional()
+      .describe("document - картинку оригиналом без сжатия"),
   }),
   async execute(input, ctx): Promise<SendFileAnswer> {
     try {

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- 🖼️ **Картинки приходят фото, а не файлом**: `send_file` отправляет JPG, PNG и WebP до 10 МБ через `sendPhoto` — картинка сразу видна в чате и в «Медиа». Если Telegram отказал (размеры, соотношение сторон) или файл больше 10 МБ, он уходит документом. `as: "document"` отправляет картинку без сжатия. `send_file` sends images as photos and falls back to a document when Telegram rejects the photo.
+
 ## [0.5.14] - 2026-11-17
 
 - 🧭 **Меню без лишних подписей**: под кнопками `/menu` и мастера модели больше нет пояснений «кнопка — что она делает», легенд значков и вступлений; на экране кнопки, текущее состояние, ошибки и предупреждения. Menu and model-wizard screens show the buttons alone; text stays for state, errors and warnings.
