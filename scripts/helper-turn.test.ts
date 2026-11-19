@@ -63,7 +63,7 @@ test("helper uses chat definitions and static block, retaining owner instruction
     /owner-fixture/,
   );
 });
-test("R7 Telegram chat and existing turns retain 91dd9bb6 wire bytes except approved tools, current bash/tasks/remind/memory_search definitions and prefix switch", async () => {
+test("R7 Telegram chat and existing turns retain 91dd9bb6 wire bytes except approved tools, current bash/tasks/remind/memory_search/send_file definitions and prefix switch", async () => {
   const base = JSON.parse(
     await readFile(
       new URL("./fixtures/helper-w3-base.json", import.meta.url),
@@ -87,7 +87,7 @@ test("R7 Telegram chat and existing turns retain 91dd9bb6 wire bytes except appr
     tools = previous.tools
       .filter((tool) => !removed.has(tool.name))
       .map((tool) =>
-        ["memory_search", "remind"].includes(tool.name)
+        ["memory_search", "remind", "send_file"].includes(tool.name)
           ? enabled.tools.find((current) => current.name === tool.name)!
           : ["bash", "tasks", "remind"].includes(tool.name)
             ? {

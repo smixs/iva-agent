@@ -409,11 +409,16 @@
             "description": "Подпись к файлу, до 1024 знаков",
             "type": "string",
             "maxLength": 1024
+          },
+          "as": {
+            "description": "document - картинку оригиналом без сжатия",
+            "type": "string",
+            "const": "document"
           }
         },
         "required": ["path"]
       },
-      "description": "Отправить файл документом в чат, где идёт разговор. path - файл из Vault (от корня vault, vault/… или абсолютный) или из временного каталога; caption - подпись. Возвращает { ok, name, bytes, message_id } или { ok: false, error }."
+      "description": "Отправить файл в чат, где идёт разговор. path - файл из Vault (от корня vault, vault/… или абсолютный) или из временного каталога; caption - подпись. Картинка JPG/PNG/WebP до 10 МБ уходит фото, остальные файлы и as: \"document\" - документом. Возвращает { ok, name, bytes, message_id } или { ok: false, error }."
     },
     {
       "type": "function",
