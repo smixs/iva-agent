@@ -81,7 +81,7 @@ void test("свёртка кириллицы: обрезка должна укл
   const model = summarizer("Проверены открытые задачи.");
   const capped = await compactMessages(messages, model, config);
   assert.ok(
-    capped?.some((message) => message.role === "tool"),
+    capped && capped.some((message) => message.role === "tool"),
     "эвристика сохранила tool-result",
   );
   assert.equal(

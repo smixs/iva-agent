@@ -43,7 +43,7 @@
     "@modelcontextprotocol/sdk": "1.32.2",
     "ai": "^7.0.99",
     "croner": "10.0.1",
-    "eve": "https://github.com/smixs/iva-agent/releases/download/eve-0.51.1-iva.12/eve-0.51.1-iva.12.tgz",
+    "eve": "https://github.com/smixs/iva-agent/releases/download/eve-0.51.1-iva.13/eve-0.51.1-iva.13.tgz",
     "just-bash": "^3.6.0",
     "zod": "4.6.7"
   },
