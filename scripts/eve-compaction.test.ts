@@ -8,7 +8,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { ModelMessage } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
-import { compactMessages } from "../node_modules/eve/dist/src/harness/compaction.js";
+import {
+  compactMessages,
+  shouldCompact,
+} from "../node_modules/eve/dist/src/harness/compaction.js";
+import { estimateTokens } from "../node_modules/eve/dist/src/harness/token-estimate.js";
 
 const CONFIG = {
   threshold: 104_857,
@@ -28,6 +32,95 @@ const summarizer = (summary: string) =>
       warnings: [],
     }),
   });
+
+void test("свёртка кириллицы: обрезка должна укладываться в порог по счётчику модели", async () => {
+  const text =
+    "Прочитай записи инструмента и проверь, какие задачи остались открыты. ";
+  const measured: ModelMessage[] = [
+    { role: "user", content: text.repeat(70) },
+    {
+      role: "assistant",
+      content: [
+        {
+          type: "tool-call",
+          toolCallId: "read-1",
+          toolName: "read",
+          input: {},
+        },
+      ],
+    },
+    {
+      role: "tool",
+      content: [
+        {
+          type: "tool-result",
+          toolCallId: "read-1",
+          toolName: "read",
+          output: { type: "text", value: text.repeat(85) },
+        },
+      ],
+    },
+  ];
+  const messages: ModelMessage[] = [
+    ...measured,
+    { role: "user", content: "Что осталось?" },
+  ];
+  const config = {
+    threshold: 2_500,
+    recentWindowTokens: 100,
+    summaryMaxOutputTokens: 100,
+  };
+  // Simulate a provider whose measured Cyrillic prompt is larger than the character estimate.
+  const usage = {
+    ...config,
+    lastKnownPromptMessageCount: measured.length,
+    lastKnownInputTokens: Math.ceil(estimateTokens(measured) * 1.6),
+  };
+  assert.ok(shouldCompact(messages, usage), "исходный вход выше порога");
+
+  const model = summarizer("Проверены открытые задачи.");
+  const capped = await compactMessages(messages, model, config);
+  assert.ok(
+    capped?.some((message) => message.role === "tool"),
+    "эвристика сохранила tool-result",
+  );
+  assert.equal(
+    shouldCompact(capped, config),
+    false,
+    "по знакам/4 обрезка влезает",
+  );
+  assert.equal(
+    model.doGenerateCalls.length,
+    0,
+    "без замера обрезка обходится без пересказа",
+  );
+
+  const higherThreshold = { ...usage, threshold: 4_000 };
+  assert.ok(
+    shouldCompact(messages, higherThreshold),
+    "обрезка нужна и при большем пороге",
+  );
+  assert.deepEqual(
+    await compactMessages(messages, model, higherThreshold),
+    capped,
+  );
+  assert.equal(
+    model.doGenerateCalls.length,
+    0,
+    "достаточная обрезка обходится без пересказа",
+  );
+
+  const result = await compactMessages(messages, model, usage);
+  assert.equal(
+    model.doGenerateCalls.length,
+    1,
+    "обрезки недостаточно при замере модели",
+  );
+  assert.ok(
+    result?.some((message) => message.content === "Проверены открытые задачи."),
+  );
+  assert.deepEqual(result?.at(-1), messages.at(-1));
+});
 
 void test("свёртка крупного multipart-вопроса: запрос виден пересказчику и остаётся в истории", async () => {
   const model = summarizer("Old answer summarized.");
