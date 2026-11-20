@@ -95,6 +95,12 @@ interface TelegramReplyItem {
   untrusted: boolean;
   source?: "assistant";
   media?: ReplyMedia;
+  quote?: ReplyQuote;
+}
+
+interface ReplyQuote {
+  text: string;
+  isManual: boolean;
 }
 
 function isRecord(value: unknown): value is UnknownRecord {
@@ -367,6 +373,20 @@ export function buildTelegramReplyContext(
   // placeholder. A validated chat ID identifies the real author; malformed
   // sender_chat metadata cannot replace a valid from identity.
   const author = senderChat.validIdentity ? senderChat : fromAuthor;
+  // A partial quote: the fragment the user selected inside the replied message.
+  // It lives on the new message, beside reply_to_message, not inside it.
+  const rawQuote = isRecord(rawMessage.quote) ? rawMessage.quote : null;
+  const quote =
+    rawQuote !== null &&
+    typeof rawQuote.text === "string" &&
+    rawQuote.text.trim().length > 0
+      ? sanitizeBounded(
+          rawQuote.text,
+          TELEGRAM_REPLY_TEXT_MAX_CHARS,
+          sanitizeText,
+          hasAttackSignal,
+        )
+      : null;
   // Telegram supplies the author identity. A username or is_bot alone is not
   // proof: other bots and forwarded content retain the foreign-data boundary.
   const own =
@@ -387,11 +407,15 @@ export function buildTelegramReplyContext(
       text.truncated ||
       Boolean(messageText.rich?.truncated) ||
       author.truncated ||
-      Boolean(media?.truncated),
+      Boolean(media?.truncated) ||
+      Boolean(quote?.truncated),
     untrusted: !own,
     ...(own ? { source: "assistant" as const } : {}),
   };
   if (media !== null) item.media = media.value;
+  if (quote !== null && rawQuote !== null) {
+    item.quote = { text: quote.text, isManual: rawQuote.is_manual === true };
+  }
   return {
     item: JSON.stringify(item),
     flagged:
@@ -399,6 +423,7 @@ export function buildTelegramReplyContext(
       (hasAttackSignal(textSecurity) ||
         hasAttackSignal(captionSecurity) ||
         author.warned ||
-        Boolean(media?.warned)),
+        Boolean(media?.warned) ||
+        Boolean(quote?.warned)),
   };
 }
