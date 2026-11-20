@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import fc from "fast-check";
 import {
   TELEGRAM_REPLY_TEXT_MAX_CHARS,
   buildTelegramReplyContext as buildReplyResult,
@@ -39,6 +40,7 @@ interface ParsedReply {
   untrusted: boolean;
   source?: "assistant";
   media?: ParsedReplyMedia;
+  quote?: { text: string; isManual: boolean };
 }
 
 function parseTelegramReplyContext(rawMessage: unknown): ParsedReply {
@@ -343,4 +345,51 @@ await test("reply exposes rich_message truncation even without readable text", (
   });
   assert.equal(parsed.text, "");
   assert.equal(parsed.truncated, true);
+});
+
+await test("reply carries the fragment the user selected as a bounded quote", () => {
+  const parsed = parseTelegramReplyContext({
+    quote: { text: "second phrase", position: 7, is_manual: true },
+    reply_to_message: reply({ text: "first. second phrase. third" }),
+  });
+  assert.equal(parsed.text, "first. second phrase. third");
+  assert.deepEqual(parsed.quote, { text: "second phrase", isManual: true });
+  assert.equal(parsed.truncated, false);
+
+  const long = parseTelegramReplyContext({
+    quote: { text: "q".repeat(TELEGRAM_REPLY_TEXT_MAX_CHARS + 5) },
+    reply_to_message: reply(),
+  });
+  assert.equal(long.quote?.text.length, TELEGRAM_REPLY_TEXT_MAX_CHARS);
+  assert.equal(long.quote?.isManual, false);
+  assert.equal(long.truncated, true);
+});
+
+await test("reply leaves quote out when Telegram sends none or a blank one", () => {
+  for (const quote of [undefined, null, "text", { text: "  " }, { text: 7 }]) {
+    const parsed = parseTelegramReplyContext({
+      quote,
+      reply_to_message: reply(),
+    });
+    assert.equal("quote" in parsed, false);
+  }
+});
+
+await test("property: a quote is kept exactly when its text is not blank, within the limit", () => {
+  fc.assert(
+    fc.property(
+      fc.string({ maxLength: TELEGRAM_REPLY_TEXT_MAX_CHARS + 20 }),
+      (text) => {
+        const parsed = parseTelegramReplyContext({
+          quote: { text },
+          reply_to_message: reply(),
+        });
+        if (text.trim().length === 0) return !("quote" in parsed);
+        return (
+          parsed.quote !== undefined &&
+          [...parsed.quote.text].length <= TELEGRAM_REPLY_TEXT_MAX_CHARS
+        );
+      },
+    ),
+  );
 });
