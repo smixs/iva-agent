@@ -5,9 +5,12 @@
 //
 // Telegram — инструмент `list_chats` прокси юзербота (telegram-mcp f1a2d8e,
 // telegram_mcp/tools/chats.py:449-578): `{"results":[…]}`, пусто — строка `No chats found…`.
-// Почта — `gws`: два списка (непрочитанные входящие без категорий и непрочитанные Updates за
-// сутки), затем заголовки каждого письма; рассылка (`List-Unsubscribe`) из основного списка
-// пунктом не становится, письмо Updates — становится, с темой для модели.
+// Почта — источник по настройке `proactive.mailProvider` (ADR-0020, дополнение 21.11.2026):
+// `gmail` (по умолчанию) — `gws`: два списка (непрочитанные входящие без категорий и
+// непрочитанные Updates за сутки), затем заголовки каждого письма; `imap` — непрочитанные INBOX
+// произвольного ящика только на чтение (scripts/proactive/imap.ts), одно письмо — один пункт;
+// `off` — проверки нет. Рассылка (`List-Unsubscribe`) из основного списка пунктом не становится,
+// письмо Updates — становится, с темой для модели.
 // Сбои (T3) — `systemctl --user`: таймерные сервисы пользователя и сервисы плагинов; идут и при
 // выключенном тумблере.
 import { execFile } from "node:child_process";
@@ -24,8 +27,15 @@ import {
   MAIL_UPDATES_LIMIT,
   TELEGRAM_GROUPS_LIMIT,
   TELEGRAM_USERS_LIMIT,
+  type MailProvider,
   type Sender,
 } from "#lib/proactive-config.ts";
+import {
+  decodeWords,
+  readImapInbox,
+  readImapConfig,
+  type ImapInbox,
+} from "./imap.ts";
 import { openFailures } from "#lib/open-failures.ts";
 import { childEnv, gwsBin } from "../lib/menu/gws-auth.ts";
 import { alertDue, alertResolved } from "../lib/notice-policy.ts";
@@ -474,15 +484,89 @@ async function listIds(
     .slice(0, limit);
 }
 
+/** Настройка почты на прогон: значение ключа и ленивая загрузка IMAP-секрета. */
+export type MailOptions = {
+  /** `proactive.mailProvider` из settings.json; нет — gmail, как до ключа. */
+  readonly provider?: () => MailProvider;
+  /** Секрет IMAP читается только в ветке imap: установке на Gmail он не нужен. */
+  readonly imapConfig?: () => ReturnType<typeof readImapConfig>;
+  /** Клиент IMAP (тесты подставляют записанный разговор; сети в тестах нет). */
+  readonly imap?: (
+    config: Parameters<typeof readImapInbox>[0],
+    limit: number,
+    signal: AbortSignal,
+  ) => Promise<ImapInbox>;
+};
+
+/** Пункт Watch из письма IMAP: тот же контракт, что у Gmail-ветки; рассылки отброшены. */
+export function imapItems(
+  inbox: ImapInbox,
+  log: (line: string) => void,
+): WatchItem[] {
+  const items: WatchItem[] = [];
+  for (const message of inbox.messages) {
+    if (message.newsletter) {
+      log(`proactive: mail ${message.uid} dropped: List-Unsubscribe`);
+      continue;
+    }
+    // Адрес разбираем по сырому From (раскодированное имя не должно менять адрес), а имя
+    // показываем раскодированным: `=?UTF-8?B?…?=` в промпт модели не идёт.
+    const { email, name } = senderOf(message.from);
+    const decoded = name === undefined ? undefined : decodeWords(name);
+    items.push({
+      key: `mail:${message.uid}`,
+      unread: 1,
+      from: {
+        ...(email === undefined ? {} : { email }),
+        ...(decoded === undefined ? {} : { name: decoded }),
+      },
+    });
+  }
+  return items;
+}
+
+/** Проверка IMAP: настройка, чтение INBOX и пункты. Сбой — ошибка источника, как у Gmail. */
+async function checkImap(
+  options: MailOptions,
+  log: (line: string) => void,
+): Promise<SourceResult> {
+  const read = options.imapConfig?.() ?? { error: "imap is not configured" };
+  // Не настроен — молчим, как неподключённый Gmail: пункта `check:mail` нет.
+  if ("error" in read) {
+    log(`proactive: mail imap: ${read.error}`);
+    return NOT_CONNECTED;
+  }
+  const signal = AbortSignal.timeout(MAIL_TIMEOUT_MS);
+  try {
+    const inbox = await (options.imap ?? readImapInbox)(
+      read.config,
+      MAIL_LIMIT,
+      signal,
+    );
+    if (inbox.truncated)
+      log(
+        `proactive: mail imap inbox has more letters than the limit ${MAIL_LIMIT}`,
+      );
+    return { items: imapItems(inbox, log), error: null };
+  } catch (error) {
+    return { items: [], error: message(error) };
+  }
+}
+
 /**
  * Непрочитанные входящие без категорий и рассылок (MAIL_LIMIT) и непрочитанные Updates за сутки
  * (MAIL_UPDATES_LIMIT); срок 20 с на всё. Письмо Updates рассылкой не отбрасывается.
+ * Ветку выбирает `proactive.mailProvider`: `imap` — свой ящик, `off` — проверки нет.
  */
 export function mailSource(
   run: GwsRun = runGws,
   log: (line: string) => void = console.log,
+  options: MailOptions = {},
 ): Source {
   const check = async (): Promise<SourceResult> => {
+    const provider = options.provider?.() ?? "gmail";
+    if (provider === "off") return NOT_CONNECTED;
+    if (provider === "imap") return checkImap(options, log);
     const deadline = Date.now() + MAIL_TIMEOUT_MS;
     try {
       const primary = await listIds(

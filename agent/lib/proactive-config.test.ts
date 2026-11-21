@@ -106,6 +106,11 @@ test(`any garbage in proactive gives a config of the right shape, valid fields k
                   /^(?:[01]\d|2[0-3]):(?:00|30)$/u.test(t),
                 ),
             );
+          else if (key === "mailProvider")
+            assert.ok(
+              ["gmail", "imap", "off"].includes(value as string),
+              `mailProvider ${String(value)}`,
+            );
           else if (key === "urgentSenders")
             assert.ok(
               (value as string[]).every(
@@ -182,6 +187,33 @@ test("iva proactive set values: numbers, on/off, HH:00|HH:30 lists, sender lists
     ["colour", "red"],
   ] as const)
     assert.ok("error" in proactiveValue(key, text), `${key} ${text}`);
+});
+
+test("mailProvider: gmail by default, imap and off by name, anything else — default and a log line", () => {
+  assert.equal(PROACTIVE_DEFAULTS.mailProvider, "gmail");
+  for (const provider of ["gmail", "imap", "off"] as const)
+    assert.equal(
+      parseProactive({ proactive: { mailProvider: provider } }).mailProvider,
+      provider,
+    );
+  for (const bad of ["IMAP ", "mail", 1, null, ["imap"]]) {
+    const logs: string[] = [];
+    const config = parseProactive(
+      { proactive: { mailProvider: bad } },
+      (line) => logs.push(line),
+    );
+    assert.equal(config.mailProvider, "gmail");
+    assert.deepEqual(logs, [
+      "proactive: settings field mailProvider is not valid, using default",
+    ]);
+  }
+});
+
+test("iva proactive set mailProvider: names pass, anything else is refused", () => {
+  assert.deepEqual(proactiveValue("mailProvider", "imap"), { value: "imap" });
+  assert.deepEqual(proactiveValue("mailProvider", "OFF"), { value: "off" });
+  for (const text of ["", "mail", "on"])
+    assert.ok("error" in proactiveValue("mailProvider", text), text);
 });
 
 test("withProactive keeps the neighbours inside and outside proactive", () => {

@@ -599,6 +599,35 @@ test("a source error: its keys are untouched, one check:<source> item, reported 
   assert.equal(state.seen["tg:1"]?.reported, true);
 });
 
+test("mail off: three ticks, no check:mail and no mail key — the source stays silent", async () => {
+  const { mailSource } = await import("./precheck.ts");
+  const h = harness();
+  const deps: TickDeps = {
+    ...h.deps,
+    sources: [
+      mailSource(
+        () => Promise.resolve({ code: 0, stdout: "" }),
+        (line) => h.logs.push(line),
+        { provider: () => "off" },
+      ),
+    ],
+  };
+  for (const at of [NOON, NOON + HOUR, NOON + 2 * HOUR])
+    assert.equal(await runProactiveTick(at, deps), 0);
+  assert.deepEqual(h.prompts, []);
+  assert.deepEqual(h.sent, []);
+  const keys = Object.keys(readState(h).seen);
+  assert.deepEqual(
+    keys.filter((key) => key.startsWith("mail:") || key === "check:mail"),
+    [],
+  );
+  // Ни одной строки про почту: источник молчит, тик идёт дальше как обычно.
+  assert.deepEqual(
+    h.logs.filter((line) => line.includes("mail")),
+    [],
+  );
+});
+
 test("proactive.json missing → initial state; garbage or a newer version → error, the file stays put", async () => {
   for (const content of [
     "{ not json",

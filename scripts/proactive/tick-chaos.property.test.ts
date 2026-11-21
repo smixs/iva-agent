@@ -390,6 +390,8 @@ const briefTimes = fc.uniqueArray(
 
 const config: fc.Arbitrary<ProactiveConfig> = fc.record({
   enabled: fc.boolean(),
+  // Почта — в ветке gmail, как у установки без ключа: шум почты проверяют свои тесты.
+  mailProvider: fc.constant("gmail"),
   quietFromHour: fc.integer({ min: 0, max: 23 }),
   quietToHour: fc.integer({ min: 0, max: 23 }),
   staleMinutes: fc.constantFrom(0, 30, 60, 24 * 60),

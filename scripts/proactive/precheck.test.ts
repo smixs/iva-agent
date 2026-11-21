@@ -16,6 +16,7 @@ import { z } from "zod";
 import {
   MAIL_QUERY,
   MAIL_UPDATES_QUERY,
+  imapItems,
   mailSource,
   parseChats,
   proxyCallTool,
@@ -23,6 +24,8 @@ import {
   telegramSource,
   type GwsRun,
 } from "./precheck.ts";
+import { parseProactive } from "../../agent/lib/proactive-config.ts";
+import type { ImapConfig, ImapInbox } from "./imap.ts";
 
 const SEED = Number(process.env.FC_SEED ?? Date.now() % 2 ** 31);
 const DATA = mkdtempSync(join(tmpdir(), "iva-precheck-"));
@@ -556,6 +559,192 @@ test("mail: at most 20 letters per run, ids that are not Gmail ids are dropped",
   const result = await mailSource(run).check();
   assert.equal(result.items.length, 20);
   assert.equal(calls.length, 22);
+});
+
+// ── Почта: сменный источник (ADR-0020, дополнение 21.11.2026) ─────────────────────────────
+
+/** Ветка imap с подменённым клиентом: сети нет, конфиг и письма заданы тестом. */
+function imap(
+  inbox: ImapInbox | Error,
+  options: {
+    readonly config?:
+      { readonly config: ImapConfig } | { readonly error: string };
+    readonly provider?: "gmail" | "imap" | "off";
+    readonly logs?: string[];
+  } = {},
+) {
+  const calls: Array<{ readonly config: ImapConfig; readonly limit: number }> =
+    [];
+  const logs = options.logs ?? [];
+  const source = mailSource(
+    () => {
+      throw new Error("gws must not run in the imap branch");
+    },
+    (line) => logs.push(line),
+    {
+      provider: () => options.provider ?? "imap",
+      imapConfig: () =>
+        options.config ?? {
+          config: {
+            host: "imap.example.org",
+            port: 993,
+            user: "owner@example.org",
+            password: "secret",
+          },
+        },
+      imap: (config, limit) => {
+        calls.push({ config, limit });
+        return inbox instanceof Error
+          ? Promise.reject(inbox)
+          : Promise.resolve(inbox);
+      },
+    },
+  );
+  return { source, calls, logs };
+}
+
+test("mail: provider off gives no check:mail — neither gws nor imap is called", async () => {
+  const { source, calls, logs } = imap(
+    { messages: [], truncated: false },
+    { provider: "off" },
+  );
+  assert.deepEqual(await source.check(), { items: [], error: null });
+  assert.deepEqual(calls, []);
+  assert.deepEqual(logs, []);
+});
+
+test("mail: an explicit gmail provider keeps today's gws branch", async () => {
+  const { run, calls } = gws({
+    list: { code: 0, stdout: JSON.stringify({ messages: [{ id: "a1" }] }) },
+    a1: metadata({ From: "anna@example.com" }),
+  });
+  const result = await mailSource(run, () => undefined, {
+    provider: () => "gmail",
+  }).check();
+  assert.deepEqual(result.items, [
+    {
+      key: "mail:a1",
+      unread: 1,
+      from: { email: "anna@example.com", name: undefined },
+    },
+  ]);
+  // Два списка и заголовки одного письма — ровно разговор Gmail-ветки.
+  assert.equal(calls.length, 3);
+});
+
+test("mail: the imap branch turns headers into items and drops a newsletter with its UID in the log", async () => {
+  const { source, calls, logs } = imap({
+    messages: [
+      {
+        uid: 42,
+        from: '"Анна Петрова" <anna@example.com>',
+        subject: "привет",
+        newsletter: false,
+      },
+      { uid: 41, from: "news@shop.example", subject: "sale", newsletter: true },
+    ],
+    truncated: false,
+  });
+  assert.deepEqual(await source.check(), {
+    items: [
+      {
+        key: "mail:42",
+        unread: 1,
+        from: { email: "anna@example.com", name: "Анна Петрова" },
+      },
+    ],
+    error: null,
+  });
+  // Предел тот же, что у Gmail-ветки, и клиент получил настоящую настройку.
+  assert.deepEqual(
+    calls.map((c) => [c.config.host, c.limit]),
+    [["imap.example.org", 20]],
+  );
+  assert.deepEqual(logs, ["proactive: mail 41 dropped: List-Unsubscribe"]);
+});
+
+test("mail: imap decodes an RFC 2047 display name but takes the address from the raw From", () => {
+  const items = imapItems(
+    {
+      messages: [
+        {
+          uid: 7,
+          from: "=?UTF-8?B?0JDQvdC90LA=?= <anna@example.com>",
+          subject: "",
+          newsletter: false,
+        },
+      ],
+      truncated: false,
+    },
+    () => undefined,
+  );
+  assert.deepEqual(items, [
+    {
+      key: "mail:7",
+      unread: 1,
+      from: { email: "anna@example.com", name: "Анна" },
+    },
+  ]);
+});
+
+test("mail: imap with too many unread letters says so once and still returns the newest", async () => {
+  const { source, logs } = imap({
+    messages: [
+      { uid: 3, from: "a@b.c", subject: "", newsletter: false },
+      { uid: 2, from: "a@b.c", subject: "", newsletter: false },
+    ],
+    truncated: true,
+  });
+  const result = await source.check();
+  assert.deepEqual(
+    result.items.map((i) => i.key),
+    ["mail:3", "mail:2"],
+  );
+  assert.deepEqual(logs, [
+    "proactive: mail imap inbox has more letters than the limit 20",
+  ]);
+});
+
+test("mail: imap not configured is silence, not check:mail; a failed read is a source error", async () => {
+  const unconfigured = imap(
+    { messages: [], truncated: false },
+    { config: { error: "imap needs host, user and password" } },
+  );
+  assert.deepEqual(await unconfigured.source.check(), {
+    items: [],
+    error: null,
+  });
+  assert.deepEqual(unconfigured.calls, []);
+  assert.deepEqual(unconfigured.logs, [
+    "proactive: mail imap: imap needs host, user and password",
+  ]);
+
+  const broken = imap(new Error("imap A1 LOGIN answered NO"));
+  const result = await broken.source.check();
+  assert.deepEqual(result.items, []);
+  assert.match(result.error ?? "", /A1 LOGIN answered NO/u);
+});
+
+test("mail: a broken mailProvider falls back to gmail and says so once", async () => {
+  const logs: string[] = [];
+  const config = parseProactive(
+    { proactive: { mailProvider: "carrier-pigeon" } },
+    (line) => logs.push(line),
+  );
+  assert.equal(config.mailProvider, "gmail");
+  assert.deepEqual(logs, [
+    "proactive: settings field mailProvider is not valid, using default",
+  ]);
+  // Мусор не должен утащить в imap: ветка та же, что у установки без ключа.
+  const { run, calls } = gws({
+    list: { code: 0, stdout: JSON.stringify({ messages: [{ id: "a1" }] }) },
+    a1: metadata({ From: "anna@example.com" }),
+  });
+  const result = await mailSource(run, (line) => logs.push(line), {
+    provider: () => config.mailProvider,
+  }).check();
+  assert.equal(result.items.length, 1);
+  assert.equal(calls[0]?.[0], "gmail");
 });
 
 test("senderOf: the address in angle brackets, or a bare address", () => {

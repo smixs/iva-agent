@@ -19,8 +19,17 @@ export const BIRTHDAY_NOTICE_DAYS = 3;
 export const BIRTHDAY_MORNING_END_HOUR = 12;
 export const BIRTHDAY_TIMEOUT_MS = 20_000;
 
+/**
+ * Откуда проверка почты Watch берёт письма (ADR-0020, дополнение 21.11.2026): `gmail` — прежний
+ * `gws`, `imap` — произвольный ящик только на чтение, `off` — проверки нет вовсе. Недоступный
+ * источник пункта `check:mail` не даёт: шума из-за настройки нет.
+ */
+export const MAIL_PROVIDERS = ["gmail", "imap", "off"] as const;
+export type MailProvider = (typeof MAIL_PROVIDERS)[number];
+
 export type ProactiveConfig = {
   readonly enabled: boolean;
+  readonly mailProvider: MailProvider;
   readonly quietFromHour: number;
   readonly quietToHour: number;
   readonly staleMinutes: number;
@@ -38,6 +47,7 @@ export const LIVE_DIALOG_MINUTES = 15;
 
 export const PROACTIVE_DEFAULTS: ProactiveConfig = {
   enabled: true,
+  mailProvider: "gmail",
   quietFromHour: 23,
   quietToHour: 8,
   staleMinutes: 60,
@@ -76,6 +86,10 @@ function listOf(max: number, item: (value: unknown) => boolean) {
 /** Правило каждого поля: что допустимо. Одно место для разбора и для `iva proactive set`. */
 const VALID: { readonly [K in ProactiveKey]: (value: unknown) => boolean } = {
   enabled: (value) => typeof value === "boolean",
+  // Почта: три значения словами, мусор — gmail (как было до ключа).
+  mailProvider: (value) =>
+    typeof value === "string" &&
+    (MAIL_PROVIDERS as readonly string[]).includes(value),
   quietFromHour: integerIn(0, 23),
   quietToHour: integerIn(0, 23),
   staleMinutes: integerIn(0, 24 * 60),
@@ -137,6 +151,7 @@ function parseList(text: string): string[] {
 function parseValue(key: ProactiveKey, text: string): unknown {
   if (key === "enabled")
     return { true: true, on: true, false: false, off: false }[text];
+  if (key === "mailProvider") return text.toLowerCase();
   if (Array.isArray(PROACTIVE_DEFAULTS[key])) return parseList(text);
   return /^\d+$/u.test(text) ? Number(text) : undefined;
 }

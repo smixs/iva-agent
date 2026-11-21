@@ -18,9 +18,11 @@ import { pluginTreeDigest } from "#lib/plugin-reader.ts";
 import { findPlugin, readPluginsStateSafe } from "#lib/plugin-store.ts";
 import {
   LIVE_DIALOG_MINUTES,
+  PROACTIVE_DEFAULTS,
   isQuietHour,
   isUrgentSender,
   parseProactive,
+  type MailProvider,
   type ProactiveConfig,
 } from "#lib/proactive-config.ts";
 import { hasInboundAttackSignal, sanitizeInbound } from "#lib/security-gate.ts";
@@ -61,9 +63,11 @@ import {
   readBirthdays,
   type Birthdays,
 } from "./birthdays.ts";
+import { readImapConfig } from "./imap.ts";
 import {
   failuresSource,
   mailSource,
+  runGws,
   telegramSource,
   unfixedFailures,
   type Dialog,
@@ -1554,6 +1558,8 @@ export async function main(
   }
   const dir = dataDir();
   const tz = env.ASSISTANT_TIMEZONE;
+  // До первого чтения настроек — умолчание: ветка почты та же, что у установки без ключа.
+  let mailProvider: MailProvider = PROACTIVE_DEFAULTS.mailProvider;
   const lock = await acquireFileLock(join(dir, "proactive.lock"), {
     timeoutMs: LOCK_WAIT_MS,
     staleMs: LOCK_STALE_MS,
@@ -1573,13 +1579,23 @@ export async function main(
       now: clock,
       closeSignal: (ids, text) =>
         closeTelegramWatchSignal(token, chat, { messageIds: ids, text }),
-      config: () =>
-        loadConfig(join(dir, "settings.json"), (line) => console.log(line)),
+      // Почта: настройка читается один раз, здесь же — и прогон проверки, и повторная
+      // проверка перед отправкой видят одно значение (иначе тик мог бы взять два разных).
+      config: () => {
+        const config = loadConfig(join(dir, "settings.json"), (line) =>
+          console.log(line),
+        );
+        mailProvider = config.mailProvider;
+        return config;
+      },
       timeZone,
       statePath: join(dir, "proactive.json"),
       sources: [
         telegramSource(env, dir),
-        mailSource(),
+        mailSource(runGws, console.log, {
+          provider: () => mailProvider,
+          imapConfig: () => readImapConfig(dir, env),
+        }),
         birthdaySource(birthdays, now, timeZone),
         failuresSource(dir),
       ],
