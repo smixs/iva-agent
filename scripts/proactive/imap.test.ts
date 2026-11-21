@@ -332,6 +332,56 @@ test(`PBT decodeWords: never throws on a header-shaped string (seed ${SEED})`, (
   );
 });
 
+test(`PBT searchUids: sorted, unique, only positive numbers (seed ${SEED})`, () => {
+  fc.assert(
+    fc.property(
+      fc.array(fc.oneof(fc.string(), fc.integer(), fc.constant("SEARCH")), {
+        maxLength: 40,
+      }),
+      (tokens) => {
+        const answer = [`SEARCH ${tokens.map(String).join(" ")}`];
+        const uids = searchUids(answer);
+        assert.deepEqual(
+          uids,
+          [...new Set(uids)].sort((a, b) => a - b),
+        );
+        assert.ok(uids.every((uid) => Number.isSafeInteger(uid) && uid > 0));
+      },
+    ),
+    { seed: SEED, numRuns: 300 },
+  );
+});
+
+test(`PBT parseHeaderBlock: a header map, names lowercased, no empty names (seed ${SEED})`, () => {
+  fc.assert(
+    fc.property(fc.string(), (raw) => {
+      const headers = parseHeaderBlock(raw);
+      for (const [name, value] of headers) {
+        assert.equal(name, name.toLowerCase());
+        assert.notEqual(name, "");
+        assert.equal(typeof value, "string");
+      }
+    }),
+    { seed: SEED, numRuns: 300 },
+  );
+});
+
+test(`PBT readImapConfig: never throws, a config or a reason always comes back (seed ${SEED})`, () => {
+  fc.assert(
+    fc.property(fc.string(), fc.string(), (host, password) => {
+      const read = readImapConfig(DATA, {
+        IVA_IMAP_HOST: host,
+        IVA_IMAP_USER: "owner@example.org",
+        IVA_IMAP_PASSWORD: password,
+      });
+      assert.ok("config" in read || "error" in read);
+      if ("config" in read)
+        assert.ok(read.config.port > 0 && read.config.port <= 65_535);
+    }),
+    { seed: SEED, numRuns: 200 },
+  );
+});
+
 test("searchUids: numbers only, no repeats, ascending; other answers ignored", () => {
   assert.deepEqual(searchUids(["SEARCH 9 5 5 12", "OK done"]), [5, 9, 12]);
   assert.deepEqual(searchUids(["SEARCH", "SEARCH 007"]), [7]);
