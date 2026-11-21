@@ -2,7 +2,7 @@
 
 ## [Unreleased]
 
-- 📬 **Проверка почты Watch выбирается настройкой**: `proactive.mailProvider` — `gmail` (как раньше), `imap` (любой ящик только на чтение, `data/secrets/imap.json` или `IVA_IMAP_*`) или `off`. Раньше почта всегда читалась через `gws`, и установка с ящиком не в Google каждый час получала пункт `check:mail` и ход модели «this check does not work». Теперь недоступный источник молчит и пишет одну строку в журнал. Watch mail source is configurable: `gmail`, read-only `imap` or `off`; an unavailable source no longer produces an hourly `check:mail` wake-up.
+- 📬 **Проверка почты Watch выбирается настройкой**: `proactive.mailProvider` — `gmail` (как раньше), `imap` (любой ящик только на чтение, `data/secrets/imap.json` или `IVA_IMAP_*`) или `off`. Раньше почта всегда читалась через `gws`, и установка с ящиком не в Google каждый час получала пункт `check:mail` и ход модели «this check does not work». Теперь выключенный (`off`) или ненастроенный источник молчит и пишет строку в журнал, а настроенный ящик, который падает в работе (неверный пароль, таймаут), остаётся обычным сбоем источника — о такой поломке владелец узнаёт. Watch mail source is configurable: `gmail`, read-only `imap` or `off`; `off` and an unconfigured source no longer produce an hourly `check:mail` wake-up, while a configured mailbox that fails is still reported as a broken source.
 
 ## [0.5.14] - 2026-11-17
 

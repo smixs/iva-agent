@@ -180,6 +180,56 @@ test("readImapInbox: a letter that vanished between SEARCH and FETCH is skipped"
   );
 });
 
+test("readImapInbox: an unsolicited FLAGS FETCH does not become a letter", async () => {
+  const wire = scripted({
+    greeting: [greeting],
+    A1: [login],
+    A2: [examined],
+    A3: ["* SEARCH 9\r\nA3 OK SEARCH done\r\n"],
+    A4: [
+      // Другой клиент снял флаг у письма 8, которое мы не просили: ни литерала, ни заголовков.
+      "* 2 FETCH (UID 8 FLAGS (\\Seen))\r\n",
+      // И то же письмо 9, но без заголовков — тоже не письмо.
+      "* 3 FETCH (UID 9 FLAGS (\\Deleted))\r\n",
+      fetch(9, "From: real@example.com\r\nSubject: Real\r\n\r\n"),
+      "A4 OK FETCH done\r\n",
+    ],
+  });
+  const inbox = await readImapInbox(
+    CONFIG,
+    20,
+    new AbortController().signal,
+    wire.connect,
+  );
+  assert.deepEqual(
+    inbox.messages.map((m) => [m.uid, m.from]),
+    [[9, "real@example.com"]],
+  );
+});
+
+test("readImapInbox: a SEARCH line longer than the general limit still works", async () => {
+  // 20 000 шестизначных UID — около 140 КиБ в одной строке ответа SEARCH.
+  const uids = Array.from({ length: 20_000 }, (_, i) => 100_000 + i);
+  const wire = scripted({
+    greeting: [greeting],
+    A1: [login],
+    A2: [examined],
+    A3: [`* SEARCH ${uids.join(" ")}\r\nA3 OK SEARCH done\r\n`],
+    A4: [fetch(119_999, "From: a@b.c\r\n\r\n"), "A4 OK FETCH done\r\n"],
+  });
+  const inbox = await readImapInbox(
+    CONFIG,
+    20,
+    new AbortController().signal,
+    wire.connect,
+  );
+  assert.deepEqual(
+    inbox.messages.map((m) => m.uid),
+    [119_999],
+  );
+  assert.equal(inbox.truncated, true);
+});
+
 test("readImapInbox: a refused login, a bad status or a closed socket is an error, not a hang", async () => {
   for (const [answers, reason] of [
     [
@@ -325,6 +375,59 @@ test("readImapConfig: the secret file, then IVA_IMAP_* over it, port defaults to
   assert.deepEqual(readImapConfig(join(DATA, "nothing"), {}), {
     error: "imap is not configured (data/secrets/imap.json or IVA_IMAP_*)",
   });
+});
+
+test("readImapConfig: a numeric port in the file is kept, not replaced by 993", () => {
+  const dir = join(DATA, "port-number");
+  mkdirSync(join(dir, "secrets"), { recursive: true });
+  writeFileSync(
+    join(dir, "secrets", "imap.json"),
+    JSON.stringify({
+      host: "imap.example.com",
+      port: 1993,
+      user: "owner@example.com",
+      password: "app-password",
+    }),
+  );
+  const read = readImapConfig(dir, {});
+  assert.equal("config" in read ? read.config.port : read.error, 1993);
+  // Переменная окружения важнее файла.
+  const overridden = readImapConfig(dir, { IVA_IMAP_PORT: "2993" });
+  assert.equal(
+    "config" in overridden ? overridden.config.port : overridden.error,
+    2993,
+  );
+  // Не порт — отказ, а не тихая подмена 993.
+  const bad = readImapConfig(dir, { IVA_IMAP_PORT: "imap" });
+  assert.equal(
+    "error" in bad ? bad.error : bad.config.port,
+    "imap port is not a valid port",
+  );
+});
+
+test("readImapConfig: the password keeps its edge whitespace, the others are trimmed", () => {
+  const dir = join(DATA, "password-spaces");
+  mkdirSync(join(dir, "secrets"), { recursive: true });
+  writeFileSync(
+    join(dir, "secrets", "imap.json"),
+    JSON.stringify({
+      host: "  imap.example.com  ",
+      user: "owner@example.com",
+      password: "  pass with spaces  ",
+    }),
+  );
+  const read = readImapConfig(dir, {});
+  assert.deepEqual("config" in read ? read.config : read.error, {
+    host: "imap.example.com",
+    port: 993,
+    user: "owner@example.com",
+    password: "  pass with spaces  ",
+  });
+  const fromEnv = readImapConfig(dir, { IVA_IMAP_PASSWORD: " env pass " });
+  assert.equal(
+    "config" in fromEnv ? fromEnv.config.password : fromEnv.error,
+    " env pass ",
+  );
 });
 
 test("readImapConfig: garbage names the reason instead of throwing", () => {

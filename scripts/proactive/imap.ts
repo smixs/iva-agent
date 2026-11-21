@@ -20,8 +20,14 @@ import { connect as tlsConnect } from "node:tls";
 
 /** Порт IMAP по умолчанию: неявный TLS (RFC 8314). */
 export const IMAP_DEFAULT_PORT = 993;
-/** Предел строки протокола и литерала: сервер, лью­щий бесконечность, гасится, а не ест память. */
+/** Предел строки прото­кола и литерала: сервер, льющий бесконечность, гасится, а не ест память. */
 const MAX_LINE = 64 * 1024;
+/**
+ * Предел строки ответа `SEARCH`. В ней перечислены все непрочитанные UID: 20 000 писем — это
+ * около 140 КиБ, и под общий предел строка не влезает. Предел остаётся: 4 МиБ — примерно
+ * полмиллиона UID, дальше проверка честно падает, а не молча теряет ящик.
+ */
+const MAX_SEARCH_LINE = 4 * 1024 * 1024;
 const MAX_LITERAL = 256 * 1024;
 /** Простой сокета: срок проверки (20 с) держит вызывающий, это второй предохранитель. */
 const SOCKET_TIMEOUT_MS = 20_000;
@@ -95,10 +101,13 @@ export function readImapConfig(
   if ("error" in secret) return { error: secret.error };
   const pick = (fileKey: string, envKey: string): string =>
     text(env[envKey]) || text(secret.values[fileKey]);
+  // Пароль не обрезаем: пробелы по краям могут быть его частью, а пустая строка — «не задан».
+  const secretText = (value: unknown): string =>
+    typeof value === "string" && value !== "" ? value : "";
+  const password =
+    secretText(env.IVA_IMAP_PASSWORD) || secretText(secret.values.password);
   const host = pick("host", "IVA_IMAP_HOST");
   const user = pick("user", "IVA_IMAP_USER");
-  const password = pick("password", "IVA_IMAP_PASSWORD");
-  const portText = pick("port", "IVA_IMAP_PORT");
   if (host === "" && user === "" && password === "")
     return {
       error: "imap is not configured (data/secrets/imap.json or IVA_IMAP_*)",
@@ -111,6 +120,15 @@ export function readImapConfig(
     return { error: "imap credentials contain control characters" };
   if (/\s/u.test(host) || /[^\w.:-]/u.test(host))
     return { error: "imap host is not a host name" };
+  // Порт: число из imap.json — обычная запись (`"port": 1993`), строка — из .env. Нет значения —
+  // 993; не число — ошибка, а не тихая подмена портом по умолчанию.
+  const portRaw = env.IVA_IMAP_PORT ?? secret.values.port;
+  const portText =
+    typeof portRaw === "number"
+      ? String(portRaw)
+      : typeof portRaw === "string"
+        ? portRaw.trim()
+        : "";
   const port =
     portText === ""
       ? IMAP_DEFAULT_PORT
@@ -264,8 +282,8 @@ class Wire {
     });
   }
 
-  /** Очередная строка без CRLF. */
-  async line(): Promise<string> {
+  /** Очередная строка без CRLF; `max` — предел длины строки, по умолчанию общий. */
+  async line(max: number = MAX_LINE): Promise<string> {
     for (;;) {
       const at = this.buffer.indexOf("\r\n");
       if (at >= 0) {
@@ -274,7 +292,7 @@ class Wire {
         return line;
       }
       if (this.failure !== null) throw this.failure;
-      if (this.buffer.length > MAX_LINE)
+      if (this.buffer.length > max)
         throw new Error("imap response line is too long");
       await this.wait();
     }
@@ -306,11 +324,12 @@ async function command(
   transport: ImapTransport,
   tag: string,
   text: string,
+  max: number = MAX_LINE,
 ): Promise<Answer> {
   transport.write(`${tag} ${text}\r\n`);
   const untagged: string[] = [];
   for (;;) {
-    const line = await wire.line();
+    const line = await wire.line(max);
     if (line.startsWith(`${tag} `)) {
       const status = line.slice(tag.length + 1).split(" ")[0] ?? "";
       if (status !== "OK")
@@ -348,13 +367,18 @@ async function readFetch(
   const fragments: string[] = [line];
   let current = line;
   let block = "";
+  // Литерал бывает только у запрошенной секции заголовков. Нежелательный `FETCH` другого клиента
+  // (смена флагов) приходит без литерала — такой ответ письмом не считается.
+  let headers = false;
   for (;;) {
     const literal = /\{(\d{1,10})\}$/u.exec(current);
     if (literal === null) break;
     block += (await wire.literal(Number(literal[1]))).toString("utf8");
+    headers = true;
     current = await wire.line();
     fragments.push(current);
   }
+  if (!headers) return null;
   const uid = /(?:^|[\s(])UID\s+(\d{1,10})(?=$|[\s)])/iu.exec(
     fragments.join(" "),
   )?.[1];
@@ -410,10 +434,21 @@ export async function readImapInbox(
     // EXAMINE, не SELECT: ящик открывается только на чтение, флаги не меняются.
     await command(wire, transport, "A2", "EXAMINE INBOX");
     const found = searchUids(
-      (await command(wire, transport, "A3", "UID SEARCH UNSEEN")).untagged,
+      (
+        await command(
+          wire,
+          transport,
+          "A3",
+          "UID SEARCH UNSEEN",
+          MAX_SEARCH_LINE,
+        )
+      ).untagged,
     );
     const wanted = found.slice(-Math.max(0, limit));
-    const messages: ImapMessage[] = [];
+    // Только запрошенные UID и по одному разу: нежелательный FETCH другого клиента не станет
+    // письмом, а повторный ответ не задвоит пункт.
+    const asked = new Set(wanted);
+    const messages = new Map<number, ImapMessage>();
     if (wanted.length > 0) {
       transport.write(
         `A4 UID FETCH ${wanted.join(",")} (UID BODY.PEEK[HEADER.FIELDS (${HEADER_FIELDS})])\r\n`,
@@ -430,14 +465,18 @@ export async function readImapInbox(
         if (!/^\* \d+ FETCH /u.test(line)) continue;
         const fetched = await readFetch(wire, line);
         // Письмо исчезло между SEARCH и FETCH — пропускаем, прогон не падает.
-        if (fetched !== null)
-          messages.push(toMessage(fetched.uid, fetched.block));
+        if (
+          fetched !== null &&
+          asked.has(fetched.uid) &&
+          !messages.has(fetched.uid)
+        )
+          messages.set(fetched.uid, toMessage(fetched.uid, fetched.block));
       }
     }
     // LOGOUT: ответ не нужен, соединение закрывает finally.
     transport.write("A5 LOGOUT\r\n");
-    messages.sort((a, b) => b.uid - a.uid);
-    return { messages, truncated: found.length > wanted.length };
+    const list = [...messages.values()].sort((a, b) => b.uid - a.uid);
+    return { messages: list, truncated: found.length > wanted.length };
   };
   try {
     return await Promise.race([session(), aborted]);
