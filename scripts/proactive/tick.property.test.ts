@@ -66,6 +66,8 @@ const step: fc.Arbitrary<Step> = fc.oneof(
 
 const config: fc.Arbitrary<ProactiveConfig> = fc.record({
   enabled: fc.constant(true),
+  // Почта — в ветке gmail, как у установки без ключа: шум почты проверяют свои тесты.
+  mailProvider: fc.constant("gmail"),
   quietFromHour: fc.integer({ min: 0, max: 23 }),
   quietToHour: fc.integer({ min: 0, max: 23 }),
   staleMinutes: fc.constantFrom(0, 30, 60, 120),
