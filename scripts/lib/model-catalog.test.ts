@@ -164,6 +164,17 @@ test("a live capabilities.reasoning.effort list wins, translated to sendable lev
   ]);
 });
 
+test("native providers keep their canonical levels, max included", async () => {
+  const options = await fetchModelOptions("codex", "test", {
+    listCodexCatalog: async () => [
+      { id: "gpt-5.5", label: "GPT 5.5", reasoningLevels: ["low", "medium", "high", "max"] },
+    ],
+  });
+  assert.deepEqual(options, [
+    { id: "gpt-5.5", reasoningLevels: ["low", "medium", "high", "max"] },
+  ]);
+});
+
 test("heterogeneous OpenRouter catalog does not invent reasoning choices", async () => {
   const options = await fetchModelOptions("openrouter", "unused");
   assert.ok(options.length > 0);

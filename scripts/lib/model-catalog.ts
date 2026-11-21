@@ -324,20 +324,26 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 // выбор сохранится в THINKING_EFFORT и молча не уедет на провод.
 const SENDABLE_LEVELS = ["minimal", "low", "medium", "high", "xhigh"] as const;
 const SENDABLE_ALIASES: Record<string, string> = { max: "xhigh" };
+// Через compatibleThinkingEffort (agent/provider.ts) идут только OpenAI-compatible
+// провайдеры. Нативный Codex получает свой level как есть (providerOptions.reasoningEffort),
+// поэтому его уровни не переводим и не фильтруем — иначе max уехал бы как xhigh.
+const COMPATIBLE_PROVIDERS = new Set(["ollama", "opencode", "custom"]);
 
-const sendableLevels = (levels: readonly unknown[]): string[] => {
+const sendableLevels = (provider: string, levels: readonly unknown[]): string[] => {
+  const compatible = COMPATIBLE_PROVIDERS.has(provider);
   const out: string[] = [];
   for (const value of levels) {
     if (typeof value !== "string") continue;
     const key = value.toLowerCase();
-    const level = SENDABLE_ALIASES[key] ?? key;
-    if (!(SENDABLE_LEVELS as readonly string[]).includes(level)) continue;
+    const level = compatible ? (SENDABLE_ALIASES[key] ?? key) : key;
+    if (compatible && !(SENDABLE_LEVELS as readonly string[]).includes(level)) continue;
     if (!out.includes(level)) out.push(level);
   }
   return out;
 };
 
 const capabilitiesReasoningLevels = (
+  provider: string,
   entry: Record<string, unknown> | null,
 ): string[] => {
   const capabilities = entry?.capabilities;
@@ -346,7 +352,7 @@ const capabilitiesReasoningLevels = (
   if (!isRecord(reasoning)) return [];
   const effort = reasoning.effort;
   if (!Array.isArray(effort)) return [];
-  return sendableLevels(effort);
+  return sendableLevels(provider, effort);
 };
 
 const validOptions = (provider: string, entries: unknown): ModelOption[] => {
@@ -372,11 +378,11 @@ const validOptions = (provider: string, entries: unknown): ModelOption[] => {
     options.push({
       id,
       reasoningLevels: (() => {
-        const live = capabilitiesReasoningLevels(entry);
+        const live = capabilitiesReasoningLevels(provider, entry);
         if (live.length > 0) return live;
         const flat =
           entry && Array.isArray(entry.reasoningLevels)
-            ? sendableLevels(entry.reasoningLevels as unknown[])
+            ? sendableLevels(provider, entry.reasoningLevels as unknown[])
             : [];
         return flat.length > 0 ? flat : providerFallbackReasoningLevels(provider);
       })(),
