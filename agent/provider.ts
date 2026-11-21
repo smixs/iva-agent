@@ -205,7 +205,7 @@ const effortRaw = (process.env.THINKING_EFFORT ?? "").toLowerCase();
 export const thinkingEffort = EFFORTS.includes(effortRaw)
   ? effortRaw
   : undefined;
-const COMPATIBLE_EFFORTS = ["low", "medium", "high"] as const;
+const COMPATIBLE_EFFORTS = ["low", "medium", "high", "max"] as const;
 type CompatibleEffort = (typeof COMPATIBLE_EFFORTS)[number];
 // CUSTOM_REASONING=1 (.env): владелец custom-эндпоинта подтверждает, что тот понимает
 // reasoning_effort (Meta Model API, vLLM с reasoning-моделью). По умолчанию — не шлём.

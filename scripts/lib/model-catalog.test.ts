@@ -139,6 +139,30 @@ test("Ollama Cloud and OpenCode Go expose their OpenAI-compatible reasoning cont
   }
 });
 
+test("a live capabilities.reasoning.effort list wins over the conservative fallback", async () => {
+  const options = await fetchModelOptions("opencode", "test", {
+    fetchFn: async () =>
+      new Response(
+        JSON.stringify({
+          data: [
+            {
+              id: "deepseek-v4.1-flash",
+              capabilities: {
+                reasoning: { supported: true, effort: ["low", "high", "max"] },
+              },
+            },
+            { id: "plain-model" },
+          ],
+        }),
+        { status: 200 },
+      ),
+  });
+  assert.deepEqual(options, [
+    { id: "deepseek-v4.1-flash", reasoningLevels: ["low", "high", "max"] },
+    { id: "plain-model", reasoningLevels: [...FALLBACK_EFFORTS] },
+  ]);
+});
+
 test("heterogeneous OpenRouter catalog does not invent reasoning choices", async () => {
   const options = await fetchModelOptions("openrouter", "unused");
   assert.ok(options.length > 0);

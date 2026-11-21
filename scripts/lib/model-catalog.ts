@@ -317,6 +317,20 @@ const optionsFor = (
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object";
 
+// Уровни усилия из живого каталога: Go отдаёт их в capabilities.reasoning.effort.
+// Без этого /think рисовал консервативный фолбэк, хотя /model уже показывал max.
+const capabilitiesReasoningLevels = (
+  entry: Record<string, unknown> | null,
+): string[] => {
+  const capabilities = entry?.capabilities;
+  if (!isRecord(capabilities)) return [];
+  const reasoning = capabilities.reasoning;
+  if (!isRecord(reasoning)) return [];
+  const effort = reasoning.effort;
+  if (!Array.isArray(effort)) return [];
+  return effort.filter((level): level is string => typeof level === "string");
+};
+
 const validOptions = (provider: string, entries: unknown): ModelOption[] => {
   if (!Array.isArray(entries)) {
     throw new ModelCatalogError(
@@ -339,10 +353,13 @@ const validOptions = (provider: string, entries: unknown): ModelOption[] => {
     seen.add(id);
     options.push({
       id,
-      reasoningLevels:
-        entry && Array.isArray(entry.reasoningLevels)
+      reasoningLevels: (() => {
+        const live = capabilitiesReasoningLevels(entry);
+        if (live.length > 0) return live;
+        return entry && Array.isArray(entry.reasoningLevels)
           ? ([...(entry.reasoningLevels as unknown[])] as string[])
-          : providerFallbackReasoningLevels(provider),
+          : providerFallbackReasoningLevels(provider);
+      })(),
     });
   }
   if (!options.length) {
