@@ -139,7 +139,7 @@ test("Ollama Cloud and OpenCode Go expose their OpenAI-compatible reasoning cont
   }
 });
 
-test("a live capabilities.reasoning.effort list wins over the conservative fallback", async () => {
+test("a live capabilities.reasoning.effort list wins, translated to sendable levels", async () => {
   const options = await fetchModelOptions("opencode", "test", {
     fetchFn: async () =>
       new Response(
@@ -157,8 +157,9 @@ test("a live capabilities.reasoning.effort list wins over the conservative fallb
         { status: 200 },
       ),
   });
+  // max у движка зовётся xhigh: кнопки зовут уровни, которые провод умеет отправить.
   assert.deepEqual(options, [
-    { id: "deepseek-v4.1-flash", reasoningLevels: ["low", "high", "max"] },
+    { id: "deepseek-v4.1-flash", reasoningLevels: ["low", "high", "xhigh"] },
     { id: "plain-model", reasoningLevels: [...FALLBACK_EFFORTS] },
   ]);
 });

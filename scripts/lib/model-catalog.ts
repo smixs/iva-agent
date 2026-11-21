@@ -319,6 +319,24 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 // Уровни усилия из живого каталога: Go отдаёт их в capabilities.reasoning.effort.
 // Без этого /think рисовал консервативный фолбэк, хотя /model уже показывал max.
+// Рантайм отдаёт движку только эти уровни (agent/provider.ts: COMPATIBLE_EFFORTS), а
+// канонический «max» на его стороне зовётся xhigh. Чужое в кнопки не пускаем: иначе
+// выбор сохранится в THINKING_EFFORT и молча не уедет на провод.
+const SENDABLE_LEVELS = ["minimal", "low", "medium", "high", "xhigh"] as const;
+const SENDABLE_ALIASES: Record<string, string> = { max: "xhigh" };
+
+const sendableLevels = (levels: readonly unknown[]): string[] => {
+  const out: string[] = [];
+  for (const value of levels) {
+    if (typeof value !== "string") continue;
+    const key = value.toLowerCase();
+    const level = SENDABLE_ALIASES[key] ?? key;
+    if (!(SENDABLE_LEVELS as readonly string[]).includes(level)) continue;
+    if (!out.includes(level)) out.push(level);
+  }
+  return out;
+};
+
 const capabilitiesReasoningLevels = (
   entry: Record<string, unknown> | null,
 ): string[] => {
@@ -328,7 +346,7 @@ const capabilitiesReasoningLevels = (
   if (!isRecord(reasoning)) return [];
   const effort = reasoning.effort;
   if (!Array.isArray(effort)) return [];
-  return effort.filter((level): level is string => typeof level === "string");
+  return sendableLevels(effort);
 };
 
 const validOptions = (provider: string, entries: unknown): ModelOption[] => {
@@ -356,9 +374,11 @@ const validOptions = (provider: string, entries: unknown): ModelOption[] => {
       reasoningLevels: (() => {
         const live = capabilitiesReasoningLevels(entry);
         if (live.length > 0) return live;
-        return entry && Array.isArray(entry.reasoningLevels)
-          ? ([...(entry.reasoningLevels as unknown[])] as string[])
-          : providerFallbackReasoningLevels(provider);
+        const flat =
+          entry && Array.isArray(entry.reasoningLevels)
+            ? sendableLevels(entry.reasoningLevels as unknown[])
+            : [];
+        return flat.length > 0 ? flat : providerFallbackReasoningLevels(provider);
       })(),
     });
   }
