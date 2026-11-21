@@ -205,16 +205,21 @@ const effortRaw = (process.env.THINKING_EFFORT ?? "").toLowerCase();
 export const thinkingEffort = EFFORTS.includes(effortRaw)
   ? effortRaw
   : undefined;
-const COMPATIBLE_EFFORTS = ["low", "medium", "high"] as const;
+// eve нормализует поле reasoning по своему списку
+// (provider-default|none|minimal|low|medium|high|xhigh) — канонического "max" там нет,
+// и с ним определение агента не проходит сборку. Поэтому max уезжает как xhigh:
+// OpenAI-compatible шлюзы (OpenCode Go) понимают xhigh и сами упираются в свой потолок.
+const COMPATIBLE_EFFORTS = ["minimal", "low", "medium", "high", "xhigh"] as const;
 type CompatibleEffort = (typeof COMPATIBLE_EFFORTS)[number];
+const compatibleEffort = effortRaw === "max" ? "xhigh" : effortRaw;
 // CUSTOM_REASONING=1 (.env): владелец custom-эндпоинта подтверждает, что тот понимает
 // reasoning_effort (Meta Model API, vLLM с reasoning-моделью). По умолчанию — не шлём.
 const customReasoning =
   selected.name === "custom" && process.env.CUSTOM_REASONING === "1";
 export const compatibleThinkingEffort: CompatibleEffort | undefined =
   (selected.compatibleReasoning || customReasoning) &&
-  (COMPATIBLE_EFFORTS as readonly string[]).includes(effortRaw)
-    ? (effortRaw as CompatibleEffort)
+  (COMPATIBLE_EFFORTS as readonly string[]).includes(compatibleEffort)
+    ? (compatibleEffort as CompatibleEffort)
     : undefined;
 
 // --- Codex (подписка ChatGPT): Responses API через @ai-sdk/openai ----------------------------
