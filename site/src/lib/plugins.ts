@@ -8,15 +8,19 @@ export const plugins: Plugin[] = data.plugins;
 export const categories = data.categories;
 export const LIST = data.list;
 
-export const pluginsUrl = (lang: Lang) => (lang === "ru" ? "/ru/plugins/" : "/plugins/");
-export const pluginUrl = (lang: Lang, name: string) => pluginsUrl(lang) + name + "/";
+export const pluginsUrl = (lang: Lang) =>
+  lang === "ru" ? "/ru/plugins/" : "/plugins/";
+export const pluginUrl = (lang: Lang, name: string) =>
+  pluginsUrl(lang) + name + "/";
 export const categoryName = (lang: Lang, id: string) =>
   categories.find((category) => category.id === id)?.[lang] ?? id;
 
 /** The address of the plugin's files at the commit people install. */
 export function sourceUrl(plugin: Plugin): string {
   const [, repository, folder] =
-    /^(https:\/\/github\.com\/[^/]+\/[^/]+)(?:\/tree\/[^/]+\/(.+))?$/.exec(plugin.repository) ?? [];
+    /^(https:\/\/github\.com\/[^/]+\/[^/]+)(?:\/tree\/[^/]+\/(.+))?$/.exec(
+      plugin.repository,
+    ) ?? [];
   if (!repository) return plugin.repository;
   return `${repository}/tree/${plugin.commit}${folder ? "/" + folder : ""}`;
 }

@@ -18,9 +18,13 @@ const LISTED: ReadonlySet<string> = new Set(
 );
 const quiet = { "cache-control": "no-store" };
 
-export async function onRequestPost({ request, env }: Context): Promise<Response> {
+export async function onRequestPost({
+  request,
+  env,
+}: Context): Promise<Response> {
   // Without the salt a hash of an address could be reversed by trying addresses: count nothing.
-  if (!env.INSTALLS_SALT) return new Response(null, { status: 503, headers: quiet });
+  if (!env.INSTALLS_SALT)
+    return new Response(null, { status: 503, headers: quiet });
   if (Number(request.headers.get("content-length") ?? 0) > MAX_BODY)
     return new Response(null, { status: 413, headers: quiet });
   const name = nameIn((await request.text()).slice(0, MAX_BODY + 1));

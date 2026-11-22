@@ -51,7 +51,9 @@ type Source =
   | { source: "git-subdir"; url: string; path: string; sha: string };
 
 try {
-  const list = process.argv[2] ? path.resolve(process.argv[2]) : fetchAt(LIST, null);
+  const list = process.argv[2]
+    ? path.resolve(process.argv[2])
+    : fetchAt(LIST, null);
   const listCommit = git(["rev-parse", "HEAD"], list);
   const market = json(path.join(list, ".agents/plugins/marketplace.json"));
   const cards = json(path.join(list, "cards.json"));
@@ -92,11 +94,15 @@ try {
     const login: string = card.author.github;
     if (!pictures.has(login)) {
       const response = await fetch(`https://github.com/${login}.png?size=96`);
-      if (!response.ok) throw new Error(`${login}: no picture (${response.status})`);
+      if (!response.ok)
+        throw new Error(`${login}: no picture (${response.status})`);
       const type = response.headers.get("content-type") ?? "";
       const extension = type.includes("jpeg") ? "jpg" : "png";
       const file = `${login.toLowerCase()}.${extension}`;
-      writeFileSync(path.join(authors, file), Buffer.from(await response.arrayBuffer()));
+      writeFileSync(
+        path.join(authors, file),
+        Buffer.from(await response.arrayBuffer()),
+      );
       pictures.set(login, `/media/authors/${file}`);
     }
     plugins.push({
@@ -124,7 +130,9 @@ try {
               .sort()
           : [],
         mcp: existsSync(path.join(root, "mcp.json"))
-          ? Object.keys(json(path.join(root, "mcp.json")).mcpServers ?? {}).sort()
+          ? Object.keys(
+              json(path.join(root, "mcp.json")).mcpServers ?? {},
+            ).sort()
           : [],
       },
     });

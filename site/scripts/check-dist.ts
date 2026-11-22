@@ -130,14 +130,22 @@ for (const page of pages) {
       `${page}: missing dimensions`,
     );
 }
-for (const file of [path.join(dist, "404.html"), path.join(dist, "ru/404.html")])
+for (const file of [
+  path.join(dist, "404.html"),
+  path.join(dist, "ru/404.html"),
+])
   assert.ok(
     readFileSync(file, "utf8").includes('name="robots" content="noindex"'),
   );
 assert.ok(
-  readFileSync(path.join(dist, "privacy/index.html"), "utf8").includes('lang="ru"'),
+  readFileSync(path.join(dist, "privacy/index.html"), "utf8").includes(
+    'lang="ru"',
+  ),
 );
-for (const home of [path.join(dist, "index.html"), path.join(dist, "ru/index.html")]) {
+for (const home of [
+  path.join(dist, "index.html"),
+  path.join(dist, "ru/index.html"),
+]) {
   const html = readFileSync(home, "utf8")
     .replaceAll("&#39;", "'")
     .replaceAll("&#x27;", "'")
@@ -212,7 +220,10 @@ for (const home of [path.join(dist, "index.html"), path.join(dist, "ru/index.htm
   const localeReviews = publishedReviews.filter(
     (review: any) => review.lang === lang,
   );
-  assert.equal((visible.match(/class="review"/g) || []).length, localeReviews.length);
+  assert.equal(
+    (visible.match(/class="review"/g) || []).length,
+    localeReviews.length,
+  );
   assert.ok(localeReviews.length >= 6, `${home}: reviews`);
   assert.equal(
     (visible.match(/class="review"[^>]* hidden/g) || []).length,
@@ -227,7 +238,10 @@ for (const home of [path.join(dist, "index.html"), path.join(dist, "ru/index.htm
     );
   }
 
-  assert.equal((visible.match(/class="usecase-row"/g) || []).length, usecases[lang].rows.length);
+  assert.equal(
+    (visible.match(/class="usecase-row"/g) || []).length,
+    usecases[lang].rows.length,
+  );
   const casesHTML = visible.match(
     /<section id="features"[\s\S]*?<\/section>/,
   )![0];
@@ -312,7 +326,10 @@ for (const page of pages) {
 const catalog = JSON.parse(readFileSync("src/data/plugins.json", "utf8"));
 assert.ok(catalog.plugins.length >= 6, "plugins: the list is read");
 for (const prefix of ["", "ru/"]) {
-  const list = readFileSync(path.join(dist, prefix, "plugins/index.html"), "utf8");
+  const list = readFileSync(
+    path.join(dist, prefix, "plugins/index.html"),
+    "utf8",
+  );
   assert.equal(
     (list.match(/<li class="plugin-card"/g) || []).length,
     catalog.plugins.length,
@@ -336,7 +353,11 @@ for (const prefix of ["", "ru/"]) {
       page.includes(`href="${plugin.repository}"`),
       `${prefix}plugins/${plugin.name}: the author's repository`,
     );
-    assert.deepEqual(findEmoji(page), [], `${prefix}plugins/${plugin.name}: emoji`);
+    assert.deepEqual(
+      findEmoji(page),
+      [],
+      `${prefix}plugins/${plugin.name}: emoji`,
+    );
   }
 }
 console.log(
