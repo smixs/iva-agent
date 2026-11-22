@@ -47,7 +47,7 @@ export async function onRequestPost({
 }
 
 export async function onRequestGet({ env }: Context): Promise<Response> {
-  return Response.json(await installCounts(env.INSTALLS, LISTED), {
+  return Response.json(await installCounts(env.INSTALLS, LISTED, new Date()), {
     headers: { "cache-control": "public, max-age=300" },
   });
 }

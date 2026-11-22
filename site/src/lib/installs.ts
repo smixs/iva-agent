@@ -52,6 +52,14 @@ async function sha256(text: string): Promise<string> {
     .join("");
 }
 
+/**
+ * A hash of an address is kept for its day only. There is no timer on this site, so every
+ * request to the count, a read of the numbers included, takes the older days away first.
+ */
+async function forgetEarlierDays(db: Database, day: string): Promise<void> {
+  await db.prepare("DELETE FROM seen WHERE day < ?").bind(day).run();
+}
+
 export type Outcome = "counted" | "repeat" | "unlisted";
 
 /**
@@ -68,8 +76,9 @@ export async function recordInstall(
   },
   listed: ReadonlySet<string>,
 ): Promise<Outcome> {
-  if (!listed.has(request.name)) return "unlisted";
   const day = dayOf(request.now);
+  await forgetEarlierDays(db, day);
+  if (!listed.has(request.name)) return "unlisted";
   const hash = await sha256(
     [request.salt, day, request.address, request.name].join("\n"),
   );
@@ -84,8 +93,6 @@ export async function recordInstall(
     )
     .bind(request.name)
     .run();
-  // Yesterday's hashes have done their work: they go with the first install of a new day.
-  await db.prepare("DELETE FROM seen WHERE day < ?").bind(day).run();
   return "counted";
 }
 
@@ -93,7 +100,9 @@ export async function recordInstall(
 export async function installCounts(
   db: Database,
   listed: ReadonlySet<string>,
+  now: Date,
 ): Promise<Record<string, number>> {
+  await forgetEarlierDays(db, dayOf(now));
   const { results } = await db
     .prepare("SELECT name, count FROM installs WHERE count > ?")
     .bind(0)

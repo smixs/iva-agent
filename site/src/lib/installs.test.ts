@@ -79,7 +79,10 @@ test("a name that is not on the list writes nothing, whatever it looks like", as
     assert.equal(await install(db, name, "203.0.113.7"), "unlisted", name);
   assert.deepEqual(raw.prepare("SELECT * FROM installs").all(), []);
   assert.deepEqual(raw.prepare("SELECT * FROM seen").all(), []);
-  assert.deepEqual(await installCounts(db, LISTED), {});
+  assert.deepEqual(
+    await installCounts(db, LISTED, at("2026-11-22T10:00:00Z")),
+    {},
+  );
 });
 
 test("one address counts once a day for a plugin, and again the next day", async () => {
@@ -98,10 +101,13 @@ test("one address counts once a day for a plugin, and again the next day", async
     await install(db, "trace", "203.0.113.7", "2026-11-23T00:00:01Z"),
     "counted",
   );
-  assert.deepEqual(await installCounts(db, LISTED), {
-    trace: 3,
-    "voice-reply": 1,
-  });
+  assert.deepEqual(
+    await installCounts(db, LISTED, at("2026-11-23T09:00:00Z")),
+    {
+      trace: 3,
+      "voice-reply": 1,
+    },
+  );
 });
 
 test("the address is never stored, and yesterday's hashes leave with the new day", async () => {
@@ -139,6 +145,34 @@ test("the address is never stored, and yesterday's hashes leave with the new day
   );
 });
 
+test("yesterday's hashes leave with any request of a new day, not only with a counted install", async () => {
+  const days = async (
+    then: (db: Database) => Promise<unknown>,
+  ): Promise<string[]> => {
+    const { db, raw } = database();
+    await install(db, "trace", "203.0.113.7", "2026-11-18T10:00:00Z");
+    await then(db);
+    return (raw.prepare("SELECT day FROM seen").all() as { day: string }[]).map(
+      (row) => row.day,
+    );
+  };
+  const later = "2026-11-22T10:00:00Z";
+  // A read of the numbers: the page asks for them on every visit.
+  assert.deepEqual(
+    await days((db) => installCounts(db, LISTED, at(later))),
+    [],
+  );
+  // A name that is not on the list: nothing is counted, the old hash still goes.
+  assert.deepEqual(
+    await days((db) => install(db, "unknown", "203.0.113.9", later)),
+    [],
+  );
+  // The numbers themselves stay.
+  const { db } = database();
+  await install(db, "trace", "203.0.113.7", "2026-11-18T10:00:00Z");
+  assert.deepEqual(await installCounts(db, LISTED, at(later)), { trace: 1 });
+});
+
 test("a different salt gives a different hash for the same address", async () => {
   const one = database();
   const two = database();
@@ -158,5 +192,8 @@ test("a plugin taken off the list keeps its row and leaves the page", async () =
   const { db } = database();
   await install(db, "trace", "203.0.113.7");
   await install(db, "voice-reply", "203.0.113.7");
-  assert.deepEqual(await installCounts(db, new Set(["trace"])), { trace: 1 });
+  assert.deepEqual(
+    await installCounts(db, new Set(["trace"]), at("2026-11-22T10:00:00Z")),
+    { trace: 1 },
+  );
 });
