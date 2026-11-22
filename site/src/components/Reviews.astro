@@ -1,10 +1,13 @@
 ---
 // Reviews as clippings of the Telegram messages they came from: an initial avatar, the first
 // name, the message and its date with a link to the original. A wall, not a carousel.
+// Every review is in the page for search engines; the wall shows SHOWN of them, drawn afresh on
+// each load, one per author. Without scripts it stays the first SHOWN.
 import reviews from "../data/reviews.json";
 import type { Lang } from "../lib/copy";
 const { lang, label } = Astro.props as { lang: Lang; label: string };
 const quotes = reviews.filter((review) => review.lang === lang);
+const SHOWN = 9;
 // Telegram's own name colours for people in a group chat: the avatar takes the bright hue, the
 // name over the white bubble the same hue darkened to 4.6:1, so it reads as text.
 const hues = [
@@ -26,7 +29,7 @@ const when = (date: string) => {
 <section id="reviews" class="section testimonials" aria-label={label}>
   <div class="reviews">
     {quotes.map((review, index) => (
-      <figure class="review" style={`--hue:${hues[index % hues.length][0]};--hue-ink:${hues[index % hues.length][1]}`}>
+      <figure class="review" data-author={review.handle} hidden={index >= SHOWN} style={`--hue:${hues[index % hues.length][0]};--hue-ink:${hues[index % hues.length][1]}`}>
         <span class="review-avatar" aria-hidden="true">{review.first[0]}</span>
         <div class="review-bubble">
           <figcaption class="review-name">{review.first}</figcaption>
@@ -36,4 +39,23 @@ const when = (date: string) => {
       </figure>
     ))}
   </div>
+  <script is:inline define:vars={{ shown: SHOWN, hues }}>
+    const wall = document.currentScript.previousElementSibling;
+    const cards = [...wall.children];
+    for (let i = cards.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [cards[i], cards[j]] = [cards[j], cards[i]];
+    }
+    const authors = new Set();
+    for (const card of cards) {
+      const take = authors.size < shown && !authors.has(card.dataset.author);
+      card.hidden = !take;
+      if (!take) continue;
+      const [hue, ink] = hues[authors.size % hues.length];
+      card.style.setProperty("--hue", hue);
+      card.style.setProperty("--hue-ink", ink);
+      authors.add(card.dataset.author);
+    }
+    wall.append(...cards);
+  </script>
 </section>

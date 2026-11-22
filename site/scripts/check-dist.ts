@@ -214,6 +214,11 @@ for (const home of [path.join(dist, "index.html"), path.join(dist, "ru/index.htm
   );
   assert.equal((visible.match(/class="review"/g) || []).length, localeReviews.length);
   assert.ok(localeReviews.length >= 6, `${home}: reviews`);
+  assert.equal(
+    (visible.match(/class="review"[^>]* hidden/g) || []).length,
+    localeReviews.length - 9,
+    `${home}: nine reviews show without scripts`,
+  );
   for (const review of localeReviews) {
     assert.ok(visible.includes(review.url), `${home}: review source link`);
     assert.ok(

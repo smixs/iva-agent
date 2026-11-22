@@ -675,6 +675,9 @@ section[tabindex="-1"]:focus {
   margin: 0 0 18px;
   break-inside: avoid;
 }
+.review[hidden] {
+  display: none;
+}
 .review-avatar {
   flex: none;
   display: grid;

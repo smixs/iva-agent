@@ -178,5 +178,585 @@
     "lang": "en",
     "short": "I was genuinely impressed! It did the whole job without stopping and without errors: crawl a site, download the images, look at them with vision, sort them and send them over for analysis.",
     "first": "Stanislav"
+  },
+  {
+    "name": "Ruslan Sidorov",
+    "handle": "@sidorovrv",
+    "date": "21.11.2026",
+    "url": "https://t.me/aimasters_chat/13658",
+    "text": "Прикрутил к Иве скилл, который из темы делает HTML-страницу с объяснением теории, примерами решения, краткой шпаргалкой и закреплением урока… Особенно трудные темы по любым предметам сын сохраняет и повторяет. В школе может быстро спросить у Ивы шпаргалку… Это реальный маст-хэв для школьников и студентов)",
+    "lang": "ru",
+    "short": "Прикрутил к Иве скилл, который из темы делает HTML-страницу с объяснением теории, примерами решения, краткой шпаргалкой и закреплением урока… Особенно трудные темы по любым предметам сын сохраняет и повторяет. В школе может быстро спросить у Ивы шпаргалку… Это реальный маст-хэв для школьников и студентов)",
+    "first": "Руслан"
+  },
+  {
+    "name": "Ruslan Sidorov",
+    "handle": "@sidorovrv",
+    "date": "21.11.2026",
+    "url": "https://t.me/aimasters_chat/13658",
+    "text": "I added a skill to Iva that turns a topic into an HTML page with the theory explained, worked examples, a short cheat sheet and review exercises… My son saves the hardest topics in any subject and goes back over them. At school he can quickly ask Iva for a cheat sheet… A real must-have for school and university students)",
+    "lang": "en",
+    "short": "I added a skill to Iva that turns a topic into an HTML page with the theory explained, worked examples, a short cheat sheet and review exercises… My son saves the hardest topics in any subject and goes back over them. At school he can quickly ask Iva for a cheat sheet… A real must-have for school and university students)",
+    "first": "Ruslan"
+  },
+  {
+    "name": "Andrew Andrew",
+    "handle": "@moleculo42",
+    "date": "21.11.2026",
+    "url": "https://t.me/aimasters_chat/13625",
+    "text": "У меня две Ивы на одном VPS… у них ещё настроена общая папка, в которой лежат одни скиллы на двоих: вишлисты детей, туннель до ру-сайтов и т. д.",
+    "lang": "ru",
+    "short": "У меня две Ивы на одном VPS… у них ещё настроена общая папка, в которой лежат одни скиллы на двоих: вишлисты детей, туннель до ру-сайтов и т. д.",
+    "first": "Andrew"
+  },
+  {
+    "name": "Andrew Andrew",
+    "handle": "@moleculo42",
+    "date": "21.11.2026",
+    "url": "https://t.me/aimasters_chat/13625",
+    "text": "I run two Ivas on one VPS… they also share a folder with one set of skills for both: the kids' wishlists, a tunnel to Russian sites and so on.",
+    "lang": "en",
+    "short": "I run two Ivas on one VPS… they also share a folder with one set of skills for both: the kids' wishlists, a tunnel to Russian sites and so on.",
+    "first": "Andrew"
+  },
+  {
+    "name": "Vladimir",
+    "handle": "@finanaliz_ru",
+    "date": "16.11.2026",
+    "url": "https://t.me/aimasters_chat/13385",
+    "text": "Если активно пользуешься Телеграмом, ставь однозначно Иву. Я начинал с Agent Second Brain, параллельно использовал Гермес. Потом поставил Иву и теперь отказался от первых двух… Сергей, тебе огромное спасибо за продукт! Особенно за его проактивность, я в восторге!",
+    "lang": "ru",
+    "short": "Если активно пользуешься Телеграмом, ставь однозначно Иву. Я начинал с Agent Second Brain, параллельно использовал Гермес. Потом поставил Иву и теперь отказался от первых двух… Сергей, тебе огромное спасибо за продукт! Особенно за его проактивность, я в восторге!",
+    "first": "Владимир"
+  },
+  {
+    "name": "Vladimir",
+    "handle": "@finanaliz_ru",
+    "date": "16.11.2026",
+    "url": "https://t.me/aimasters_chat/13385",
+    "text": "If you live in Telegram, go with Iva, no question. I started with Agent Second Brain and ran Hermes alongside it. Then I installed Iva and dropped the other two… Sergey, huge thanks for the product! Especially for how proactive it is, I'm thrilled!",
+    "lang": "en",
+    "short": "If you live in Telegram, go with Iva, no question. I started with Agent Second Brain and ran Hermes alongside it. Then I installed Iva and dropped the other two… Sergey, huge thanks for the product! Especially for how proactive it is, I'm thrilled!",
+    "first": "Vladimir"
+  },
+  {
+    "name": "Alex Mango",
+    "handle": "@manuyko",
+    "date": "16.11.2026",
+    "url": "https://t.me/aimasters_chat/13366",
+    "text": "Одно другое дополняет. Для телеги однозначно Иву.",
+    "lang": "ru",
+    "short": "Одно другое дополняет. Для телеги однозначно Иву.",
+    "first": "Алекс"
+  },
+  {
+    "name": "Alex Mango",
+    "handle": "@manuyko",
+    "date": "16.11.2026",
+    "url": "https://t.me/aimasters_chat/13366",
+    "text": "They complement each other. For Telegram, definitely Iva.",
+    "lang": "en",
+    "short": "They complement each other. For Telegram, definitely Iva.",
+    "first": "Alex"
+  },
+  {
+    "name": "Артём",
+    "handle": "@metalurgista",
+    "date": "23.10.2026",
+    "url": "https://t.me/aimasters_chat/12479",
+    "text": "Моя Ива… всё припомнила, даже то, что я уже и не вспоминаю. Сергей, структура памяти у неё огонь!",
+    "lang": "ru",
+    "short": "Моя Ива… всё припомнила, даже то, что я уже и не вспоминаю. Сергей, структура памяти у неё огонь!",
+    "first": "Артём"
+  },
+  {
+    "name": "Артём",
+    "handle": "@metalurgista",
+    "date": "23.10.2026",
+    "url": "https://t.me/aimasters_chat/12479",
+    "text": "My Iva… brought up everything, even things I no longer think about myself. Sergey, her memory structure is fire!",
+    "lang": "en",
+    "short": "My Iva… brought up everything, even things I no longer think about myself. Sergey, her memory structure is fire!",
+    "first": "Artyom"
+  },
+  {
+    "name": "V",
+    "handle": "@Enttse",
+    "date": "20.10.2026",
+    "url": "https://t.me/aimasters_chat/12326",
+    "text": "Папка с заметками умеет только помнить. Ива умеет делать… Когда нужна Ива: когда надо не «помнить», а «сделать» — проверить, найти, собрать, напомнить, отправить.",
+    "lang": "ru",
+    "short": "Папка с заметками умеет только помнить. Ива умеет делать… Когда нужна Ива: когда надо не «помнить», а «сделать» — проверить, найти, собрать, напомнить, отправить.",
+    "first": "V"
+  },
+  {
+    "name": "V",
+    "handle": "@Enttse",
+    "date": "20.10.2026",
+    "url": "https://t.me/aimasters_chat/12326",
+    "text": "A folder of notes can only remember. Iva can do things… When you need Iva: when the job isn't to “remember” but to “do”: check, find, gather, remind, send.",
+    "lang": "en",
+    "short": "A folder of notes can only remember. Iva can do things… When you need Iva: when the job isn't to “remember” but to “do”: check, find, gather, remind, send.",
+    "first": "V"
+  },
+  {
+    "name": "-",
+    "handle": "@pisatsudayatyt",
+    "date": "16.10.2026",
+    "url": "https://t.me/aimasters_chat/12190",
+    "text": "Я до этого использовал Hermes и прочие аналоги тыкал. Но они какие-то все тяжеловесные и неповоротливые. Сейчас решил попробовать Иву. Это прям, пожалуй, то самое, что хочется для себя… Спасибо вам!",
+    "lang": "ru",
+    "short": "Я до этого использовал Hermes и прочие аналоги тыкал. Но они какие-то все тяжеловесные и неповоротливые. Сейчас решил попробовать Иву. Это прям, пожалуй, то самое, что хочется для себя… Спасибо вам!",
+    "first": "Участник чата"
+  },
+  {
+    "name": "-",
+    "handle": "@pisatsudayatyt",
+    "date": "16.10.2026",
+    "url": "https://t.me/aimasters_chat/12190",
+    "text": "I used Hermes before and poked at other alternatives, but they all felt heavy and clumsy. Now I've tried Iva. This is pretty much exactly what I want for myself… Thank you!",
+    "lang": "en",
+    "short": "I used Hermes before and poked at other alternatives, but they all felt heavy and clumsy. Now I've tried Iva. This is pretty much exactly what I want for myself… Thank you!",
+    "first": "Chat member"
+  },
+  {
+    "name": "Farhad AI Balance",
+    "handle": "@Balbrosmusic",
+    "date": "15.10.2026",
+    "url": "https://t.me/aimasters_chat/12156",
+    "text": "Как вы сделали так, что Iva отвечает мне в чате не целиковым появляющимся сообщением, а как ИИ-чат-бот? Это очень круто! Я не знал, что такое возможно сделать в мессенджере.",
+    "lang": "ru",
+    "short": "Как вы сделали так, что Iva отвечает мне в чате не целиковым появляющимся сообщением, а как ИИ-чат-бот? Это очень круто! Я не знал, что такое возможно сделать в мессенджере.",
+    "first": "Фархад"
+  },
+  {
+    "name": "Farhad AI Balance",
+    "handle": "@Balbrosmusic",
+    "date": "15.10.2026",
+    "url": "https://t.me/aimasters_chat/12156",
+    "text": "How did you make Iva answer in the chat not as one message that pops up whole, but like an AI chatbot? That's really cool! I didn't know you could do that in a messenger.",
+    "lang": "en",
+    "short": "How did you make Iva answer in the chat not as one message that pops up whole, but like an AI chatbot? That's really cool! I didn't know you could do that in a messenger.",
+    "first": "Farhad"
+  },
+  {
+    "name": "Олег Савчак",
+    "handle": "@oleg_pilot",
+    "date": "11.10.2026",
+    "url": "https://t.me/aimasters_chat/11978",
+    "text": "Спасибо за Иву! Попросил найти исходники своего старого топового ролика с YouTube — Ива нашла всё на Яндекс.Диске и заодно собрала целый каталог: 42 766 файлов, 527 ГБ, 2 535 папок. Теперь всё под рукой за секунду, а не в бесконечных поисках.",
+    "lang": "ru",
+    "short": "Спасибо за Иву! Попросил найти исходники своего старого топового ролика с YouTube — Ива нашла всё на Яндекс.Диске и заодно собрала целый каталог: 42 766 файлов, 527 ГБ, 2 535 папок. Теперь всё под рукой за секунду, а не в бесконечных поисках.",
+    "first": "Олег"
+  },
+  {
+    "name": "Олег Савчак",
+    "handle": "@oleg_pilot",
+    "date": "11.10.2026",
+    "url": "https://t.me/aimasters_chat/11978",
+    "text": "Thanks for Iva! I asked her to find the source files of my old top YouTube video. Iva found everything on Yandex Disk and built a full catalogue while she was at it: 42,766 files, 527 GB, 2,535 folders. Now everything is at hand in a second instead of endless searching.",
+    "lang": "en",
+    "short": "Thanks for Iva! I asked her to find the source files of my old top YouTube video. Iva found everything on Yandex Disk and built a full catalogue while she was at it: 42,766 files, 527 GB, 2,535 folders. Now everything is at hand in a second instead of endless searching.",
+    "first": "Oleg"
+  },
+  {
+    "name": "Станислав Миронов | Школа Раскрепощения",
+    "handle": "@stan_is_love",
+    "date": "11.10.2026",
+    "url": "https://t.me/aimasters_chat/11973",
+    "text": "Сергей, спасибо вам за Иву! Это суперагент, доволен на все 100… Работа заметно ускорилась. Чинится сама кратно лучше. Правок требуется минимум. Уверенности в том, что дело будет доведено до конца, когда ставишь задачу, стало больше.",
+    "lang": "ru",
+    "short": "Сергей, спасибо вам за Иву! Это суперагент, доволен на все 100… Работа заметно ускорилась. Чинится сама кратно лучше. Правок требуется минимум. Уверенности в том, что дело будет доведено до конца, когда ставишь задачу, стало больше.",
+    "first": "Станислав"
+  },
+  {
+    "name": "Станислав Миронов | Школа Раскрепощения",
+    "handle": "@stan_is_love",
+    "date": "11.10.2026",
+    "url": "https://t.me/aimasters_chat/11973",
+    "text": "Sergey, thank you for Iva! It's a super agent, I'm 100% happy… Work got noticeably faster. It fixes itself far better. It needs minimal corrections. When I hand over a task, I'm much more confident it will be seen through to the end.",
+    "lang": "en",
+    "short": "Sergey, thank you for Iva! It's a super agent, I'm 100% happy… Work got noticeably faster. It fixes itself far better. It needs minimal corrections. When I hand over a task, I'm much more confident it will be seen through to the end.",
+    "first": "Stanislav"
+  },
+  {
+    "name": "V",
+    "handle": "@Enttse",
+    "date": "09.10.2026",
+    "url": "https://t.me/aimasters_chat/11935",
+    "text": "Подключил Иву к колонке Алиса, и она может работать через неё. Достаточно сказать «Алиса, включи навык Помощник Ива» — и общаешься с Ивой голосом. Всё то же самое, как в ТГ, только ответы короткие и вслух.",
+    "lang": "ru",
+    "short": "Подключил Иву к колонке Алиса, и она может работать через неё. Достаточно сказать «Алиса, включи навык Помощник Ива» — и общаешься с Ивой голосом. Всё то же самое, как в ТГ, только ответы короткие и вслух.",
+    "first": "V"
+  },
+  {
+    "name": "V",
+    "handle": "@Enttse",
+    "date": "09.10.2026",
+    "url": "https://t.me/aimasters_chat/11935",
+    "text": "I connected Iva to an Alice smart speaker, and she works through it. Just say “Alice, open the Iva Assistant skill” and you talk to Iva by voice. Everything is the same as in Telegram, only the answers are short and spoken.",
+    "lang": "en",
+    "short": "I connected Iva to an Alice smart speaker, and she works through it. Just say “Alice, open the Iva Assistant skill” and you talk to Iva by voice. Everything is the same as in Telegram, only the answers are short and spoken.",
+    "first": "V"
+  },
+  {
+    "name": "V",
+    "handle": "@Enttse",
+    "date": "06.10.2026",
+    "url": "https://t.me/aimasters_chat/11722",
+    "text": "Часто сталкивался с тем, что за рулём длинный текст особо не прочитаешь (ответ от Ивы), поэтому запилил плагин, где добавляется функция озвучить текст… Чтобы установить, достаточно отправить ссылку Иве.",
+    "lang": "ru",
+    "short": "Часто сталкивался с тем, что за рулём длинный текст особо не прочитаешь (ответ от Ивы), поэтому запилил плагин, где добавляется функция озвучить текст… Чтобы установить, достаточно отправить ссылку Иве.",
+    "first": "V"
+  },
+  {
+    "name": "V",
+    "handle": "@Enttse",
+    "date": "06.10.2026",
+    "url": "https://t.me/aimasters_chat/11722",
+    "text": "I kept running into the fact that you can't really read a long reply from Iva while driving, so I built a plugin that adds a read-aloud feature… To install it, you just send the link to Iva.",
+    "lang": "en",
+    "short": "I kept running into the fact that you can't really read a long reply from Iva while driving, so I built a plugin that adds a read-aloud feature… To install it, you just send the link to Iva.",
+    "first": "V"
+  },
+  {
+    "name": "I Here",
+    "handle": "@iherean",
+    "date": "05.10.2026",
+    "url": "https://t.me/aimasters_chat/11620",
+    "text": "Не соблазняйте нас, Иву 🌿 ни на что не поменяем 🙈😂",
+    "lang": "ru",
+    "short": "Не соблазняйте нас, Иву 🌿 ни на что не поменяем 🙈😂",
+    "first": "I Here"
+  },
+  {
+    "name": "I Here",
+    "handle": "@iherean",
+    "date": "05.10.2026",
+    "url": "https://t.me/aimasters_chat/11620",
+    "text": "Don't tempt us, we won't trade Iva 🌿 for anything 🙈😂",
+    "lang": "en",
+    "short": "Don't tempt us, we won't trade Iva 🌿 for anything 🙈😂",
+    "first": "I Here"
+  },
+  {
+    "name": "Ruslan Sidorov",
+    "handle": "@sidorovrv",
+    "date": "05.10.2026",
+    "url": "https://t.me/aimasters_chat/11607",
+    "text": "Красава, Сергей, такими темпами Ива в 2027 будет в топ-3 агентов, запомните этот твит)))",
+    "lang": "ru",
+    "short": "Красава, Сергей, такими темпами Ива в 2027 будет в топ-3 агентов, запомните этот твит)))",
+    "first": "Руслан"
+  },
+  {
+    "name": "Ruslan Sidorov",
+    "handle": "@sidorovrv",
+    "date": "05.10.2026",
+    "url": "https://t.me/aimasters_chat/11607",
+    "text": "Nice one, Sergey. At this pace Iva will be a top-3 agent in 2027, remember this tweet)))",
+    "lang": "en",
+    "short": "Nice one, Sergey. At this pace Iva will be a top-3 agent in 2027, remember this tweet)))",
+    "first": "Ruslan"
+  },
+  {
+    "name": "Александр Шамулин",
+    "handle": "@shamulin",
+    "date": "04.10.2026",
+    "url": "https://t.me/aimasters_chat/11572",
+    "text": "Мне этого всегда недоставало, а сегодня пришло в голову, что можно попросить Иву это сделать… Теперь Ива умеет по вопросу искать картинки и присылать сразу в телегу. Рад, как ребёнок )))",
+    "lang": "ru",
+    "short": "Мне этого всегда недоставало, а сегодня пришло в голову, что можно попросить Иву это сделать… Теперь Ива умеет по вопросу искать картинки и присылать сразу в телегу. Рад, как ребёнок )))",
+    "first": "Александр"
+  },
+  {
+    "name": "Александр Шамулин",
+    "handle": "@shamulin",
+    "date": "04.10.2026",
+    "url": "https://t.me/aimasters_chat/11572",
+    "text": "I'd always missed this, and today it hit me that I could just ask Iva to do it… Now Iva can find pictures for a question and send them straight to Telegram. Happy as a kid )))",
+    "lang": "en",
+    "short": "I'd always missed this, and today it hit me that I could just ask Iva to do it… Now Iva can find pictures for a question and send them straight to Telegram. Happy as a kid )))",
+    "first": "Alexander"
+  },
+  {
+    "name": "Олег Савчак",
+    "handle": "@oleg_pilot",
+    "date": "02.10.2026",
+    "url": "https://t.me/aimasters_chat/11453",
+    "text": "Обучаюсь по продукту, помощник Ива сейчас голосовые заносит в таблицу, делает выводы, разносит данные по листам, голосовых по 50 штук в день. Пишет MD, ведёт две гугл-таблицы: базу знаний и продуктовую таблицу в обучении.",
+    "lang": "ru",
+    "short": "Обучаюсь по продукту, помощник Ива сейчас голосовые заносит в таблицу, делает выводы, разносит данные по листам, голосовых по 50 штук в день. Пишет MD, ведёт две гугл-таблицы: базу знаний и продуктовую таблицу в обучении.",
+    "first": "Олег"
+  },
+  {
+    "name": "Олег Савчак",
+    "handle": "@oleg_pilot",
+    "date": "02.10.2026",
+    "url": "https://t.me/aimasters_chat/11453",
+    "text": "I'm studying a new product, and Iva the assistant logs my voice notes into a spreadsheet, draws conclusions and sorts the data across sheets, about 50 voice notes a day. She writes Markdown and keeps two Google Sheets: a knowledge base and a product table for the course.",
+    "lang": "en",
+    "short": "I'm studying a new product, and Iva the assistant logs my voice notes into a spreadsheet, draws conclusions and sorts the data across sheets, about 50 voice notes a day. She writes Markdown and keeps two Google Sheets: a knowledge base and a product table for the course.",
+    "first": "Oleg"
+  },
+  {
+    "name": "Олег Савчак",
+    "handle": "@oleg_pilot",
+    "date": "25.09.2026",
+    "url": "https://t.me/aimasters_chat/11193",
+    "text": "Я свои лимиты на Ollama и GPT сжёг, и не жалко, так как Ива мне нравится, хотя пока ещё не раскрыл её всю.",
+    "lang": "ru",
+    "short": "Я свои лимиты на Ollama и GPT сжёг, и не жалко, так как Ива мне нравится, хотя пока ещё не раскрыл её всю.",
+    "first": "Олег"
+  },
+  {
+    "name": "Олег Савчак",
+    "handle": "@oleg_pilot",
+    "date": "25.09.2026",
+    "url": "https://t.me/aimasters_chat/11193",
+    "text": "I burned through my Ollama and GPT limits and I don't regret it, because I like Iva, even though I haven't unlocked all of her yet.",
+    "lang": "en",
+    "short": "I burned through my Ollama and GPT limits and I don't regret it, because I like Iva, even though I haven't unlocked all of her yet.",
+    "first": "Oleg"
+  },
+  {
+    "name": "Maksim",
+    "handle": "@Maxim0os",
+    "date": "11.09.2026",
+    "url": "https://t.me/aimasters_chat/10463",
+    "text": "Сергей, я хочу, чтобы твоей Ивой пользовались как можно больше людей, так как она реально удобный инструмент!",
+    "lang": "ru",
+    "short": "Сергей, я хочу, чтобы твоей Ивой пользовались как можно больше людей, так как она реально удобный инструмент!",
+    "first": "Максим"
+  },
+  {
+    "name": "Maksim",
+    "handle": "@Maxim0os",
+    "date": "11.09.2026",
+    "url": "https://t.me/aimasters_chat/10463",
+    "text": "Sergey, I want as many people as possible to use your Iva, because it's a genuinely convenient tool!",
+    "lang": "en",
+    "short": "Sergey, I want as many people as possible to use your Iva, because it's a genuinely convenient tool!",
+    "first": "Maksim"
+  },
+  {
+    "name": "egituman",
+    "handle": "@egi_tuman",
+    "date": "08.09.2026",
+    "url": "https://t.me/aimasters_chat/10267",
+    "text": "Я лучше Иву спрошу 😊",
+    "lang": "ru",
+    "short": "Я лучше Иву спрошу 😊",
+    "first": "egituman"
+  },
+  {
+    "name": "egituman",
+    "handle": "@egi_tuman",
+    "date": "08.09.2026",
+    "url": "https://t.me/aimasters_chat/10267",
+    "text": "I'd rather ask Iva 😊",
+    "lang": "en",
+    "short": "I'd rather ask Iva 😊",
+    "first": "egituman"
+  },
+  {
+    "name": "Александр Шамулин",
+    "handle": "@shamulin",
+    "date": "31.08.2026",
+    "url": "https://t.me/aimasters_chat/9663",
+    "text": "Вчера часа полтора убил на Клода, чтобы вернуть в Иву возможность отправки голосовых… В результате разрешил Иве поправить код, и она за 1–2 хода всё сделала, работает.",
+    "lang": "ru",
+    "short": "Вчера часа полтора убил на Клода, чтобы вернуть в Иву возможность отправки голосовых… В результате разрешил Иве поправить код, и она за 1–2 хода всё сделала, работает.",
+    "first": "Александр"
+  },
+  {
+    "name": "Александр Шамулин",
+    "handle": "@shamulin",
+    "date": "31.08.2026",
+    "url": "https://t.me/aimasters_chat/9663",
+    "text": "Yesterday I burned an hour and a half on Claude trying to get voice-message sending back into Iva… In the end I let Iva fix the code herself, and she did it all in one or two turns. It works.",
+    "lang": "en",
+    "short": "Yesterday I burned an hour and a half on Claude trying to get voice-message sending back into Iva… In the end I let Iva fix the code herself, and she did it all in one or two turns. It works.",
+    "first": "Alexander"
+  },
+  {
+    "name": "Stanislav I.",
+    "handle": "@Stanislaus",
+    "date": "30.07.2026",
+    "url": "https://t.me/aimasters_chat/8467",
+    "text": "Я прикрутил Иве MCP из Garmin, теперь все тренировки выгружаю. Каждый вечер и утро даёт рекомендации, основываясь на данных с Garmin. Подключил рабочий календарь и уведомления о предстоящих встречах. Скидываю заметки и задачи.",
+    "lang": "ru",
+    "short": "Я прикрутил Иве MCP из Garmin, теперь все тренировки выгружаю. Каждый вечер и утро даёт рекомендации, основываясь на данных с Garmin. Подключил рабочий календарь и уведомления о предстоящих встречах. Скидываю заметки и задачи.",
+    "first": "Станислав"
+  },
+  {
+    "name": "Stanislav I.",
+    "handle": "@Stanislaus",
+    "date": "30.07.2026",
+    "url": "https://t.me/aimasters_chat/8467",
+    "text": "I hooked the Garmin MCP up to Iva, so all my workouts get exported now. Every evening and morning she gives recommendations based on the Garmin data. I connected my work calendar with alerts for upcoming meetings, and I drop in notes and tasks.",
+    "lang": "en",
+    "short": "I hooked the Garmin MCP up to Iva, so all my workouts get exported now. Every evening and morning she gives recommendations based on the Garmin data. I connected my work calendar with alerts for upcoming meetings, and I drop in notes and tasks.",
+    "first": "Stanislav"
+  },
+  {
+    "name": "Александр Шамулин",
+    "handle": "@shamulin",
+    "date": "29.07.2026",
+    "url": "https://t.me/aimasters_chat/8412",
+    "text": "…тут нужно только занести встречу в календарь, что-то погуглить, напомнить, какую марку мыла я обычно покупаю и где мои носки (ну вы поняли). Такая Ива-напоминальщица, помощница.",
+    "lang": "ru",
+    "short": "…тут нужно только занести встречу в календарь, что-то погуглить, напомнить, какую марку мыла я обычно покупаю и где мои носки (ну вы поняли). Такая Ива-напоминальщица, помощница.",
+    "first": "Александр"
+  },
+  {
+    "name": "Александр Шамулин",
+    "handle": "@shamulin",
+    "date": "29.07.2026",
+    "url": "https://t.me/aimasters_chat/8412",
+    "text": "…here I just need a meeting put in the calendar, something googled, a reminder of which soap brand I usually buy and where my socks are (you get the idea). Iva the reminder-keeper, the helper.",
+    "lang": "en",
+    "short": "…here I just need a meeting put in the calendar, something googled, a reminder of which soap brand I usually buy and where my socks are (you get the idea). Iva the reminder-keeper, the helper.",
+    "first": "Alexander"
+  },
+  {
+    "name": "Ruslan Sidorov",
+    "handle": "@sidorovrv",
+    "date": "26.07.2026",
+    "url": "https://t.me/aimasters_chat/8273",
+    "text": "В Иве, на мой взгляд, реализована правильная организация памяти, это главное для агента. Весь остальной харнесс можно придумать и докрутить.",
+    "lang": "ru",
+    "short": "В Иве, на мой взгляд, реализована правильная организация памяти, это главное для агента. Весь остальной харнесс можно придумать и докрутить.",
+    "first": "Руслан"
+  },
+  {
+    "name": "Ruslan Sidorov",
+    "handle": "@sidorovrv",
+    "date": "26.07.2026",
+    "url": "https://t.me/aimasters_chat/8273",
+    "text": "In my view Iva gets memory organisation right, and that's the main thing for an agent. The rest of the harness you can invent and tune yourself.",
+    "lang": "en",
+    "short": "In my view Iva gets memory organisation right, and that's the main thing for an agent. The rest of the harness you can invent and tune yourself.",
+    "first": "Ruslan"
+  },
+  {
+    "name": "Артём",
+    "handle": "@metalurgista",
+    "date": "23.07.2026",
+    "url": "https://t.me/aimasters_chat/8052",
+    "text": "Сегодня у друга ДР. Тянет свой небольшой бизнес… Решил подарить ему старт в агентах. И лучший вход вижу через Иву. Куплю ВПС, закину денег на OpenRouter или на DeepSeek. Настроим за стаканом летнего чая. Уверен, ему зайдёт.",
+    "lang": "ru",
+    "short": "Сегодня у друга ДР. Тянет свой небольшой бизнес… Решил подарить ему старт в агентах. И лучший вход вижу через Иву. Куплю ВПС, закину денег на OpenRouter или на DeepSeek. Настроим за стаканом летнего чая. Уверен, ему зайдёт.",
+    "first": "Артём"
+  },
+  {
+    "name": "Артём",
+    "handle": "@metalurgista",
+    "date": "23.07.2026",
+    "url": "https://t.me/aimasters_chat/8052",
+    "text": "It's my friend's birthday today. He runs a small business on his own… I decided to give him a start with agents as a gift, and Iva is the best way in that I can see. I'll buy a VPS, top up OpenRouter or DeepSeek, and we'll set it up over a glass of iced tea. I'm sure he'll love it.",
+    "lang": "en",
+    "short": "It's my friend's birthday today. He runs a small business on his own… I decided to give him a start with agents as a gift, and Iva is the best way in that I can see. I'll buy a VPS, top up OpenRouter or DeepSeek, and we'll set it up over a glass of iced tea. I'm sure he'll love it.",
+    "first": "Artyom"
+  },
+  {
+    "name": "Fedor",
+    "handle": "@FrostFedor",
+    "date": "09.07.2026",
+    "url": "https://t.me/aimasters_chat/7357",
+    "text": "Настроил интеграцию IVA с Gmail и Google Calendar через Google Workspace MCP на VPS, всё супер работает.",
+    "lang": "ru",
+    "short": "Настроил интеграцию IVA с Gmail и Google Calendar через Google Workspace MCP на VPS, всё супер работает.",
+    "first": "Фёдор"
+  },
+  {
+    "name": "Fedor",
+    "handle": "@FrostFedor",
+    "date": "09.07.2026",
+    "url": "https://t.me/aimasters_chat/7357",
+    "text": "I set up IVA with Gmail and Google Calendar through the Google Workspace MCP on a VPS, and it all works great.",
+    "lang": "en",
+    "short": "I set up IVA with Gmail and Google Calendar through the Google Workspace MCP on a VPS, and it all works great.",
+    "first": "Fedor"
+  },
+  {
+    "name": "Павел | AI Systems • Автоматизация",
+    "handle": "@TGsalesPavel",
+    "date": "07.07.2026",
+    "url": "https://t.me/aimasters_chat/7300",
+    "text": "Развернул Иву, впечатлён 🔥🔥🔥 Платные поисковики сразу отключил, поставил скрейперы, парсеры и новостники. Он сам поставил быстро, думает хорошо.",
+    "lang": "ru",
+    "short": "Развернул Иву, впечатлён 🔥🔥🔥 Платные поисковики сразу отключил, поставил скрейперы, парсеры и новостники. Он сам поставил быстро, думает хорошо.",
+    "first": "Павел"
+  },
+  {
+    "name": "Павел | AI Systems • Автоматизация",
+    "handle": "@TGsalesPavel",
+    "date": "07.07.2026",
+    "url": "https://t.me/aimasters_chat/7300",
+    "text": "Deployed Iva and I'm impressed 🔥🔥🔥 Turned off the paid search engines right away and set up scrapers, parsers and news feeds. It installed them itself, quickly, and it thinks well.",
+    "lang": "en",
+    "short": "Deployed Iva and I'm impressed 🔥🔥🔥 Turned off the paid search engines right away and set up scrapers, parsers and news feeds. It installed them itself, quickly, and it thinks well.",
+    "first": "Pavel"
+  },
+  {
+    "name": "Ruslan Sidorov",
+    "handle": "@sidorovrv",
+    "date": "07.07.2026",
+    "url": "https://t.me/aimasters_chat/7286",
+    "text": "Вторую неделю нещадно эксплуатирую Иву: переношу туда свои наработки из n8n… Ива легко коннектится по API с n8n. Смотрю фишки из других проектов и разрабатываю голосом похожие решения под себя… это реально заставляет офигевать от возможностей системы. Сергей, теперь я ваш адепт))) Спасибо!",
+    "lang": "ru",
+    "short": "Вторую неделю нещадно эксплуатирую Иву: переношу туда свои наработки из n8n… Ива легко коннектится по API с n8n. Смотрю фишки из других проектов и разрабатываю голосом похожие решения под себя… это реально заставляет офигевать от возможностей системы. Сергей, теперь я ваш адепт))) Спасибо!",
+    "first": "Руслан"
+  },
+  {
+    "name": "Ruslan Sidorov",
+    "handle": "@sidorovrv",
+    "date": "07.07.2026",
+    "url": "https://t.me/aimasters_chat/7286",
+    "text": "Second week of working Iva mercilessly: I'm moving my n8n builds over… Iva connects to n8n over API with no fuss. I look at features in other projects and build similar ones for myself by voice… the system's capabilities genuinely blow my mind. Sergey, I'm a convert now))) Thank you!",
+    "lang": "en",
+    "short": "Second week of working Iva mercilessly: I'm moving my n8n builds over… Iva connects to n8n over API with no fuss. I look at features in other projects and build similar ones for myself by voice… the system's capabilities genuinely blow my mind. Sergey, I'm a convert now))) Thank you!",
+    "first": "Ruslan"
+  },
+  {
+    "name": "Shakhruz Ashot Ashirov",
+    "handle": "@shakhruz_ashirov",
+    "date": "05.07.2026",
+    "url": "https://t.me/aimasters_chat/7215",
+    "text": "Сергей, дорогой, благодарю тебя за труд и упорство, с которым ты продолжаешь идти вперёд в решении вопроса второго мозга и памяти. Ты делаешь это сам… и делишься исходниками и результатами с нами бесплатно, за что тебе поклон и респект!",
+    "lang": "ru",
+    "short": "Сергей, дорогой, благодарю тебя за труд и упорство, с которым ты продолжаешь идти вперёд в решении вопроса второго мозга и памяти. Ты делаешь это сам… и делишься исходниками и результатами с нами бесплатно, за что тебе поклон и респект!",
+    "first": "Шахруз"
+  },
+  {
+    "name": "Shakhruz Ashot Ashirov",
+    "handle": "@shakhruz_ashirov",
+    "date": "05.07.2026",
+    "url": "https://t.me/aimasters_chat/7215",
+    "text": "Sergey, my friend, thank you for the work and persistence with which you keep pushing forward on the second-brain and memory problem. You do it yourself… and share the source code and results with us for free. Respect and a deep bow for that!",
+    "lang": "en",
+    "short": "Sergey, my friend, thank you for the work and persistence with which you keep pushing forward on the second-brain and memory problem. You do it yourself… and share the source code and results with us for free. Respect and a deep bow for that!",
+    "first": "Shakhruz"
+  },
+  {
+    "name": "Ruslan Euroopt",
+    "handle": "@mamysh",
+    "date": "20.06.2026",
+    "url": "https://t.me/aimasters_chat/6757",
+    "text": "Без зазрения совести откатился к заводским и поставил Иву… Пушка!",
+    "lang": "ru",
+    "short": "Без зазрения совести откатился к заводским и поставил Иву… Пушка!",
+    "first": "Руслан"
+  },
+  {
+    "name": "Ruslan Euroopt",
+    "handle": "@mamysh",
+    "date": "20.06.2026",
+    "url": "https://t.me/aimasters_chat/6757",
+    "text": "Without a second thought I rolled back to factory settings and installed Iva… It rocks!",
+    "lang": "en",
+    "short": "Without a second thought I rolled back to factory settings and installed Iva… It rocks!",
+    "first": "Ruslan"
   }
 ]
