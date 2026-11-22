@@ -1,6 +1,6 @@
 {
   "list": "https://github.com/smixs/iva-plugins",
-  "commit": "895d80ab9e4c39711ae1f87cb911d911f95143c8",
+  "commit": "445496e0df075826ad9f6c4b9ddc129af3ed62de",
   "categories": [
     {
       "id": "voice",
@@ -37,7 +37,7 @@
       "repository": "https://github.com/smixs/iva-plugins/tree/main/trace",
       "added": "2026-08-18",
       "version": "0.1.1",
-      "commit": "895d80ab9e4c39711ae1f87cb911d911f95143c8",
+      "commit": "445496e0df075826ad9f6c4b9ddc129af3ed62de",
       "summary": {
         "en": "A viewer for Iva's turn journal: the schema of Iva with the path of a turn lit across it, a feed of turns and a replay. You see what Iva did in a turn, step by step, and where the time went.",
         "ru": "Просмотр журнала ходов Ивы: схема Ивы, на которой подсвечен путь хода, лента ходов и повтор. Видно, что Ива делала в ходе шаг за шагом и куда ушло время."
@@ -72,7 +72,7 @@
       "repository": "https://github.com/smixs/iva-plugins/tree/main/hello",
       "added": "2026-08-18",
       "version": "0.1.1",
-      "commit": "895d80ab9e4c39711ae1f87cb911d911f95143c8",
+      "commit": "445496e0df075826ad9f6c4b9ddc129af3ed62de",
       "summary": {
         "en": "The smallest plugin that carries code: one skill and one tool that greets by name. Copy the folder, rename it, and the whole path of a code plugin is already wired.",
         "ru": "Самый маленький плагин с кодом: один скилл и один инструмент, который здоровается по имени. Скопируйте папку, переименуйте, и весь путь плагина с кодом уже собран."
@@ -105,7 +105,7 @@
       "repository": "https://github.com/smixs/yandex-taxi-skill",
       "added": "2026-11-22",
       "version": "1.1.0",
-      "commit": "895d80ab9e4c39711ae1f87cb911d911f95143c8",
+      "commit": "445496e0df075826ad9f6c4b9ddc129af3ed62de",
       "summary": {
         "en": "Iva orders Yandex Taxi in a browser from your account: she quotes the price, picks the tariff and the card, places the order and watches where the car is. Nothing is ordered without your explicit yes.",
         "ru": "Ива заказывает Яндекс Такси в браузере от вашего аккаунта: называет цену, выбирает тариф и карту, оформляет заказ и следит, где машина. Без вашего явного «да» заказ не делается."
