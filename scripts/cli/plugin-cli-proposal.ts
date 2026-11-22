@@ -201,6 +201,11 @@ export function createPluginProposalCommands(
     return lines;
   }
 
+  /** Строка о счёте — в том же сообщении, что и итог: stdout установщика владелец не видит. */
+  function withCountNotice(text: string, count: PendingCount | null): string {
+    return count ? `${text}\n\n${count.notice}` : text;
+  }
+
   /**
    * Установка забранного тапом предложения: один `add <копия> --trust`, итог владельцу
    * сообщением, копия удаляется. Процесс живёт в своём юните и переживает перезапуск моста.
@@ -237,13 +242,9 @@ export function createPluginProposalCommands(
     }
     rmSync(taken, { recursive: true, force: true });
     rmSync(from, { force: true });
-    // Строка о счёте — в том же сообщении, что и итог: stdout установщика владелец не видит.
     const text =
       failure === null
-        ? [
-            installedText(translate, name),
-            ...(count ? [count.notice] : []),
-          ].join("\n\n")
+        ? withCountNotice(installedText(translate, name), count)
         : notInstalledText(translate, name, failure);
     const sent = await (
       await textSender()

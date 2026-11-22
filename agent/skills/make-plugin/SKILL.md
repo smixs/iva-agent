@@ -80,8 +80,8 @@ send it to the Marketplace `smixs/iva-plugins`, with a button (skill `rich-repli
 the tap does: the plugin becomes a public repository under the owner's GitHub account, and the
 reviewed list gets a request that names it. Only after the owner's tap:
 
-1. Copy the plugin's files to a new scratch folder without its `.git`: the history keeps what
-   was deleted from the files, and it would be published with them. Clean out everything
+1. Copy the plugin's files to a new scratch folder without its `.git`: earlier commits keep
+   what was deleted from the files, and they would be published with them. Clean out everything
    personal: keys, tokens, names, chat ids, e-mail addresses, home paths. Add a `LICENSE` when
    there is none (MIT, unless the owner names another). Show the owner what was removed.
 2. `gh auth status` succeeds → in that folder `git init -b main`, commit, then
