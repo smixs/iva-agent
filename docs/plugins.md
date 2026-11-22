@@ -176,12 +176,15 @@ POST https://iva-agent.com/api/plugins/installs
 
 No identifier of the installation, no version, no model, no keys. The site sees the address
 of your server, as any site does; it keeps a salted hash of it for a day, so that one machine
-is not counted twice, and never the address itself. The command prints a line each time it
-sends. A plugin from your own list, from a repository or from a folder is never counted, and
-neither are updates.
+is not counted twice, and never the address itself. The command prints a line before it
+sends; after a tap in Telegram that line is in the message that says the plugin is installed,
+and the name leaves after the message. A plugin from your own list, from a repository or from
+a folder you install in the terminal is never counted, and neither are updates. A plugin
+installed by a tap arrives as a folder, so it is counted by its name - when the default list
+has that name.
 
 `IVA_PLUGIN_STATS=off` in `.env` turns it off; so does `DO_NOT_TRACK=1` in the environment.
-The request is the last thing an install does, waits at most 2.5 seconds and cannot fail it.
+The request is the last thing an install does, gives up after 2.5 seconds and cannot fail it.
 
 ## Write your own
 

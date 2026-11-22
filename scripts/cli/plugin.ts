@@ -95,7 +95,7 @@ export function createPluginCommands(
   const log =
     dependencies.log ?? ((...args: unknown[]) => console.log(...args));
   // `GIT_TERMINAL_PROMPT=0` только здесь, для плагинов и Marketplace: приватный или
-  // отсутствующий репозиторий (а дефолтного `smixs/iva-plugins` ещё нет) иначе
+  // отсутствующий репозиторий иначе
   // спросит логин в терминале и будет ждать — держа при этом лок апдейта. Ответ
   // «репозиторий недоступен» приходит сразу, и команда объясняет его фразой.
   // `iva update` этой правкой не тронут: там приглашение как раз уместно.
@@ -223,7 +223,7 @@ ${C.b}iva plugin${C.x} — ${translate("install and manage plugins", "устан
 
     switch (sub) {
       case "add":
-        return install.add();
+        return install.addAndCount();
       case "list":
         return list();
       case "remove":

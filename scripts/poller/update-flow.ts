@@ -4,6 +4,7 @@ import { basename, join } from "node:path";
 import { readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import { readEnvFresh } from "../lib/env-file.ts";
+import { INSTALL_COUNT_SWITCHES } from "../lib/install-count.ts";
 import {
   inspectUpstream,
   markVersionNotified,
@@ -113,6 +114,13 @@ export function launchIvaCommand(
     `--property=WorkingDirectory=${ROOT}`,
     `--setenv=PATH=${process.env.PATH || ""}`,
     `--setenv=ASSISTANT_DATA_DIR=${DATA_DIR}`,
+    // A transient unit starts with none of this unit's environment: a switch of the install
+    // count set there would be lost to an install after the owner's tap (ADR-0029).
+    ...INSTALL_COUNT_SWITCHES.flatMap((name) =>
+      process.env[name] === undefined
+        ? []
+        : [`--setenv=${name}=${process.env[name]}`],
+    ),
     NODE,
     ...command,
   ];

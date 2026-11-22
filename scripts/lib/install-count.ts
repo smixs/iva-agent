@@ -12,6 +12,15 @@ export const INSTALL_COUNT_URL = "https://iva-agent.com/api/plugins/installs";
 /** How long the end of `iva plugin add` may wait for a site that does not answer. */
 export const INSTALL_COUNT_TIMEOUT_MS = 2500;
 
+/**
+ * The two settings that turn the count off, by name: whoever starts the installer in an
+ * environment of its own (the bridge, for an install after the owner's tap) hands these over.
+ */
+export const INSTALL_COUNT_SWITCHES = [
+  "IVA_PLUGIN_STATS",
+  "DO_NOT_TRACK",
+] as const;
+
 const OFF = new Set(["off", "0", "false", "no"]);
 
 /** `IVA_PLUGIN_STATS=off` in `.env`, or `DO_NOT_TRACK=1`, turns the count off. */

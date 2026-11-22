@@ -8,6 +8,8 @@ import type { AddressInfo } from "node:net";
 import test from "node:test";
 import fc from "fast-check";
 import {
+  INSTALL_COUNT_SWITCHES,
+  INSTALL_COUNT_TIMEOUT_MS,
   INSTALL_COUNT_URL,
   installCountEnabled,
   sendInstallCount,
@@ -70,6 +72,23 @@ async function site(
       }),
   };
 }
+
+test("where the name goes, how long the install waits and what turns it off are spelled once", () => {
+  // The site, the path and the wait are promises of the documentation: a change here is a
+  // change of what the owner was told.
+  assert.equal(INSTALL_COUNT_URL, "https://iva-agent.com/api/plugins/installs");
+  assert.equal(INSTALL_COUNT_TIMEOUT_MS, 2500);
+  assert.deepEqual(INSTALL_COUNT_SWITCHES, [
+    "IVA_PLUGIN_STATS",
+    "DO_NOT_TRACK",
+  ]);
+  for (const name of INSTALL_COUNT_SWITCHES)
+    assert.equal(
+      installCountEnabled({ [name]: name === "DO_NOT_TRACK" ? "1" : "off" }),
+      false,
+      name,
+    );
+});
 
 test("the request carries the plugin name and nothing that tells one installation from another", async () => {
   const world = await site({ status: 200 });

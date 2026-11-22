@@ -41,6 +41,7 @@ import {
   pluginReadProblem,
   type PluginCliContext,
 } from "./plugin-cli-context.ts";
+import type { PendingCount } from "./plugin-cli-install.ts";
 import type { createPluginTrustCommands } from "./plugin-cli-trust.ts";
 
 // `telegram-send.ts` reaches the authored tree through the Outbox, so it is a type here and
@@ -211,7 +212,7 @@ export function createPluginProposalCommands(
       path: string,
       digest12: string,
       source: string,
-    ) => Promise<void>,
+    ) => Promise<PendingCount | null>,
   ): Promise<void> {
     const digest12 = args[0] ?? "";
     if (!DIGEST12.test(digest12))
@@ -222,6 +223,7 @@ export function createPluginProposalCommands(
     const from = fromFile(dir, digest12);
     let name = digest12;
     let failure: string | null = null;
+    let count: PendingCount | null = null;
     try {
       const report = await readPlugin(taken);
       if (!report.manifest) throw new Error(pluginReadProblem(report));
@@ -229,22 +231,28 @@ export function createPluginProposalCommands(
       if ((await pluginTreeDigest(taken)).slice(0, 12) !== digest12)
         throw new Error(staleReason(translate));
       // Источник в plugins.json — папка черновика, а не эта копия: копию сейчас удалим.
-      await addFolder(taken, digest12, readFileSync(from, "utf8"));
+      count = await addFolder(taken, digest12, readFileSync(from, "utf8"));
     } catch (error) {
       failure = errorText(error);
     }
     rmSync(taken, { recursive: true, force: true });
     rmSync(from, { force: true });
+    // Строка о счёте — в том же сообщении, что и итог: stdout установщика владелец не видит.
     const text =
       failure === null
-        ? installedText(translate, name)
+        ? [
+            installedText(translate, name),
+            ...(count ? [count.notice] : []),
+          ].join("\n\n")
         : notInstalledText(translate, name, failure);
     const sent = await (
       await textSender()
     )(owner.token, owner.chat, text, {
       retryTransient: true,
     });
+    // Имя уходит после сообщения и только если оно дошло: не прочёл строку — нет счёта.
     if (!sent.ok) bad(`Telegram send failed: ${sent.error}`);
+    else await count?.send();
     if (failure !== null) throw new Error(failure);
   }
 

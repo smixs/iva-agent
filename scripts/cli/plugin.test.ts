@@ -6,6 +6,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
+  cpSync,
   chmodSync,
   existsSync,
   mkdirSync,
@@ -396,6 +397,8 @@ function commands(
     sends?: ProposalSends;
     /** Счёт установок (ADR-0029): без него команда наружу не отправляет ничего. */
     countInstall?: (name: string) => Promise<boolean>;
+    /** Своё чтение `.env` вместо `env`: так тест ломает его. */
+    readEnv?: () => Record<string, string>;
     /** Зовётся на каждом шаге команды: так тест вклинивается между шагами установки. */
     onStep?: (message: string) => void;
   } = {},
@@ -419,7 +422,7 @@ function commands(
       events.push(["step", message]);
       extra.onStep?.(message);
     },
-    readEnv: () => ({ ...extra.env }),
+    readEnv: extra.readEnv ?? (() => ({ ...extra.env })),
     cap: (command, args, options = {}) => {
       const where = typeof options.cwd === "string" ? options.cwd : root;
       const result = spawnSync(command, [...args], {
@@ -3755,11 +3758,13 @@ function defaultMarketplace(
   ]);
 }
 
-function countRecorder(answer = true) {
+/** `atSend` зовётся в момент, когда имя уходит: тест смотрит, что владелец уже прочёл. */
+function countRecorder(answer = true, atSend: () => void = () => undefined) {
   const counted: string[] = [];
   return {
     counted,
     countInstall: (name: string) => {
+      atSend();
       counted.push(name);
       return Promise.resolve(answer);
     },
@@ -3775,11 +3780,15 @@ const plantAlpha = (work: string): void =>
 const COUNT_LINE = /install count: sending the name alpha to iva-agent\.com/u;
 
 test("add by name from the default marketplace is counted once, and says what leaves the machine", async () => {
-  const { counted, countInstall } = countRecorder();
+  const lines: string[] = [];
+  const readAtSend: string[] = [];
+  const { counted, countInstall } = countRecorder(true, () =>
+    readAtSend.push(lines.join("\n")),
+  );
   const { cmdPlugin, printed, events } = commands(
     home(),
     undefined,
-    undefined,
+    (line) => lines.push(line),
     defaultMarketplace(ALPHA_LIST, plantAlpha),
     undefined,
     { countInstall },
@@ -3788,6 +3797,8 @@ test("add by name from the default marketplace is counted once, and says what le
   await cmdPlugin(["add", "alpha"]);
   assert.deepEqual(counted, ["alpha"]);
   assert.match(printed.join("\n"), COUNT_LINE);
+  // Строка напечатана раньше, чем имя ушло: владелец читает её до запроса.
+  assert.match(readAtSend[0], COUNT_LINE);
   assert.match(printed.join("\n"), /IVA_PLUGIN_STATS=off in \.env/u);
   // Счёт — последнее действие: «installed» сказано раньше, чем что-то ушло наружу.
   assert.match(messages(events, "ok"), /alpha installed/u);
@@ -3903,6 +3914,10 @@ test("an install after the owner's tap is counted by name when the default list 
           name: "relay",
           source: { source: "url", url: relayUrl, ref: null, sha: null },
         },
+        {
+          name: "beacon",
+          source: { source: "url", url: relayUrl, ref: null, sha: null },
+        },
       ],
     }),
   };
@@ -3913,13 +3928,17 @@ test("an install after the owner's tap is counted by name when the default list 
   gitEnv.GIT_CONFIG_VALUE_1 = withRelay.GIT_CONFIG_VALUE_0;
 
   const root = home();
-  const { counted, countInstall } = countRecorder();
   const sends = recordingSends();
-  const shell = () =>
-    commands(root, undefined, undefined, gitEnv, undefined, {
+  const toldAtSend: string[] = [];
+  const { counted, countInstall } = countRecorder(true, () =>
+    toldAtSend.push(sends.texts.map((sent) => sent.text).join("\n")),
+  );
+  // Сборка версии проходит: счёт идёт только за плагин, который дошёл до работающей версии.
+  const shell = (to = sends.sends) =>
+    commands(root, undefined, undefined, gitEnv, buildStub(), {
       interactive: false,
       env: OWNER_ENV,
-      sends: sends.sends,
+      sends: to,
       countInstall,
     });
 
@@ -3931,9 +3950,29 @@ test("an install after the owner's tap is counted by name when the default list 
   );
   assert.deepEqual(counted, [], "a refused install is not an install");
 
+  // Сообщение владельцу не дошло — строку о счёте он не читал, и имя не уходит.
+  const unheard = await takenProposal(
+    root,
+    mcpOnlyPlugin("beacon", "lamp", "beacon-skill"),
+  );
+  await shell({
+    ...sends.sends,
+    text: () => Promise.resolve({ ok: false, fellBack: false, error: "403" }),
+  }).cmdPlugin(["install-proposal", unheard]);
+  assert.deepEqual(counted, []);
+
   const listed = await takenProposal(root, mcpOnlyPlugin("relay", "viewer"));
   await shell().cmdPlugin(["install-proposal", listed]);
   assert.deepEqual(counted, ["relay"]);
+  // По тапу владелец читает строку в Telegram, в том же сообщении, что и итог установки,
+  // и уже после него имя уходит: stdout установщика он не видит.
+  const told = sends.texts.at(-1)?.text ?? "";
+  assert.match(told, /Plugin relay installed/u);
+  assert.match(
+    told,
+    /install count: sending the name relay to iva-agent\.com, nothing else — IVA_PLUGIN_STATS=off in \.env turns this off/u,
+  );
+  assert.equal(toldAtSend[0].includes(told), true);
 
   // Черновик самой Ивы с именем, которого в списке нет, остаётся на машине.
   const drafted = await takenProposal(
@@ -3945,7 +3984,62 @@ test("an install after the owner's tap is counted by name when the default list 
     (await readPluginsState(join(root, "data"))).plugins
       .map((entry) => entry.name)
       .sort(),
-    ["notes", "relay"],
+    ["beacon", "notes", "relay"],
   );
   assert.deepEqual(counted, ["relay"]);
+  assert.doesNotMatch(sends.texts.at(-1)?.text ?? "", /install count/u);
+});
+
+test("a plugin whose code is not in the running version is not counted", async () => {
+  const carrier = codePlugin("carrier");
+  const { counted, countInstall } = countRecorder();
+  const { cmdPlugin, printed, events, data } = commands(
+    home(),
+    undefined,
+    undefined,
+    defaultMarketplace(
+      {
+        name: "iva-plugins",
+        plugins: [{ name: "carrier", source: "./plugins/carrier" }],
+      },
+      (work) =>
+        cpSync(carrier, join(work, "plugins/carrier"), { recursive: true }),
+    ),
+    buildStub({
+      status: "skipped",
+      reason:
+        "this tree is a development checkout - build it yourself: npm run build",
+    }),
+    { countInstall },
+  );
+
+  await cmdPlugin(["add", "carrier", "--trust"]);
+
+  assert.equal((await readPluginsState(data)).plugins[0].name, "carrier");
+  assert.match(messages(events, "ok"), /code is not in the version that runs/u);
+  assert.deepEqual(counted, []);
+  assert.doesNotMatch(printed.join("\n"), /install count/u);
+});
+
+test("a count that cannot read its settings leaves the install done and sends nothing", async () => {
+  const { counted, countInstall } = countRecorder();
+  const { cmdPlugin, events, data } = commands(
+    home(),
+    undefined,
+    undefined,
+    defaultMarketplace(ALPHA_LIST, plantAlpha),
+    undefined,
+    {
+      countInstall,
+      readEnv: () => {
+        throw new Error("EACCES: permission denied, open '.env'");
+      },
+    },
+  );
+
+  await cmdPlugin(["add", "alpha"]);
+
+  assert.equal((await readPluginsState(data)).plugins[0].name, "alpha");
+  assert.match(messages(events, "ok"), /alpha installed/u);
+  assert.deepEqual(counted, []);
 });
