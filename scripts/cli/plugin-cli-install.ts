@@ -659,26 +659,31 @@ export function createPluginInstallCommands(
             await readPluginsState(data),
             name,
           )));
-      // Выключатель читается последним, из `.env` и из окружения команды: между ним и
-      // строкой владельцу ожиданий нет.
-      if (
-        !listed ||
-        !installCountEnabled(readEnv()) ||
-        !installCountEnabled(process.env)
-      )
-        return null;
+      if (!listed) return null;
     } catch {
       return null;
     }
+    if (!countSwitchedOn()) return null;
     return {
       notice: translate(
         `install count: sending the name ${name} to iva-agent.com, nothing else — IVA_PLUGIN_STATS=off in .env turns this off`,
         `счёт установок: на iva-agent.com уходит имя ${name}, и больше ничего — выключить: IVA_PLUGIN_STATS=off в .env`,
       ),
+      // Между строкой и запросом по тапу стоит доставка сообщения в Telegram: выключатель,
+      // поставленный за это время, ещё слышен.
       send: async () => {
-        await countInstall(name);
+        if (countSwitchedOn()) await countInstall(name);
       },
     };
+  }
+
+  /** Выключатель счёта: из `.env` и из окружения команды; не прочитался — выключено. */
+  function countSwitchedOn(): boolean {
+    try {
+      return installCountEnabled(readEnv()) && installCountEnabled(process.env);
+    } catch {
+      return false;
+    }
   }
 
   async function remove(): Promise<void> {

@@ -3918,6 +3918,10 @@ test("an install after the owner's tap is counted by name when the default list 
           name: "beacon",
           source: { source: "url", url: relayUrl, ref: null, sha: null },
         },
+        {
+          name: "lantern",
+          source: { source: "url", url: relayUrl, ref: null, sha: null },
+        },
       ],
     }),
   };
@@ -3961,6 +3965,26 @@ test("an install after the owner's tap is counted by name when the default list 
   }).cmdPlugin(["install-proposal", unheard]);
   assert.deepEqual(counted, []);
 
+  // Владелец выключил счёт, пока сообщение шло к нему: строку он получил, а имя не уходит.
+  const switched = await takenProposal(
+    root,
+    mcpOnlyPlugin("lantern", "wick", "lantern-skill"),
+  );
+  try {
+    await shell({
+      ...sends.sends,
+      text: (_token, chat, text) => {
+        process.env.IVA_PLUGIN_STATS = "off";
+        sends.texts.push({ chat, text: String(text) });
+        return Promise.resolve({ ok: true, fellBack: false, error: "" });
+      },
+    }).cmdPlugin(["install-proposal", switched]);
+  } finally {
+    delete process.env.IVA_PLUGIN_STATS;
+  }
+  assert.match(sends.texts.at(-1)?.text ?? "", /sending the name lantern/u);
+  assert.deepEqual(counted, []);
+
   const listed = await takenProposal(root, mcpOnlyPlugin("relay", "viewer"));
   await shell().cmdPlugin(["install-proposal", listed]);
   assert.deepEqual(counted, ["relay"]);
@@ -3984,7 +4008,7 @@ test("an install after the owner's tap is counted by name when the default list 
     (await readPluginsState(join(root, "data"))).plugins
       .map((entry) => entry.name)
       .sort(),
-    ["beacon", "notes", "relay"],
+    ["beacon", "lantern", "notes", "relay"],
   );
   assert.deepEqual(counted, ["relay"]);
   assert.doesNotMatch(sends.texts.at(-1)?.text ?? "", /install count/u);
