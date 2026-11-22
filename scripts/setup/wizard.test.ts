@@ -201,7 +201,7 @@ test("failure: an invalid provider is named and the wizard walks the steps", asy
   });
   await assert.rejects(
     h.run(),
-    /no answer for:\s+Provider \(1\/2\/3\/4\/5\/6\) \[1\]: /u,
+    /no answer for:\s+Provider \(1\/2\/3\/4\/5\/6\/7\) \[1\]: /u,
   );
   assert.ok(
     h.screen.some((line) => /MODEL_PROVIDER is invalid \(ollmaa\)/u.test(line)),
@@ -290,4 +290,22 @@ test("keeping a Go Responses installation probes its configured wire", async () 
   await h.run();
   assert.equal(h.validated[0].opencodeProtocol, "responses");
   assert.equal(h.written[0].OPENCODE_PROTOCOL, "responses");
+});
+
+test("keeping Devin settings preserves the executable and proxy for validation", async () => {
+  const existing: Env = {
+    ...complete,
+    MODEL_PROVIDER: "devin",
+    DEVIN_MODEL: "swe-2-high",
+    DEVIN_COMMAND: "/configured/devin",
+    DEVIN_PROXY_URL: "http://test.proxy:3128",
+  };
+  delete existing.ASSISTANT_BEARER;
+  const h = wizard(existing, ["n"], { env: { AGENT_LANGUAGE: "en" } });
+  await h.run();
+  assert.equal(h.validated[0].devinEnv?.DEVIN_COMMAND, existing.DEVIN_COMMAND);
+  assert.equal(
+    h.validated[0].devinEnv?.DEVIN_PROXY_URL,
+    existing.DEVIN_PROXY_URL,
+  );
 });

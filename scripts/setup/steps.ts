@@ -1,3 +1,4 @@
+import { devinStatus } from "../lib/devin-cli-status.ts";
 import { resolveOpenCodeProtocol } from "@iva/opencode-protocol";
 // Шаги мастера настройки, вынесенные из scripts/setup/main.ts (B5, шаг 1).
 //
@@ -588,7 +589,19 @@ export async function askProviderSettings(
   else if (provider === "opencode") await askOpencodeSettings(state, ctx);
   else if (provider === "openrouter") await askOpenrouterSettings(state, ctx);
   else if (provider === "custom") await askCustomSettings(state, ctx);
-  else if (provider === "claude") await askClaudeSettings(state, ctx);
+  else if (provider === "devin") {
+    const devinEnv = { ...process.env, ...state.existing, ...out };
+    await devinStatus(devinEnv);
+    out.DEVIN_MODEL = await ctx.pickFromList(
+      await ctx.fetchModels("devin", undefined, { devinEnv }),
+      out.DEVIN_MODEL || state.existing.DEVIN_MODEL,
+      "swe-2-high",
+    );
+    out.DEVIN_CONTEXT_WINDOW = "131072";
+    ctx.print(
+      "Devin CLI: experimental text-only provider; usage is collected when the CLI provides valid metrics.",
+    );
+  } else if (provider === "claude") await askClaudeSettings(state, ctx);
   else await askCodexSettings(state, ctx);
   ctx.print(
     `  ${C.y}${ctx.t("Don't inflate the context window:", "Окно контекста не завышайте:")}${C.x} ${ctx.t("compaction computes its threshold from it; an inflated window risks overflow.", "компактация считает порог от него; завышенное окно = риск переполнения.")}`,
@@ -1076,6 +1089,7 @@ function printSetupSummary(
     openrouter: out.OPENROUTER_MODEL,
     codex: out.CODEX_MODEL,
     claude: out.CLAUDE_MODEL,
+    devin: out.DEVIN_MODEL,
     custom: out.CUSTOM_MODEL,
   }[provider];
   ctx.print();
@@ -1118,6 +1132,7 @@ export async function writeSetupEnv(
     openrouter: { model: "OPENROUTER_MODEL", key: "OPENROUTER_API_KEY" },
     codex: { model: "CODEX_MODEL", key: null },
     claude: { model: "CLAUDE_MODEL", key: null },
+    devin: { model: "DEVIN_MODEL", key: null },
     custom: { model: "CUSTOM_MODEL", key: "CUSTOM_API_KEY" },
   }[provider];
   if (!selected) throw new Error(`unknown provider: ${provider}`);
@@ -1127,6 +1142,9 @@ export async function writeSetupEnv(
   const catOut = catalogProvider(provider);
   await ctx.validateModelSelection({
     provider: out.MODEL_PROVIDER,
+    ...(provider === "devin"
+      ? { devinEnv: { ...process.env, ...state.existing, ...out } }
+      : {}),
     ...(out.MODEL_PROVIDER === "opencode"
       ? { opencodeProtocol: out.OPENCODE_PROTOCOL }
       : {}),

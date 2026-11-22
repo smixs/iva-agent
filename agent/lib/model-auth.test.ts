@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import fc from "fast-check";
 import {
   modelAuthFailure,
+  modelAuthProvider,
   modelAuthText,
   modelAuthRecoveryText,
 } from "./model-auth.ts";
@@ -203,4 +204,11 @@ test("REPAIR1: API key explanation in both languages", () => {
     modelAuthText("custom", "en"),
     /API key used by Iva is not accepted/u,
   );
+});
+
+test("Devin authentication keeps its provider identity and CLI repair command", () => {
+  assert.equal(modelAuthProvider({ MODEL_PROVIDER: "devin" }), "devin");
+  assert.equal(modelAuthFailure(new Error("not signed in"), "devin"), "devin");
+  assert.match(modelAuthText("devin", "en"), /Devin/);
+  assert.match(modelAuthText("devin", "ru"), /devin auth login/);
 });

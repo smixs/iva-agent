@@ -20,7 +20,8 @@ import { parseJson } from "./night-input.ts";
 // примером в инструкции шага, ответ — JSON в тексте, разбор мягкий. Инструментов нет. Не
 // прошёл схему — один повтор с текстом ошибки, потом NightSchemaError. Сетевой
 // отказ классифицируется для повтора дня или периода. Ceiling проверяется до вызова; неизвестный usage
-// закрывает следующие вызовы.
+// закрывает следующие вызовы, кроме Devin ACP при недоступных метриках:
+// для него действует консервативная оценка входа, число вызовов и срок ночи.
 
 export class NightCeilingError extends Error {}
 export class NightSchemaError extends Error {}
@@ -141,7 +142,7 @@ export type SchemaCall<T> = {
   validate?: (value: T) => void;
 };
 
-/** Расход в usage.jsonl тем же путём, что у чата; нет usage — ночь дальше не зовёт. */
+/** Реальный расход — в usage.jsonl; неизвестный вход учитывается оценкой ×2. */
 function recordUsage(
   usage: Parameters<typeof sdkUsageTokens>[0],
   estimate: number,
@@ -170,7 +171,7 @@ function recordUsage(
 }
 
 function checkCeiling(estimate: number): void {
-  if (ceiling.unknownUsage)
+  if (ceiling.unknownUsage && providerName !== "devin")
     throw new NightCeilingError("memory night ceiling reached");
   for (const [key, needed] of [
     ["calls", ceiling.calls + 1],

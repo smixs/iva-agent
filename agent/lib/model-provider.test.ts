@@ -147,6 +147,7 @@ test("every supported provider keeps its own default model", () => {
       "gpt-5.5",
       "claude-fable-5-2",
       "openai/gpt-5.1",
+      "swe-2-high",
     ],
   );
 });
@@ -230,6 +231,7 @@ test("every supported provider keeps its own default vision model", () => {
       "gpt-5.5",
       "claude-fable-5-2",
       "google/gemini-2.5-flash",
+      "swe-2-high",
     ],
   );
 });
@@ -349,7 +351,7 @@ test("only OpenCode loses the wizard prefix from a configured model", () => {
 test("model provider selection rejects values that would split runtime identity", () => {
   assert.deepEqual(
     [...MODEL_PROVIDER_NAMES],
-    ["ollama", "opencode", "codex", "claude", "openrouter", "custom"],
+    ["ollama", "opencode", "codex", "claude", "openrouter", "custom", "devin"],
   );
   const garbage = [
     "ollmaa", // опечатка из issue #161
@@ -386,7 +388,7 @@ test("the refusal names the bad value, every accepted name and the fix", () => {
   const message = invalidModelProviderMessage("ollmaa");
   assert.equal(
     message,
-    'Invalid MODEL_PROVIDER "ollmaa"; expected one of: ollama, opencode, codex, claude, openrouter, custom — run: iva config',
+    'Invalid MODEL_PROVIDER "ollmaa"; expected one of: ollama, opencode, codex, claude, openrouter, custom, devin — run: iva config',
   );
   for (const name of MODEL_PROVIDER_NAMES)
     assert.match(message, new RegExp(name));
@@ -495,7 +497,7 @@ test("runtime startup rejects an invalid provider before choosing a config", () 
     assert.notEqual(result.status, 0, module);
     assert.match(
       result.stderr,
-      /Invalid MODEL_PROVIDER "ollmaa"; expected one of: ollama, opencode, codex, claude, openrouter, custom — run: iva config/,
+      /Invalid MODEL_PROVIDER "ollmaa"; expected one of: ollama, opencode, codex, claude, openrouter, custom, devin — run: iva config/,
       module,
     );
   }
@@ -724,7 +726,7 @@ test("property: every value outside the list is refused, with the list in the re
       // Перечень в отказе — канонический порядок целиком, а не «одно из».
       assert.ok(
         invalidModelProviderMessage(value).includes(
-          "ollama, opencode, codex, claude, openrouter, custom",
+          "ollama, opencode, codex, claude, openrouter, custom, devin",
         ),
       );
     }),

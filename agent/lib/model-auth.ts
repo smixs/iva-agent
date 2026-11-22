@@ -4,6 +4,7 @@ export const MODEL_AUTH_REPEAT_MS = 24 * 60 * 60 * 1000;
 export type AuthLanguage = "ru" | "en";
 const PROVIDERS: Readonly<Record<string, string>> = {
   claude: "Claude",
+  devin: "Devin",
   codex: "ChatGPT",
   openrouter: "OpenRouter",
   opencode: "OpenCode",
@@ -149,6 +150,7 @@ function authSince(facts: AuthTextFacts, lang: AuthLanguage): string {
   }).format(facts.since);
 }
 function authRepair(provider: string): string | null {
+  if (provider === "devin") return "devin auth login";
   if (provider === "claude") return "claude auth login";
   return provider === "codex" ? "iva login" : null;
 }

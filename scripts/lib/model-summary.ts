@@ -11,6 +11,7 @@ const PROVIDERS: Record<string, string> = {
   codex: "OpenAI",
   claude: "Claude",
   custom: "Custom",
+  devin: "Devin",
 };
 
 /** Имена провайдеров, которые умеет подписать этот экран. Сверяются с рантаймом в тесте. */

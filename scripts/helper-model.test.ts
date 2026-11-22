@@ -185,7 +185,11 @@ test("helper defaults and unknown windows", () => {
   for (const [name, p] of Object.entries(MODEL_PROVIDERS))
     assert.equal(
       p.defaultHelperModel,
-      name === "claude" ? "claude-sonnet-5-5" : null,
+      name === "claude"
+        ? "claude-sonnet-5-5"
+        : name === "devin"
+          ? "swe-2-high"
+          : null,
     );
   process.env.HELPER_MODEL = "";
   assert.equal(

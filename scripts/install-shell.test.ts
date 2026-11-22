@@ -920,7 +920,7 @@ for (const os of ["Linux", "Darwin"]) {
     assert.equal(second.status, 0, second.stdout + second.stderr);
     const calls = world.calls(callsPath);
     assert.match(second.stdout, /Continuing first installation/u);
-    assert.match(second.stdout, /Provider \(1\/2\/3\/4\/5\/6\)/u);
+    assert.match(second.stdout, /Provider \(1\/2\/3\/4\/5\/6\/7\)/u);
     assert.doesNotMatch(calls, /^iva update$|^npm ci$/mu);
     // Adding .env changes a build input; dependencies are still reusable.
     assert.match(calls, /^npm exec -- eve build$/mu);
@@ -1016,7 +1016,7 @@ void test("an explicit configured checkout asks only whether to reconfigure", (t
   });
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.match(result.stdout, /Reconfigure from scratch\?/u);
-  assert.doesNotMatch(result.stdout, /Provider \(1\/2\/3\/4\/5\/6\)/u);
+  assert.doesNotMatch(result.stdout, /Provider \(1\/2\/3\/4\/5\/6\/7\)/u);
 });
 
 void test("the installer takes Russian from the supplied env file", (t) => {
@@ -1071,7 +1071,7 @@ void test("an unfinished checkout resumes first installation from the downloaded
     },
   });
   assert.equal(result.status, 0, result.stdout + result.stderr);
-  assert.match(result.stdout, /Provider \(1\/2\/3\/4\/5\/6\)/u);
+  assert.match(result.stdout, /Provider \(1\/2\/3\/4\/5\/6\/7\)/u);
   assert.doesNotMatch(world.calls(), /^iva update$/mu);
   assert.match(world.calls(), /^iva _activate-units$/mu);
   assert.equal(existsSync(join(world.install, ".iva-installed")), true);
@@ -1098,7 +1098,7 @@ void test("deferred setup finishes explicitly through the first-install wizard",
   assert.doesNotMatch(calls, /^iva update$|^npm ci$/mu);
   assert.match(calls, /^iva _activate-units$/mu);
   assert.doesNotMatch(result.stdout, /Reconfigure from scratch\?/u);
-  assert.match(result.stdout, /Provider \(1\/2\/3\/4\/5\/6\)/u);
+  assert.match(result.stdout, /Provider \(1\/2\/3\/4\/5\/6\/7\)/u);
   assert.equal(
     readFileSync(join(world.install, ".iva-installed"), "utf8"),
     "autostart=true\n",
@@ -1152,7 +1152,7 @@ try:
             if b'current/default' in output and b'LANG_SENT' not in output:
                 os.write(fd, b'1\\n')
                 output += b'LANG_SENT'
-            if (b'Reconfigure from scratch?' in output or b'Provider (1/2/3/4/5/6)' in output) and not dropped:
+            if (b'Reconfigure from scratch?' in output or b'Provider (1/2/3/4/5/6/7)' in output) and not dropped:
                 dropped = True
                 deadline = time.monotonic() + 2
                 if mode == 'signal':
