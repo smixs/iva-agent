@@ -1,0 +1,18 @@
+---
+// A plug, the sign of a plugin: one ink line, and inside it the cells of the plugin's commit
+// in the one green of the site.
+import { PLUG_COLUMNS, plugPattern } from "../lib/plug";
+const { seed, size = 56 } = Astro.props as { seed: string; size?: number };
+const cells = plugPattern(seed);
+---
+
+<svg class="plug" viewBox="0 0 64 64" width={size} height={size} aria-hidden="true">
+  <g class="plug-move">
+    <path class="plug-line" d="M26 16V8.5a3 3 0 0 1 6 0V16M38 16V8.5a3 3 0 0 1 6 0V16" transform="translate(-3 0)"></path>
+    <rect class="plug-body" x="14" y="16" width="36" height="30" rx="8"></rect>
+    {cells.map((on, index) => on && (
+      <rect class="plug-cell" x={17.5 + (index % PLUG_COLUMNS) * 6} y={19.5 + Math.floor(index / PLUG_COLUMNS) * 6} width="5" height="5" rx="1.2"></rect>
+    ))}
+    <path class="plug-line" d="M32 46v5c0 5 3 8 8 8h18"></path>
+  </g>
+</svg>

@@ -3,6 +3,8 @@
 // and a browser without scripts see all of them. Search, the category filter and the sort only
 // hide and reorder what is already there; the install numbers come from /api/plugins/installs.
 import Base from "../layouts/Base.astro";
+import Plug from "./Plug.astro";
+import PluginStory from "./PluginStory.astro";
 import type { Lang } from "../lib/copy";
 import { categories, categoryName, labels, plugins, pluginUrl, pluginsUrl } from "../lib/plugins";
 import { breadcrumbs, pageTitle, SITE } from "../lib/seo";
@@ -34,6 +36,7 @@ const schema = [
   <section class="section plugins" data-plugins>
     <h1>{t.title}</h1>
     <p class="plugins-lead">{t.lead}</p>
+    <PluginStory lang={lang} />
     <div class="plugin-tools">
       <label class="plugin-search">
         <span class="sr-only">{t.search}</span>
@@ -48,7 +51,7 @@ const schema = [
           <option value="name">{t.byName}</option>
         </select>
       </label>
-      <div class="plugin-filter" role="group" aria-label={t.category}>
+      <div class="plugin-filter" role="group" aria-label={t.filter}>
         <button type="button" aria-pressed="true" data-plugin-category="all">{t.all} <span>{plugins.length}</span></button>
         {used.map((category) => (
           <button type="button" aria-pressed="false" data-plugin-category={category.id}>
@@ -65,18 +68,14 @@ const schema = [
           data-category={plugin.category}
           data-added={plugin.added}
           data-order={index}
-          data-search={[plugin.name, plugin.title, plugin.summary[lang], plugin.author.name, categoryName(lang, plugin.category)].join(" ").toLowerCase()}
+          data-search={[plugin.name, plugin.title, plugin.tagline[lang], plugin.summary[lang], plugin.author.name, categoryName(lang, plugin.category)].join(" ").toLowerCase()}
         >
-          <div class="plugin-card-head">
-            <img src={plugin.author.picture} alt="" width="44" height="44" loading="lazy" decoding="async" />
-            <div>
-              <h2><a href={pluginUrl(lang, plugin.name)}>{plugin.title}</a></h2>
-              <p class="plugin-by">{plugin.author.name}</p>
-            </div>
-          </div>
-          <p class="plugin-summary">{plugin.summary[lang]}</p>
+          <Plug seed={plugin.commit} size={56} />
+          <h2><a href={pluginUrl(lang, plugin.name)}>{plugin.title}</a></h2>
+          <p class="plugin-summary">{plugin.tagline[lang]}</p>
           <p class="plugin-meta">
-            <span>{categoryName(lang, plugin.category)}</span>
+            <img src={plugin.author.picture} alt="" width="24" height="24" loading="lazy" decoding="async" />
+            <span>{plugin.author.name}</span>
             <span data-plugin-installs hidden></span>
           </p>
         </li>
@@ -85,7 +84,6 @@ const schema = [
     <p class="plugin-empty" data-plugin-empty hidden>
       {t.empty} <button type="button" data-plugin-reset>{t.reset}</button>
     </p>
-    <p class="plugin-note">{t.counted} <a href={docs + "#install-count"}>{t.countedLink}</a></p>
   </section>
   <section class="section plugin-make">
     <h2>{t.makeTitle}</h2>

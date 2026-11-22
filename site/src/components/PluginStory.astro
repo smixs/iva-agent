@@ -1,0 +1,118 @@
+---
+// Three frames, left to right, of what a plugin is: a phrase to Iva, the plug going in, the
+// new skill. Drawn with one ink line and one green; the plug carries the cells of the string
+// this picture was thought up from. Plays once when it comes into view; a click plays it again.
+import type { Lang } from "../lib/copy";
+import { PLUG_COLUMNS, plugPattern } from "../lib/plug";
+const { lang } = Astro.props as { lang: Lang };
+const ru = lang === "ru";
+const captions = ru
+  ? ["Напишите Иве", "Плагин встаёт на место", "Ива умеет новое"]
+  : ["Write to Iva", "The plugin clicks in", "Iva can do more"];
+const phrase = ru ? "Поставь плагин" : "Install a plugin";
+const cells = plugPattern("VKJ5ZZE25ZYO");
+---
+
+<div class="plugin-story-wrap">
+<ol class="plugin-story" data-plugin-story aria-label={ru ? "Как ставится плагин" : "How a plugin is installed"}>
+  <li class="ps-frame ps-1">
+    <svg viewBox="0 0 240 160" aria-hidden="true">
+      <g class="ps-bubble ps-pop">
+        <path class="ps-line ps-white" d="M40 44h150a16 16 0 0 1 16 16v36a16 16 0 0 1-16 16h-4l10 18-30-18H40a16 16 0 0 1-16-16V60a16 16 0 0 1 16-16Z"></path>
+        <text class="ps-text" x="115" y="84" text-anchor="middle">{phrase}</text>
+      </g>
+    </svg>
+    <p class="ps-caption">{captions[0]}</p>
+  </li>
+  <li class="ps-arrow ps-arrow-1" aria-hidden="true">
+    <svg viewBox="0 0 64 24"><path class="ps-line ps-arrow-line" d="M4 12h50"></path><path class="ps-line ps-arrow-head" d="M46 4l10 8-10 8"></path></svg>
+  </li>
+  <li class="ps-frame ps-2">
+    <svg viewBox="0 0 240 160" aria-hidden="true">
+      <g class="ps-plug">
+        <path class="ps-line" d="M82 80C58 80 62 112 38 112S14 92 -80 96"></path>
+        <path class="ps-line" d="M126 68h34M126 92h34"></path>
+        <rect class="ps-line ps-white" x="82" y="56" width="46" height="48" rx="10"></rect>
+        {cells.map((on, index) => on && (
+          <rect class="ps-cell" x={87 + (index % PLUG_COLUMNS) * 7.4} y={66 + Math.floor(index / PLUG_COLUMNS) * 7.4} width="6" height="6" rx="1.4"></rect>
+        ))}
+      </g>
+      <g class="ps-socket">
+        <rect class="ps-line ps-white" x="158" y="38" width="62" height="84" rx="14"></rect>
+        <path class="ps-leaf" d="M183 96c-9-10-9-24 0-36 9 12 9 26 0 36Z"></path>
+        <path class="ps-line ps-thin" d="M196 96c-7-8-7-18 0-27 7 9 7 19 0 27Z"></path>
+      </g>
+      <path class="ps-line ps-spark" d="M150 52l-6-10M150 108l-6 10"></path>
+    </svg>
+    <p class="ps-caption">{captions[1]}</p>
+  </li>
+  <li class="ps-arrow ps-arrow-2" aria-hidden="true">
+    <svg viewBox="0 0 64 24"><path class="ps-line ps-arrow-line" d="M4 12h50"></path><path class="ps-line ps-arrow-head" d="M46 4l10 8-10 8"></path></svg>
+  </li>
+  <li class="ps-frame ps-3">
+    <svg viewBox="0 0 240 160" aria-hidden="true">
+      <g class="ps-answer ps-pop">
+        <path class="ps-line ps-green" d="M200 44H50a16 16 0 0 0-16 16v36a16 16 0 0 0 16 16h4l-10 18 30-18h126a16 16 0 0 0 16-16V60a16 16 0 0 0-16-16Z"></path>
+        <g class="ps-bars">
+          {[26, 44, 30, 52, 34, 46, 24].map((height, index) => (
+            <rect class="ps-bar" x={75 + index * 15} y={78 - height / 2} width="7" height={height} rx="3.5" style={`--i:${index}`}></rect>
+          ))}
+        </g>
+      </g>
+    </svg>
+    <p class="ps-caption">{captions[2]}</p>
+  </li>
+</ol>
+<button class="ps-replay" type="button" data-plugin-story-replay aria-label={ru ? "Показать ещё раз" : "Play again"}>
+  <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.6-5.9M20 4v5h-5"></path></svg>
+</button>
+<script is:inline>
+  {
+    const story = document.querySelector("[data-plugin-story]");
+    const replay = document.querySelector("[data-plugin-story-replay]");
+    const parts = [...story.children];
+    const frames = parts.filter((part) => part.classList.contains("ps-frame"));
+    // When each part starts on a wide screen, where all three frames are in view at once.
+    const starts = [0, 1150, 1800, 3900, 4550];
+    let timers = [];
+    const play = (part) => part.setAttribute("data-play", "");
+    const reset = () => {
+      timers.forEach(clearTimeout);
+      timers = [];
+      for (const part of parts) part.removeAttribute("data-play");
+      void story.offsetWidth;
+    };
+    const strip = () => story.scrollWidth > story.clientWidth + 1;
+    const run = () => {
+      reset();
+      if (strip()) {
+        // A phone shows one frame at a time: the strip moves on by itself, like a film,
+        // until a finger takes it over. A frame swiped into view plays as well.
+        story.scrollTo({ left: 0 });
+        play(frames[0]);
+        const show = (frame) => {
+          story.scrollTo({ left: frame.offsetLeft - frames[0].offsetLeft, behavior: "smooth" });
+          timers.push(setTimeout(play, 450, frame));
+        };
+        timers = [setTimeout(show, 1900, frames[1]), setTimeout(show, 4700, frames[2])];
+        return;
+      }
+      timers = parts.map((part, index) => setTimeout(play, starts[index], part));
+    };
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches) replay.hidden = true;
+    else {
+      new IntersectionObserver((entries, observer) => {
+        if (!entries[0].isIntersecting) return;
+        observer.disconnect();
+        run();
+        const swiped = new IntersectionObserver((seen) => {
+          for (const entry of seen) if (entry.isIntersecting && strip()) play(entry.target);
+        }, { root: story, threshold: 0.6 });
+        for (const frame of frames.slice(1)) swiped.observe(frame);
+      }, { threshold: 0.4 }).observe(story);
+      replay.addEventListener("click", run);
+      story.addEventListener("pointerdown", () => timers.forEach(clearTimeout), { passive: true });
+    }
+  }
+</script>
+</div>

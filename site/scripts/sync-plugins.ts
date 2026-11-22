@@ -108,6 +108,7 @@ try {
     plugins.push({
       name: entry.name,
       title: card.title,
+      tagline: card.tagline,
       description: entry.description,
       category: card.category,
       author: { ...card.author, picture: pictures.get(login) },

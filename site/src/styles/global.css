@@ -817,13 +817,384 @@ section[tabindex="-1"]:focus {
   font-size: 48px;
   margin-bottom: 20px;
 }
-.plugins-lead,
+.plugins-lead {
+  font-size: 24px;
+  line-height: 1.35;
+  letter-spacing: -0.015em;
+  color: var(--muted);
+  margin-bottom: 36px;
+}
 .plugin-page-lead {
   max-width: 62ch;
-  font-size: 20px;
+  font-size: 18px;
   line-height: 1.55;
   color: var(--muted);
-  margin-bottom: 40px;
+  margin-bottom: 36px;
+}
+.plugin-page-tagline {
+  margin: 0 0 12px;
+  font-size: 24px;
+  line-height: 1.3;
+  letter-spacing: -0.015em;
+}
+/* The plug: the sign of a plugin. One ink line; the cells inside are the plugin's commit. */
+.plug {
+  flex: none;
+  overflow: visible;
+}
+.plug-line,
+.plug-body {
+  fill: none;
+  stroke: var(--ink);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.plug-body {
+  fill: #fff;
+}
+.plug-cell,
+.ps-cell {
+  fill: var(--leaf-pressed);
+}
+.plug-move {
+  transform-box: fill-box;
+  transform-origin: 50% 0;
+}
+/* How a plugin is installed, in three frames. */
+.plugin-story-wrap {
+  position: relative;
+  margin-bottom: 56px;
+}
+.plugin-story {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 56px minmax(0, 1fr) 56px minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  column-gap: 8px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+.ps-frame {
+  display: grid;
+  grid-row: 1 / span 2;
+  grid-template-rows: subgrid;
+}
+.ps-1 {
+  grid-column: 1;
+}
+.ps-arrow-1 {
+  grid-column: 2;
+}
+.ps-2 {
+  grid-column: 3;
+}
+.ps-arrow-2 {
+  grid-column: 4;
+}
+.ps-3 {
+  grid-column: 5;
+}
+.ps-frame svg {
+  display: block;
+  width: 100%;
+  max-width: 330px;
+  height: auto;
+  margin: 0 auto;
+  overflow: visible;
+}
+.ps-arrow {
+  grid-row: 1;
+  align-self: center;
+}
+.ps-arrow svg {
+  display: block;
+  width: 100%;
+  overflow: visible;
+}
+.ps-arrow .ps-line {
+  stroke-width: 4.6;
+}
+/* The cord comes in from beyond the frame: it fades at the edge instead of ending. */
+.ps-2 svg {
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 8%);
+  mask-image: linear-gradient(90deg, transparent, #000 8%);
+}
+.ps-caption {
+  margin: 4px 0 0;
+  font-size: 20px;
+  font-weight: 650;
+  line-height: 1.25;
+  letter-spacing: -0.02em;
+  text-align: center;
+}
+.ps-line {
+  fill: none;
+  stroke: var(--ink);
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.ps-thin {
+  stroke-width: 2.5;
+}
+.ps-white {
+  fill: #fff;
+}
+.ps-green,
+.ps-leaf {
+  fill: var(--leaf);
+}
+.ps-leaf {
+  stroke: var(--ink);
+  stroke-width: 2.5;
+  stroke-linejoin: round;
+}
+.ps-bar {
+  fill: var(--ink);
+}
+.ps-text {
+  fill: var(--ink);
+  font-family: var(--font);
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.ps-spark {
+  opacity: 0;
+}
+.ps-replay {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: none;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition:
+    background-color 160ms ease,
+    color 160ms ease;
+}
+.js .ps-replay {
+  display: grid;
+}
+.ps-replay svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.ps-replay:focus-visible {
+  outline-offset: 2px;
+}
+@media (prefers-reduced-motion: no-preference) {
+  /* With scripts on, a part waits unseen until it is its turn to play. */
+  .js .plugin-story > :not([data-play]) :is(.ps-pop, .ps-plug, .ps-socket, .ps-caption, .ps-arrow-line, .ps-arrow-head) {
+    opacity: 0;
+  }
+  .ps-pop,
+  .ps-plug,
+  .ps-bar,
+  .ps-spark {
+    transform-box: fill-box;
+  }
+  .ps-bubble {
+    transform-origin: 82% 100%;
+  }
+  .ps-answer {
+    transform-origin: 18% 100%;
+  }
+  .ps-plug {
+    transform-origin: 100% 40%;
+  }
+  .ps-bar {
+    transform-origin: 50% 50%;
+  }
+  .ps-spark {
+    transform-origin: 100% 50%;
+  }
+  .ps-arrow-head {
+    transform-box: fill-box;
+    transform-origin: 100% 50%;
+  }
+  [data-play] .ps-pop {
+    animation: ps-pop 820ms cubic-bezier(0.3, 0.7, 0.3, 1) both;
+  }
+  [data-play] .ps-caption {
+    animation: ps-rise 520ms cubic-bezier(0.23, 1, 0.32, 1) 300ms both;
+  }
+  [data-play] .ps-arrow-line {
+    stroke-dasharray: 50;
+    animation: ps-draw 460ms cubic-bezier(0.23, 1, 0.32, 1) both;
+  }
+  [data-play] .ps-arrow-head {
+    animation: ps-head 300ms cubic-bezier(0.3, 1.6, 0.5, 1) 400ms both;
+  }
+  [data-play] .ps-socket {
+    animation:
+      ps-fade 420ms ease-out both,
+      ps-bump 420ms cubic-bezier(0.3, 0.7, 0.3, 1) 1330ms both;
+  }
+  [data-play] .ps-plug {
+    animation:
+      ps-fade 320ms ease-out both,
+      ps-plug-in 1200ms linear 480ms both;
+  }
+  [data-play] .ps-spark {
+    animation: ps-spark 460ms cubic-bezier(0.23, 1, 0.32, 1) 1300ms both;
+  }
+  [data-play] .ps-bar {
+    animation: ps-bar 900ms cubic-bezier(0.37, 0, 0.63, 1) calc(650ms + var(--i) * 70ms) 3 both;
+  }
+  .plugin-card:hover .plug-move,
+  .plugin-card:focus-within .plug-move {
+    animation: plug-press 620ms cubic-bezier(0.3, 0.7, 0.3, 1);
+  }
+}
+@keyframes ps-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.3);
+  }
+  42% {
+    opacity: 1;
+    transform: scale(1.12, 0.9);
+  }
+  64% {
+    transform: scale(0.95, 1.06);
+  }
+  82% {
+    transform: scale(1.03, 0.98);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes ps-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes ps-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes ps-draw {
+  from {
+    opacity: 1;
+    stroke-dashoffset: 50;
+  }
+  to {
+    opacity: 1;
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes ps-head {
+  from {
+    opacity: 0;
+    transform: scale(0.3);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+/* The plug draws back, flies stretched, lands squashed and settles. */
+@keyframes ps-plug-in {
+  0% {
+    transform: translateX(-46px);
+    animation-timing-function: cubic-bezier(0.4, 0, 0.6, 1);
+  }
+  22% {
+    transform: translateX(-58px) scale(0.93, 1.07);
+    animation-timing-function: cubic-bezier(0.5, 0, 0.9, 0.5);
+  }
+  62% {
+    transform: translateX(-4px) scale(1.14, 0.9);
+    animation-timing-function: linear;
+  }
+  70% {
+    transform: translateX(3px) scale(0.84, 1.14);
+    animation-timing-function: cubic-bezier(0.2, 0.8, 0.3, 1);
+  }
+  84% {
+    transform: translateX(-1.5px) scale(1.05, 0.96);
+    animation-timing-function: ease-in-out;
+  }
+  100% {
+    transform: none;
+  }
+}
+@keyframes ps-bump {
+  0% {
+    transform: none;
+  }
+  35% {
+    transform: translateX(5px) scale(0.97, 1.03);
+  }
+  100% {
+    transform: none;
+  }
+}
+@keyframes ps-spark {
+  0% {
+    opacity: 0;
+    transform: scale(0.3);
+  }
+  35% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.3);
+  }
+}
+@keyframes ps-bar {
+  0%,
+  100% {
+    transform: none;
+  }
+  30% {
+    transform: scaleY(0.35);
+  }
+  62% {
+    transform: scaleY(1.22);
+  }
+}
+@keyframes plug-press {
+  0% {
+    transform: none;
+  }
+  28% {
+    transform: translateY(5px) scale(0.94, 1.06);
+  }
+  55% {
+    transform: translateY(-7px) scale(1.08, 0.9);
+  }
+  78% {
+    transform: translateY(1px) scale(0.98, 1.03);
+  }
+  100% {
+    transform: none;
+  }
 }
 .plugin-tools {
   display: none;
@@ -948,23 +1319,20 @@ section[tabindex="-1"]:focus {
 .plugin-card:focus-within {
   border-color: var(--blue);
 }
-.plugin-card-head {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  margin-bottom: 16px;
+.plugin-card .plug {
+  margin: -4px 0 14px -6px;
 }
-.plugin-card-head img,
-.plugin-page-head img {
+.plugin-meta img,
+.plugin-by img {
   flex: none;
   border-radius: 50%;
   background: var(--panel);
 }
 .plugin-card h2 {
-  font-size: 22px;
+  font-size: 24px;
   line-height: 1.2;
   letter-spacing: -0.02em;
-  margin: 0 0 2px;
+  margin: 0 0 6px;
 }
 .plugin-card h2 a {
   color: var(--ink);
@@ -987,23 +1355,21 @@ section[tabindex="-1"]:focus {
 }
 .plugin-summary {
   flex: 1;
-  margin-bottom: 20px;
-  font-size: 16px;
-  line-height: 1.5;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 4;
-  line-clamp: 4;
-  overflow: hidden;
+  margin-bottom: 22px;
+  font-size: 17px;
+  line-height: 1.4;
 }
 .plugin-meta {
   display: flex;
-  justify-content: space-between;
-  gap: 12px;
+  align-items: center;
+  gap: 8px;
   margin: 0;
   font-size: 14px;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
+}
+.plugin-meta [data-plugin-installs] {
+  margin-left: auto;
 }
 .plugin-empty {
   margin-bottom: 28px;
@@ -1019,12 +1385,6 @@ section[tabindex="-1"]:focus {
   text-underline-offset: 0.24em;
   cursor: pointer;
 }
-.plugin-note {
-  max-width: 78ch;
-  margin: 0;
-  font-size: 14px;
-  color: var(--muted);
-}
 .plugin-make {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
@@ -1037,7 +1397,8 @@ section[tabindex="-1"]:focus {
 }
 .plugin-make p {
   max-width: 56ch;
-  font-size: 18px;
+  font-size: 20px;
+  margin-bottom: 20px;
 }
 .plugin-make ul {
   display: flex;
@@ -1065,7 +1426,8 @@ section[tabindex="-1"]:focus {
 .plugin-page-head .plugin-by {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 16px;
+  align-items: center;
+  gap: 4px 12px;
   font-size: 15px;
   font-variant-numeric: tabular-nums;
 }
@@ -1164,6 +1526,39 @@ section[tabindex="-1"]:focus {
     background: var(--leaf-hover);
   }
 }
+@media (max-width: 760px) {
+  .plugin-story-wrap {
+    margin: 0 calc(var(--gutter) * -1) 36px;
+  }
+  .plugin-story {
+    display: flex;
+    gap: 14px;
+    padding: 0 var(--gutter) 8px;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    scroll-padding-inline: var(--gutter);
+    scrollbar-width: none;
+  }
+  .plugin-story::-webkit-scrollbar {
+    display: none;
+  }
+  .ps-frame {
+    display: block;
+    flex: 0 0 min(78%, 320px);
+    padding: 8px 12px 18px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    scroll-snap-align: start;
+  }
+  .ps-arrow {
+    display: none;
+  }
+  .ps-replay {
+    top: auto;
+    right: calc(var(--gutter) - 8px);
+    bottom: -40px;
+  }
+}
 @media (max-width: 960px) {
   .plugin-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1181,7 +1576,10 @@ section[tabindex="-1"]:focus {
   .plugin-page-head h1 {
     font-size: 34px;
   }
-  .plugins-lead,
+  .plugins-lead {
+    font-size: 20px;
+    margin-bottom: 24px;
+  }
   .plugin-page-lead {
     font-size: 17px;
     margin-bottom: 28px;
@@ -1205,9 +1603,12 @@ section[tabindex="-1"]:focus {
   .plugin-page-head {
     gap: 14px;
   }
-  .plugin-page-head img {
-    width: 48px;
-    height: 48px;
+  .plugin-page-head .plug {
+    width: 72px;
+    height: 72px;
+  }
+  .plugin-page-tagline {
+    font-size: 20px;
   }
   .plugin-install {
     padding: 20px;

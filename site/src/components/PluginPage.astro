@@ -2,26 +2,19 @@
 // One plugin of the default Marketplace: what it does, how to install it, who wrote it and
 // what it starts on the machine. Every fact comes from the list entry and its card.
 import Base from "../layouts/Base.astro";
+import Plug from "./Plug.astro";
 import type { Lang } from "../lib/copy";
 import { categoryName, labels, pluginUrl, pluginsUrl, sourceUrl, type Plugin } from "../lib/plugins";
 import { breadcrumbs, clip, pageTitle, SITE } from "../lib/seo";
 const { lang, plugin } = Astro.props as { lang: Lang; plugin: Plugin };
 const t = labels[lang];
 const home = lang === "ru" ? "/ru/" : "/";
-const docs = lang === "ru" ? "/ru/docs/plugins/" : "/docs/plugins/";
 const command = `iva plugin add ${plugin.name}`;
 const crumbs = [
   { name: t.home, url: home },
   { name: t.plugins, url: pluginsUrl(lang) },
   { name: plugin.title, url: pluginUrl(lang, plugin.name) },
 ];
-const parts = [
-  plugin.parts.skills.length && `${t.skills}: ${plugin.parts.skills.join(", ")}`,
-  plugin.parts.code && t.code,
-  plugin.parts.services.length && `${t.services}: ${plugin.parts.services.join(", ")}`,
-  plugin.parts.mcp.length && `${t.mcp}: ${plugin.parts.mcp.join(", ")}`,
-].filter(Boolean);
-const added = new Intl.DateTimeFormat(lang, { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(plugin.added));
 const title = lang === "ru" ? `${plugin.title}: плагин для Ивы` : `${plugin.title}: a plugin for Iva`;
 const schema = [
   breadcrumbs(crumbs),
@@ -61,10 +54,12 @@ const schema = [
       ))}
     </nav>
     <header class="plugin-page-head">
-      <img src={plugin.author.picture} alt="" width="64" height="64" />
+      <Plug seed={plugin.commit} size={96} />
       <div>
         <h1>{plugin.title}</h1>
+        <p class="plugin-page-tagline">{plugin.tagline[lang]}</p>
         <p class="plugin-by">
+          <img src={plugin.author.picture} alt="" width="24" height="24" />
           <a href={`https://github.com/${plugin.author.github}`}>{plugin.author.name}</a>
           <span>{categoryName(lang, plugin.category)}</span>
           <span data-plugin-installs hidden></span>
@@ -85,12 +80,9 @@ const schema = [
       <div><dt>{t.runs}</dt><dd>{plugin.runs[lang]}</dd></div>
       <div><dt>{t.keys}</dt><dd>{plugin.keys.length ? plugin.keys.map((key) => <code>{key}</code>) : t.noKeys}</dd></div>
       <div><dt>{t.network}</dt><dd>{plugin.network.length ? plugin.network.join(", ") : t.noNetwork}</dd></div>
-      <div><dt>{t.parts}</dt><dd>{parts.join("; ")}</dd></div>
       <div><dt>{t.version}</dt><dd>{plugin.version} · <a href={sourceUrl(plugin)}><code>{plugin.commit.slice(0, 12)}</code></a></dd></div>
       <div><dt>{t.repository}</dt><dd><a href={plugin.repository}>{plugin.repository.replace("https://github.com/", "").replace(/\/tree\/[^/]+/, "")}</a></dd></div>
-      <div><dt>{t.added}</dt><dd><time datetime={plugin.added}>{added}</time></dd></div>
     </dl>
-    <p class="plugin-note">{t.risk} <a href={docs + "#what-you-risk"}>{t.riskLink}</a></p>
     <a class="back" href={pluginsUrl(lang)}>← {t.back}</a>
   </article>
 </Base>

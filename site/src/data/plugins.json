@@ -1,6 +1,6 @@
 {
   "list": "https://github.com/smixs/iva-plugins",
-  "commit": "445496e0df075826ad9f6c4b9ddc129af3ed62de",
+  "commit": "158ef62d308b99aef42d296188df54a647526a5f",
   "categories": [
     {
       "id": "voice",
@@ -27,6 +27,10 @@
     {
       "name": "trace",
       "title": "Trace",
+      "tagline": {
+        "en": "Shows what Iva did in a turn, step by step",
+        "ru": "Показывает, что Ива делала, шаг за шагом"
+      },
       "description": "Viewer for the turn journal: the schema of Iva with the path of a turn lit across it, the turn feed and a replay.",
       "category": "tools",
       "author": {
@@ -37,7 +41,7 @@
       "repository": "https://github.com/smixs/iva-plugins/tree/main/trace",
       "added": "2026-08-18",
       "version": "0.1.1",
-      "commit": "445496e0df075826ad9f6c4b9ddc129af3ed62de",
+      "commit": "158ef62d308b99aef42d296188df54a647526a5f",
       "summary": {
         "en": "A viewer for Iva's turn journal: the schema of Iva with the path of a turn lit across it, a feed of turns and a replay. You see what Iva did in a turn, step by step, and where the time went.",
         "ru": "Просмотр журнала ходов Ивы: схема Ивы, на которой подсвечен путь хода, лента ходов и повтор. Видно, что Ива делала в ходе шаг за шагом и куда ушло время."
@@ -62,6 +66,10 @@
     {
       "name": "hello",
       "title": "Hello",
+      "tagline": {
+        "en": "A sample plugin with code",
+        "ru": "Образец плагина с кодом"
+      },
       "description": "The demo for plugin authors: the smallest plugin that carries code - one skill, one tool.",
       "category": "authors",
       "author": {
@@ -72,7 +80,7 @@
       "repository": "https://github.com/smixs/iva-plugins/tree/main/hello",
       "added": "2026-08-18",
       "version": "0.1.1",
-      "commit": "445496e0df075826ad9f6c4b9ddc129af3ed62de",
+      "commit": "158ef62d308b99aef42d296188df54a647526a5f",
       "summary": {
         "en": "The smallest plugin that carries code: one skill and one tool that greets by name. Copy the folder, rename it, and the whole path of a code plugin is already wired.",
         "ru": "Самый маленький плагин с кодом: один скилл и один инструмент, который здоровается по имени. Скопируйте папку, переименуйте, и весь путь плагина с кодом уже собран."
@@ -95,6 +103,10 @@
     {
       "name": "yandex-taxi",
       "title": "Yandex Taxi",
+      "tagline": {
+        "en": "Orders Yandex Taxi",
+        "ru": "Заказывает Яндекс Такси"
+      },
       "description": "Orders Yandex Taxi through a browser: price quote, order, car tracking. No order without the owner's explicit yes.",
       "category": "services",
       "author": {
@@ -105,7 +117,7 @@
       "repository": "https://github.com/smixs/yandex-taxi-skill",
       "added": "2026-11-22",
       "version": "1.1.0",
-      "commit": "445496e0df075826ad9f6c4b9ddc129af3ed62de",
+      "commit": "158ef62d308b99aef42d296188df54a647526a5f",
       "summary": {
         "en": "Iva orders Yandex Taxi in a browser from your account: she quotes the price, picks the tariff and the card, places the order and watches where the car is. Nothing is ordered without your explicit yes.",
         "ru": "Ива заказывает Яндекс Такси в браузере от вашего аккаунта: называет цену, выбирает тариф и карту, оформляет заказ и следит, где машина. Без вашего явного «да» заказ не делается."
@@ -130,6 +142,10 @@
     {
       "name": "voice-reply",
       "title": "Voice Reply",
+      "tagline": {
+        "en": "Answers with voice",
+        "ru": "Отвечает голосом"
+      },
       "description": "Voice replies in Telegram: a speak button under long answers, a choice of voices, OpenRouter or a local Silero engine.",
       "category": "voice",
       "author": {
@@ -167,6 +183,10 @@
     {
       "name": "alice-webhook",
       "title": "Alice",
+      "tagline": {
+        "en": "Talks through Yandex Alice",
+        "ru": "Говорит через Яндекс Алису"
+      },
       "description": "Yandex Alice as a voice front end: a smart speaker passes what you say to Iva and reads her answer aloud.",
       "category": "voice",
       "author": {
@@ -203,6 +223,10 @@
     {
       "name": "runet",
       "title": "Runet",
+      "tagline": {
+        "en": "Shops at Russian stores",
+        "ru": "Покупает в российских магазинах"
+      },
       "description": "Russian sites and shops from a server abroad: a browser with a kept profile, orders at Market, WB and grocery chains, the VkusVill MCP.",
       "category": "services",
       "author": {
