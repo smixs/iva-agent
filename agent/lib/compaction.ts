@@ -1,25 +1,23 @@
-// Когда история сессии пересказывается (компактация eve). Два порога, одно правило.
+// Одна свёртка — та, что встроена в eve: перед шагом модели eve пересказывает историю,
+// и ход ждёт. Свёртки между ходами больше нет (владелец, 24.10.2026: «отдай Иве свод
+// судьи», ~/.agents/decisions/2026-10-24-iva-compaction-one-path.md).
 //
-// Между ходами — основной путь: канал после законченного хода сам просит eve пересказать
-// историю, пока человек ничего не ждёт (agent/lib/idle-compaction.ts). Порог — 60 % окна
-// модели, но не больше 110 тыс. токенов: у моделей с окном в миллион доля окна одна не
-// сработала бы никогда. Вход 200+ тыс. замедлял каждый шаг; один пересказ около
-// 110 тыс. сокращает последующие входы (владелец, 22.10.2026).
-// Внутри хода — страховка: eve пересказывает историю перед шагом модели, и ход ждёт. Её
-// порог на четверть выше, иначе до свёртки между ходами дело не доходит.
-export const IDLE_COMPACTION_PERCENT = 0.6;
-export const IDLE_COMPACTION_MAX_TOKENS = 110_000;
-const IN_TURN_HEADROOM = 1.25;
+// Порог T = min(300 000, ⌊0,8·W⌋): 300 тыс. предложил владелец, 0,8·W — поправка для
+// окон меньше миллиона (Codex 272 тыс., остальные провайдеры 131 тыс., старые Claude —
+// 200 тыс.). Если замер на c1 покажет шаг на 250–300 тыс. медленнее шага на
+// 100–150 тыс. больше чем в 1,5 раза, потолок в формуле меняется на 200 000.
+const COMPACTION_PERCENT = 0.8;
+const COMPACTION_MAX_TOKENS = 300_000;
 
-/** Вход шага в токенах, с которого история сворачивается между ходами. */
-export function idleCompactionLimit(windowTokens: number): number {
+/** Вход шага в токенах, с которого eve сворачивает историю перед шагом. */
+export function compactionThreshold(windowTokens: number): number {
   return Math.min(
-    Math.floor(windowTokens * IDLE_COMPACTION_PERCENT),
-    IDLE_COMPACTION_MAX_TOKENS,
+    Math.floor(windowTokens * COMPACTION_PERCENT),
+    COMPACTION_MAX_TOKENS,
   );
 }
 
-/** Доля окна для страховки внутри хода (compaction.thresholdPercent у eve). */
+/** Доля окна для compaction.thresholdPercent у eve: порог считает сама eve от окна модели. */
 export function compactionThresholdPercent(windowTokens: number): number {
-  return (idleCompactionLimit(windowTokens) * IN_TURN_HEADROOM) / windowTokens;
+  return compactionThreshold(windowTokens) / windowTokens;
 }

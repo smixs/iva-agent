@@ -42,7 +42,12 @@ await test("TelegramProgress Once/Quiet: claims survive stream recovery (seed 11
           kind: fc.constantFrom("complete", "close", "lose", "restore", "age"),
           step: fc.integer({ min: 0, max: 2 }),
           text: fc.boolean(),
-          elapsed: fc.constantFrom(0, 1, 10_000, 10_001),
+          elapsed: fc.constantFrom(
+            0,
+            1,
+            status.PROGRESS_MIN_TURN_MS,
+            status.PROGRESS_MIN_TURN_MS + 1,
+          ),
         }),
         { maxLength: 30 },
       ),
@@ -91,7 +96,7 @@ await test("TelegramProgress Once/Quiet: claims survive stream recovery (seed 11
                 event.step >= step &&
                 event.text &&
                 !claimed &&
-                now - 100_000 > 10_000;
+                now - 100_000 > status.PROGRESS_MIN_TURN_MS;
               if (!closed && event.step >= step) step = event.step;
               stream.completeStep(event.step, event.text ? "Checking." : "");
               assert.equal(
@@ -489,7 +494,7 @@ await test("PBT смешивает ходы, шаги, инструменты, �
         let step = 0;
         let words: string[] = [];
         let tool = false;
-        let phase: "idle" | "running" | "final" | "compacting" = "idle";
+        let phase: "idle" | "running" | "final" | "held" = "idle";
         let flow: InstanceType<typeof status.TelegramDraftStream> | undefined;
         const frames = () =>
           calls.filter((c) => c.method === "sendRichMessageDraft");
@@ -502,7 +507,6 @@ await test("PBT смешивает ходы, шаги, инструменты, �
           sessionId: null,
           turnId: null,
           draftId: null,
-          compacting: null,
           resetAt: null,
         });
         try {
@@ -612,11 +616,8 @@ await test("PBT смешивает ходы, шаги, инструменты, �
                 sessionId,
                 "completed",
               );
-              runStatus.setChatStatus(
-                key,
-                chatTakeOverPatch({ sessionId, compacting: true }),
-              );
-              phase = "compacting";
+              runStatus.setChatStatus(key, chatTakeOverPatch({ sessionId }));
+              phase = "held";
             }
             if (op === "end") {
               await status.finishTelegramStatus(
@@ -632,7 +633,6 @@ await test("PBT смешивает ходы, шаги, инструменты, �
                 sessionId: null,
                 turnId: null,
                 draftId: null,
-                compacting: null,
                 ingressId: null,
                 ingressAt: null,
                 turnAt: null,

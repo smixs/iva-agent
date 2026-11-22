@@ -85,6 +85,10 @@ export function writtenInLanguage(tr: Translate): string {
  * `data` — `<слово>: <имя>`. Промпт Watch даёт их модели, а Bridge по тем же словам узнаёт
  * «Я в курсе» и гасит пункт сам, без хода модели: слова одни, разъехаться им нельзя.
  */
+export function watchAnswered(tr: Translate, time: string): string {
+  return `✅ ${tr("replied at", "ответил в")} ${time}`;
+}
+
 export function watchButtons(tr: Translate) {
   return [
     { label: tr("To tasks", "В задачи"), word: tr("To tasks", "В задачи") },

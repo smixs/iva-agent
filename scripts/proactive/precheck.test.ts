@@ -15,6 +15,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { z } from "zod";
 import {
   MAIL_QUERY,
+  MAIL_UPDATES_QUERY,
   mailSource,
   parseChats,
   proxyCallTool,
@@ -365,9 +366,16 @@ function gws(answers: Record<string, Awaited<ReturnType<GwsRun>>>) {
   const calls: Array<readonly string[]> = [];
   const run: GwsRun = (args) => {
     calls.push(args);
-    const params = JSON.parse(args[5] ?? "{}") as { id?: string };
-    const answer = answers[params.id ?? "list"];
-    return Promise.resolve(answer ?? { code: 1, stdout: "" });
+    const params = JSON.parse(args[5] ?? "{}") as { id?: string; q?: string };
+    // Два списка: основной — ключ `list`, Updates — `updates` (без него — пустой список).
+    const listKey = params.q === MAIL_UPDATES_QUERY ? "updates" : "list";
+    const answer = answers[params.id ?? listKey];
+    return Promise.resolve(
+      answer ??
+        (listKey === "updates" && params.id === undefined
+          ? { code: 0, stdout: "{}" }
+          : { code: 1, stdout: "" }),
+    );
   };
   return { run, calls };
 }
@@ -423,10 +431,77 @@ test("mail: unread inbox without categories, a newsletter (List-Unsubscribe) is 
     "--params",
     JSON.stringify({ userId: "me", q: MAIL_QUERY, maxResults: 20 }),
   ]);
-  assert.match(
-    String(calls[1]?.[5]),
-    /"format":"metadata","metadataHeaders":\["From","List-Unsubscribe"\]/u,
+  assert.deepEqual(calls[1], [
+    "gmail",
+    "users",
+    "messages",
+    "list",
+    "--params",
+    JSON.stringify({ userId: "me", q: MAIL_UPDATES_QUERY, maxResults: 10 }),
+  ]);
+  assert.equal(
+    MAIL_UPDATES_QUERY,
+    "is:unread in:inbox category:updates newer_than:1d",
   );
+  assert.match(
+    String(calls[2]?.[5]),
+    /"format":"metadata","metadataHeaders":\["From","Subject","List-Unsubscribe"\]/u,
+  );
+});
+
+const ids = (prefix: string, n: number) =>
+  Array.from({ length: n }, (_, i) => ({ id: `${prefix}${i}` }));
+const listOf = (messages: object[], extra: object = {}) => ({
+  code: 0,
+  stdout: JSON.stringify({ messages, ...extra }),
+});
+
+test("mail: an Updates letter with List-Unsubscribe is an item with its subject; a Primary one is dropped and the log names the rule", async () => {
+  const { run } = gws({
+    list: listOf([{ id: "p1" }]),
+    updates: listOf([{ id: "u1" }]),
+    p1: metadata({
+      From: "news@shop.example",
+      "List-Unsubscribe": "<mailto:x>",
+    }),
+    u1: metadata({
+      From: "Air <noreply@air.example>",
+      Subject: "Online check-in is open",
+      "List-Unsubscribe": "<mailto:x>",
+    }),
+  });
+  const logs: string[] = [];
+  const result = await mailSource(run, (l) => logs.push(l)).check();
+  assert.deepEqual(result.items, [
+    {
+      key: "mail:u1",
+      unread: 1,
+      from: { email: "noreply@air.example", name: "Air" },
+      subject: "Online check-in is open",
+    },
+  ]);
+  assert.deepEqual(logs, ["proactive: mail p1 dropped: List-Unsubscribe"]);
+});
+
+test("mail: 20 Primary and 10 Updates coexist; a letter in both lists appears once; a full list is logged", async () => {
+  const primary = ids("p", 20);
+  const updates = [...ids("u", 9), { id: "p0" }];
+  const answers: Record<string, Awaited<ReturnType<GwsRun>>> = {
+    list: listOf([...primary, { id: "p-extra" }], { nextPageToken: "t" }),
+    updates: listOf(updates, { nextPageToken: "t2" }),
+  };
+  for (const { id } of [...primary, ...updates])
+    answers[id] = metadata({ From: "a@b.c", Subject: `s ${id}` });
+  const { run } = gws(answers);
+  const logs: string[] = [];
+  const result = await mailSource(run, (l) => logs.push(l)).check();
+  assert.equal(result.items.length, 29);
+  assert.equal(new Set(result.items.map((i) => i.key)).size, 29);
+  assert.equal(result.items.filter((i) => i.subject !== undefined).length, 10);
+  assert.deepEqual(logs, [
+    "proactive: mail inbox list has more letters than the limit 20",
+    "proactive: mail updates list has more letters than the limit 10",
+  ]);
 });
 
 test("mail: no messages key means empty", async () => {
@@ -480,7 +555,7 @@ test("mail: at most 20 letters per run, ids that are not Gmail ids are dropped",
   const { run, calls } = gws(answers);
   const result = await mailSource(run).check();
   assert.equal(result.items.length, 20);
-  assert.equal(calls.length, 21);
+  assert.equal(calls.length, 22);
 });
 
 test("senderOf: the address in angle brackets, or a bare address", () => {
@@ -730,5 +805,52 @@ test(`PBT exported topic belongs to the selected chat and latest message (seed=$
       },
     ),
     { seed: SEED, numRuns: 80 },
+  );
+});
+
+/* eslint-disable @typescript-eslint/require-await -- Async transport fixtures return deterministic acknowledgements. */
+test("live-dialog read recognizes out=true, dates and owner direction", async () => {
+  const { readDialog } = await import("./precheck.ts");
+  const now = Date.UTC(2026, 10, 3, 10);
+  const calls: unknown[] = [];
+  const dialog = await readDialog(
+    async (name, args) => {
+      calls.push([name, args]);
+      return results([
+        { date: new Date(now - 60_000).toISOString(), text: "peer" },
+        {
+          date: new Date(now - 300_000).toISOString(),
+          out: true,
+          text: "owner",
+        },
+      ]);
+    },
+    "tg:123",
+    now,
+  );
+  assert.deepEqual(dialog, {
+    lastPeerMs: now - 60_000,
+    lastOwnerMs: now - 300_000,
+  });
+  assert.deepEqual(calls, [["get_history", { chat_id: 123, limit: 100 }]]);
+  await assert.rejects(
+    readDialog(
+      async (_name, args) => {
+        if (args.limit !== 100)
+          throw new Error("offline during history expansion");
+        return results(
+          Array.from({ length: 100 }, () => ({
+            date: new Date(now).toISOString(),
+          })),
+        );
+      },
+      "tg:123",
+      now,
+    ),
+    /offline during history expansion/,
+  );
+  await assert.rejects(
+    readDialog(async () => results([{ out: true }]), "tg:123", now),
+    /valid date/,
   );
 });

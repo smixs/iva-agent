@@ -181,3 +181,49 @@ test("пример: незакрытый фенс 10к строк - один к�
   assert.ok(html.includes("<pre>"));
   assert.ok(Date.now() - started < 5000);
 });
+
+test(`folds in any arrangement never leave literal tags or unbalanced quotes (seed ${SEED})`, () => {
+  const piece = fc.constantFrom(
+    "<details>",
+    "</details>",
+    "<summary>",
+    "</summary>",
+    "<details open>",
+    "<summary>Итог</summary>",
+    "текст",
+    "\n",
+    "\n\n",
+    "> цитата\n",
+    "**b**",
+    "<",
+    "&",
+    "\n```\n",
+    "```js\n",
+    "```",
+    "*_`",
+  );
+  fc.assert(
+    fc.property(
+      fc.array(piece, { maxLength: 40 }).map((a) => a.join("")),
+      fc.integer({ min: 100, max: 400 }),
+      (text, limit) => {
+        for (const chunk of toTelegramHtmlChunks(text, limit)) {
+          assert.ok(chunk.length <= limit);
+          // Литерал в коде легитимен, а длинный <pre> режется по атомам HTML:
+          // буквы тега проверяем только там, где кода нет.
+          if (!text.includes("```"))
+            assert.doesNotMatch(chunk, /&lt;\/?(?:details|summary)/);
+          assert.equal(
+            (chunk.match(/<pre>/g) ?? []).length,
+            (chunk.match(/<\/pre>/g) ?? []).length,
+          );
+          assert.equal(
+            (chunk.match(/<blockquote[ >]/g) ?? []).length,
+            (chunk.match(/<\/blockquote>/g) ?? []).length,
+          );
+        }
+      },
+    ),
+    { seed: SEED, numRuns: 500 },
+  );
+});

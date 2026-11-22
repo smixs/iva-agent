@@ -11,6 +11,8 @@ export const TELEGRAM_USERS_LIMIT = 500;
 export const TELEGRAM_GROUPS_LIMIT = 200;
 /** Сколько писем проверка почты смотрит за прогон. */
 export const MAIL_LIMIT = 20;
+/** И сколько непрочитанных писем Updates за последние сутки: отдельный список, чтобы не вытеснять основные. */
+export const MAIL_UPDATES_LIMIT = 10;
 /** Окно Brief и сроки напоминаний Watch о днях рождения Google Контактов. */
 export const BIRTHDAY_LOOKAHEAD_DAYS = 7;
 export const BIRTHDAY_NOTICE_DAYS = 3;
@@ -30,6 +32,9 @@ export type ProactiveConfig = {
   readonly insightTimes: readonly string[];
   readonly urgentSenders: readonly string[];
 };
+
+/** Owner silence before Watch can report a Telegram chat (beside staleMinutes). */
+export const LIVE_DIALOG_MINUTES = 15;
 
 export const PROACTIVE_DEFAULTS: ProactiveConfig = {
   enabled: true,

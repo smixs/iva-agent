@@ -194,6 +194,41 @@ await test("строки существующего .env разбираются 
   );
 });
 
+await test(".env.example читается одинаково и сервисом, и командой: комментарии только отдельной строкой", () => {
+  const text = readFileSync(
+    new URL("../.env.example", import.meta.url),
+    "utf8",
+  );
+  // `node --env-file` обрезает значение на `#`, а `EnvironmentFile=` у systemd - нет:
+  // комментарий в конце строки становится частью значения юнитов (#385).
+  const trailing = text
+    .split(/\r?\n/u)
+    .filter((line) =>
+      /^\s*(?:export\s+)?[A-Za-z_][A-Za-z0-9_]*\s*=.*#/u.test(line),
+    )
+    .map((line) => line.split("=")[0]);
+  assert.deepEqual(
+    trailing,
+    [],
+    "комментарий - строкой выше, не после значения",
+  );
+  assert.deepEqual(ambiguousEnvLines(text), []);
+  // Старая установка, где владелец вписал id в прежнюю строку шаблона: `iva doctor`
+  // называет ключ по сырому тексту строки, и с русским, и с латинским комментарием.
+  assert.deepEqual(
+    ambiguousEnvLines(
+      "TELEGRAM_DIGEST_CHAT_ID=123456789   # chat_id\nTELEGRAM_DIGEST_CHAT_ID=1 # отчёты\n",
+    ),
+    [
+      { key: "TELEGRAM_DIGEST_CHAT_ID", problem: ENV_VALUE_PROBLEM.special },
+      {
+        key: "TELEGRAM_DIGEST_CHAT_ID",
+        problem: ENV_VALUE_PROBLEM["non-ascii"],
+      },
+    ],
+  );
+});
+
 await test("NUL: процесс обрывает значение, поэтому запись обязана отказать", () => {
   const poisoned = `sk-live-a${NUL}BCDEF`;
   // Прямая запись мимо formatEnvLine — то, что делал прежний писатель.

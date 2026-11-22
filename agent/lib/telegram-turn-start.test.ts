@@ -480,7 +480,7 @@ void test("a takeover carries the queued sign: compaction and reminder claims ke
     queuedSessionId: "session-1",
   };
   for (const patch of [
-    chatTakeOverPatch({ sessionId: "session-1", compacting: true }),
+    chatTakeOverPatch({ sessionId: "session-1" }),
     chatTakeOverPatch({ sessionId: "session-reminder" }),
   ]) {
     const store = statusStore({ status: "idle", generation: 3, ...sign });
@@ -880,9 +880,9 @@ void test("early ingress time survives adoption when the same session also owns 
   assert.equal(store.get().queuedIngressId, undefined);
 });
 
-void test("a takeover for compaction or a reminder clears the previous Stop fact", async () => {
+void test("a takeover clears the previous Stop fact", async () => {
   for (const fields of [
-    { sessionId: "session-1", compacting: true as const },
+    { sessionId: "session-1" },
     { sessionId: "session-reminder" },
   ]) {
     const store = statusStore({

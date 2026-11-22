@@ -80,10 +80,7 @@ const languageLabel = (value: string, ctx: MenuContext) =>
           : escapeRichText(value);
 
 const cancelLine = (ctx: MenuContext) =>
-  `${button(ctx.tr("Cancel", "Отмена"), `iva_menu:${SID}:o`, "danger")} — ${ctx.tr(
-    "leave the prompt without changing anything.",
-    "выйти из ввода, ничего не меняя.",
-  )}`;
+  button(ctx.tr("Cancel", "Отмена"), `iva_menu:${SID}:o`, "danger");
 
 // Текущий список для экрана: через запятую, с обрезкой по длине; пусто — «нет».
 function termsLabel(terms: string[], ctx: MenuContext): string {
@@ -199,7 +196,6 @@ export default {
     const terms = parseKeyterms(env[TERMS_VAR]);
     const text = [
       `# ${ctx.tr("🎤 Voice", "🎤 Голос")}`,
-      `${ctx.tr("Deepgram key", "Ключ Deepgram")}: ${hasKey ? ctx.tr("set", "есть") : ctx.tr("not set", "нет")}.`,
       ...(hasKey
         ? []
         : [
@@ -208,11 +204,12 @@ export default {
               "Без ключа голосовые не распознаются.",
             ),
           ]),
-      `${ctx.tr("Language", "Язык")}: ${languageLabel(language, ctx)}.`,
-      `${button(ctx.tr("🔑 Set the key", "🔑 Указать ключ"), `iva_menu:${SID}:key`)} — ${ctx.tr(
-        "send the key in the next message, I'll delete it from the chat.",
-        "пришли ключ следующим сообщением, я удалю его из чата.",
-      )}`,
+      button(
+        hasKey
+          ? ctx.tr("🔑 Change the Deepgram key", "🔑 Сменить ключ Deepgram")
+          : ctx.tr("🔑 Set the Deepgram key", "🔑 Указать ключ Deepgram"),
+        `iva_menu:${SID}:key`,
+      ),
       buttonRow(
         LANGS.map((value) =>
           button(
@@ -222,10 +219,10 @@ export default {
         ),
       ),
       `${ctx.tr("Names and terms", "Имена и термины")}: ${termsLabel(terms, ctx)}.`,
-      `${button(ctx.tr("✏️ Names and terms", "✏️ Имена и термины"), `iva_menu:${SID}:terms`)} — ${ctx.tr(
-        "names and words Deepgram should spell your way.",
-        "имена и слова, которые Deepgram должен писать как у тебя.",
-      )}`,
+      button(
+        ctx.tr("✏️ Names and terms", "✏️ Имена и термины"),
+        `iva_menu:${SID}:terms`,
+      ),
       menuBackLine(ctx, PARENT),
     ].join("\n\n");
     return { text };
@@ -336,14 +333,11 @@ export default {
           [
             `# ${ctx.tr("🎤 Names and terms", "🎤 Имена и термины")}`,
             termsRejection(problem, ctx),
-            `${button(ctx.tr("✏️ Try again", "✏️ Ввести заново"), `iva_menu:${SID}:terms`)} — ${ctx.tr(
-              "send the list once more.",
-              "прислать список ещё раз.",
-            )}`,
-            `${button(ctx.tr("‹ Voice", "‹ Голос"), `iva_menu:${SID}:o`)} — ${ctx.tr(
-              "back to the voice settings, nothing changed.",
-              "вернуться к настройкам голоса, ничего не меняя.",
-            )}`,
+            button(
+              ctx.tr("✏️ Try again", "✏️ Ввести заново"),
+              `iva_menu:${SID}:terms`,
+            ),
+            button(ctx.tr("‹ Voice", "‹ Голос"), `iva_menu:${SID}:o`),
           ].join("\n\n"),
         );
       }

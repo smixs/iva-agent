@@ -119,8 +119,8 @@ test("F14: concurrent chat and helper use separate wire models and image verdict
     helper.result.session.agent.modelReference?.contextWindowTokens,
     8000,
   );
-  assert.equal(chat.result.session.compaction.threshold, 6000);
-  assert.equal(helper.result.session.compaction.threshold, 6000);
+  assert.equal(chat.result.session.compaction.threshold, 6400);
+  assert.equal(helper.result.session.compaction.threshold, 6400);
   for (const kind of [
     "watch",
     "brief",

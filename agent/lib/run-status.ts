@@ -42,7 +42,7 @@ export type TelegramSessionRetirement = {
 const retirement = (v: unknown): v is TelegramSessionRetirement =>
   parseTelegramSessionRetirement(v) !== null;
 
-/** Поля хода: заполнены, только пока чат держит ход, принятый вход или свёртка. */
+/** Поля хода: заполнены, только пока чат держит ход или принятый вход. */
 const turnFields = {
   ingressId: text,
   ingressAt: num,
@@ -53,7 +53,6 @@ const turnFields = {
   firstOutputAt: num,
   latencyLogged: mark,
   progressClaimed: mark,
-  compacting: mark,
 };
 /** Отметки: переживают конец хода и не говорят, занят ли чат. */
 const markFields = {
@@ -64,6 +63,11 @@ const markFields = {
   updatedAt: num,
   wasCancelled: mark,
   resetAt: num,
+  // Эпоха последнего успешного сброса чата (requestedAt намерения /new): durable
+  // свидетель «remote за эту эпоху уже падал» и живая граница после снятия
+  // намерения (specs/ResetEpoch.tla, cFence). Не падает: понизить её вернуло бы
+  // помеченным ею элементам вид «после».
+  resetEpoch: num,
   turnQuestion: str,
   turnQuestionMedia: bool,
   queuedIngressId: text,
@@ -78,6 +82,10 @@ const markFields = {
   restartRetryUpdate: num,
   restartRetryQuestion: str,
   restartRetryMedia: bool,
+  // Id сообщения-статуса долгого хода (specs/ProgressMessage.tla). Отметка, а не поле хода:
+  // сброс Bridge, жнец и захват снимают поля хода другим процессом и не знают про этот id,
+  // а сообщение в чате остаётся «работаю» навсегда. Пока отметка жива, её удалит retireProgressMessage.
+  progressMessageId: num,
   // Следы индикаторов версий до 0.5.0: уходят, когда меняется пара хода.
   statusMessageId: legacy,
   statusAt: legacy,
@@ -101,22 +109,20 @@ type Running<Own extends TurnField, Absent extends TurnField> = Marks & {
 
 // Инварианты строки (TurnFieldsOnlyWhenBusy): какие поля хода состояние обязано нести и
 // каких нести не может. Свободный чат не несёт ни одного; у принятого входа есть ingressId
-// и ещё нет сессии, а значит нет ни хода, ни свёртки; свёртка идёт под сессией и без хода.
+// и ещё нет сессии, а значит нет и хода.
 const turnFieldNames = Object.keys(turnFields) as TurnField[];
 const rowRules: Record<
-  "free" | "accepted" | "turn" | "compacting",
+  "free" | "accepted" | "turn",
   { own: readonly TurnField[]; absent: readonly TurnField[] }
 > = {
   free: { own: [], absent: turnFieldNames },
-  accepted: { own: ["ingressId"], absent: ["turnId", "compacting"] },
-  turn: { own: ["sessionId"], absent: ["compacting"] },
-  compacting: { own: ["sessionId", "compacting"], absent: ["turnId"] },
+  accepted: { own: ["ingressId"], absent: ["turnId"] },
+  turn: { own: ["sessionId"], absent: [] },
 };
 export type ChatRecord =
   | (Marks & { status?: "idle" } & { [K in TurnField]?: undefined })
-  | Running<"ingressId", "sessionId" | "turnId" | "compacting">
-  | Running<"sessionId", "compacting">
-  | Running<"sessionId" | "compacting", "turnId">;
+  | Running<"ingressId", "sessionId" | "turnId">
+  | Running<"sessionId", never>;
 type ChatRecordFields = Partial<Checked<typeof markFields> & TurnFields>;
 /** Ожидание CAS: поле сравнивается с записью; `undefined` значит «поля нет». */
 export type ChatRecordExpected = ChatRecordFields;
@@ -125,7 +131,7 @@ export type ChatRecordPatch = {
   [K in keyof ChatRecordFields]?: ChatRecordFields[K] | null;
 };
 
-/** Состояние чата. Занят: accepted, turn, compacting. Остальные Bridge считает свободными. */
+/** Состояние чата. Занят: accepted, turn. Остальные Bridge считает свободными. */
 export type ChatState =
   | "free"
   | "awaiting-owner"
@@ -133,18 +139,15 @@ export type ChatState =
   | "retiring"
   | "accepted"
   | "turn"
-  | "compacting"
   | "stale";
 
 type RawRecord = Record<string, unknown>;
 const rowOf = (raw: RawRecord): keyof typeof rowRules =>
   raw.status !== "running"
     ? "free"
-    : raw.compacting !== undefined
-      ? "compacting"
-      : raw.sessionId !== undefined
-        ? "turn"
-        : "accepted";
+    : raw.sessionId !== undefined
+      ? "turn"
+      : "accepted";
 
 /** Что в записи нарушает схему: `поле: причина`. Пусто — запись верна. */
 export function chatRecordViolations(raw: RawRecord): string[] {
@@ -235,7 +238,6 @@ export const TURN_FIELDS_CLEARED = {
   firstOutputAt: null,
   latencyLogged: null,
   progressClaimed: null,
-  compacting: null,
 } as const satisfies Record<TurnField, null>;
 
 // Ход длиннее этого считаем зависшим/осиротевшим (упал без terminal-события):
@@ -427,7 +429,7 @@ export function updateTelegramPendingInputRequests(
 
 /**
  * Состояние чата по записи — единственное место, где оно выводится из полей. Занятый чат
- * (ход, принятый вход, свёртка) с записью старше срока — `stale`: его снимет жнец Bridge.
+ * (ход, принятый вход) с записью старше срока — `stale`: его снимет жнец Bridge.
  * У свободного чата отметки читаются по старшинству: покой сессии, предложенный повтор,
  * открытый вопрос владельцу.
  */
@@ -442,7 +444,6 @@ export function chatState(
       now - record.updatedAt >= staleMs
     )
       return "stale";
-    if (record.compacting === true) return "compacting";
     return record.sessionId === undefined ? "accepted" : "turn";
   }
   if (!record) return "free";
@@ -454,23 +455,44 @@ export function chatState(
     : "free";
 }
 
+/**
+ * Сообщение-статус долгого хода по записи (specs/ProgressMessage.tla): единственное место,
+ * где `progressClaimed` и `progressMessageId` становятся словом.
+ *   none    — ничего не отправлено;
+ *   claimed — отправка идёт, провалилась, id потерян или сообщение исчезло: в этом ходе не повторять;
+ *   shown   — живой статус идущего хода;
+ *   stale   — id без заявки: сообщение надо удалить.
+ */
+export type ProgressMessage = "none" | "claimed" | "shown" | "stale";
+
+export function progressMessageOf(
+  record:
+    | {
+        readonly progressClaimed?: unknown;
+        readonly progressMessageId?: unknown;
+      }
+    | null
+    | undefined,
+): ProgressMessage {
+  const claimed = record?.progressClaimed === true;
+  const posted =
+    typeof record?.progressMessageId === "number" &&
+    !Number.isNaN(record.progressMessageId);
+  if (claimed) return posted ? "shown" : "claimed";
+  return posted ? "stale" : "none";
+}
+
 /** Чат занят: Bridge держит новые сообщения в очереди. */
 export const chatBusy = (state: ChatState): boolean =>
-  state === "turn" || state === "accepted" || state === "compacting";
+  state === "turn" || state === "accepted";
 
 /** Запись держит чат: занят либо завис и ждёт жнеца. */
 export const chatHeld = (state: ChatState): boolean =>
   chatBusy(state) || state === "stale";
 
-// true, когда по chatKey реально идёт ход или свёртка между ходами (running и не протух).
+// true, когда по chatKey реально идёт ход (running и не протух).
 export function isRunning(chatKey: string, now = Date.now()): boolean {
   return chatBusy(chatState(getChatStatus(chatKey), now));
-}
-
-// true, когда чат занят свёрткой между ходами (agent/lib/idle-compaction.ts): запись
-// running несёт compacting: true. Срок у неё тот же, что у хода.
-export function isCompacting(chatKey: string, now = Date.now()): boolean {
-  return chatState(getChatStatus(chatKey), now) === "compacting";
 }
 
 // Чем запись метит updatedAt: обычная — временем записи, запись знака очереди — прежним.

@@ -20,7 +20,6 @@ import {
   chatBusy,
   chatState,
   getChatStatus,
-  isCompacting,
   isRunning,
   RUN_STALE_MS,
   setChatStatusIf,
@@ -246,7 +245,15 @@ export async function routeMessageUpdate(
     queueCountImpl = queueCount,
     replyToBotImpl = isReplyToBot,
     shouldQueueImpl = shouldQueueBusyUpdate,
-    enqueueImpl = enqueueTelegramQueueUpdate,
+    enqueueImpl = (
+      key: string,
+      candidate: TelegramQueueUpdate,
+      enqueuedAt?: number,
+      resetFence?: number | null,
+    ) =>
+      enqueueTelegramQueueUpdate(key, candidate, enqueuedAt, { resetFence }),
+    arrivedAt,
+    resetFence,
     acknowledgeImpl = acknowledgeQueued,
     traceQueuedImpl,
     deliverImpl = pacedDelivery,
@@ -262,7 +269,6 @@ export async function routeMessageUpdate(
     botUsername = BOT_USERNAME,
     logImpl = log,
     resetPendingImpl = hasPrivateResetIntent,
-    compactingImpl = isCompacting,
   }: {
     chatKeyImpl?: (update: TelegramQueueUpdate) => string | null;
     loadQueueImpl?: () => MaybePromise<TelegramQueueDocument>;
@@ -281,7 +287,15 @@ export async function routeMessageUpdate(
     enqueueImpl?: (
       key: string,
       candidate: TelegramQueueUpdate,
+      enqueuedAt?: number,
+      resetFence?: number | null,
     ) => MaybePromise<{ count: number; added?: boolean }>;
+    // Время постановки во входящие inbox: элемент очереди хранит прибытие, а не
+    // промоут, чтобы отсечка сброса по времени видела сообщения до /new.
+    arrivedAt?: number;
+    // Эпоха сброса durable-inbox записи (null — записи без пометки): очередь
+    // хранит эпоху приёма, а не эпоху на момент промоута.
+    resetFence?: number | null;
     acknowledgeImpl?: (
       update: TelegramQueueUpdate,
       count: number,
@@ -304,19 +318,17 @@ export async function routeMessageUpdate(
     botUsername?: unknown;
     logImpl?: (...parts: unknown[]) => void;
     resetPendingImpl?: (chatKey: string) => boolean;
-    compactingImpl?: (chatKey: string) => boolean;
   } = {},
 ): Promise<RouteMessageResult> {
   const key = chatKeyImpl(update);
   const turnPolicy = turnPolicyImpl();
   // Remove this fence when vercel/eve#2876 is fixed in the installed eve.
   const resetPending = key !== null && resetPendingImpl(key);
-  // Ответ на сообщение бота идёт мимо очереди. Пока чат занят свёрткой между ходами, и он
-  // встаёт в очередь: вход сессии eve не переживает перезапуск посреди свёртки.
+  // Ответ на сообщение бота идёт мимо очереди.
   if (
     update.message &&
     key !== null &&
-    (resetPending || !replyToBotImpl(update.message) || compactingImpl(key))
+    (resetPending || !replyToBotImpl(update.message))
   ) {
     const queue = await loadQueueImpl();
     // Прямая доставка не обгоняет очередь чата (specs/QueueDrain.tla, свидетель -switch).
@@ -331,7 +343,7 @@ export async function routeMessageUpdate(
       }
       let queued;
       try {
-        queued = await enqueueImpl(key, update);
+        queued = await enqueueImpl(key, update, arrivedAt, resetFence);
       } catch (error) {
         logImpl(
           `queue enqueue failed for update ${update.update_id}:`,

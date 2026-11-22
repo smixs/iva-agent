@@ -4,8 +4,9 @@
 // живёт синтаксис тега, для моста, меню и визардов.
 //
 // Контракт: <tg-button type="callback_data" data="…" style="…">подпись</tg-button> стоит
-// ПРЯМО в строке рядом с пояснением («кнопка — что она делает»); <tg-button-row> — только
-// для равноправных коротких вариантов (да/нет, список). Нажатие приходит обычным
+// своей строкой; подпись сама говорит, что делает кнопка (ADR-0015, 17.11.2026). Строка
+// «кнопка — пояснение» разбирается, но экраны меню её не пишут. <tg-button-row> — для
+// равноправных коротких вариантов (да/нет, список). Нажатие приходит обычным
 // callback_query с тем же data, поэтому обработчики кнопок не меняются.
 
 import { readFileSync } from "node:fs";
@@ -281,15 +282,12 @@ export function buttonRow(buttons: readonly string[]): string {
   return `<tg-button-row>${buttons.join("")}</tg-button-row>`;
 }
 
-/** Строка «‹ Меню — вернуться в настройки»: одна подпись у всех экранов /menu. */
+/** Кнопка «‹ Меню»: одна у всех экранов /menu. */
 export function menuBackLine(
   ctx: { readonly tr: (en: string, ru: string) => string },
   parent: string,
 ): string {
-  return `${button(ctx.tr("‹ Menu", "‹ Меню"), `iva_menu:${parent}:o`)} — ${ctx.tr(
-    "back to the settings.",
-    "вернуться в настройки.",
-  )}`;
+  return button(ctx.tr("‹ Menu", "‹ Меню"), `iva_menu:${parent}:o`);
 }
 
 /**

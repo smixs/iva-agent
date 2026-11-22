@@ -253,14 +253,8 @@ function renderInterviewQuestion(st: MenuState, ctx: MenuContext) {
       "Reply with text, or skip / finish below.",
       "Ответь текстом, или пропусти / заверши кнопкой ниже.",
     ),
-    `${button(ctx.tr("Skip", "Пропустить"), `iva_menu:${SID}:skip`)} — ${ctx.tr(
-      "leave this one and move on.",
-      "оставить этот вопрос и идти дальше.",
-    )}`,
-    `${button(ctx.tr("Finish", "Завершить"), `iva_menu:${SID}:fin`)} — ${ctx.tr(
-      "stop here and send what you've answered.",
-      "остановиться и отдать уже отвеченное.",
-    )}`,
+    button(ctx.tr("Skip", "Пропустить"), `iva_menu:${SID}:skip`),
+    button(ctx.tr("Finish", "Завершить"), `iva_menu:${SID}:fin`),
     menuBackLine(ctx, PARENT),
   ].join("\n\n");
   return ctx.flows.screen(st, text);
@@ -398,16 +392,13 @@ export default {
     const text = [
       `# ${T("💾 Memory core", "💾 Ядро памяти")}`,
       body,
-      `${button(T("Take the interview", "Пройти интервью"), `iva_menu:${SID}:go`)} — ${T(
-        "the interview asks 6 questions; Iva turns your answers into the core.",
-        "интервью — 6 вопросов; ответы ива сама превратит в ядро.",
-      )}`,
-      `${button(
+      button(T("Take the interview", "Пройти интервью"), `iva_menu:${SID}:go`),
+      button(
         nightOn
           ? T("🌙 Night: on", "🌙 Ночь: вкл")
           : T("🌙 Night: off", "🌙 Ночь: выкл"),
         `iva_menu:${SID}:night`,
-      )} — ${T("toggle code-driven nightly memory.", "включить или остановить ночную память.")}`,
+      ),
       menuBackLine(ctx, PARENT),
     ].join("\n\n");
     return { text };

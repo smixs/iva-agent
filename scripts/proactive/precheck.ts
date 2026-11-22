@@ -5,8 +5,9 @@
 //
 // Telegram — инструмент `list_chats` прокси юзербота (telegram-mcp f1a2d8e,
 // telegram_mcp/tools/chats.py:449-578): `{"results":[…]}`, пусто — строка `No chats found…`.
-// Почта — `gws`: список непрочитанных входящих без категорий, затем заголовки каждого письма;
-// рассылка (`List-Unsubscribe`) пунктом не становится.
+// Почта — `gws`: два списка (непрочитанные входящие без категорий и непрочитанные Updates за
+// сутки), затем заголовки каждого письма; рассылка (`List-Unsubscribe`) из основного списка
+// пунктом не становится, письмо Updates — становится, с темой для модели.
 // Сбои (T3) — `systemctl --user`: таймерные сервисы пользователя и сервисы плагинов; идут и при
 // выключенном тумблере.
 import { execFile } from "node:child_process";
@@ -18,7 +19,9 @@ import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import {
+  LIVE_DIALOG_MINUTES,
   MAIL_LIMIT,
+  MAIL_UPDATES_LIMIT,
   TELEGRAM_GROUPS_LIMIT,
   TELEGRAM_USERS_LIMIT,
   type Sender,
@@ -39,8 +42,11 @@ export type Birthday = {
 export type WatchItem = {
   readonly key: string;
   readonly unread: number;
+  readonly dialog?: Dialog;
   readonly from: Sender;
   readonly note?: string;
+  /** Тема автоматического письма (Updates): чужой текст, в промпт идёт через Gate. */
+  readonly subject?: string;
   /** Поля ДР до обработки промпта; в seen не сохраняются. */
   readonly birthday?: Birthday;
   readonly message_id?: number;
@@ -59,7 +65,18 @@ export type SourceResult = {
   readonly silent?: boolean;
 };
 
+export type Dialog = {
+  readonly lastOwnerMs: number | null;
+  readonly lastPeerMs: number | null;
+};
+
 export type Source = {
+  /** Fresh read-only history, including chats whose unread count is now zero. */
+  readonly dialog?: (
+    key: string,
+    now: number,
+    since?: number,
+  ) => Promise<Dialog>;
   readonly name: string;
   /** Префикс ключей источника в `seen`. */
   readonly prefix: string;
@@ -252,6 +269,52 @@ function topicOfLink(link: string, item: WatchItem, message_id: number) {
   return count(Number(topic)) || undefined;
 }
 
+function telegramMessageTime(row: ChatRecord): number {
+  const at = typeof row?.date === "string" ? Date.parse(row.date) : NaN;
+  if (!Number.isFinite(at))
+    throw new Error("Telegram history has no valid date");
+  return at;
+}
+const latestMessage = (rows: readonly { at: number }[]) =>
+  rows.length ? Math.max(...rows.map((row) => row.at)) : null;
+
+/** get_history uses message_to_dict (out=true); list_messages omits direction upstream. */
+export async function readDialog(
+  call: CallTool,
+  key: string,
+  now: number,
+  since = now - LIVE_DIALOG_MINUTES * 60_000,
+): Promise<Dialog> {
+  if (!/^tg:-?\d+$/u.test(key)) throw new Error("invalid Telegram chat key");
+  for (let limit = 100; Number.isSafeInteger(limit); limit *= 2) {
+    const raw = await call("get_history", {
+      chat_id: Number(key.slice(3)),
+      limit,
+    });
+    const parsed = raw.startsWith("No messages found")
+      ? { results: [] }
+      : (parseJson(raw) as { results?: unknown } | undefined);
+    if (!Array.isArray(parsed?.results))
+      throw new Error("get_history answered without results");
+    const messages = (parsed.results as ChatRecord[]).map((row) => ({
+      owner: row?.out === true,
+      at: telegramMessageTime(row),
+    }));
+    const dialog = {
+      lastOwnerMs: latestMessage(messages.filter((row) => row.owner)),
+      lastPeerMs: latestMessage(messages.filter((row) => !row.owner)),
+    };
+    const oldest = Math.min(now, ...messages.map((row) => row.at));
+    if (
+      dialog.lastOwnerMs !== null ||
+      messages.length < limit ||
+      oldest <= since
+    )
+      return dialog;
+  }
+  throw new Error("Telegram history does not cover the required interval");
+}
+
 /** Личные чаты и группы с упоминаниями; нет токена прокси — не подключён. */
 export function telegramSource(
   env: NodeJS.ProcessEnv,
@@ -259,7 +322,7 @@ export function telegramSource(
   callTool?: CallTool,
   log: (line: string) => void = console.log,
 ): Source {
-  const check = async (): Promise<SourceResult> => {
+  const connect = (): CallTool | null => {
     // Свой адрес присмотра: у владельца может быть отдельный прокси того же telegram-mcp, которым
     // он пользуется сам. Watch только читает список чатов, а Connection юзербота (отправка от
     // имени владельца) этим адресом не включается.
@@ -268,11 +331,16 @@ export function telegramSource(
       watchUrl === ""
         ? proxyToken(env, dataDir)
         : (env.TELEGRAM_WATCH_TOKEN ?? "").trim();
-    if (token === "" && callTool === undefined) return NOT_CONNECTED;
+    if (token === "" && callTool === undefined) return null;
     const port = env.TELEGRAM_MCP_PORT || "8724";
-    const call =
+    return (
       callTool ??
-      proxyCallTool(watchUrl || `http://127.0.0.1:${port}/mcp`, token);
+      proxyCallTool(watchUrl || `http://127.0.0.1:${port}/mcp`, token)
+    );
+  };
+  const check = async (): Promise<SourceResult> => {
+    const call = connect();
+    if (call === null) return NOT_CONNECTED;
     // Чат самого бота Ивы — не пропущенное: id бота стоит в начале его токена.
     const botId = String(env.TELEGRAM_BOT_TOKEN ?? "").split(":")[0] ?? "";
     try {
@@ -281,13 +349,24 @@ export function telegramSource(
       return { items: [], error: message(error) };
     }
   };
-  return { name: "telegram", prefix: "tg:", check };
+  return {
+    name: "telegram",
+    prefix: "tg:",
+    check,
+    dialog: async (key, now, since) => {
+      const call = connect();
+      if (!call) throw new Error("Telegram history is not connected");
+      return readDialog(call, key, now, since);
+    },
+  };
 }
 
 // ── Почта ────────────────────────────────────────────────────────────────────────────────
 
 export const MAIL_QUERY =
   "is:unread in:inbox -category:promotions -category:social -category:forums -category:updates";
+export const MAIL_UPDATES_QUERY =
+  "is:unread in:inbox category:updates newer_than:1d";
 
 /** Исход `gws`: код выхода (2 — не авторизован), нет бинаря или срок вышел; и stdout. */
 export type GwsRun = (
@@ -368,24 +447,65 @@ function header(message: Record<string, unknown> | null, wanted: string) {
   return typeof found?.value === "string" ? found.value : null;
 }
 
-/** Непрочитанные входящие без категорий и рассылок, не больше MAIL_LIMIT; срок 20 с на всё. */
-export function mailSource(run: GwsRun = runGws): Source {
+/** Один список писем: годные id и, если писем больше предела, строка в журнал. */
+async function listIds(
+  run: GwsRun,
+  q: string,
+  limit: number,
+  name: string,
+  deadline: number,
+  log: (line: string) => void,
+): Promise<string[] | null> {
+  const list = await gwsJson(
+    run,
+    { userId: "me", q, maxResults: limit },
+    deadline,
+  );
+  if (list === null) return null;
+  if (typeof list.nextPageToken === "string" && list.nextPageToken !== "")
+    log(
+      `proactive: mail ${name} list has more letters than the limit ${limit}`,
+    );
+  return (Array.isArray(list.messages) ? list.messages : [])
+    .map((m: { id?: unknown }) => m.id)
+    .filter(
+      (id): id is string => typeof id === "string" && /^[\w-]+$/u.test(id),
+    )
+    .slice(0, limit);
+}
+
+/**
+ * Непрочитанные входящие без категорий и рассылок (MAIL_LIMIT) и непрочитанные Updates за сутки
+ * (MAIL_UPDATES_LIMIT); срок 20 с на всё. Письмо Updates рассылкой не отбрасывается.
+ */
+export function mailSource(
+  run: GwsRun = runGws,
+  log: (line: string) => void = console.log,
+): Source {
   const check = async (): Promise<SourceResult> => {
     const deadline = Date.now() + MAIL_TIMEOUT_MS;
     try {
-      const list = await gwsJson(
+      const primary = await listIds(
         run,
-        { userId: "me", q: MAIL_QUERY, maxResults: MAIL_LIMIT },
+        MAIL_QUERY,
+        MAIL_LIMIT,
+        "inbox",
         deadline,
+        log,
       );
-      if (list === null) return NOT_CONNECTED;
-      const ids = (Array.isArray(list.messages) ? list.messages : [])
-        .map((m: { id?: unknown }) => m.id)
-        .filter(
-          (id): id is string => typeof id === "string" && /^[\w-]+$/u.test(id),
-        )
-        .slice(0, MAIL_LIMIT);
-      const headers = ["From", "List-Unsubscribe"];
+      if (primary === null) return NOT_CONNECTED;
+      const updates =
+        (await listIds(
+          run,
+          MAIL_UPDATES_QUERY,
+          MAIL_UPDATES_LIMIT,
+          "updates",
+          deadline,
+          log,
+        )) ?? [];
+      const updatesSet = new Set(updates);
+      const ids = [...new Set([...primary, ...updates])];
+      const headers = ["From", "Subject", "List-Unsubscribe"];
       const metadata = { format: "metadata", metadataHeaders: headers };
       const messages = await Promise.all(
         ids.map((id) =>
@@ -396,8 +516,20 @@ export function mailSource(run: GwsRun = runGws): Source {
       for (const [index, id] of ids.entries()) {
         const m = messages[index] ?? null;
         const from = senderOf(header(m, "From") ?? "");
-        if (m !== null && header(m, "List-Unsubscribe") === null)
-          items.push({ key: `mail:${id}`, unread: 1, from });
+        const automated = updatesSet.has(id);
+        if (m === null) {
+          log(`proactive: mail ${id} dropped: no metadata`);
+        } else if (!automated && header(m, "List-Unsubscribe") !== null) {
+          log(`proactive: mail ${id} dropped: List-Unsubscribe`);
+        } else {
+          const subject = automated ? (header(m, "Subject") ?? "") : "";
+          items.push({
+            key: `mail:${id}`,
+            unread: 1,
+            from,
+            ...(automated ? { subject } : {}),
+          });
+        }
       }
       return { items, error: null };
     } catch (error) {

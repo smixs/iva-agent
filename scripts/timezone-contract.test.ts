@@ -123,7 +123,7 @@ test("R1: every TypeScript time consumer calls the shared resolver", () => {
   assert.equal(resolveOperationalTimeZone("Mars/Olympus"), "UTC");
   assertValidTimeZone(resolveOperationalTimeZone("Mars/Olympus"));
   const consumers = [
-    "agent/instrumentation.ts",
+    "agent/lib/process-timezone.ts",
     "agent/instructions/now.ts",
     "agent/lib/vault-daily.ts",
     "scripts/memory/night.ts",

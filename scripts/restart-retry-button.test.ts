@@ -323,7 +323,6 @@ void test("a tap keeps its snapshotted question after a literal old-version take
     firstOutputAt: null,
     sessionId: null,
     turnId: null,
-    compacting: null,
     draftId: null,
     latencyLogged: null,
     resetAt: null,

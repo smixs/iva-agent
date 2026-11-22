@@ -11,7 +11,7 @@
 # starts fail2ban, enables unattended security upgrades, and hardens sshd LAST — with
 # a reload, so the session you are typing in is never dropped. It ends with the two
 # commands that finish the install — and, when the upgrade brought a new kernel, with
-# a reboot, because install.sh refuses to run while one is pending.
+# a reboot, because install.sh refuses to install packages while one is pending.
 #
 # It never asks for an SSH key: you log in as the new user with the password you set
 # here, and hardening stops at PermitRootLogin no. Headless runs can still authorize a
@@ -1462,8 +1462,8 @@ final_card() {
   )
   if [ "$pending" = true ]; then
     card+=(
-      "install.sh refuses to start before that reboot: a pending kernel"
-      "upgrade makes every package install hang."
+      "install.sh stops before installing packages until that reboot:"
+      "a pending kernel upgrade makes every package install hang."
     )
   else
     card+=("Keep this root session open until you verify login in a NEW terminal.")
@@ -1511,7 +1511,7 @@ reboot_if_needed() {
     esac
   fi
   if [ "$do_reboot" != true ]; then
-    warn "Not rebooting. install.sh will refuse to run until the kernel upgrade is applied — run 'sudo reboot' when you are ready, then continue with the two commands above."
+    warn "Not rebooting. install.sh will refuse to install packages until the kernel upgrade is applied — run 'sudo reboot' when you are ready, then continue with the two commands above."
     return 0
   fi
   log "rebooting after the kernel upgrade"

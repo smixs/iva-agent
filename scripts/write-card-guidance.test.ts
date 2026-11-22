@@ -241,7 +241,7 @@ void test(
         tools: [metadata],
         modelReference: { id: "test/model" },
       },
-      compaction: { threshold: 100_000, recentWindowSize: 100 },
+      compaction: { threshold: 100_000, recentWindowTokens: 100, summaryMaxOutputTokens: 400 },
       continuationToken: "test",
       sessionId: "test",
       history: [],

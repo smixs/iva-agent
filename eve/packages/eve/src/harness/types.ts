@@ -35,9 +35,24 @@ export type SessionStateMap = Readonly<Record<string, unknown>>;
  * Compaction configuration stored on the session.
  */
 export interface CompactionConfig {
+  /**
+   * Input size recorded when the last summary was rejected. Automatic
+   * compaction waits for the input to grow past it before retrying; a manual
+   * request bypasses the gate.
+   */
+  readonly failedAttemptInputTokens?: number;
   readonly lastKnownInputTokens?: number;
   readonly lastKnownPromptMessageCount?: number;
-  readonly recentWindowSize: number;
+  /**
+   * Manual "compact before the next step" mark written by the session compact
+   * route (e.g. `/compact`). Consumed and cleared by the next step's
+   * compaction pass.
+   */
+  readonly manualRequested?: boolean;
+  /** Budget for the verbatim recent tail kept through compaction, in tokens. */
+  readonly recentWindowTokens: number;
+  /** Output bound of the single summarization call. */
+  readonly summaryMaxOutputTokens: number;
   readonly threshold: number;
   readonly thresholdPercent?: number;
 }

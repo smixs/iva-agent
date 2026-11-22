@@ -108,7 +108,9 @@ export function launchIvaCommand(
     "--user",
     "--collect",
     `--unit=${unitPrefix}-${Date.now()}`,
-    `--working-directory=${ROOT}`,
+    // Not --working-directory: systemd-run has it only since 240, and the property is what
+    // that option sets (systemd 239 on RHEL/Alma 8 refuses the option, accepts the property).
+    `--property=WorkingDirectory=${ROOT}`,
     `--setenv=PATH=${process.env.PATH || ""}`,
     `--setenv=ASSISTANT_DATA_DIR=${DATA_DIR}`,
     NODE,

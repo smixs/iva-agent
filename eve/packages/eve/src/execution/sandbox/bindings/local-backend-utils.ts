@@ -103,12 +103,22 @@ export function resolveLocalBackendTemplatesDirectory(
   return join(cacheDirectory, backendCacheName, "templates");
 }
 
+export function resolveLocalBackendSessionsDirectory(
+  cacheDirectory: string,
+  backendCacheName: string,
+): string {
+  return join(cacheDirectory, backendCacheName, "sessions");
+}
+
 export function resolveLocalBackendSessionRootPath(
   cacheDirectory: string,
   backendCacheName: string,
   sessionKey: string,
 ): string {
-  return join(cacheDirectory, backendCacheName, "sessions", sessionKey);
+  return join(
+    resolveLocalBackendSessionsDirectory(cacheDirectory, backendCacheName),
+    sessionKey,
+  );
 }
 
 export async function writeSandboxSeedFiles(

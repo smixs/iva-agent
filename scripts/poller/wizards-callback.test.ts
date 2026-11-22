@@ -160,7 +160,7 @@ test("chg рисует экран провайдеров", async () => {
     assert.equal(await tap(chat, user, "iva_model:chg"), true);
     assert.equal(st.step, "provider");
     assert.equal(edits().length, 1);
-    assert.match(edits()[0].text, /Pick a provider:/u);
+    assert.doesNotMatch(edits()[0].text, /Pick a provider|API key/u);
     assert.match(edits()[0].keyboard, /iva_model:prov:ollama/u);
   } finally {
     if (previousFetch) globalThis.fetch = previousFetch;
@@ -255,11 +255,7 @@ test("R8 helper model: full /model path, back button, saved clears helper flag",
     await handleModelCmd(chat, user, { msgId: 11 });
     assert.match(
       edits().at(-1)!.text,
-      /<tg-button[^>]*data="iva_model:helper"[^>]*>Helper and background model: same as Iva<\/tg-button>/,
-    );
-    assert.match(
-      edits().at(-1)!.text,
-      /Used by helpers, Watch, Brief and Insight/,
+      /<tg-button[^>]*data="iva_model:helper"[^>]*>Helpers: same as Iva<\/tg-button>/,
     );
     assert.match(edits().at(-1)!.keyboard, /iva_model:helper/);
     rmSync(join(home, "settings.json"), { force: true });

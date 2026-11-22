@@ -8,7 +8,8 @@ import type {
 } from "#harness/types.js";
 import type { RuntimeTurnAgent } from "#runtime/agent/bootstrap.js";
 
-const DEFAULT_COMPACTION_RECENT_WINDOW_SIZE = 10;
+const DEFAULT_COMPACTION_RECENT_WINDOW_TOKENS = 20_000;
+const DEFAULT_COMPACTION_SUMMARY_MAX_OUTPUT_TOKENS = 8_192;
 const DEFAULT_COMPACTION_THRESHOLD_PERCENT = 0.9;
 const FALLBACK_COMPACTION_THRESHOLD = 100_000;
 export const DEFAULT_ROOT_MAX_INPUT_TOKENS_PER_SESSION = 40_000_000;
@@ -30,8 +31,10 @@ export interface AuthoredSessionLimits {
 export function createCompactionConfig(
   input: {
     readonly contextWindowTokens?: number;
+    readonly failedAttemptInputTokens?: number;
     readonly lastKnownInputTokens?: number;
     readonly lastKnownPromptMessageCount?: number;
+    readonly manualRequested?: boolean;
     readonly thresholdPercent?: number;
   } = {},
 ) {
@@ -41,21 +44,22 @@ export function createCompactionConfig(
       ? FALLBACK_COMPACTION_THRESHOLD
       : Math.max(1, Math.floor(input.contextWindowTokens * thresholdPercent));
 
-  const config = {
-    recentWindowSize: DEFAULT_COMPACTION_RECENT_WINDOW_SIZE,
+  return {
+    ...(input.failedAttemptInputTokens === undefined
+      ? {}
+      : { failedAttemptInputTokens: input.failedAttemptInputTokens }),
+    ...(input.lastKnownInputTokens === undefined
+      ? {}
+      : {
+          lastKnownInputTokens: input.lastKnownInputTokens,
+          lastKnownPromptMessageCount: input.lastKnownPromptMessageCount,
+        }),
+    ...(input.manualRequested === true ? { manualRequested: true } : {}),
+    recentWindowTokens: DEFAULT_COMPACTION_RECENT_WINDOW_TOKENS,
+    summaryMaxOutputTokens: DEFAULT_COMPACTION_SUMMARY_MAX_OUTPUT_TOKENS,
     threshold,
     thresholdPercent,
   };
-
-  if (input.lastKnownInputTokens !== undefined) {
-    return {
-      ...config,
-      lastKnownInputTokens: input.lastKnownInputTokens,
-      lastKnownPromptMessageCount: input.lastKnownPromptMessageCount,
-    };
-  }
-
-  return config;
 }
 
 export interface CreateSessionInput {
@@ -163,8 +167,10 @@ export function refreshSessionFromTurnAgent(input: {
     ),
     compaction: createCompactionConfig({
       contextWindowTokens: input.turnAgent.model?.contextWindowTokens,
+      failedAttemptInputTokens: input.session.compaction.failedAttemptInputTokens,
       lastKnownInputTokens: input.session.compaction.lastKnownInputTokens,
       lastKnownPromptMessageCount: input.session.compaction.lastKnownPromptMessageCount,
+      manualRequested: input.session.compaction.manualRequested,
       thresholdPercent: input.compactionOverrides?.thresholdPercent,
     }),
   };
@@ -202,8 +208,10 @@ export function projectToDurableSession(session: HarnessSession): DurableSession
   const durable: {
     agent: { system: string };
     compaction?: {
+      failedAttemptInputTokens?: number;
       lastKnownInputTokens?: number;
       lastKnownPromptMessageCount?: number;
+      manualRequested?: boolean;
     };
     continuationToken: string;
     history: HarnessSession["history"];
@@ -223,12 +231,16 @@ export function projectToDurableSession(session: HarnessSession): DurableSession
   };
 
   if (
+    session.compaction.failedAttemptInputTokens !== undefined ||
     session.compaction.lastKnownInputTokens !== undefined ||
-    session.compaction.lastKnownPromptMessageCount !== undefined
+    session.compaction.lastKnownPromptMessageCount !== undefined ||
+    session.compaction.manualRequested !== undefined
   ) {
     durable.compaction = {
+      failedAttemptInputTokens: session.compaction.failedAttemptInputTokens,
       lastKnownInputTokens: session.compaction.lastKnownInputTokens,
       lastKnownPromptMessageCount: session.compaction.lastKnownPromptMessageCount,
+      manualRequested: session.compaction.manualRequested,
     };
   }
   if (session.rootSessionId !== undefined) {
@@ -276,8 +288,10 @@ export function hydrateDurableSession(input: {
     agent: createSessionAgent(turnAgent, durable.agent.system, tools),
     compaction: createCompactionConfig({
       contextWindowTokens: turnAgent.model?.contextWindowTokens,
+      failedAttemptInputTokens: durable.compaction?.failedAttemptInputTokens,
       lastKnownInputTokens: durable.compaction?.lastKnownInputTokens,
       lastKnownPromptMessageCount: durable.compaction?.lastKnownPromptMessageCount,
+      manualRequested: durable.compaction?.manualRequested,
       thresholdPercent: input.compactionOverrides?.thresholdPercent,
     }),
     continuationToken: durable.continuationToken,

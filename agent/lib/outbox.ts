@@ -253,3 +253,127 @@ export async function sendThroughOutbox(
   }
   return result;
 }
+
+// ── Сообщение-статус долгого хода ─────────────────────────────────────────────────────────
+// Один пост, правки на месте, удаление в конце хода (specs/ProgressMessage.tla). Это не
+// ответ модели: он не rich, не виджет и не режется на куски — одно сообщение Bot API на
+// любой вход, всегда без звука. Гейт и конвертер те же, что у ответа; TELEGRAM_RICH_REPLIES
+// не читается. Ответ Telegram разбирается здесь, а не у транспорта: ack — единственное, что
+// знает вызывающий (draft stream).
+
+/** Ответ Bot API на один вызов: тело разобрано, status — код HTTP. */
+export type StatusReply = {
+  ok: boolean;
+  status: number;
+  description?: string;
+  result?: { message_id?: unknown };
+  parameters?: { retry_after?: unknown };
+};
+
+/** Транспорт статуса: только провод. `plain` — тот же текст без тегов и parse_mode. */
+export type StatusTransport = {
+  send: (text: string, mode: "html" | "plain") => Promise<StatusReply>;
+  edit: (
+    id: number,
+    text: string,
+    mode: "html" | "plain",
+  ) => Promise<StatusReply>;
+  remove: (id: number) => Promise<StatusReply>;
+};
+
+/**
+ * Что вызывающий должен сделать с отказом:
+ *   ok    — дошло (у поста с id сообщения, у правки «не изменено» тоже ok);
+ *   gone  — любой 4xx кроме 429 и разметки: сообщения нет или его нельзя тронуть;
+ *   wait  — 429, подождать retryAfterMs;
+ *   error — 5xx или сеть.
+ */
+export type StatusAck =
+  | { kind: "ok"; messageId?: number }
+  | { kind: "gone" }
+  | { kind: "wait"; retryAfterMs: number }
+  | { kind: "error"; error: string; unsent?: true };
+
+const STATUS_LIMIT = 4096;
+
+// Сообщение-статус одно: берём первый чанк конвертера. Пустая отрисовка — не отправляем.
+function statusHtml(text: string): string {
+  const gated = redactNotice(text);
+  return toTelegramHtmlChunks(gated, STATUS_LIMIT)[0] ?? "";
+}
+
+const markupRefusal = (reply: StatusReply): boolean =>
+  reply.status === 400 &&
+  /can['’]?t parse entities|unsupported start tag|unexpected end tag|can['’]?t find end of|entity/iu.test(
+    reply.description ?? "",
+  );
+
+function classify(reply: StatusReply, edit: boolean): StatusAck {
+  if (reply.ok) {
+    const id = reply.result?.message_id;
+    return typeof id === "number" && Number.isSafeInteger(id)
+      ? { kind: "ok", messageId: id }
+      : { kind: "ok" };
+  }
+  if (
+    edit &&
+    reply.status === 400 &&
+    /message is not modified/iu.test(reply.description ?? "")
+  )
+    return { kind: "ok" };
+  if (reply.status === 429) {
+    const seconds = Number(reply.parameters?.retry_after);
+    return {
+      kind: "wait",
+      retryAfterMs:
+        1000 * Math.max(1, Number.isFinite(seconds) ? Math.ceil(seconds) : 1),
+    };
+  }
+  if (reply.status >= 400 && reply.status < 500) return { kind: "gone" };
+  return { kind: "error", error: `status ${reply.status}` };
+}
+
+// Пост и правка делят тело: HTML, при отказе по разметке один повтор без тегов.
+async function sendStatusBody(
+  text: string,
+  call: (body: string, mode: "html" | "plain") => Promise<StatusReply>,
+  edit: boolean,
+): Promise<StatusAck> {
+  const html = statusHtml(text);
+  if (!html) return { kind: "error", error: "empty rendering", unsent: true };
+  try {
+    const reply = await call(html, "html");
+    if (!markupRefusal(reply)) return classify(reply, edit);
+    const plain = htmlToPlain(html).slice(0, STATUS_LIMIT);
+    if (!plain.trim()) return { kind: "error", error: "empty rendering" };
+    return classify(await call(plain, "plain"), edit);
+  } catch (err) {
+    return { kind: "error", error: String(err) };
+  }
+}
+
+export function postStatusThroughOutbox(
+  text: string,
+  t: StatusTransport,
+): Promise<StatusAck> {
+  return sendStatusBody(text, (body, mode) => t.send(body, mode), false);
+}
+
+export function editStatusThroughOutbox(
+  id: number,
+  text: string,
+  t: StatusTransport,
+): Promise<StatusAck> {
+  return sendStatusBody(text, (body, mode) => t.edit(id, body, mode), true);
+}
+
+export async function deleteStatusThroughOutbox(
+  id: number,
+  t: StatusTransport,
+): Promise<StatusAck> {
+  try {
+    return classify(await t.remove(id), false);
+  } catch (err) {
+    return { kind: "error", error: String(err) };
+  }
+}

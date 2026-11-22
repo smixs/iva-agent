@@ -48,7 +48,8 @@ function messageUnavailable(response: {
   );
 }
 
-function transport(tg: Handle, deadline?: number) {
+// Одна точка сроков Bot API для правок: сообщение-статус (channels/telegram.ts statusTransport) берёт её же.
+export function transport(tg: Pick<Handle, "request">, deadline?: number) {
   return async (method: string, body: Record<string, unknown>) => {
     const remaining =
       deadline === undefined ? Infinity : deadline - performance.now();

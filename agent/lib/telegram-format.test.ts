@@ -182,3 +182,90 @@ void test("HTML path never shows button tags: url becomes a link, the rest their
   assert.match(html, /<b>Да<\/b>/);
   assert.match(html, /<a href="https:\/\/iva-agent\.com">Сайт<\/a>/);
 });
+
+await test("HTML path renders a fold as an expandable quote with a bold title", () => {
+  assert.deepEqual(
+    toTelegramHtmlChunks(
+      "Итог.\n\n<details><summary>Детали</summary>\n\n- шаг **один**\n> цитата\n\n`код`\n</details>",
+    ),
+    [
+      "Итог.\n\n<blockquote expandable><b>Детали</b>\n• шаг <b>один</b>\nцитата\n\n<code>код</code></blockquote>",
+    ],
+  );
+  assert.deepEqual(toTelegramHtmlChunks("<details>тело</details>"), [
+    "<blockquote expandable>тело</blockquote>",
+  ]);
+});
+
+await test("malformed folds degrade to balanced text without literal tags", () => {
+  assert.deepEqual(toTelegramHtmlChunks("<details>a"), [
+    "<blockquote expandable>a</blockquote>",
+  ]);
+  assert.deepEqual(toTelegramHtmlChunks("x</details>y"), ["xy"]);
+  assert.deepEqual(
+    toTelegramHtmlChunks("<details><details>a</details>b</details>"),
+    ["<blockquote expandable>ab</blockquote>"],
+  );
+  assert.deepEqual(toTelegramHtmlChunks("```\n<details>код</details>\n```"), [
+    "<pre>&lt;details&gt;код&lt;/details&gt;</pre>",
+  ]);
+});
+
+await test("a long fold is cut into self-contained expandable quotes within the limit", () => {
+  const body = Array.from({ length: 60 }, (_, i) => `строка ${i}`).join("\n");
+  const chunks = toTelegramHtmlChunks(
+    `<details><summary>S</summary>${body}</details>`,
+    300,
+  );
+  assert.ok(chunks.length > 1);
+  for (const c of chunks) {
+    assert.ok(c.length <= 300);
+    assert.match(c, /^<blockquote expandable>/);
+    assert.match(c, /<\/blockquote>$/);
+  }
+});
+
+await test("a fenced log inside a fold renders as code, with no markdown applied to its lines", () => {
+  assert.deepEqual(
+    toTelegramHtmlChunks(
+      "<details><summary>Лог</summary>\n\n```\na *b* _c_ `d`\n- x <y>\n```\nпосле **текст**\n</details>",
+    ),
+    [
+      "<blockquote expandable><b>Лог</b><pre>a *b* _c_ `d`\n- x &lt;y&gt;</pre>после <b>текст</b></blockquote>",
+    ],
+  );
+});
+
+await test("a long fold with a fenced log stays code in every chunk", () => {
+  const log = Array.from({ length: 40 }, (_, i) => `*n${i}* \`x\``).join("\n");
+  const chunks = toTelegramHtmlChunks(
+    `<details><summary>S</summary>\n\n\`\`\`\n${log}\n\`\`\`\n</details>`,
+    300,
+  );
+  assert.ok(chunks.length > 1);
+  for (const c of chunks) {
+    assert.ok(c.length <= 300);
+    assert.doesNotMatch(c, /```|<b>n|<code>/);
+    assert.match(c, /^<blockquote expandable>/);
+  }
+});
+
+await test("a literal <details> in a fence does not erase the marks of a real fold in other chunks", () => {
+  const filler = Array.from({ length: 60 }, (_, i) => `строка ${i}`).join("\n");
+  const chunks = toTelegramHtmlChunks(
+    `\`\`\`\n<details>литерал</details>\n\`\`\`\n\n<details><summary>Д</summary>${filler}</details>`,
+    300,
+  );
+  assert.ok(chunks.length > 2);
+  assert.match(chunks[0], /^<pre>&lt;details&gt;/);
+  for (const c of chunks.slice(1)) assert.match(c, /^<blockquote expandable>/);
+});
+
+await test("a quote line right before a fold does not swallow it", () => {
+  assert.deepEqual(toTelegramHtmlChunks("> цитата\n<details>тело</details>"), [
+    "<blockquote>цитата</blockquote>\n<blockquote expandable>тело</blockquote>",
+  ]);
+  assert.deepEqual(toTelegramHtmlChunks("<details>тело</details>\n> цитата"), [
+    "<blockquote expandable>тело</blockquote>\n\n<blockquote>цитата</blockquote>",
+  ]);
+});

@@ -131,6 +131,133 @@ const tableCells = (line: string): string[] =>
     .split("|")
     .map((c) => c.trim());
 
+// ── <details> → раскрывающаяся цитата ─────────────────────────────────────────────
+// parse_mode=HTML не знает <details>, но знает <blockquote expandable>. Складка
+// превращается в строки markdown-цитаты с меткой FOLD_MARK (управляющий символ, которого
+// в тексте нет) ДО нарезки: пустые строки тела тоже цитата, поэтому складка не рвётся на
+// абзацах, а длинная режется по строкам, и каждый кусок остаётся самостоятельной цитатой.
+// Цитата в цитате в Telegram невозможна, поэтому «>» внутри тела срезается. Не закрытый
+// <details> берёт всё до конца текста, лишний </details> и вложенный <details> просто
+// пропадают. Фенс кода внутри складки теряет строки-ограды, а каждая его строка несёт
+// CODE_MARK: нарезка может разрезать код, и каждый кусок сам знает, какие строки - код
+// (<pre> без разбора markdown), а какие - текст цитаты.
+const FOLD_MARK = "\u0001";
+const CODE_MARK = "\u0004";
+const FENCE_OPEN = "\u0002";
+const FENCE_CLOSE = "\u0003";
+const FENCE_REF = new RegExp(`${FENCE_OPEN}(\\d+)${FENCE_CLOSE}`, "g");
+const DETAILS_TAG_RE = /<\/?details\b[^>]*>/gi;
+
+function foldToQuote(rawBody: string): string {
+  let body = rawBody.replace(DETAILS_TAG_RE, "");
+  let title = "";
+  const sm = /<summary\b[^>]*>([\s\S]*?)<\/summary>/i.exec(body);
+  if (sm) {
+    title = sm[1]
+      .replace(/<[^>]*>/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    body = body.slice(0, sm.index) + body.slice(sm.index + sm[0].length);
+  }
+  body = body.replace(/<\/?summary\b[^>]*>/gi, "");
+  let inCode = false;
+  const lines: string[] = [];
+  for (const l of body.replace(/^\n+|\s+$/g, "").split("\n")) {
+    if (inCode) {
+      if (/^```\s*$/.test(l)) inCode = false;
+      else lines.push(`${CODE_MARK}${l}`);
+    } else if (/^```\w*\s*$/.test(l)) inCode = true;
+    else
+      lines.push(
+        l
+          .replace(/^\s*(?:>\s?)+/, "")
+          .replace(/^\s*[-*+]\s+/, "• ")
+          .replace(/^#{1,6}\s+(.*)$/, "**$1**"),
+      );
+  }
+  if (lines.length === 1 && lines[0] === "") lines.length = 0;
+  if (title) lines.unshift(`**${title.replace(/\*\*/g, "")}**`);
+  return lines.length ? lines.map((l) => `>${FOLD_MARK}${l}`).join("\n") : "";
+}
+
+export function foldsToQuotes(md: unknown): string {
+  const text = String(md);
+  if (!/<\/?(?:details|summary)\b/i.test(text)) return text;
+  // Уже сложено (второй проход по куску): буквальный <details> в коде не должен
+  // стереть метки настоящей складки.
+  if (new RegExp(`^>${FOLD_MARK}`, "m").test(text)) return text;
+  try {
+    // Фенсы прячем под метки, чтобы теги внутри кода остались буквами.
+    const fences: string[] = [];
+    const masked: string[] = [];
+    let fence: string[] | null = null;
+    for (const line of text
+      .replace(/\r\n/g, "\n")
+      .split(FOLD_MARK)
+      .join("")
+      .split(CODE_MARK)
+      .join("")
+      .split(FENCE_OPEN)
+      .join("")
+      .split(FENCE_CLOSE)
+      .join("")
+      .split("\n")) {
+      if (fence) {
+        fence.push(line);
+        if (/^```\s*$/.test(line)) {
+          fences.push(fence.join("\n"));
+          masked.push(`${FENCE_OPEN}${fences.length - 1}${FENCE_CLOSE}`);
+          fence = null;
+        }
+      } else if (/^```\w*\s*$/.test(line)) fence = [line];
+      else masked.push(line);
+    }
+    if (fence) {
+      fences.push(fence.join("\n"));
+      masked.push(`${FENCE_OPEN}${fences.length - 1}${FENCE_CLOSE}`);
+    }
+    const unmask = (v: string) =>
+      v.replace(FENCE_REF, (_m, i: string) => fences[Number(i)] ?? "");
+    const s = masked.join("\n");
+    let out = "";
+    let pos = 0;
+    let depth = 0;
+    let bodyStart = 0;
+    const emit = (body: string) => {
+      const quote = foldToQuote(unmask(body));
+      if (!quote) return;
+      if (out && !out.endsWith("\n")) out += "\n";
+      out += `${quote}\n`;
+    };
+    for (const m of s.matchAll(DETAILS_TAG_RE)) {
+      const end = m.index + m[0].length;
+      if (m[0][1] !== "/") {
+        if (depth === 0) {
+          out += s.slice(pos, m.index);
+          bodyStart = end;
+          pos = end;
+        }
+        depth++;
+      } else if (depth === 0) {
+        out += s.slice(pos, m.index);
+        pos = end;
+      } else if (--depth === 0) {
+        emit(s.slice(bodyStart, m.index));
+        pos = end;
+      }
+    }
+    if (depth > 0) emit(s.slice(bodyStart));
+    else out += s.slice(pos);
+    // Одинокий <summary> вне складки тоже не должен доехать буквами.
+    return unmask(out.replace(/<\/?summary\b[^>]*>/gi, "")).replace(
+      /^\n(?=>)/,
+      "",
+    );
+  } catch {
+    return text.replace(/<\/?(?:details|summary)\b[^>]*>/gi, "");
+  }
+}
+
 // ── block + inline converter ────────────────────────────────────────────────────
 function convert(md: unknown): string {
   // PUA-метка code-span извне срезается до разбора фенсов: иначе она проезжает
@@ -190,18 +317,40 @@ function convert(md: unknown): string {
     // blockquote (grouped, multi-line); leading "!" on first line → expandable
     if (/^>\s?/.test(line)) {
       const ql = [];
+      const isFold = (l: string) => l.startsWith(`>${FOLD_MARK}`);
+      const foldGroup = isFold(line);
       while (i < lines.length) {
         const mm = /^>\s?(.*)$/.exec(lines[i]);
-        if (!mm) break;
+        // Цитата и складка рядом - две отдельные цитаты, иначе складка теряет «expandable».
+        if (!mm || isFold(lines[i]) !== foldGroup) break;
         ql.push(mm[1]);
         i++;
       }
       let expandable = false;
-      if (ql[0] && /^!\s?/.test(ql[0])) {
+      // Складка <details> приходит строками с меткой FOLD_MARK у каждой строки
+      // (см. foldsToQuotes): так каждый кусок нарезки остаётся раскрывающейся цитатой.
+      if (ql[0]?.startsWith(FOLD_MARK)) {
+        expandable = true;
+        for (let k = 0; k < ql.length; k++)
+          ql[k] = ql[k].startsWith(FOLD_MARK) ? ql[k].slice(1) : ql[k];
+      } else if (ql[0] && /^!\s?/.test(ql[0])) {
         expandable = true;
         ql[0] = ql[0].replace(/^!\s?/, "");
       }
-      const inner = ql.map(inlineHtml).join("\n");
+      let inner = "";
+      let prevText = false;
+      for (let k = 0; k < ql.length;) {
+        if (expandable && ql[k].startsWith(CODE_MARK)) {
+          const code = [];
+          while (k < ql.length && ql[k].startsWith(CODE_MARK))
+            code.push(ql[k++].slice(1));
+          inner += `<pre>${escHtml(code.join("\n"))}</pre>`;
+          prevText = false;
+        } else {
+          inner += (prevText ? "\n" : "") + inlineHtml(ql[k++]);
+          prevText = true;
+        }
+      }
       out.push(
         expandable
           ? `<blockquote expandable>${inner}</blockquote>`
@@ -437,7 +586,7 @@ export function sanitizeTelegramHtml(input: unknown): string {
 // ── public converter ──────────────────────────────────────────────────────────────
 export function mdToTelegramHtml(md: unknown): string {
   try {
-    return sanitizeTelegramHtml(convert(md));
+    return sanitizeTelegramHtml(convert(foldsToQuotes(md)));
   } catch {
     try {
       return escHtml(md);
@@ -589,7 +738,10 @@ export function toTelegramHtmlChunks(md: unknown, limit = 4096): string[] {
     const cap = Math.max(1, limit);
     const srcLimit = Math.min(3500, Math.floor(cap * 0.85));
     const result: string[] = [];
-    for (const src of chunkMarkdown(stripRichButtons(String(md)), srcLimit)) {
+    for (const src of chunkMarkdown(
+      foldsToQuotes(stripRichButtons(String(md))),
+      srcLimit,
+    )) {
       const html = mdToTelegramHtml(src);
       if (html.length <= cap) {
         // Кусок, из которого ничего не отрендерилось (пустой забор, пробелы),

@@ -355,7 +355,7 @@ test("rich: тумблер виджетов пишет TELEGRAM_WIDGETS и от�
     readFileSync(envPath, "utf8"),
     "TELEGRAM_RICH_REPLIES=auto\nTELEGRAM_WIDGETS=never\n",
   );
-  assert.match(st._last?.text ?? "", /виджеты выключены/);
+  assert.match(st._last?.text ?? "", /Виджеты выключены/);
   assert.ok((await labelOf("iva_menu:rich:w:never"))?.endsWith("✓"));
   assert.ok(!(await labelOf("iva_menu:rich:set:never"))?.includes("✓"));
 });
@@ -406,9 +406,8 @@ test("voice: ключ принимается в личке, пишется в .e
   h.st = st;
 
   const view = await voiceScreen.render(st, h.ctx);
-  assert.match(view.text, /Ключ Deepgram: нет/);
+  assert.match(view.text, />🔑 Указать ключ Deepgram</);
   assert.match(view.text, /Без ключа голосовые не распознаются/);
-  assert.match(view.text, /Язык: Русский/);
   assert.ok(
     buttonsOf(view.text)
       .find(([, callback]) => callback === "iva_menu:voice:lang:ru")?.[0]

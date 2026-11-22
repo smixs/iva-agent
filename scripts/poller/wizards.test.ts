@@ -270,11 +270,17 @@ function telegramSpy(t: TestContext): SentCall[] {
       const body = JSON.parse(init?.body ?? "{}") as {
         text?: string;
         rich_message?: { markdown?: string };
+        reply_markup?: { inline_keyboard?: { text: string }[][] };
       };
-      // Экраны визарда — rich: текст экрана лежит в rich_message.markdown.
+      // Rich: экран целиком в rich_message.markdown. Classic: подписи кнопок — в клавиатуре,
+      // их дописываем к тексту, чтобы тест видел экран так же, как владелец.
+      const keys = (body.reply_markup?.inline_keyboard ?? [])
+        .flat()
+        .map((button) => button.text);
       sent.push({
         method,
-        text: body.rich_message?.markdown ?? body.text ?? "",
+        text:
+          body.rich_message?.markdown ?? [body.text ?? "", ...keys].join("\n"),
       });
       return Promise.resolve({
         ok: true,

@@ -65,8 +65,8 @@ async function restartOffer(
   const text = [
     `# ${ctx.tr("💬 Rich replies", "💬 Богатые ответы")}`,
     ctx.tr(
-      `Reply mode: ${label}. It applies after an agent restart (the value is read as the agent starts).`,
-      `Режим ответов: ${label}. Применится после перезапуска агента (значение читается при старте).`,
+      `${label[0].toUpperCase()}${label.slice(1)}. Applies after a restart.`,
+      `${label[0].toUpperCase()}${label.slice(1)}. Применится после перезапуска.`,
     ),
     buttonRow([
       button(
@@ -95,10 +95,6 @@ export default {
     const widgetsMark = (value: Mode) => (widgets === value ? " ✓" : "");
     const text = [
       `# ${ctx.tr("💬 Rich replies", "💬 Богатые ответы")}`,
-      ctx.tr(
-        "Tables, task lists, folds, formulas and pictures go as a Telegram rich message. Buttons work either way: a reply with a button is always sent rich.",
-        "Таблицы, чек-листы, свёртки, формулы и картинки уходят богатым сообщением Telegram. Кнопки работают в любом режиме: ответ с кнопкой всегда уходит богатым.",
-      ),
       ...(invalid === null
         ? []
         : [
@@ -117,10 +113,6 @@ export default {
           `iva_menu:${SID}:set:never`,
         ),
       ]),
-      ctx.tr(
-        "Widgets: Iva draws a live card right in the message: a chart, tabs, a list you can sort. Telegram apps without widgets show its caption.",
-        "Виджеты: Ива рисует живую карточку прямо в сообщении: график, вкладки, список с сортировкой. Приложения Telegram без виджетов показывают её подпись.",
-      ),
       ...(widgetsInvalid === null
         ? []
         : [

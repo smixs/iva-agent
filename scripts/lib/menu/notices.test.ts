@@ -92,21 +92,17 @@ test("reports render off and Watch on on a fresh installation, in either languag
 
   const russian = screen.render({ page: 3 }, makeContext("ru"));
   assert.match(russian.text, /🔔 Уведомления/);
-  assert.match(
-    russian.text,
-    /Алерты — о проблемах и обновлениях — приходят всегда/,
-  );
+  assert.doesNotMatch(russian.text, /Алерты|Отчёты памяти:/);
   assert.deepEqual(labels(russian), [
     ["○ Отчёты памяти", "iva_menu:ntc:set:rep:1"],
     ["✓ Сама пишет", "iva_menu:ntc:set:pro:0"],
     ["○ Инсайт", "iva_menu:ntc:ins:1130"],
     ["‹ Меню", "iva_menu:r:o"],
   ]);
-  assert.match(
+  assert.doesNotMatch(
     russian.text,
-    /Присмотр за пропущенным, обзор дня и инсайт\. О сбоях пишу всегда\./,
+    /Присмотр за пропущенным|черновик плагина/u,
   );
-  assert.match(russian.text, /раз в день: черновик плагина/u);
   assert.doesNotMatch(russian.text, /Время инсайта|Инсайт: каждый/u);
   // Строка дайджеста ушла: её место — времена Brief из настроек.
   assert.match(russian.text, /Обзор дня: 08:30 и 14:00/u);
@@ -114,18 +110,13 @@ test("reports render off and Watch on on a fresh installation, in either languag
 
   const english = screen.render({ page: 0 }, makeContext("en"));
   assert.match(english.text, /🔔 Notices/);
-  assert.match(english.text, /Alerts — problems and updates — always arrive/);
   assert.deepEqual(labels(english), [
     ["○ Memory reports", "iva_menu:ntc:set:rep:1"],
     ["✓ Writes on her own", "iva_menu:ntc:set:pro:0"],
     ["○ Insight", "iva_menu:ntc:ins:1130"],
     ["‹ Menu", "iva_menu:r:o"],
   ]);
-  assert.match(
-    english.text,
-    /Watch for missed items, the daily brief and Insight\. Failures are always reported\./,
-  );
-  assert.match(english.text, /once a day: a plugin draft/u);
+  assert.doesNotMatch(english.text, /Watch for missed items|a plugin draft/u);
   assert.match(english.text, /Daily brief: 08:30 and 14:00/u);
   assert.doesNotMatch(english.text, /digest/iu);
   assert.equal(screen.parent, "r");
@@ -281,12 +272,10 @@ test("a switched-on Insight is ticked, offers its times and says when it comes",
     ["17:30", "iva_menu:ntc:ins:1730"],
     ["‹ Меню", "iva_menu:r:o"],
   ]);
-  assert.match(view.text, /Время инсайта:/u);
   assert.match(view.text, /Инсайт: каждый день в 11:30/u);
   assert.doesNotMatch(view.text, /не придёт|Последний инсайт/u);
 
   const english = screen.render({ page: 0 }, makeContext("en"));
-  assert.match(english.text, /Insight time:/u);
   assert.match(english.text, /Insight: every day at 11:30/u);
 });
 
@@ -467,10 +456,16 @@ test("property: junk Insight arguments write nothing and redraw nothing", async 
   );
 });
 
-test("classic menu: [reports, writes], [Insight], the times row, [‹ Menu]; every data fits 64 bytes", () => {
+test("classic menu: [reports, writes], [Insight, ‹ Menu] or the times row between; every data fits 64 bytes", () => {
   rmSync(proactivePath, { force: true });
   for (const [times, rows] of [
-    [[], [["○ Отчёты памяти", "✓ Сама пишет"], ["○ Инсайт"], ["‹ Меню"]]],
+    [
+      [],
+      [
+        ["○ Отчёты памяти", "✓ Сама пишет"],
+        ["○ Инсайт", "‹ Меню"],
+      ],
+    ],
     [
       ["11:30"],
       [

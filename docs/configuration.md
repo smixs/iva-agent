@@ -64,9 +64,9 @@ For `claude` there is no API key either: install the CLI on the server as the se
 
 If Claude's access token comes from an external synchronization service, Iva can wait through its rotation after HTTP 401 and safely repeat the same call once, before any useful output or tool action in the current turn. Set `claude.authRotationWaitMs` in `data/settings.json` (for example, `{"claude":{"authRotationWaitMs":120000}}`); the default window is 120 seconds. Iva watches `.credentials.json` in `CLAUDE_CONFIG_DIR`, otherwise `~/.claude`, and makes one final call when the access changes or the window ends. Each active attempt retains its usual first-output deadline. A successful repeat stays silent; a final authentication failure with an access-only token asks you to check the external synchronization service. The service that owns the credentials continues to manage refresh.
 
-**Don't inflate the context window.** Iva compacts the conversation between turns once a turn's input reaches 60% of this number (or 110,000 tokens, whichever is smaller), and inside a turn a quarter above that as a safety net. Set it above the model's real window and the compactor fires too late — the request overflows before the conversation gets trimmed. When you switch models, enter the new model's actual window, not a rounder bigger one.
+**Don't inflate the context window.** Before every model step eve compacts the session once the estimated input reaches `min(300,000, 80% of this number)` tokens, keeping the last ~20,000 tokens verbatim. Set the window above the model's real window and the compactor fires too late — the request overflows before the conversation gets trimmed. When you switch models, enter the new model's actual window, not a rounder bigger one.
 
-Use `/compact` to compress an idle conversation with at least 30,000 measured input tokens. Iva confirms completion, then reports the before/after size with the next answer using its first measured model input. During an answer, repeat the command after it finishes. After a restart, one completed turn supplies the input measurement.
+Use `/compact` to mark a session for compression. The mark is durable: the next model step compacts the session before answering, and the reply tells you when it is armed.
 
 ## Telegram
 
@@ -161,3 +161,17 @@ a running process uninterrupted. Ownership checks include the loaded data direct
 foreign content, links and unknown ownership are preserved and reported by `iva doctor`.
 Moving the data directory changes the scope: review preserved old services explicitly.
 Older CLI versions lack these ownership checks, including during a rollback.
+
+Watch stays quiet in a Telegram chat for 15 minutes after your latest outgoing message,
+including urgent senders. It checks the conversation before waking the model and again before
+each HTTP attempt, including retries and split deliveries. Waiting time starts at your latest message; an earlier incoming question counts
+as answered. After you reply following a Watch notice, the next tick replaces that notice
+with “✅ replied at HH:MM” in your time zone and removes its buttons. The recorded message
+IDs also cover split deliveries. A conversation read that cannot establish the window leaves that chat
+quiet for the tick.
+
+Existing `proactive.json` files upgrade in place: the optional `signals` field keeps schema
+version 1; older Iva versions ignore it on rollback. Notices sent by older versions have no
+recorded IDs and keep their previous behavior. A `closing` entry freezes the exact edit text. The next tick repeats that idempotent edit against the same IDs; Telegram’s “message is not modified” response confirms completion with one external effect.
+
+A received ID is atomically written and fsynced to `proactive.json.receipts` before Outbox acknowledges delivery. The next tick replays the receipt if the main state write failed; `receiptCursor` prevents old receipts from reopening a closed notice. A successful state projection removes the journal. Closing reads enough conversation messages to cover the interval since the notice; 100 is the initial fetch size, followed by larger reads when required.

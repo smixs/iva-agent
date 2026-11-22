@@ -5,11 +5,11 @@ The repository keeps bounded models, one per section below: the directory lock (
 floor (`UpdateLock`, `UpdateRun`, `UpdateJob`, `UpdateBranch`, `UpdateFloor`), restart recovery (`RestartRecovery`),
 the half-hourly proactive run (`Proactive`), plugin proposals and plugin modes (`PluginProposal`, `PluginMode`),
 the nightly backup against an oversized vault file and the commit of the vault (`BrainOversize`, `VaultCommit`),
-the draft stop of a turn, the compaction between turns, the tap on a model's button and the drain of the Bridge
-queue in batches (`DraftStop`, `IdleCompaction`, `ButtonTap`, `QueueDrain`), the userbot login (`UserbotLogin`),
+the draft stop of a turn, the tap on a model's button and the drain of the Bridge
+queue in batches (`DraftStop`, `ButtonTap`, `QueueDrain`), the userbot login (`UserbotLogin`),
 the launchd unit (`LaunchdUnit`), the helper run, its outcome and the goal check (`Helpers`, `GoalCheck`), the chat
-record (`ChatRecord`), the reminder row and its turn (`ReminderLifecycle`, `TurnLifecycle`), the reset intent of a
-private chat (`ResetIntent`) and the run of a schedule (`JobRun`). Run them from a temporary directory because TLC writes state files beside the model. Every `*-check.sh` takes `tlc` from `PATH`, and `~/.local/bin/tlc` otherwise; `TLC=` names another path, `TLC_TIMEOUT` and `JAVA_TOOL_OPTIONS` set the time and the heap.
+record (`ChatRecord`), the status message of a long turn (`ProgressMessage`), the reminder row and its turn (`ReminderLifecycle`, `TurnLifecycle`), the reset intent of a
+private chat (`ResetEpoch`) and the run of a schedule (`JobRun`). Run them from a temporary directory because TLC writes state files beside the model. Every `*-check.sh` takes `tlc` from `PATH`, and `~/.local/bin/tlc` otherwise; `TLC=` names another path, `TLC_TIMEOUT` and `JAVA_TOOL_OPTIONS` set the time and the heap.
 
 ## FileLock
 
@@ -264,12 +264,11 @@ or network timeout preserves the count without increasing it.
 
 Two turns may use the same session. Stop reads the draft id and pair once, then
 cancel uses that snapshot even if another turn has started. Duplicate updates
-can cancel a core turn only once. Compaction has a null turn id. An additional
-initial case supplies an inconsistent persisted compaction record with a positive
+can cancel a core turn only once. An additional
+initial case supplies an inconsistent persisted record with a null turn and a positive
 draft id to check the null-turn guard independently of the record writer.
 Turn completion releases the chat record only when its session and turn still
-match. Compaction release checks its session and the compacting flag. Both keep
-a record acquired by another owner.
+match, and keeps a record acquired by another owner.
 
 Reset and takeover can change the chat record in another process. Each typing
 tick compares status, session, turn and draft id and closes a stale stream.
@@ -279,12 +278,12 @@ The final answer can receive another 429 after restart; Outbox retries it.
 Draft ids are abstract fresh values, so random
 collisions and clock durations require implementation tests.
 
-The main BFS configuration checks two turns and one restart. Nine mutants must
+The main BFS configuration checks two turns and one restart. Eight mutants must
 violate their named state invariant: missing draft comparison (`StopOwnDraft`),
 cancel with a null turn (`StopHasTurn`), a frame after final delivery
 (`NoFrameAfterFinal`), a missing record check (`SelfCheckCloses`), resetting the
 rejection count on a 429 or timeout (`FailurePolicy`), releasing another owner's
-record at turn completion or compaction end (two mutants, `ForeignRecordPreserved`),
+record at turn completion (`ForeignRecordPreserved`),
 retaining a pre-restart pause (`RestartForgetsPause`), and starting an older
 turn's frame after a newer final answer (`NoOlderInFlightAfterFinal`). The main
 configuration also checks `StopOnce`, `FramesOnlyWhileOpen`, `FinalAfterClose`
@@ -306,21 +305,6 @@ parsing, real timer deadlines and the live Telegram client have separate checks.
 LOG_DIR="$PWD/.scratch/draft-stop-results" specs/draft-stop-check.sh
 ```
 
-## IdleCompaction
-
-`IdleCompaction.tla` models the compaction between turns (ADR-0021) and was written after the code: it checks the code, not a design. One eve session in one chat: the bridge (routing under queue or steer, replies to bot messages, the disk queue, the drain, the reaper), the chat status record, the process memory of `agent/lib/idle-compaction.ts` (with the open ask `reclaim`), eve's input buffer, control queue and current action, the compact POST that the `session.waiting` handler awaits with its outcomes (accepted, refused, unknown, accepted after the client's timeout), the `compaction.requested` hook that claims the chat again, `/stop` and steer aborts in eve's order (parking, `turn.cancelled`, parking), and a restart with the ExecStartPre quarantine. The comment in the model maps every action to its function and lists the assumptions about eve (facts Ф3–Ф13 of the spec).
-
-Checked on the code with a late compact request allowed, queue and steer (`IdleCompaction.cfg`, `-steer`): every invariant of spec section 7 (`QueuedWhileCompacting`, `CompactionGuarded`, `TurnRecordKept`, `NoFalseInterruptNotice`, `NoCancelMarkForCompaction`, `CompactingNeverInTurn`, `OffOnlyAfterUselessCompaction`, `AtMostOneAskPerTurn`, `NoStackedCompaction`, `NoAskOverCompactingRecord`, `NoAskWhileOff`) and the liveness `NoLostMessage` and `ChatFreed`. With a restart (`-restart`, `-restart-steer`) the safety invariants and `NoHangAfterRestart` hold, except `CompactionGuarded` and `QueuedWhileCompacting` (F7, `-restart-guarded`): a late request queued in eve survives the restart while the process memory does not. The proposed repair `BeginAnyIdle` (R5, a model switch, not code) makes `-r5` and `-r5-steer` pass every safety invariant. The drain hands eve the queued messages as one batch, and a message waits behind a non-empty queue under steer too (route R1 of `.scratch/work/wave-1010/l5/spec-v2.md`).
-
-Findings that must fail: the window between the start of a late compaction and its hook (`-window`: `QueuedInRequestWindow`; `-window-restart`: `NoHangInRequestWindow`, F6); a message already in eve's input lost without a notice by a restart mid-compaction (`-silentloss`) and waiting in that input (`-inbox`); a compaction longer than `RUN_STALE_MS` reaped while a buffered turn runs without a record (`-turnhang`, outside the feature).
-
-Witnesses must fail: `-offfail` (R3 off: `OffOnlyAfterUselessCompaction`), `-nobeginclaim` (no claim on `compaction.requested`: `CompactionGuarded`), `-noaskguard` (a second ask while one is open: `NoStackedCompaction`), `-releasebysession` (on the base without the await: `TurnRecordKept`), `-noclaim` (`QueuedWhileCompacting`), `-noopenguard` (`OffOnlyAfterUselessCompaction`), `-noisyreap` (`NoFalseInterruptNotice`), `-turnkeeps` (`CompactingNeverInTurn`), `-dueagain` (`AtMostOneAskPerTurn`), `-offnotchecked` (`NoAskWhileOff`), `-repliesdirect` (`QueuedWhileCompacting`), `-noreap` (`ChatFreed`). `-void` (no await) and `-noparkrelease` pass: the hook's claim covers the first, the reaper the second.
-
-The draft/stop change retires the queued status message. This model retains queue ownership, buffered input, compaction and recovery; `DraftStop.tla` covers the new stream lifecycle.
-
-```sh
-specs/idle-compaction-check.sh
-```
 
 ## ButtonTap
 
@@ -682,8 +666,8 @@ process. A restart of the agent forgets every process memory and keeps the file;
 recovery before the start may mark the record or fail. The Bridge can crash and
 come back.
 
-A chat is in one of eight states. Busy: `accepted` (a message is accepted, the
-turn has not started), `turn`, `compacting`. `stale` is a busy record without a
+A chat is in one of seven states. Busy: `accepted` (a message is accepted, the
+turn has not started), `turn`. `stale` is a busy record without a
 write for the stale interval, or marked by recovery; the Bridge no longer waits
 for it and the reaper frees it. Free: `free`, and three marked free states read by
 precedence — `retiring` (the session leaves after its turn), `retry-offered`
@@ -693,22 +677,23 @@ precedence — `retiring` (the session leaves after its turn), `retry-offered`
 
 Checked invariants:
 
-1. `OneState`: every reachable record satisfies exactly one of eight
+1. `OneState`: every reachable record satisfies exactly one of seven
    independent state predicates.
-2. `TurnFieldsOnlyWhenBusy`: `ingress`, `session`, `turn` and `compacting` are
-   filled only while the record is busy; a compaction has a session and no turn;
-   a turn id needs a session.
+2. `TurnFieldsOnlyWhenBusy`: `ingress`, `session` and `turn` are
+   filled only while the record is busy; a turn id needs a session.
 3. `ReleasedByOwnerOrReaper`: a busy record becomes free through its owner (the
    turn by session and turn, the session by itself, an accepted message by its
    ingress id), through the reaper after the deadline, or through a reset.
 4. `FreeAfterRestart`: after any restart the chat becomes free in finite time.
    Fairness: every started step ends, time passes, the Bridge comes back.
+5. `ProgressIdKept`: the id of the status message (`progressMessageId`) is a mark,
+   not a turn field. Every terminal patch, takeover, reset and reap keeps it; only its
+   own writer sets or clears it (`pm`, with the ghost `pmSet`).
 
 Mutants that must fail: a turn's terminal write that compares the session
 without the turn (`ReleasedByOwnerOrReaper`); the reaper that frees a live
-record (`ReleasedByOwnerOrReaper`); a release that leaves `compacting` on a
-free chat (`TurnFieldsOnlyWhenBusy`, and `OneState` in a second
-configuration); the reaper switched off (`FreeAfterRestart`).
+record (`ReleasedByOwnerOrReaper`); the reaper switched off (`FreeAfterRestart`);
+the id of the status message cleared with the turn fields (`ProgressIdKept`).
 
 Run `sh specs/chat-record-check.sh`. `scripts/chat-record.test.ts` replays
 each counterexample on the real writers and names the invariant in the test
@@ -720,8 +705,63 @@ and its in-flight phases (`QueueDrain.tla`); the two awaits inside one session
 retirement and the choice of the reset target; the file lock (`FileLock.tla`);
 wall-clock values. The model assumes that eve handles the events of one session
 in order, so a session-level release never overlaps a turn of that session.
-`IdleCompaction`, `RestartRecovery`, `DraftStop`, `DeferredRestart` and
+`RestartRecovery`, `DraftStop`, `DeferredRestart` and
 `TurnLifecycle` keep their own scenarios over the same record.
+
+## ProgressMessage
+
+`ProgressMessage.tla` models the status message of a long turn: the first progress line is posted once,
+edited in place and deleted at the end of the turn. `TelegramProgress.tla` keeps the claim alone
+(`progressClaimed`); this model adds the id of the message, a mark of the chat record
+(`progressMessageId`, `ChatRecord.tla` `pm`), and the one deleter that fires on the state `stale`.
+`progressMessageOf` in `agent/lib/run-status.ts` turns the two fields into a word: `none`, `claimed`
+(posting, failed, id lost or message gone: never resend), `shown`, `stale` (an id without a claim).
+
+Two turns in one chat. A request to Telegram has two steps: Telegram accepts it, then the caller learns the
+answer, so a crash between them leaves one untracked message. Answers are ok, gone, wait (429) and error; a lost
+reply is an error with the effect applied. An edit refused as gone may come from a message that still exists, so
+the id stays and the frame stops editing; only the answer to a delete clears the id. Other processes clear the turn fields at any moment (Bridge reset or
+reaper, takeover). A restart forgets process memory, keeps the record, and the turn resumes or not.
+
+Checked invariants:
+
+1. `Once`: at most one post attempt per turn; a failed post, a lost id or a gone message is never followed by a resend.
+2. `NoPostOverId`: a post is attempted only when the record holds neither a claim nor an id.
+3. `StaleIsFinal` (property): an id seen without a claim never becomes live again.
+4. `NoDeleteLive`: deleteMessage is requested only for a stale id, or by the frame that posted it.
+5. Clear by value after a definitive answer: part of `NoOrphanWithoutCrash`, which also checks that every
+   existing status message is the recorded id or is held by a request that deletes or records it. A frame
+   whose record write lost and whose own delete got no definitive answer records the id as a stale mark when the
+   record holds neither a claim nor an id.
+6. `NoStatusAfterFinal`: no post or edit starts after the stream is closed; the final send waits for the
+   in-flight status call or its bound.
+7. `EventuallyGone` (property, `ProgressMessage-live.cfg`: Telegram answers, no crash): after a terminal event the
+   recorded id is deleted. `RetiredByNextTurn` (property, `ProgressMessage-live-fault.cfg`: one fault, no crash,
+   `SpecNext`: a turn that can start does start): an id left by a failed end-of-turn delete is retired by the next
+   `turn.started`.
+8. `ClearOnlyByAnswer`: the id leaves the record only after a definitive Telegram answer (ok or gone) to a delete of
+   that exact id: never on 429, 5xx or a timeout, never by a turn-field clear, never for another message.
+
+Mutants that must fail: the id as a turn field (`NoOrphanWithoutCrash`), delete by the pair instead of by
+`stale` (`NoDeleteLive`), clear with null instead of by value (`NoOrphanWithoutCrash`), claim without
+`id = undefined` (`NoPostOverId`), no delete after a failed CAS (`NoOrphanWithoutCrash`), an edit after close
+(`NoStatusAfterFinal`), a resend after gone (`Once`), the id cleared after a failed delete (`ClearOnlyByAnswer`),
+no stale mark after a failed frame delete (`NoOrphanWithoutCrash`), the id cleared by an edit refused as gone
+(`NoOrphanWithoutCrash`).
+
+Run `sh specs/progress-message-check.sh`. `agent/lib/progress-message.test.ts`,
+`agent/lib/progress-message-sequence.test.ts` and `scripts/telegram-status-progress.test.ts` replay the
+invariants on the real writers and on the wire.
+
+Outside the model: the text and the throttle (a skipped call is no step), the draft and typing, the
+final answer, and the case where Telegram accepts a delete of a message it still keeps (too old to delete).
+A delete Telegram refuses with a 4xx while the message still exists (for example a bot message too old to
+delete) counts as gone: the id is cleared and the message stays; only a stale mark that old would show it.
+Two residuals remain without a crash, and `NoOrphanWithoutCrash` excuses only them: a lost post reply (Telegram
+accepted the post and the id never came back: nobody can know it), and a frame delete that got no definitive
+answer while the record already holds another claim or id (there is no place for the id, and no retry is made,
+because a sleep would hold the handler). The first is the named residual of the design; the second needs a
+steer racing a failing Telegram. Both are rare and neither is repaired by the record.
 
 ## ReminderLifecycle
 
@@ -796,25 +836,25 @@ The tests named `TurnLifecycle …` in `scripts/lib/reminder-turn.test.ts` and `
 specs/turn-lifecycle-check.sh
 ```
 
-## ResetIntent
+## ResetEpoch
 
-`ResetIntent.tla` models the reset intent of a private chat (`/new` and `/restart`) and was written after the code: `scripts/lib/telegram-reset-intent.ts` (the intent file with `discardThroughUpdateId`), `scripts/poller/queue.ts` (`performScopedReset`, `reconcileScopedResetIntents`, the Bridge memory read by `privateResetIntentPhase`), `scripts/poller/control.ts` (`startReset`, `holdForPendingRetry`, `finishReset`) and `agent/lib/telegram-reset-route.ts` (the reset route the agent serves). One private chat, updates `1..N` with `/new` among them, the chat queue and the intent file on disk, the Bridge memory (the record mirror that fences the queue, the backoff, the failure count, the delivered escalation, the request the main loop and the reconciliation each await), the agent session as a generation, the reset requests the agent has accepted and not yet finished (with their acceptance order, address or session-id target, and the fixed generation selected by session id), the main loop that handles `/new` step by step, the reconciliation task with the chat reset queue (`chatResetTails`: the main path of a chat and its reconciliation never run at once, and the queue delivery of that chat waits while either holds it) and a Bridge restart between any two steps that empties the memory. The operator `Phase` is `resetIntentPhase`: `none`, `blocked`, `recorded`, `waiting`, `escalated`. Time is a step `Expire`; group chats, the edit of the pending message, `/restart`'s service restart, a second Bridge process and read errors at startup are outside the model.
+`ResetEpoch.tla` models the reset epoch of `/new` in one private chat and was written after the code: it checks the code (`scripts/poller/{queue,inbox,routing}.ts`, `agent/lib/telegram-reset-route.ts`, based on `dd50c6ad` with the T325/T326/T341 fixes). A durable inbox record is stamped with the live epoch (`admitFenceFields`); a record without a stamp predates the first epoch and proves "after" only by a strictly later `enqueuedAt`. `/new` (`performScopedReset`) persists a durable intent with epoch `max(now, last durable + 1)`, calls the remote reset, completes (bail out if the live epoch moved, clear the queue at the live fence, `resetEpoch = max(previous, fence)`) and removes only its own intent (`expectedRequestedAt`). The background `reconcileScopedResetIntents` rechecks the intent before and after the remote call, then completes and clears the same way. `promoteReadyInbox` retires records older than the live epoch; while an intent is pending, routed messages only queue and the drain skips the chat. Message order across resets is tracked by request sequence numbers: a message's `aseq` counts the intents persisted before its admission, and the conversation carries the seq of the intent whose remote started it. A remote call is three events, not one: the issue, the end of the client's wait, and the server-side landing — a client timeout or abort does not prove the request never reached the server, and a call that did arrive lands later (`SrvLand`). The wire call carries the chat key and the intent epoch (`chatKey`, `resetEpoch`), and the route executes calls of one key in arrival order while keeping a ledger of landed epochs (`resetLandedEpochs`): a call whose epoch already landed is answered `superseded` without touching the live session, so a stale remote that outlives the client's wait cannot wipe the fresh conversation. Remote issues also share one per-chat client slot (`remoteResetSlot`, T341): the second issue waits for the first call to resolve, and a remote whose epoch already landed is never issued (`issueRemoteReset` dedup, durable via `status.resetEpoch`). `RemoteSlot = FALSE` and `WireFence = FALSE` replay the pre-fix wire where both flows could each have a remote in flight for the same intent and any landing reset whatever session was live then. `LossOnlyByNewer` records which seq wiped a delivered message, so the late-remote loss is caught; `RemoteInOrder` catches a stale remote landing after a newer one. An externally lost intent (`MayAbandon`: wiped intent directory, rolled-back binary) is off in the main configuration.
 
 Checked invariants:
 
-1. `ExactCut`: after `/new` the chat queue is cleared exactly through the recorded `update_id`; a message before it never reaches the new session, a message after it is kept, goes to the new session and is not wiped by a late reset.
-2. `IntentUntilClean`: without the intent file no message before a reset `/new` is left in the queue.
-3. `ConfirmOnce`: the owner sees "conversation reset" at most once per `/new`; `EscalationOnce`: one escalation per process.
-4. `Finished` (liveness): every `/new` gets an answer, and the intent is removed after the session reset and the cleanup, or the owner is told to run `iva reset`.
+1. `NoStaleInConv`: a conversation started by the remote of request `s` holds only messages admitted no earlier than `s` — what arrived before the last successful `/new` never enters the new conversation.
+2. `LossOnlyByNewer`: a message may be retired or wiped only by a boundary requested after its admission (`dropped` and `gone` are both attributed) — what arrived after the last successful `/new` is not lost. `DropOnlyByNewer` checks boundary retirements of stamped records only (`dropped` with `mMark # 0`, `gone` excluded): a stamped record may be retired only by a boundary requested after its admission (`mDrop > mASeq`). The unstamped branch is outside the fence pair because `FenceRule` never reaches it — `===` and `>=` coincide there, an unstamped record's only proof of "after" being a strictly later `enqueuedAt` — and its losses belong to the abandon window below. `DropAllByNewer` states the same chronological guarantee with no record excluded, so the witness `ResetEpoch-abandon-loss` can attribute the window's second casualty: besides the pre-`/new` message that survives into the new conversation, a lost intent's own `/new` flow still clears the queue and retires an unstamped message admitted after the `/new` request in the same tick (`mDrop = mASeq`, a real loss). Remote wipes under `RemoteSlot = FALSE` are the fixed defect below, so mutant pairs are judged by the target invariant the defect cannot reach.
+3. `RemoteInOrder`: the last remote to land is the newest one ever issued — a superseded intent's remote may not restart the conversation on top of a newer epoch.
+4. `ConfirmOnce`: each `/new` gets at most one "conversation reset" confirmation — `finishReset` runs once per completed `/new` flow and the reconcile sweep stays silent (`confirmed[seq] <= 1`).
+5. `EscalationOnce`: at most one "run iva reset" escalation per process lifetime (`escalations <= 1`) — the in-memory `escalated` flag gates the send and a restart resets it.
+6. `Finished` (temporal): under fairness, bounded failures and bounded restarts every persisted intent reaches its end — pending is empty, both flows idle, and a remote of its epoch or newer has landed. `UnfairSpec` pairs it: without fairness, legal stuttering leaves a live intent forever.
 
-The base configuration has the reconciliation pass interleaving with the main loop (`RecInterleave = TRUE`): the scan of the intent directory may happen before a whole `/new` and its next message. What keeps `ExactCut` green is the chat reset queue and `RecTake`, the step that re-reads the intent from disk after taking the queue: without an intent file, or with a different `discardThroughUpdateId`, the reconciliation does nothing.
+The lifecycle state (durable intent memory vs the volatile `resetIntentMemory`) is part of the model: a shared failure counter with retry backoff (`recordResetFailure` + `deferResetRetry`), a one-time escalation flag, the volatile landed-epoch journal `remoteResetLandedEpochs` (`vLanded`, falls back to the durable status epoch after a restart) and the boot sweep that reloads the intent mirror before the first `getUpdates`. `MaxFails`/`MaxRestarts` cap the environment's nondeterminism; `0` disables failure and restart branches in cfgs whose checks do not need them, and `ResetEpoch-escalate.cfg` is a reachability witness (`NoEscalation` must fail) so `EscalationOnce` is never checked over an empty place.
 
-The agent is not restarted with the Bridge: `Remote` and `RecRemote` only accept the request into `pending`, and `AgentDone` finishes it — possibly after the Bridge restart, with the address resolved at that moment. `AgentStale = TRUE` guards the session: a request whose chat was already reset after its acceptance (`doneSeq`) does nothing, so the late resolve preserves the session the new Bridge has already filled. `doneSeq` retains the greatest acceptance number of completed resets, even when an older reset finishes later. Recovery can finish while the old request still awaits `resolveSession`; `-agent-outlives` shows the loss with this guard disabled (`AgentStale = FALSE`). The conformance tests in `scripts/telegram-reset-restart.test.ts` use two Bridge processes and SIGKILL; `scripts/lib/telegram-reset.test.ts` also covers completion order across the asynchronous `reset()` boundary. Resets by `sessionId` keep their fixed session handle; recovery from a reset intent always uses the chat address. `Remote` can accept either target, so an older address request can finish after a newer session-id request and delivery. Both target kinds record completion for the chat (`SessionCompletion = TRUE`), including when the fixed session has already retired. The Bridge supplies an optional `chatKey` alongside `sessionId`, because eve's fixed session handle exposes no address. Address resolution still uses the full conversation address; completion is scoped by chat and topic, including group replies. Old session-id bodies without `chatKey` retain their fixed-id reset behavior; malformed keys return HTTP 400. Different chats and topics have independent completion records.
-
-Witnesses must fail: `-clear-first` (the intent is removed before the queue is cleared, `IntentUntilClean`), `-clear-all` (the queue is cleared through its last item, not the recorded `update_id`, `ExactCut`), `-confirm-recovery` (the reconciliation also confirms, `ConfirmOnce`). One accepted window fails and stays as a witness: `-confirm-window` (a restart between "conversation reset" and the saved offset: Telegram hands `/new` out again and the owner sees a second confirmation, `ConfirmOnce`). Two mutants of the fix, not witnesses: `-interleave` (the reconciliation takes the chat reset queue but does not re-read the intent, `RecReread = FALSE`, so its late remote reset wipes the session `/new` and the queue delivery already filled) and `-agent-outlives` (the late request of a dead Bridge resets whatever session it resolves, `AgentStale = FALSE`, so the message the recovery delivered is wiped); both fail `ExactCut`. The `-session-completion` mutant records only address completions (`SessionCompletion = FALSE`); an older address request wipes post-cut delivery after a newer session-id reset, violating `ExactCut`. Conformance tests named after the invariants: `scripts/telegram-poll-reset.test.ts` (`ResetIntent …`), `scripts/lib/telegram-reset-intent.test.ts` and `scripts/telegram-reset-restart.test.ts` (`ResetIntent ExactCut …`: two Bridge processes, the request of the killed one finishing after the recovery), and `scripts/telegram-reset-mixed.test.ts` (both R1-M orders from the critic: the direct route and the Bridge group reply with a timed-out request, plus independent chat/topic completion).
+Every mutant ships with a paired control whose cfg differs by exactly one constant; the control must pass and the mutant must violate its target invariant (D65). `ResetEpoch-fence-geq.cfg` / `ResetEpoch-fence-eq.cfg` (liveness `>=` vs `===`, `MayAbandon` on in both: `===` retires a stamp newer than the live epoch with an older boundary seq — `DropOnlyByNewer`, `gone` excluded), `ResetEpoch-guards.cfg` / `ResetEpoch-no-guards.cfg` (reconcile with vs without the intent check: a stale completion steals the newer intent and rolls the epoch back — `NoStaleInConv`), `ResetEpoch-clock-monotone.cfg` / `ResetEpoch-clock.cfg` (epoch `max(now, floor)` vs bare `Date.now`: a second `/new` in the same millisecond cannot tell before from after — `NoStaleInConv`; `EpochMax = FALSE` stays in both as part of the same mutation). Witness `ResetEpoch-abandon.cfg` records an accepted window: the durable epoch registry does not see a wiped intent's stamp, so a later `/new` may reuse a fence no higher than it and a pre-`/new` message survives into the new conversation (`NoStaleInConv`). Witness `ResetEpoch-abandon-loss.cfg` records the same window's loss: the lost intent's own clear retires an unstamped message admitted after the `/new` request in the same tick (`DropAllByNewer`). Mutants `ResetEpoch-late-remote.cfg` and `ResetEpoch-late-remote-order.cfg` replay the pre-T341 wire (`RemoteSlot = FALSE`, `WireFence = FALSE`), each paired with the `WireFence = TRUE` control on the same model constants (`ResetEpoch-late-remote-fence.cfg` / `ResetEpoch-late-remote-order-fence.cfg`): the reconcile sweep issues a remote while the intent is pending, the `/new` flow completes and a new message is delivered, then the second remote lands and wipes it (`LossOnlyByNewer`), or an older intent's remote lands after the newer `/new`'s one and rolls `convSeq` back (`RemoteInOrder`). Under the epoch ledger both orderings are refused server-side: the stale call's epoch has already landed. The third pair isolates the layer the client slot cannot cover: mutant `ResetEpoch-remote-timeout.cfg` keeps the slot but drops the ledger (`RemoteSlot = TRUE`, `WireFence = FALSE`) against control `ResetEpoch-remote-timeout-fence.cfg` — a client's remote times out with the call still live in the wire, the sweep's second call for the same intent lands and completes the epoch, a message is delivered, and the abandoned server call lands last and wipes it (`LossOnlyByNewer`).
 
 ```sh
-specs/reset-intent-check.sh
+specs/reset-epoch-check.sh
 ```
 
 ## JobRun

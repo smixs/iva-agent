@@ -17,6 +17,7 @@ import { acquireFileLock, releaseFileLock } from "#lib/fs-atomic.ts";
 import { pluginTreeDigest } from "#lib/plugin-reader.ts";
 import { findPlugin, readPluginsStateSafe } from "#lib/plugin-store.ts";
 import {
+  LIVE_DIALOG_MINUTES,
   isQuietHour,
   isUrgentSender,
   parseProactive,
@@ -30,6 +31,7 @@ import { resolveTimeZone } from "../../packages/timezone/index.ts";
 import {
   noticeTranslator,
   recordAlert,
+  watchAnswered,
   watchButtons,
   writtenInLanguage,
   type Translate,
@@ -47,7 +49,11 @@ import { insightFailureLines, listTurnFailures } from "../lib/turn-failures.ts";
 import { listTurnRepeats } from "../lib/turn-repeats.ts";
 import { readEntries, summarize, type UsageRecord } from "../lib/usage.ts";
 import { resolveStopAt } from "../lib/rollup-turn.ts";
-import { sendTelegramHtml } from "../lib/telegram-send.ts";
+import {
+  closeTelegramWatchSignal,
+  sendTelegramHtml,
+  type TelegramSendOptions,
+} from "../lib/telegram-send.ts";
 import { isEntrypoint } from "../lib/version-layout.ts";
 import {
   birthdaySource,
@@ -60,6 +66,7 @@ import {
   mailSource,
   telegramSource,
   unfixedFailures,
+  type Dialog,
   type Birthday,
   type Source,
   type SourceResult,
@@ -71,6 +78,8 @@ import {
   initialState,
   localDay,
   readProactiveState,
+  recordSignalReceipt,
+  recoverSignalReceipts,
   updateSeen,
   writeProactiveState,
   type ProactiveState,
@@ -91,6 +100,12 @@ const BRIEF_WINDOW_MIN = 3 * 60;
 
 export type TickDeps = {
   readonly config: () => ProactiveConfig;
+  /** Fresh delivery/recheck time; production uses the same clock as main. */
+  readonly now?: () => number;
+  readonly closeSignal?: (
+    messageIds: readonly number[],
+    text: string,
+  ) => Promise<{ ok: boolean; error: string; refused?: string }>;
   readonly timeZone: string;
   readonly statePath: string;
   readonly sources: readonly Source[];
@@ -109,7 +124,8 @@ export type TickDeps = {
   readonly send: (
     part: string,
     source: "watch" | "brief" | "insight",
-  ) => Promise<{ ok: boolean; error: string }>;
+    options?: Pick<TelegramSendOptions, "beforeAttempt" | "onAcknowledged">,
+  ) => Promise<{ ok: boolean; error: string; messageIds?: readonly number[] }>;
   readonly translate: () => Promise<Translate>;
   /** Отметка дросселя Alert для сбоя, доставленного владельцу (T3); false — не записалась. */
   readonly recordAlert?: (key: string, essence: string) => boolean;
@@ -133,7 +149,10 @@ export type TickDeps = {
   readonly log?: (line: string) => void;
 };
 
-type Candidate = WatchItem & { readonly urgent: boolean };
+type Candidate = WatchItem & {
+  readonly urgent: boolean;
+  readonly dialog?: Dialog;
+};
 
 const message = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
@@ -197,7 +216,8 @@ function admit(
   let candidates = observed.flatMap((item): Candidate[] => {
     const entry = state.seen[item.key];
     const urgent = isUrgentSender(config, item.from);
-    const stale = clock.now - entry.firstSeenMs >= config.staleMinutes * 60_000;
+    const waitingFrom = item.dialog?.lastOwnerMs ?? entry.firstSeenMs;
+    const stale = clock.now - waitingFrom >= config.staleMinutes * 60_000;
     // Сбой источник отдаёт, только когда дроссель Alert пропускает (alertDue): решает он, а не
     // запись `seen`, которая могла остаться «сообщён» от прошлого падения того же юнита.
     return item.failure || (!entry.reported && (stale || urgent))
@@ -299,12 +319,18 @@ function birthdayForPrompt(item: Birthday, flagged: { attack: boolean }) {
   return name ? { ...item, name } : null;
 }
 
+const waitingFrom = (item: WatchItem) =>
+  item.dialog?.lastOwnerMs == null
+    ? ""
+    : `, waiting since owner message ${new Date(item.dialog.lastOwnerMs).toISOString()}`;
+
 function watchLine(
   item: Candidate,
   flagged: { attack: boolean },
   birthdayKeys: Set<string>,
 ): string {
-  const { key, from, note, unread, urgent, message_id, topic_id } = item;
+  const { key, from, note, subject, unread, urgent, message_id, topic_id } =
+    item;
   if (isContactBirthdayKey(key)) {
     const birthday = item.birthday && birthdayForPrompt(item.birthday, flagged);
     if (!birthday) return "";
@@ -320,7 +346,11 @@ function watchLine(
   const message = message_id
     ? `, message_id=${message_id}${topic_id ? `, topic_id=${topic_id}` : ""}`
     : "";
-  return `- ${key} from ${who || "unknown"}: ${unread} unread${urgent ? ", urgent sender" : ""}${message}`;
+  const automated =
+    subject === undefined
+      ? ""
+      : `, automated letter, subject: ${gated(subject, flagged)}`;
+  return `- ${key} from ${who || "unknown"}: ${unread} unread${urgent ? ", urgent sender" : ""}${message}${waitingFrom(item)}${automated}`;
 }
 
 function watchPrompt(candidates: readonly Candidate[], tr: Translate) {
@@ -367,6 +397,7 @@ function partsOf(text: string): string[] {
 type DeliveryPart = {
   readonly text: string;
   readonly itemKey?: string;
+  readonly itemKeys?: readonly string[];
   readonly birthdayKeys: readonly string[];
 };
 
@@ -381,21 +412,181 @@ function partsForDelivery(
     const keys = [...part.matchAll(ITEM_MARKER)].map((m) => m[1]);
     const text = part.replace(ITEM_MARKER, "").trim();
     const birthdayKeys = [...new Set(keys.filter((key) => allowed.has(key)))];
-    return text ? [{ text, itemKey: keys[0], birthdayKeys }] : [];
+    return text
+      ? [{ text, itemKey: keys[0], itemKeys: [...new Set(keys)], birthdayKeys }]
+      : [];
   });
 }
+
+const dialogSource = (deps: TickDeps, key: string) =>
+  deps.sources.find((source) => key.startsWith(source.prefix) && source.dialog);
+
+/** State/time guard runs before model admission and again after the model. */
+async function liveCandidates(
+  deps: TickDeps,
+  items: readonly WatchItem[],
+  now: number,
+  log: (line: string) => void,
+): Promise<WatchItem[]> {
+  const result: WatchItem[] = [];
+  for (const item of items) {
+    const source = dialogSource(deps, item.key);
+    if (!source?.dialog) {
+      result.push(item);
+      continue;
+    }
+    try {
+      const dialog = await source.dialog(item.key, now);
+      const { lastOwnerMs: owner, lastPeerMs: peer } = dialog;
+      if (
+        peer !== null &&
+        (owner === null ||
+          (peer > owner && now - owner >= LIVE_DIALOG_MINUTES * 60_000))
+      )
+        result.push({ ...item, dialog });
+      else log(`proactive: ${item.key} live or answered, dropped`);
+    } catch (error) {
+      log(
+        `proactive: ${item.key} dialog unavailable, dropped: ${message(error)}`,
+      );
+    }
+  }
+  return result;
+}
+
+async function closeTextFor(
+  deps: TickDeps,
+  {
+    key,
+    signal,
+    now,
+  }: {
+    key: string;
+    signal: NonNullable<ProactiveState["signals"]>[string];
+    now: number;
+  },
+): Promise<string | null> {
+  if (signal.closeText !== undefined) return signal.closeText;
+  const source = dialogSource(deps, key);
+  if (!source?.dialog) throw new Error("Telegram dialog is not connected");
+  const dialog = await source.dialog(key, now, signal.deliveredAtMs);
+  if (dialog.lastOwnerMs === null || dialog.lastOwnerMs <= signal.deliveredAtMs)
+    return null;
+  const clock = localDay(dialog.lastOwnerMs, deps.timeZone);
+  const time = `${String(clock.hour).padStart(2, "0")}:${String(clock.minute).padStart(2, "0")}`;
+  return watchAnswered(await deps.translate(), time);
+}
+
+async function closeOneSignal(
+  deps: TickDeps,
+  state: ProactiveState,
+  {
+    key,
+    signal,
+    now,
+  }: {
+    key: string;
+    signal: NonNullable<ProactiveState["signals"]>[string];
+    now: number;
+  },
+  log: (line: string) => void,
+): Promise<{ state: ProactiveState; failed: boolean }> {
+  let current = state;
+  let failed = false;
+  if (!deps.closeSignal) return { state, failed: true };
+  try {
+    const text = await closeTextFor(deps, { key, signal, now });
+    if (text === null) return { state: current, failed };
+    // Freeze the exact idempotent edit before HTTP; a lost ack replays this same payload.
+    const previous = current;
+    current = {
+      ...current,
+      signals: {
+        ...current.signals,
+        [key]: { ...signal, closeText: text, status: "closing" },
+      },
+    };
+    if (!(await save(deps, current, "signal close claim", log))) {
+      current = previous;
+      failed = true;
+      return { state: current, failed };
+    }
+    const ack = await deps.closeSignal(signal.messageIds, text);
+    if (!ack.ok) {
+      log(`proactive: ${key} close failed: ${ack.error}`);
+      failed = true;
+      return { state: current, failed };
+    }
+    if (ack.refused)
+      log(
+        `proactive: ${key} close refused for good, signal closed: ${ack.refused}`,
+      );
+    current = {
+      ...current,
+      signals: { ...current.signals, [key]: { ...signal, status: "closed" } },
+    };
+    if (!(await save(deps, current, "signal closed", log))) failed = true;
+  } catch (error) {
+    log(`proactive: ${key} close failed: ${message(error)}`);
+    failed = true;
+  }
+  return { state: current, failed };
+}
+
+/** Close before Brief/Insight/Watch, independent of unread counts and model ceilings. */
+async function closeSignals(
+  deps: TickDeps,
+  state: ProactiveState,
+  now: number,
+  log: (line: string) => void,
+): Promise<{ state: ProactiveState; failed: boolean }> {
+  let current = state;
+  let failed = false;
+  for (const [key, signal] of Object.entries(state.signals ?? {})) {
+    if (signal.status === "closed") continue;
+    const result = await closeOneSignal(
+      deps,
+      current,
+      { key, signal, now },
+      log,
+    );
+    current = result.state;
+    failed ||= result.failed;
+  }
+  return { state: current, failed };
+}
+
+function staleKeys(
+  keys: readonly string[],
+  allowed: ReadonlySet<string>,
+  read: ReadonlySet<string>,
+) {
+  return (
+    keys.length === 0 ||
+    (keys.some((key) => key.startsWith("tg:")) && keys.length !== 1) ||
+    keys.some((key) => !allowed.has(key) || read.has(key))
+  );
+}
+
+const needsRecheck = (
+  deps: TickDeps,
+  parts: readonly DeliveryPart[],
+  candidates: readonly Candidate[],
+) =>
+  parts.some((part) => part.itemKey !== undefined) ||
+  candidates.some((item) => dialogSource(deps, item.key));
 
 /** Перед отправкой сверяем только чаты и письма; отказ сверки сохраняет сообщение. */
 async function unreadParts(
   deps: TickDeps,
   parts: readonly DeliveryPart[],
-  candidates: readonly Candidate[],
+  { candidates, now }: { candidates: readonly Candidate[]; now: number },
   log: (line: string) => void,
 ): Promise<DeliveryPart[]> {
-  if (!parts.some((part) => part.itemKey !== undefined)) return [...parts];
+  if (!needsRecheck(deps, parts, candidates)) return [...parts];
   const read = new Set<string>();
   for (const source of deps.sources) {
-    if (source.prefix !== "tg:" && source.prefix !== "mail:") continue;
+    if (!["tg:", "mail:"].includes(source.prefix)) continue;
     const items = candidates.filter((c) => c.key.startsWith(source.prefix));
     if (items.length === 0) continue;
     const checked = await checkSafely(source, undefined);
@@ -407,7 +598,17 @@ async function unreadParts(
       if (!checked.items.some((c) => c.key === item.key && c.unread > 0))
         read.add(item.key);
   }
+  const live = await liveCandidates(deps, candidates, deps.now?.() ?? now, log);
+  const allowed = new Set(live.map((item) => item.key));
+  const tracksTelegram = candidates.some((item) =>
+    dialogSource(deps, item.key),
+  );
   return parts.flatMap((part) => {
+    const keys = part.itemKeys ?? [];
+    if (tracksTelegram && staleKeys(keys, allowed, read)) {
+      log("proactive: unbound or stale Watch part dropped");
+      return [];
+    }
     const key = part.itemKey;
     if (key !== undefined && read.has(key)) {
       log(`proactive: ${key} already read, its part dropped`);
@@ -422,20 +623,44 @@ async function deliver(
   parts: readonly DeliveryPart[],
   send: (part: string) => ReturnType<TickDeps["send"]>,
   log: (line: string) => void,
-  acknowledge?: (keys: readonly string[]) => Promise<boolean>,
+  {
+    acknowledge,
+    recordSignal,
+  }: {
+    acknowledge?: (keys: readonly string[]) => Promise<boolean>;
+    recordSignal?: (
+      part: DeliveryPart,
+      result: Awaited<ReturnType<TickDeps["send"]>>,
+    ) => Promise<SignalRecord>;
+  } = {},
 ): Promise<{
   readonly sent: boolean;
   readonly all: boolean;
   readonly ackSaveFailed: boolean;
+  readonly uncertain: boolean;
 }> {
   let sent = false;
+  let uncertain = false;
   let all = parts.length > 0;
   for (const part of parts) {
     // Брошенное исключение шва — тот же отказ части: остальные части идут, сбой не сообщён.
-    const result = await send(part.text).catch((error: unknown) => ({
+    const result: Awaited<ReturnType<TickDeps["send"]>> = await send(
+      part.text,
+    ).catch((error: unknown) => ({
       ok: false,
       error: message(error),
     }));
+    const recorded = recordSignal ? await recordSignal(part, result) : "ok";
+    // Lost receipt or state: going on would lose track of sent messages. An unknown outcome
+    // of one part is only logged; it is not retried (ADR-0007), the other parts still go.
+    if (recorded === "abort")
+      return {
+        sent: result.ok || sent,
+        all: false,
+        ackSaveFailed: true,
+        uncertain,
+      };
+    if (recorded === "uncertain") uncertain = true;
     if (result.ok) {
       sent = true;
       if (
@@ -443,14 +668,17 @@ async function deliver(
         part.birthdayKeys.length &&
         !(await acknowledge(part.birthdayKeys))
       )
-        return { sent, all: false, ackSaveFailed: true };
+        return { sent, all: false, ackSaveFailed: true, uncertain };
     } else {
       all = false;
       log(`proactive: a part was not delivered: ${result.error}`);
     }
   }
-  return { sent, all, ackSaveFailed: false };
+  return { sent, all, ackSaveFailed: false, uncertain };
 }
+
+/** What signalDelivery decided about one part: go on, go on with a failed run, or stop the batch. */
+type SignalRecord = "ok" | "uncertain" | "abort";
 
 /** Один накопленный state хода; подтверждения пишутся до следующей части. */
 function birthdayDelivery(
@@ -545,6 +773,46 @@ function toldParts(
   return { parts: plainParts([note]), told: failures };
 }
 
+const validMessageIds = (
+  ids: readonly number[] | undefined,
+): ids is readonly number[] =>
+  !!ids?.length && ids.every((id) => Number.isSafeInteger(id) && id > 0);
+
+function signalDelivery(
+  deps: TickDeps,
+  current: ReturnType<typeof birthdayDelivery>,
+  now: number,
+  log: (line: string) => void,
+) {
+  return async (
+    part: DeliveryPart,
+    ack: Awaited<ReturnType<TickDeps["send"]>>,
+  ): Promise<SignalRecord> => {
+    const key = part.itemKey;
+    if (!key || !dialogSource(deps, key)) return "ok";
+    const receiptLost = /^receipt not durable:/u.test(ack.error);
+    const uncertain = /^delivery outcome unknown:/u.test(ack.error);
+    const ids = ack.messageIds;
+    if (!validMessageIds(ids)) {
+      log(`proactive: ${key} signal delivery has no message_id`);
+      if (receiptLost) return "abort";
+      return !ack.ok && !uncertain ? "ok" : "uncertain";
+    }
+    try {
+      for (const id of ids)
+        recordSignalReceipt(deps.statePath, key, id, deps.now?.() ?? now);
+    } catch (error) {
+      log(`proactive: receipt not durable: ${message(error)}`);
+      return "abort";
+    }
+    const next = recoverSignalReceipts(deps.statePath, current.state);
+    if (!(await save(deps, next, "signal delivery", log))) return "abort";
+    current.state = next;
+    if (receiptLost) return "abort";
+    return uncertain ? "uncertain" : "ok";
+  };
+}
+
 /** Шаги 8–9: ход, доставка, подъём и отметка сбоев. Провал хода — код 1, отправки нет. */
 async function wake(
   deps: TickDeps,
@@ -564,16 +832,38 @@ async function wake(
   const prepared = watchPrompt(candidates, await deps.translate());
   const text = await turnText(deps, prepared.prompt, "watch", log);
   if (text === null) return 1;
-  const send = (part: string) => deps.send(part, "watch");
+  const send = async (text: string) => {
+    const part = parts.find((part) => part.text === text);
+    const keys = part?.itemKeys ?? [];
+    const items = candidates.filter((item) => keys.includes(item.key));
+    const live = await liveCandidates(deps, items, deps.now?.() ?? now, log);
+    if (live.length !== items.length)
+      return { ok: false, error: "dialog changed before delivery" };
+    const key = part?.itemKey;
+    return deps.send(text, "watch", {
+      beforeAttempt: async () =>
+        (await liveCandidates(deps, items, deps.now?.() ?? now, log)).length ===
+        items.length,
+      ...(key && dialogSource(deps, key)
+        ? {
+            onAcknowledged: (id: number) =>
+              recordSignalReceipt(deps.statePath, key, id, deps.now?.() ?? now),
+          }
+        : {}),
+    });
+  };
   const filtered = await unreadParts(
     deps,
     partsForDelivery(text, prepared.birthdayKeys),
-    candidates,
+    { candidates, now },
     log,
   );
   const { parts, told } = toldParts(filtered, candidates, log);
   const current = birthdayDelivery(deps, claimed, now, log);
-  const delivered = await deliver(parts, send, log, current.acknowledge);
+  const delivered = await deliver(parts, send, log, {
+    acknowledge: current.acknowledge,
+    recordSignal: signalDelivery(deps, current, now, log),
+  });
   if (delivered.ackSaveFailed) return 1;
   if (!delivered.sent) log("proactive: nothing delivered");
   const next = afterDelivery(
@@ -589,7 +879,8 @@ async function wake(
       next.wakes === current.state.wakes ? "failures" : "wakes",
       log,
     );
-  return 0;
+  // An unknown outcome is a failed run, as before, but it no longer holds back the other parts.
+  return delivered.uncertain ? 1 : 0;
 }
 
 /**
@@ -835,7 +1126,7 @@ async function brief(
     parts,
     (part) => deps.send(part, "brief"),
     log,
-    current.acknowledge,
+    { acknowledge: current.acknowledge },
   );
   // Не дошла ни одна часть — провал прогона (код 1, факт в jobs.json), как у дайджеста 0.4.11.
   if (parts.length > 0 && !sent) log("proactive: the brief was not delivered");
@@ -858,24 +1149,40 @@ export async function runProactiveTick(
   return code;
 }
 
+async function startTick(
+  now: number,
+  deps: TickDeps,
+  log: (line: string) => void,
+) {
+  try {
+    const stored = readProactiveState(deps.statePath);
+    const closed = await closeSignals(
+      deps,
+      stored ?? initialState(now),
+      now,
+      log,
+    );
+    return { stored, closed };
+  } catch (error) {
+    log(`proactive: ${message(error)}`);
+    return null;
+  }
+}
+
 async function tick(
   now: number,
   deps: TickDeps,
   log: (line: string) => void,
   reached: Reached,
 ): Promise<number> {
-  let stored: ProactiveState | null;
-  try {
-    stored = readProactiveState(deps.statePath);
-  } catch (error) {
-    log(`proactive: ${message(error)}`);
-    return 1;
-  }
+  const started = await startTick(now, deps, log);
+  if (started === null) return 1;
+  const { stored, closed } = started;
   const clock = { ...localDay(now, deps.timeZone), now };
-  let state = stored ?? initialState(now);
+  let state = closed.state;
   const run = { state, stored, clock };
   const config = await ceiled(deps, deps.config(), run, log, reached);
-  let failed = false;
+  let failed = closed.failed;
   const slot = briefSlot(config, state, clock);
   if (slot !== null) {
     const result = await brief(
@@ -885,9 +1192,11 @@ async function tick(
       log,
     );
     if (result.ackSaveFailed) return 1;
-    ({ state, failed } = result);
-  } else if (insightDue(config, stored, clock))
-    return insight(deps, state, clock, log);
+    state = result.state;
+    failed ||= result.failed;
+  } else if (insightDue(config, stored, clock)) {
+    return (await insight(deps, state, clock, log)) || Number(failed);
+  }
   if (watchSkipped(clock, stored, deps.signal)) return failed ? 1 : 0;
   const code = await watch(
     deps,
@@ -1178,7 +1487,11 @@ async function watch(
     );
   };
   const state = observedState({ base, first }, observed, keep2, clock.now);
-  const candidates = admit(state, observed, config, clock);
+  const live = await liveCandidates(deps, observed, clock.now, log);
+  const candidates = admit(state, live, config, clock).filter((item) => {
+    const signal = state.signals?.[item.key];
+    return !signal || signal.status === "closed";
+  });
   noteWatchDrop(ceiling, [state, observed, config, clock]);
   if (candidates.length === 0) {
     if (!(await save(deps, state, "seen", log))) return 1;
@@ -1257,6 +1570,9 @@ export async function main(
       overrides.birthdays ??
       (() => (birthdayRead ??= readBirthdays(now, timeZone)));
     return await runProactiveTick(now, {
+      now: clock,
+      closeSignal: (ids, text) =>
+        closeTelegramWatchSignal(token, chat, { messageIds: ids, text }),
       config: () =>
         loadConfig(join(dir, "settings.json"), (line) => console.log(line)),
       timeZone,
@@ -1271,8 +1587,9 @@ export async function main(
       runTurn: async (prompt, kind, signal) =>
         runReminderTurn(prompt, reminderClientOptions(env, kind), { signal }),
       signal: runDeadline(env[JOB_STOP_AT_ENV]),
-      send: (part, source) =>
+      send: (part, source, options) =>
         sendTelegramHtml(token, chat, part, {
+          ...options,
           retryTransient: true,
           rich: true,
           trace: { source },

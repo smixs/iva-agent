@@ -120,7 +120,7 @@ export default defineTool({
         const row = await remove(input.id, file);
         if (command) {
           rmSync(commandLog(row.id), { force: true });
-          await clearCommandAlert(row.id);
+          clearCommandAlert(row.id);
         }
         return { ok: true, removed: { id: row.id, text: row.text } };
       }

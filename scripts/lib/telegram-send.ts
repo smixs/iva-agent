@@ -11,6 +11,8 @@
 //     ненулевым кодом, а оставшиеся чанки Telegram не получает;
 //   • retryTransient=true даёт каждому HTML/plain-вызову до трёх попыток при сети,
 //     5xx, 408, 425 и 429; по умолчанию повторов нет;
+//     Watch с onAcknowledged останавливается при UNKNOWN (сеть/5xx/408/нет ID),
+//     до durable receipt повторять неопределённую отправку запрещено;
 //   • beforeAttempt (по умолчанию нет) спрашивается перед каждой попыткой, повторы после паузы
 //     тоже: false — попытки нет, отправка кончается отказом без повтора;
 //   • пустой отчёт — тоже ok=false: слать нечего, и молчать об этом нельзя;
@@ -34,11 +36,19 @@ type FetchImpl = typeof fetch;
 type Sleep = (ms: number) => Promise<void>;
 
 type PostAck = OutboxAck & {
+  readonly messageId?: number;
   readonly retryable?: boolean;
   readonly retryAfterMs?: number;
+  readonly outcomeUnknown?: boolean;
+  /** beforeAttempt said no: no request was made. */
+  readonly withdrawn?: boolean;
+  /** HTTP status of a refusal; absent for network errors. */
+  readonly status?: number;
 };
 
 export type TelegramSendOptions = {
+  /** Persist the received ID before this delivery is acknowledged by Outbox. */
+  readonly onAcknowledged?: (messageId: number) => void;
   readonly caption?: boolean;
   readonly retryTransient?: boolean;
   /** Тема форума (message_thread_id), когда сообщение идёт в тему группы. */
@@ -59,7 +69,8 @@ export type TelegramSendOptions = {
   readonly rich?: boolean;
   /**
    * Проверка перед каждой попыткой, включая повтор после паузы: false — сообщение больше не
-   * нужно, попытки нет. Alert о брошенном напоминании перечитывает здесь факт доставки.
+   * нужно, попытки нет. Alert о брошенном напоминании перечитывает здесь факт доставки;
+   * Watch — свежее состояние диалога (живое окно владельца).
    */
   readonly beforeAttempt?: () => Promise<boolean>;
 };
@@ -138,14 +149,26 @@ async function post(
         body: JSON.stringify(body),
       },
     );
-    if (res.ok) return { ok: true };
+    if (res.ok) {
+      const parsed: unknown = await res.json?.().catch(() => null);
+      const id = (parsed as { result?: { message_id?: unknown } } | null)
+        ?.result?.message_id;
+      return {
+        ok: true,
+        ...(Number.isSafeInteger(id) && (id as number) > 0
+          ? { messageId: id as number }
+          : {}),
+      };
+    }
     const text = await res.text();
     // 400 = Telegram не распарсил HTML: единственный статус, где повтор без тегов помогает.
     return {
       ok: false,
       error: `${res.status}: ${text}`,
+      status: res.status,
       retryPlain: res.status === 400,
       retryable: classifyDeliverStatus(res.status) === "retry",
+      outcomeUnknown: res.status >= 500 || res.status === 408,
       ...(res.status === 429
         ? { retryAfterMs: telegramRetryAfterMs(text) }
         : {}),
@@ -156,40 +179,78 @@ async function post(
       error: errorMessage(e),
       retryPlain: false,
       retryable: !(e instanceof AttemptWithdrawn),
+      outcomeUnknown: !(e instanceof AttemptWithdrawn),
+      ...(e instanceof AttemptWithdrawn ? { withdrawn: true } : {}),
     };
   }
 }
 
 async function postWithTransientRetry(
-  bot: string,
-  method: string,
-  body: TelegramRequest,
-  fetchImpl: FetchImpl,
+  attempt: () => Promise<PostAck>,
   sleep: Sleep,
 ): Promise<PostAck> {
-  for (let attempt = 1; ; attempt++) {
-    const ack = await post(bot, method, body, fetchImpl);
-    if (ack.ok || !ack.retryable || attempt >= MAX_ATTEMPTS) return ack;
-    const retryMs =
-      ack.retryAfterMs ?? Math.min(MAX_RETRY_MS, 1000 * 2 ** (attempt - 1));
-    await sleep(retryMs);
+  for (let number = 1; ; number++) {
+    const ack = await attempt();
+    if (ack.ok || !ack.retryable || number >= MAX_ATTEMPTS) return ack;
+    await sleep(
+      ack.retryAfterMs ?? Math.min(MAX_RETRY_MS, 1000 * 2 ** (number - 1)),
+    );
   }
 }
 
-// Один вызов Bot API для всех методов шва: sendMessage у HTML-пути, sendRichMessage
-// у rich-поста. Повторы транзиентных отказов включает вызывающий.
 type SendPost = (method: string, body: TelegramRequest) => Promise<PostAck>;
-
 function poster(
   bot: string,
   retryTransient: boolean,
-  fetchImpl: FetchImpl,
-  sleep: Sleep,
+  options: {
+    fetchImpl: FetchImpl;
+    sleep: Sleep;
+    beforeAttempt?: TelegramSendOptions["beforeAttempt"];
+    onAcknowledged?: TelegramSendOptions["onAcknowledged"];
+  },
 ): SendPost {
-  return retryTransient
-    ? (method, body) =>
-        postWithTransientRetry(bot, method, body, fetchImpl, sleep)
-    : (method, body) => post(bot, method, body, fetchImpl);
+  let stopError = "";
+  const attempt: SendPost = async (method, body) => {
+    if (stopError)
+      return { ok: false, error: stopError, retryPlain: false, stop: true };
+    const ack = await post(
+      bot,
+      method,
+      body,
+      checkedFetch(options.fetchImpl, options.beforeAttempt),
+    );
+    // A withdrawal ends the whole send: the rich -> HTML fallback and later chunks must not
+    // ask beforeAttempt again, a second answer could differ from the first.
+    if (!ack.ok && ack.withdrawn) {
+      stopError = ack.error;
+      return { ok: false, error: stopError, retryPlain: false, stop: true };
+    }
+    if (
+      options.onAcknowledged &&
+      (ack.ok ? ack.messageId === undefined : ack.outcomeUnknown)
+    ) {
+      stopError = `delivery outcome unknown: ${ack.ok ? "missing message_id" : ack.error}`;
+      return { ok: false, error: stopError, retryPlain: false, stop: true };
+    }
+    if (ack.ok && ack.messageId !== undefined && options.onAcknowledged) {
+      try {
+        options.onAcknowledged(ack.messageId);
+      } catch (error) {
+        stopError = `receipt not durable: ${errorMessage(error)}`;
+        return {
+          ok: false,
+          error: stopError,
+          retryPlain: false,
+          stop: true,
+        };
+      }
+    }
+    return ack;
+  };
+  return (method, body) =>
+    retryTransient
+      ? postWithTransientRetry(() => attempt(method, body), options.sleep)
+      : attempt(method, body);
 }
 
 // Ночной отчёт — цельный документ, а не диалог: если Telegram отказал не по разметке
@@ -253,6 +314,9 @@ function messageTransport(
   };
 }
 
+const deliveredIds = (messageIds: readonly number[]) =>
+  messageIds.length ? { messageIds } : {};
+
 /**
  * Delivers a scheduled model result through Telegram, retaining its delivery choice.
  *
@@ -272,15 +336,32 @@ export async function sendTelegramHtml(
     trace,
     rich,
     beforeAttempt,
+    onAcknowledged,
   }: TelegramSendOptions = {},
-): Promise<{ ok: boolean; fellBack: boolean; error: string }> {
+): Promise<{
+  ok: boolean;
+  fellBack: boolean;
+  error: string;
+  messageIds?: readonly number[];
+}> {
   const { text, silent } =
     typeof md === "string"
       ? parseTelegramDelivery(md)
       : { text: md, silent: false };
+  const messageIds: number[] = [];
+  const sendPost = poster(bot, retryTransient, {
+    fetchImpl,
+    sleep,
+    beforeAttempt,
+    onAcknowledged,
+  });
   const transport = messageTransport(
     chat,
-    poster(bot, retryTransient, checkedFetch(fetchImpl, beforeAttempt), sleep),
+    async (method, body) => {
+      const ack = await sendPost(method, body);
+      if (ack.ok && ack.messageId !== undefined) messageIds.push(ack.messageId);
+      return ack;
+    },
     {
       ...(silent ? { disable_notification: true } : {}),
       ...(threadId ? { message_thread_id: threadId } : {}),
@@ -298,7 +379,12 @@ export async function sendTelegramHtml(
     );
     // Пустой рендер шов сам вернул провалом (nothing delivered): ночной скрипт падает
     // ненулевым кодом, как падал на 400 «message text is empty».
-    return { ok, fellBack, error };
+    return {
+      ok,
+      fellBack,
+      error,
+      ...deliveredIds(messageIds),
+    };
   } catch (e) {
     // Шов бросает только на нестроковом md (гейт работает по строке) — контракт
     // «никогда не бросает» держим здесь, у самой границы cron-скриптов.
@@ -336,7 +422,7 @@ export async function sendTelegramRich(
     trace,
   }: TelegramRichOptions = {},
 ): Promise<{ ok: boolean; fellBack: boolean; error: string }> {
-  const sendPost = poster(bot, retryTransient, fetchImpl, sleep);
+  const sendPost = poster(bot, retryTransient, { fetchImpl, sleep });
   const extra: TelegramRequest = {
     ...(silent ? { disable_notification: true } : {}),
     ...(threadId ? { message_thread_id: threadId } : {}),
@@ -404,11 +490,90 @@ export async function sendTelegramScreen(
   const payload = screenPayload(redactNotice(markdown));
   const method = "rich_message" in payload ? "sendRichMessage" : "sendMessage";
   const ack = await postWithTransientRetry(
-    bot,
-    method,
-    { chat_id: chat, ...payload },
-    fetchImpl,
+    () => post(bot, method, { chat_id: chat, ...payload }, fetchImpl),
     sleep,
   );
   return { ok: ack.ok, error: ack.ok ? "" : ack.error };
+}
+
+/**
+ * A refusal that repeating cannot change: HTTP 4xx except 429, 408 (says nothing about the
+ * outcome) and 401 (the token was rejected, not this message). 5xx, 429, 408, 401 and network
+ * errors may heal, so the caller retries them.
+ */
+const definitiveRefusal = (ack: PostAck) =>
+  !ack.ok &&
+  ack.status !== undefined &&
+  ack.status >= 400 &&
+  ack.status < 500 &&
+  ack.status !== 401 &&
+  ack.status !== 408 &&
+  ack.status !== 429;
+
+const notModified = (ack: PostAck) =>
+  !ack.ok && /message is not modified/iu.test(ack.error);
+
+/** Keep text literal in rich markdown. */
+const literalMarkdown = (text: string) =>
+  text.replace(/[\\`*_{}[\]()#+.!|<>~=$-]/gu, "\\$&");
+
+/**
+ * Close the recorded Watch messages: the first one is edited to the close text (empty markup
+ * removes any classic buttons), the others of the same signal are deleted, so one signal never
+ * ends as several identical lines. A definitive refusal (the owner deleted the message, the
+ * chat is gone) counts as done and is reported in `refused`; a transient failure is `ok: false`
+ * and the whole close is repeated later (an edit that already landed answers "not modified",
+ * a delete that already landed answers "not found").
+ */
+export async function closeTelegramWatchSignal(
+  bot: string,
+  chat: string,
+  { messageIds, text }: { messageIds: readonly number[]; text: string },
+  { fetchImpl = fetch }: Pick<TelegramSendOptions, "fetchImpl"> = {},
+): Promise<{ ok: boolean; error: string; refused?: string }> {
+  let refused = "";
+  const closeText = redactNotice(text);
+  const edit = (extra: Record<string, unknown>, message_id: number) =>
+    post(
+      bot,
+      "editMessageText",
+      {
+        chat_id: chat,
+        message_id,
+        ...extra,
+        reply_markup: { inline_keyboard: [] },
+      },
+      fetchImpl,
+    );
+  for (const [index, message_id] of messageIds.entries()) {
+    let ack: PostAck;
+    if (index === 0) {
+      ack = await edit({ text: closeText }, message_id);
+      // The receipt does not say how the message went out. A rich message refuses a plain
+      // `text` edit, so one definitive refusal is retried once in the rich form.
+      if (definitiveRefusal(ack) && !notModified(ack)) {
+        const plainRefusal = ack.ok ? "" : ack.error;
+        ack = await edit(
+          { rich_message: { markdown: literalMarkdown(closeText) } },
+          message_id,
+        );
+        if (!ack.ok && definitiveRefusal(ack))
+          ack = {
+            ...ack,
+            error: `plain edit: ${plainRefusal}; rich edit: ${ack.error}`,
+          };
+      }
+    } else {
+      ack = await post(
+        bot,
+        "deleteMessage",
+        { chat_id: chat, message_id },
+        fetchImpl,
+      );
+    }
+    if (ack.ok || notModified(ack)) continue;
+    if (!definitiveRefusal(ack)) return { ok: false, error: ack.error };
+    refused ||= ack.error;
+  }
+  return { ok: true, error: "", ...(refused ? { refused } : {}) };
 }

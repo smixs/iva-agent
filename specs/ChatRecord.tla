@@ -13,10 +13,7 @@
 \* TurnStart        -> publishTelegramTurnStarted. Beat -> markTelegramTurnAlive.
 \* TurnEnd, Release -> the terminal handler of one turn: it starts when the turn
 \*                     ends and writes later (telegram-draft.ts finishTelegramStatus
-\*                     waits for the draft first). ReleaseIntoCompaction is its
-\*                     keepBusy branch.
-\* CompactClaim/End -> channels/telegram.ts claimChatForCompaction,
-\*                     releaseCompactionClaim and the session.waiting release.
+\*                     waits for the draft first).
 \* SessionFails     -> session.failed: finishTelegramStatus without a turn.
 \* MarkRetire, AskOwner, OwnerAnswers -> run-status.ts
 \*                     markTelegramSessionForRetirement,
@@ -44,18 +41,21 @@ vars == <<rec, acc, core, closing, rem, bridgeUp,
 Sessions == 1..2      \* dialogue sessions of the chat
 ReminderSession == 3  \* the session of one Reminder turn
 Empty == [status |-> "idle", ingress |-> 0, session |-> 0, turn |-> 0,
-  compacting |-> FALSE, stale |-> FALSE, reset |-> FALSE, retry |-> FALSE,
-  retire |-> FALSE, pending |-> FALSE]
-CoreIdle == [phase |-> "idle", session |-> 0, turn |-> 0, due |-> FALSE]
+  stale |-> FALSE, reset |-> FALSE, retry |-> FALSE,
+  retire |-> FALSE, pending |-> FALSE, pm |-> FALSE, pmSet |-> FALSE]
+CoreIdle == [phase |-> "idle", session |-> 0, turn |-> 0]
 
 Live(r) == r.status = "running" /\ ~r.stale
 \* chatTakeOverPatch: a claim names its owner and drops what the previous one left.
-Claimed(r, ingress, session, compacting) == [r EXCEPT !.status = "running",
-  !.ingress = ingress, !.session = session, !.turn = 0, !.compacting = compacting,
+Claimed(r, ingress, session) == [r EXCEPT !.status = "running",
+  !.ingress = ingress, !.session = session, !.turn = 0,
   !.stale = FALSE, !.reset = FALSE, !.retry = FALSE]
-\* The terminal patch: every turn field goes with the status.
+\* The terminal patch: every turn field goes with the status. pm (progressMessageId)
+\* is a mark, not a turn field: it stays (specs/ProgressMessage.tla). The mutant makes it
+\* a turn field.
 Freed(r) == [r EXCEPT !.status = "idle", !.ingress = 0, !.session = 0, !.turn = 0,
-  !.compacting = FALSE, !.stale = FALSE]
+  !.stale = FALSE,
+  !.pm = IF Mutant = "mark-as-turn-field" THEN FALSE ELSE r.pm]
 Tombstone(r) == [Freed(r) EXCEPT !.reset = TRUE, !.retry = FALSE]
 
 Init ==
@@ -67,7 +67,7 @@ Init ==
 Accept ==
   /\ acc = 0 /\ accepts < MaxAccepts /\ ~Live(rec)
   /\ accepts' = accepts + 1 /\ acc' = accepts'
-  /\ rec' = Claimed(rec, accepts', 0, FALSE)
+  /\ rec' = Claimed(rec, accepts', 0)
   /\ UNCHANGED <<core, closing, rem, bridgeUp, started, restarts, crashes, foreign>>
 Abandon ==
   /\ acc # 0 /\ acc' = 0
@@ -79,10 +79,10 @@ Abandon ==
 TurnStart(s) ==
   /\ core.phase = "idle" /\ started < MaxTurns
   /\ started' = started + 1
-  /\ core' = [phase |-> "turn", session |-> s, turn |-> started', due |-> FALSE]
+  /\ core' = [phase |-> "turn", session |-> s, turn |-> started']
   /\ rec' = IF rec.reset THEN rec
             ELSE [rec EXCEPT !.status = "running", !.session = s,
-                             !.turn = started', !.compacting = FALSE, !.stale = FALSE]
+                             !.turn = started', !.stale = FALSE]
   /\ acc' = IF ~rec.reset /\ rec.status = "running" /\ rec.session = 0 /\ rec.ingress = acc
             THEN 0 ELSE acc
   /\ UNCHANGED <<closing, rem, bridgeUp, accepts, restarts, crashes, foreign>>
@@ -91,10 +91,10 @@ Beat ==
   /\ rec.stale /\ rec' = [rec EXCEPT !.stale = FALSE]
   /\ UNCHANGED <<acc, core, closing, rem, bridgeUp, started, accepts, restarts,
                  crashes, foreign>>
-TurnEnd(due) ==
+TurnEnd ==
   /\ core.phase = "turn"
   /\ closing' = closing \cup {[session |-> core.session, turn |-> core.turn]}
-  /\ core' = [core EXCEPT !.phase = "idle", !.turn = 0, !.due = due]
+  /\ core' = [core EXCEPT !.phase = "idle", !.turn = 0]
   /\ UNCHANGED <<rec, acc, rem, bridgeUp, started, accepts, restarts, crashes, foreign>>
 Owns(c) == rec.status = "running" /\ rec.session = c.session /\ rec.turn = c.turn
 Hit(c) == IF Mutant = "release-by-session"
@@ -104,29 +104,6 @@ Release(c) ==
   /\ rec' = IF Hit(c) THEN Freed(rec) ELSE rec
   /\ foreign' = (foreign \/ (Hit(c) /\ ~Owns(c)))
   /\ UNCHANGED <<acc, core, rem, bridgeUp, started, accepts, restarts, crashes>>
-ReleaseIntoCompaction(c) ==
-  /\ c \in closing /\ Owns(c) /\ closing' = closing \ {c}
-  /\ core.phase = "idle" /\ core.session = c.session /\ core.due
-  /\ rec' = [Freed(rec) EXCEPT !.status = "running", !.session = c.session,
-                               !.compacting = TRUE]
-  /\ core' = [core EXCEPT !.phase = "compacting", !.due = FALSE]
-  /\ UNCHANGED <<acc, rem, bridgeUp, started, accepts, restarts, crashes, foreign>>
-CompactClaim ==
-  /\ core.phase = "idle" /\ core.session # 0 /\ core.due
-  /\ \A c \in closing : c.session # core.session
-  /\ ~Live(rec) /\ ~rec.reset
-  /\ rec' = Claimed(rec, 0, core.session, TRUE)
-  /\ core' = [core EXCEPT !.phase = "compacting", !.due = FALSE]
-  /\ UNCHANGED <<acc, closing, rem, bridgeUp, started, accepts, restarts, crashes,
-                 foreign>>
-CompactEnd ==
-  /\ core.phase = "compacting" /\ core' = [core EXCEPT !.phase = "idle"]
-  /\ rec' = IF rec.status = "running" /\ rec.session = core.session /\ rec.compacting
-            THEN IF Mutant = "leave-compacting"
-                 THEN [Freed(rec) EXCEPT !.compacting = TRUE] ELSE Freed(rec)
-            ELSE rec
-  /\ UNCHANGED <<acc, closing, rem, bridgeUp, started, accepts, restarts, crashes,
-                 foreign>>
 SessionFails ==
   /\ core.session # 0 /\ core' = CoreIdle
   /\ \A c \in closing : c.session # core.session
@@ -150,10 +127,9 @@ OwnerAnswers ==
   /\ UNCHANGED <<acc, core, closing, rem, bridgeUp, started, accepts, restarts,
                  crashes, foreign>>
 \* The process dies: memory is gone, the file stays. Recovery before the start marks
-\* an interrupted record for the Bridge and frees an interrupted compaction; it may fail.
+\* an interrupted record for the Bridge; it may fail.
 Recovered(r) ==
   IF r.status # "running" THEN r
-  ELSE IF r.compacting THEN [Empty EXCEPT !.reset = TRUE]
   ELSE [r EXCEPT !.stale = TRUE]
 Restart ==
   /\ restarts < MaxRestarts /\ restarts' = restarts + 1
@@ -161,10 +137,21 @@ Restart ==
   /\ rec' \in {rec, Recovered(rec)}
   /\ UNCHANGED <<rem, bridgeUp, started, accepts, crashes, foreign>>
 
+\* The agent process records or clears the id of the status message by value
+\* (telegram-draft.ts); nothing else writes it.
+MarkProgressId ==
+  /\ core.phase = "turn" /\ ~rec.pm /\ rec' = [rec EXCEPT !.pm = TRUE, !.pmSet = TRUE]
+  /\ UNCHANGED <<acc, core, closing, rem, bridgeUp, started, accepts, restarts, crashes,
+                 foreign>>
+ClearProgressId ==
+  /\ rec.pm /\ rec' = [rec EXCEPT !.pm = FALSE, !.pmSet = FALSE]
+  /\ UNCHANGED <<acc, core, closing, rem, bridgeUp, started, accepts, restarts, crashes,
+                 foreign>>
+
 \* ---- Reminder turn: its own process, its own session ------------------------
 RemClaim ==
   /\ ~rem /\ ~Live(rec) /\ rem' = TRUE
-  /\ rec' = Claimed(rec, 0, ReminderSession, FALSE)
+  /\ rec' = Claimed(rec, 0, ReminderSession)
   /\ UNCHANGED <<acc, core, closing, bridgeUp, started, accepts, restarts, crashes,
                  foreign>>
 RemRelease ==
@@ -214,49 +201,48 @@ BridgeBoot ==
                  foreign>>
 
 TurnStarts == \E s \in Sessions : TurnStart(s)
-TurnEnds == \E due \in BOOLEAN : TurnEnd(due)
 Releases == \E c \in closing : Release(c)
-ReleasesIntoCompaction == \E c \in closing : ReleaseIntoCompaction(c)
-Next == Accept \/ Abandon \/ TurnStarts \/ Beat \/ TurnEnds
-  \/ Releases \/ ReleasesIntoCompaction \/ CompactClaim \/ CompactEnd \/ SessionFails \/ MarkRetire \/ AskOwner
+Next == Accept \/ Abandon \/ TurnStarts \/ Beat \/ TurnEnd
+  \/ Releases \/ SessionFails \/ MarkRetire \/ AskOwner
   \/ OwnerAnswers \/ Restart \/ RemClaim \/ RemRelease \/ Expire \/ Reap \/ Retire
-  \/ Reset \/ DeliveryFailed \/ BridgeCrash \/ BridgeBoot
+  \/ Reset \/ DeliveryFailed \/ BridgeCrash \/ BridgeBoot \/ MarkProgressId \/ ClearProgressId
 \* Every started step ends; time passes; the Bridge comes back.
 Fairness ==
-  /\ WF_vars(Abandon) /\ WF_vars(TurnEnds) /\ WF_vars(Releases) /\ WF_vars(CompactEnd)
+  /\ WF_vars(Abandon) /\ WF_vars(TurnEnd) /\ WF_vars(Releases)
   /\ WF_vars(RemRelease) /\ WF_vars(Expire) /\ WF_vars(Reap) /\ WF_vars(BridgeBoot)
 Spec == Init /\ [][Next]_vars /\ Fairness
 
 \* ---- the states of a chat ----------------------------------------------------
-NoTurnFields == rec.ingress = 0 /\ rec.session = 0 /\ rec.turn = 0 /\ ~rec.compacting
+NoTurnFields == rec.ingress = 0 /\ rec.session = 0 /\ rec.turn = 0
 Idle == rec.status = "idle" /\ NoTurnFields
 Is == [
   free |-> Idle /\ ~rec.retire /\ ~rec.retry /\ ~rec.pending,
   awaitingOwner |-> Idle /\ ~rec.retire /\ ~rec.retry /\ rec.pending,
   retryOffered |-> Idle /\ ~rec.retire /\ rec.retry,
   retiring |-> Idle /\ rec.retire,
-  accepted |-> Live(rec) /\ rec.session = 0 /\ rec.ingress # 0 /\ rec.turn = 0
-               /\ ~rec.compacting,
-  turn |-> Live(rec) /\ rec.session # 0 /\ ~rec.compacting,
-  compacting |-> Live(rec) /\ rec.session # 0 /\ rec.compacting /\ rec.turn = 0,
+  accepted |-> Live(rec) /\ rec.session = 0 /\ rec.ingress # 0 /\ rec.turn = 0,
+  turn |-> Live(rec) /\ rec.session # 0,
   stale |-> rec.status = "running" /\ rec.stale]
 
 TypeOK ==
   /\ rec.status \in {"idle", "running"} /\ rec.ingress \in 0..MaxAccepts
   /\ rec.session \in 0..ReminderSession /\ rec.turn \in 0..MaxTurns
-  /\ \A f \in {"compacting", "stale", "reset", "retry", "retire", "pending"} :
+  /\ \A f \in {"stale", "reset", "retry", "retire", "pending", "pm", "pmSet"} :
        rec[f] \in BOOLEAN
-  /\ acc \in 0..MaxAccepts /\ core.phase \in {"idle", "turn", "compacting"}
+  /\ acc \in 0..MaxAccepts /\ core.phase \in {"idle", "turn"}
   /\ rem \in BOOLEAN /\ bridgeUp \in BOOLEAN /\ foreign \in BOOLEAN
 \* 1. A chat is in exactly one named state at every moment.
 OneState == Cardinality({name \in DOMAIN Is : Is[name]}) = 1
-\* 2. Turn fields are filled only while a turn or a compaction holds the chat.
+\* 2. Turn fields are filled only while a turn holds the chat.
 TurnFieldsOnlyWhenBusy ==
   /\ rec.status = "idle" => NoTurnFields /\ ~rec.stale
-  /\ rec.compacting => rec.session # 0 /\ rec.turn = 0
   /\ rec.turn # 0 => rec.session # 0
 \* 3. Only the owner frees a record, or the reaper after the deadline.
 ReleasedByOwnerOrReaper == ~foreign
 \* 4. After any restart the chat becomes free in finite time.
 FreeAfterRestart == (restarts > 0) ~> (rec.status = "idle")
+\* 5. The id of the status message is a mark: every patch of the Channel, the Bridge, the
+\*    reaper and the Reminder keeps it; only its own writer records or clears it.
+\*    pmSet is a ghost: it records that the writer set the mark and is touched only by it.
+ProgressIdKept == rec.pmSet => rec.pm
 =============================================================================

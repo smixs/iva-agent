@@ -87,7 +87,7 @@ void test("repeated stop after cancellation or a newer draft is harmless; an alr
   assert.equal(actualCancels, 1);
   st = { sessionId: "s", turnId: "new", draftId: 42 };
   assert.equal(await handleTelegramDraftStop(native, deps), "ignored");
-  st = { sessionId: "s", turnId: null, draftId: 41, compacting: true };
+  st = { sessionId: "s", turnId: null, draftId: 41 };
   assert.equal(await handleTelegramDraftStop(native, deps), "ignored");
   st = { status: "idle" };
   assert.equal(await handleTelegramDraftStop(native, deps), "ignored");

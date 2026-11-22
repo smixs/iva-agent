@@ -16,7 +16,11 @@ import { waitForDevelopmentSandboxPrewarm } from "#execution/sandbox/development
 import { prewarmAppSandboxes } from "#execution/sandbox/prewarm.js";
 import { waitForSandboxTemplatePrewarmLock } from "#execution/sandbox/template-prewarm-lock.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
-import { createRuntimeSandboxKeys } from "#runtime/sandbox/keys.js";
+import type { World } from "#compiled/@workflow/world/index.js";
+import {
+  createRuntimeSandboxKeys,
+  sessionIdFromRuntimeSandboxSessionKey,
+} from "#runtime/sandbox/keys.js";
 import type { RuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
 import { createRuntimeSandboxTemplatePlan } from "#runtime/sandbox/template-plan.js";
 import type { SandboxAccess, SandboxSessionState, SandboxState } from "#sandbox/state.js";
@@ -124,7 +128,11 @@ export async function ensureSandboxAccess(input: EnsureSandboxAccessInput): Prom
 
     const createInput: SandboxBackendCreateInput = {
       existingMetadata: reattachSession?.metadata,
-      runtimeContext: { appRoot },
+      runtimeContext: {
+        appRoot,
+        isSessionFinished: async (sessionKey) =>
+          await isSessionOwnerRunTerminal(backend.name, sessionKey),
+      },
       sessionKey: keys.sessionKey,
       tags: input.tags,
       templateKey: keys.templateKey,
@@ -210,6 +218,47 @@ export async function ensureSandboxAccess(input: EnsureSandboxAccessInput): Prom
       await handle.stop();
     },
   };
+}
+
+/**
+ * Reports whether the workflow run that owns a sandbox session key has
+ * reached a terminal status in the installed world. The check is the
+ * only witness a cache sweep may delete on: a missing world, a run id
+ * that does not parse or is not stored, and any lookup error all read
+ * as "still owned" so a live or resumable session is never collected.
+ */
+async function isSessionOwnerRunTerminal(
+  backendName: string,
+  sessionKey: string,
+): Promise<boolean> {
+  const sessionId = sessionIdFromRuntimeSandboxSessionKey({ backendName, sessionKey });
+  if (sessionId === undefined) {
+    return false;
+  }
+
+  // Reading the runtime's world slot directly keeps the check inert in
+  // processes with no workflow run — asking getWorld() would lazily
+  // install one instead of answering "no owner state here".
+  const world = (globalThis as Record<symbol, unknown>)[
+    Symbol.for("@workflow/world//cache")
+  ] as Pick<World, "runs"> | undefined;
+  if (world === undefined) {
+    return false;
+  }
+
+  try {
+    const run = await world.runs.get(sessionId, { resolveData: "none" });
+    // Mirrors the Workflow runtime's TERMINAL_WORKFLOW_RUN_STATUSES. The
+    // vendored World bundle does not carry the helper, so the terminal
+    // set is restated here — the only statuses a finished run can hold.
+    return (
+      run.status === "completed" ||
+      run.status === "failed" ||
+      run.status === "cancelled"
+    );
+  } catch {
+    return false;
+  }
 }
 
 async function createBackendHandleWithPrewarmRetry(input: {

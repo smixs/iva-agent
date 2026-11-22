@@ -219,11 +219,14 @@ void test("the vault template ignores half-written temp files, not real cards", 
   writeFileSync(join(vault, ".gitignore"), readFileSync(template, "utf8"));
 
   execFileSync("git", ["-C", vault, "init", "-q"]);
+  mkdirSync(join(vault, ".index"));
   for (const name of [
     "cards/tmpjsxhjx4o.tmp",
     "cards/ivan.md.tmp-23940-c9d1d4da-9f4c-477f-ac92-7972aedd15ea",
     "cards/ivan.md",
     "MOC.md",
+    // Производный кэш hybrid-поиска: в бэкап vault ему не место (T351).
+    ".index/embeddings.json",
   ])
     writeFileSync(join(vault, name), "x\n");
   execFileSync("git", ["-C", vault, "add", "-A"]);

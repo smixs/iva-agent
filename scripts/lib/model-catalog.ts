@@ -150,7 +150,7 @@ export const CATALOG: Record<string, ProviderCatalogEntry> = {
     models: ["gpt-5.5", "gpt-6-sol", "gpt-6-luna", "gpt-6.1-sol"],
   },
   claude: {
-    label: "Claude (подписка Pro/Max)",
+    label: "Claude (подписка)",
     // Ключа в .env нет: вход живёт в Claude Code CLI на той же машине (data/ его не хранит,
     // а ключ подписки Ива не видит вовсе).
     auth: "cli",
@@ -194,7 +194,7 @@ export const CATALOG: Record<string, ProviderCatalogEntry> = {
     ],
   },
   custom: {
-    label: "Custom (OpenAI-compatible)",
+    label: "Custom API",
     // Ключ опционален: локальный или self-hosted эндпоинт живёт без авторизации.
     auth: "key-optional",
     // Адрес статичным быть не может — его задаёт владелец, целиком, вместе с суффиксом
