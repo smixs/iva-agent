@@ -168,6 +168,7 @@ export function claudeContextWindow(route: string): number {
 
 // Defaults belong to the same resolver for runtime, setup and status displays.
 const PROVIDER_CONTEXT_WINDOWS: Readonly<Record<string, number>> = {
+  devin: 131_072,
   ollama: 131_072,
   opencode: 131_072,
   openrouter: 131_072,

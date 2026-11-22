@@ -12,6 +12,7 @@ Iva runs on your server with your keys. Here is every external service it talks 
 | **OpenAI (ChatGPT subscription)** | your existing Plus/Pro/Team  | the models your plan exposes (`gpt-6.1-sol`, `gpt-6-sol`, `gpt-6-luna`, `gpt-5.x`), fetched live                                                            | same subscription (multimodal), no variable                        |
 | **Claude (Pro/Max subscription)** | your existing Pro/Max plan   | Fable 5.2, Opus 5.5, Sonnet 5.5, Haiku 5.5 (`claude-fable-5-2`, `claude-opus-5-5`, `claude-sonnet-5-5`, `claude-haiku-5-5`), the ones the plan's picker has | same subscription (multimodal), no variable                        |
 | **Custom (OpenAI-compatible)**    | whatever your endpoint costs | whatever your endpoint serves — the wizard reads `GET {base}/models` when there is one, otherwise you type the id                                           | the chat model itself, or a slug in `CUSTOM_VISION_MODEL`          |
+| **Devin CLI (experimental)**      | your Devin account plan      | live CLI catalog, `swe-2-high` by default                                                                                                                   | text only                                                          |
 
 The first three are plain API keys, `codex` and `claude` ride subscriptions you already pay for, and `custom` is an address you supply:
 
@@ -20,10 +21,10 @@ The first three are plain API keys, `codex` and `claude` ride subscriptions you 
 - 💸 **No markup** — you pay the provider directly; Iva adds nothing on top
 
 ```bash
-MODEL_PROVIDER=opencode   # or ollama / openrouter / codex / claude / custom, then `iva restart`
+MODEL_PROVIDER=opencode   # or ollama / openrouter / codex / claude / custom / devin, then `iva restart`
 ```
 
-Those six names, spelled exactly. Anything else — `ollmaa`, `OLLAMA` — stops the agent at startup with the list of accepted names, instead of running Ollama under a name nobody configured ([troubleshooting.md](troubleshooting.md)).
+Those seven names, spelled exactly. Anything else — `ollmaa`, `OLLAMA` — stops the agent at startup with the list of accepted names, instead of running Ollama under a name nobody configured ([troubleshooting.md](troubleshooting.md)).
 
 OpenCode Go only serves clients that identify themselves: every request carries Iva's own `User-Agent` (`iva/<version>`) and a stable conversation id in `x-opencode-session` — the eve session id, or one id per process where there is no session (declared nodes, vision). Without them Go answers `MissingSessionID` on every turn ([Go docs](https://opencode.ai/docs/go/#where-can-i-use-it)). Other providers get neither header.
 
@@ -81,6 +82,10 @@ One key for [300+ models](https://openrouter.ai/models) (Anthropic, OpenAI, Goog
 3. `iva config` → provider `4` → paste the key, then the slug. Setup fires a live test **with a tool call** and continues only once the model answers — a mistyped slug or a no-tools model is rejected on the spot, not later as a silent bot.
 
 Set `OPENROUTER_CONTEXT_WINDOW` to the model's real window. Vision runs through `google/gemini-2.5-flash` regardless of your text model (billed to your OpenRouter credit); `OPENROUTER_VISION_MODEL` takes any other image-capable slug.
+
+### Devin CLI (`devin`)
+
+Install and authenticate the official CLI on the same machine. Select Devin in `iva config`; no API key is needed. Each model step uses an isolated ACP session, and Iva executes the tool calls. Token accounting includes internal requests and cache use when valid CLI metrics are available. This is experimental and text-only; see [setup, limitations and usage](devin-provider.md).
 
 ### Your own OpenAI-compatible endpoint (`custom`)
 

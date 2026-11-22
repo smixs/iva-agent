@@ -87,7 +87,7 @@ test("both trees name the same vision variable and the same vision default", () 
   // null стоит ровно у двух подписок — иначе «нет переменной» тихо расползлось бы по таблице.
   assert.deepEqual(
     MODEL_PROVIDER_NAMES.filter((name) => CATALOG[name].visionVar === null),
-    ["codex", "claude"],
+    ["codex", "claude", "devin"],
   );
 });
 

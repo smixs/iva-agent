@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Add an opt-in experimental Devin CLI provider: signed-in account authentication, live model selection, isolated ACP/MCP tool interception, cancellation and a dedicated optional proxy. Iva executes all tool calls. Count internal model requests once per request ID, including cache reads/writes; unavailable metrics remain unknown. Night memory keeps its limits and can continue when Devin metrics are unavailable. Text only; setup and limitations are in docs/devin-provider.md.
+
 ## [0.5.14] - 2026-11-17
 
 - 🧭 **Меню без лишних подписей**: под кнопками `/menu` и мастера модели больше нет пояснений «кнопка — что она делает», легенд значков и вступлений; на экране кнопки, текущее состояние, ошибки и предупреждения. Menu and model-wizard screens show the buttons alone; text stays for state, errors and warnings.

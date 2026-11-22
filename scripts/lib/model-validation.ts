@@ -1,3 +1,4 @@
+import { devinStatus, listDevinModels } from "./devin-cli-status.ts";
 import { randomUUID } from "node:crypto";
 import { resolveOpenCodeProtocol } from "@iva/opencode-protocol";
 import {
@@ -9,6 +10,7 @@ import { ClaudeCliError, probeClaudeModel } from "./claude-cli-status.ts";
 
 type OpenRouterErrorReason = (body: unknown, status: number) => unknown;
 type ModelSelection = {
+  devinEnv?: NodeJS.ProcessEnv;
   provider: string;
   model: string | null | undefined;
   key?: string;
@@ -168,10 +170,24 @@ export async function probeOpenRouterModel(
 }
 
 export async function validateModelSelection(
-  { provider, model, key, dataDir, base, opencodeProtocol }: ModelSelection,
+  {
+    provider,
+    model,
+    key,
+    dataDir,
+    base,
+    opencodeProtocol,
+    devinEnv,
+  }: ModelSelection,
   { fetchFn = fetch, listCodexCatalog, probeClaude }: ValidationOptions = {},
 ): Promise<{ id: string; reasoningLevels: string[]; answered?: boolean }> {
   const selected = selectionOf(provider, model);
+  if (provider === "devin") {
+    await devinStatus(devinEnv);
+    if (!(await listDevinModels(devinEnv)).includes(selected))
+      throw new Error(`Devin model is unavailable: ${selected}`);
+    return { id: selected, reasoningLevels: [] };
+  }
   if (provider === "openrouter")
     return probeOpenRouterModel({ model: selected, key }, { fetchFn });
   // У вендора без ключа проверка одна: живой запрос через CLI на этой же машине.

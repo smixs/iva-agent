@@ -69,6 +69,7 @@ const PROVIDER_MENU = [
   "claude",
   "openrouter",
   "custom",
+  "devin",
 ];
 const LANGUAGES = new Set(["en", "ru"]);
 
@@ -306,6 +307,9 @@ async function keepCurrent(p: Progress): Promise<void> {
 function currentSelection({ ctx, existing, config }: Progress) {
   return {
     provider: config.prov0,
+    ...(config.prov0 === "devin"
+      ? { devinEnv: { ...process.env, ...existing } }
+      : {}),
     ...(config.prov0 === "opencode"
       ? { opencodeProtocol: existing.OPENCODE_PROTOCOL }
       : {}),
@@ -344,7 +348,7 @@ async function chooseProvider(p: Progress): Promise<boolean> {
   );
   printProviderMenu(ctx);
   const choice = await ctx.ask(
-    `  ${ctx.t("Provider", "Провайдер")} (1/2/3/4/5/6)`,
+    `  ${ctx.t("Provider", "Провайдер")} (1/2/3/4/5/6/7)`,
     providerDefault(p.config.prov0),
   );
   p.provider = providerFor(menuChoice(choice));
@@ -384,6 +388,7 @@ function printProviderMenu(ctx: SetupContext): void {
   ctx.print(
     `    6) ${ctx.t("Custom — your own OpenAI-compatible endpoint", "Custom — свой OpenAI-совместимый эндпоинт")} ${ctx.t("(proxy, vLLM, LiteLLM, a vendor plan)", "(прокси, vLLM, LiteLLM, вендорская подписка)")}`,
   );
+  ctx.print("    7) Devin CLI (experimental, signed-in Pro account)");
 }
 
 /** Причина отказа мастера для строки «Настройка прервана»: сообщение ошибки или она сама. */

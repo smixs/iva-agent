@@ -1,3 +1,4 @@
+import { devinStatus } from "../lib/devin-cli-status.ts";
 import { noticeLang } from "../lib/notice-policy.ts";
 import { logHint } from "../lib/systemd-control.ts";
 import { unitPath } from "../lib/launchd.ts";
@@ -583,6 +584,15 @@ async function checkEnvFile(ctx: DoctorContext): Promise<boolean> {
   // Вендора без ключа в .env доктор проверяет там же, где живёт его вход: в чужом CLI
   // на этой же машине. Молчать об этом значило бы объявить .env здоровым перед
   // отказом агента на старте.
+  if (rawProvider === "devin") {
+    try {
+      await devinStatus({ ...process.env, ...ctx.env });
+      ctx.ok("Devin CLI: signed in (experimental, text-only)");
+    } catch {
+      ctx.fail("Devin CLI: sign in with devin auth login");
+    }
+    return true;
+  }
   if (!(await checkModelAuth(ctx, rawProvider)) && provider.auth === "cli")
     await checkClaudeCli(ctx);
   return true;

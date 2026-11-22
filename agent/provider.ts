@@ -20,6 +20,7 @@ import {
   MAX_IMAGE_BYTES,
 } from "./lib/attachment-ref.ts";
 import { resolveAttachmentPath } from "./lib/telegram-media-cache.ts";
+import { makeDevinCliModel } from "./lib/devin-cli.ts";
 import { makeClaudeCliModel } from "./lib/claude-cli.ts";
 import {
   CODEX_BASE_URL,
@@ -64,6 +65,7 @@ const PROVIDER = selected.name;
 // Читается ровно в одном месте — PROVIDERS[PROVIDER] ниже, поэтому запись выбранного
 // провайдера в поле соседа невозможна. satisfies держит таблицу полной.
 const PROVIDERS = {
+  devin: { baseURL: "process://devin", apiKey: undefined },
   ollama: {
     // OLLAMA_BASE_URL — не пользовательская настройка, а шов для тестов: replica-смоук
     // подставляет сюда локальный mock-провайдер (scripts/lib/mock-openai-server.ts).
@@ -871,6 +873,7 @@ function makeBareTextModel(
   // Claude-подписка — тоже своя модель: рукописная LanguageModelV4 поверх Claude Code CLI
   // (stream-json), потому что API-адреса у неё нет вовсе.
   // Go выбирает провод явно; остальные API-ключи говорят chat/completions.
+  if (providerName === "devin") return makeDevinCliModel(model);
   if (providerName === "codex") return makeCodexModel(model, sessionId);
   if (providerName === "claude")
     return makeClaudeCliModel(model, {

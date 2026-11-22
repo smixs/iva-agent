@@ -1,3 +1,4 @@
+import { devinStatus, listDevinModels } from "./devin-cli-status.ts";
 // Provider/model/effort metadata for the /model and /think Telegram wizards.
 // Static lists are suggestions only; selectable catalog providers must come from
 // a successful live response. Codex also returns model-specific reasoning levels.
@@ -44,6 +45,7 @@ export interface ModelOption {
 }
 
 export interface FetchModelOptions {
+  devinEnv?: NodeJS.ProcessEnv;
   dataDir?: string;
   // Адрес эндпоинта для провайдера, у которого он не вшит (custom). Пусто — берётся base
   // каталога. Значение собирает вызывающий: только он читает свежий .env.
@@ -210,6 +212,17 @@ export const CATALOG: Record<string, ProviderCatalogEntry> = {
     // Курировать нечего — список моделей приходит живым GET {base}/models, а если его нет,
     // мастер спрашивает id текстом.
     models: [],
+  },
+  devin: {
+    label: "Devin CLI (experimental)",
+    auth: "cli",
+    baseVar: null,
+    keyVar: null,
+    modelVar: "DEVIN_MODEL",
+    def: "swe-2-high",
+    visionVar: null,
+    visionDef: null,
+    models: ["swe-2-high", "swe-2-flash-medium"],
   },
 };
 
@@ -412,6 +425,8 @@ async function liveSource(
     claudeEnv = process.env,
     fetchFn = fetch,
   } = options;
+  if (provider === "devin")
+    return optionsFor(provider, await listDevinModels(options.devinEnv));
   if (provider === "codex")
     return validOptions(
       provider,
@@ -518,6 +533,14 @@ export async function checkKey(
   const endpoint = base ?? cat?.base;
   // У вендора без ключа (claude) в .env проверять нечего: его вход живёт в CLI на этой же
   // машине, и статус говорит то же, что скажет доктор. Ключ тут не читается вовсе.
+  if (provider === "devin") {
+    try {
+      await devinStatus();
+      return null;
+    } catch {
+      return "Run devin auth login on the server";
+    }
+  }
   if (cat?.auth === "cli") return await claudeKeyState();
   if (!cat || !endpoint) return null;
   // OpenRouter has a dedicated auth-only endpoint; the others validate via /models.

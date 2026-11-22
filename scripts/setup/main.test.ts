@@ -238,7 +238,7 @@ test("Russian: «2.» picks Russian and «да» reconfigures", async (t) => {
     ),
     port,
     answers: ["2.", "да"],
-    stopAt: /Провайдер \(1\/2\/3\/4\/5\/6\) \[2\]: $/u,
+    stopAt: /Провайдер \(1\/2\/3\/4\/5\/6\/7\) \[2\]: $/u,
   });
   assert.match(result.transcript, /Iva будет отвечать по-русски/u);
   assert.match(result.transcript, /Идём по шагам\./u);

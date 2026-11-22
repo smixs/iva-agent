@@ -33,6 +33,7 @@ export const MODEL_PROVIDER_NAMES = [
   "claude",
   "openrouter",
   "custom",
+  "devin",
 ] as const;
 
 export type ModelProviderName = (typeof MODEL_PROVIDER_NAMES)[number];
@@ -56,6 +57,16 @@ export interface ModelProviderSelection {
 // те же дефолты для кнопок /model и мастера, и разъехаться им нельзя — расхождение значит,
 // что мастер предлагает не ту модель, которую возьмёт рантайм. Сверяет model-catalog.test.ts.
 export const MODEL_PROVIDERS = {
+  devin: {
+    modelVar: "DEVIN_MODEL",
+    defaultModel: "swe-2-high",
+    defaultHelperModel: "swe-2-high",
+    compatibleReasoning: false,
+    replaysReasoning: false,
+    toolNameMax: TOOL_NAME_MAX,
+    visionModelVar: null,
+    defaultVisionModel: null,
+  },
   ollama: {
     modelVar: "OLLAMA_MODEL",
     defaultHelperModel: null,
