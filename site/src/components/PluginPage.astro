@@ -1,0 +1,125 @@
+---
+// One plugin of the default Marketplace: what it does, how to install it, who wrote it and
+// what it starts on the machine. Every fact comes from the list entry and its card.
+import Base from "../layouts/Base.astro";
+import type { Lang } from "../lib/copy";
+import { categoryName, labels, pluginUrl, pluginsUrl, sourceUrl, type Plugin } from "../lib/plugins";
+import { breadcrumbs, clip, pageTitle, SITE } from "../lib/seo";
+const { lang, plugin } = Astro.props as { lang: Lang; plugin: Plugin };
+const t = labels[lang];
+const home = lang === "ru" ? "/ru/" : "/";
+const docs = lang === "ru" ? "/ru/docs/plugins/" : "/docs/plugins/";
+const command = `iva plugin add ${plugin.name}`;
+const crumbs = [
+  { name: t.home, url: home },
+  { name: t.plugins, url: pluginsUrl(lang) },
+  { name: plugin.title, url: pluginUrl(lang, plugin.name) },
+];
+const parts = [
+  plugin.parts.skills.length && `${t.skills}: ${plugin.parts.skills.join(", ")}`,
+  plugin.parts.code && t.code,
+  plugin.parts.services.length && `${t.services}: ${plugin.parts.services.join(", ")}`,
+  plugin.parts.mcp.length && `${t.mcp}: ${plugin.parts.mcp.join(", ")}`,
+].filter(Boolean);
+const added = new Intl.DateTimeFormat(lang, { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(plugin.added));
+const title = lang === "ru" ? `${plugin.title}: плагин для Ивы` : `${plugin.title}: a plugin for Iva`;
+const schema = [
+  breadcrumbs(crumbs),
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    name: plugin.title,
+    description: plugin.summary[lang],
+    url: SITE + pluginUrl(lang, plugin.name),
+    softwareVersion: plugin.version,
+    applicationCategory: "UtilitiesApplication",
+    operatingSystem: "Ubuntu, Debian, macOS",
+    isAccessibleForFree: true,
+    offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+    author: { "@type": "Person", name: plugin.author.name, url: `https://github.com/${plugin.author.github}` },
+    codeRepository: plugin.repository,
+    isPartOf: { "@id": SITE + "/#software" },
+  },
+];
+---
+
+<Base
+  title={pageTitle(title, lang)}
+  description={clip(plugin.summary[lang])}
+  lang={lang}
+  en={pluginUrl("en", plugin.name)}
+  ru={pluginUrl("ru", plugin.name)}
+  schema={schema}
+>
+  <article class="section plugin-page" data-plugin={plugin.name}>
+    <nav class="breadcrumbs" aria-label={lang === "ru" ? "Хлебные крошки" : "Breadcrumbs"}>
+      {crumbs.map((crumb, index) => (
+        <>
+          <span aria-hidden="true">{index > 0 ? " / " : ""}</span>
+          <a href={crumb.url} aria-current={index === crumbs.length - 1 ? "page" : undefined}>{crumb.name}</a>
+        </>
+      ))}
+    </nav>
+    <header class="plugin-page-head">
+      <img src={plugin.author.picture} alt="" width="64" height="64" />
+      <div>
+        <h1>{plugin.title}</h1>
+        <p class="plugin-by">
+          <a href={`https://github.com/${plugin.author.github}`}>{plugin.author.name}</a>
+          <span>{categoryName(lang, plugin.category)}</span>
+          <span data-plugin-installs hidden></span>
+        </p>
+      </div>
+    </header>
+    <p class="plugin-page-lead">{plugin.summary[lang]}</p>
+    <section class="plugin-install" aria-labelledby="plugin-install">
+      <h2 id="plugin-install">{t.install}</h2>
+      <p class="plugin-install-label">{t.terminal}</p>
+      <div class="plugin-command">
+        <code data-plugin-command>{command}</code>
+        <button type="button" data-plugin-copy data-copied={t.copied}>{t.copy}</button>
+      </div>
+      <p class="plugin-install-ask">{t.orAsk} <q>{t.phrase(plugin.name)}</q></p>
+    </section>
+    <dl class="plugin-facts">
+      <div><dt>{t.runs}</dt><dd>{plugin.runs[lang]}</dd></div>
+      <div><dt>{t.keys}</dt><dd>{plugin.keys.length ? plugin.keys.map((key) => <code>{key}</code>) : t.noKeys}</dd></div>
+      <div><dt>{t.network}</dt><dd>{plugin.network.length ? plugin.network.join(", ") : t.noNetwork}</dd></div>
+      <div><dt>{t.parts}</dt><dd>{parts.join("; ")}</dd></div>
+      <div><dt>{t.version}</dt><dd>{plugin.version} · <a href={sourceUrl(plugin)}><code>{plugin.commit.slice(0, 12)}</code></a></dd></div>
+      <div><dt>{t.repository}</dt><dd><a href={plugin.repository}>{plugin.repository.replace("https://github.com/", "").replace(/\/tree\/[^/]+/, "")}</a></dd></div>
+      <div><dt>{t.added}</dt><dd><time datetime={plugin.added}>{added}</time></dd></div>
+    </dl>
+    <p class="plugin-note">{t.risk} <a href={docs + "#what-you-risk"}>{t.riskLink}</a></p>
+    <a class="back" href={pluginsUrl(lang)}>← {t.back}</a>
+  </article>
+</Base>
+<script is:inline define:vars={{ lang }}>
+  const page = document.querySelector("[data-plugin]");
+  const button = page.querySelector("[data-plugin-copy]");
+  const code = page.querySelector("[data-plugin-command]");
+  const label = button.textContent;
+  let timer;
+  button.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(code.textContent);
+      button.textContent = button.dataset.copied;
+      clearTimeout(timer);
+      timer = setTimeout(() => (button.textContent = label), 1600);
+    } catch {
+      // No clipboard here: the command is selected, one keystroke from being copied.
+      getSelection().selectAllChildren(code);
+    }
+  });
+  const words = lang === "ru" ? { one: "установка", few: "установки", many: "установок", other: "установки" } : { one: "install", other: "installs" };
+  fetch("/api/plugins/installs")
+    .then((response) => (response.ok ? response.json() : {}))
+    .then((counts) => {
+      const n = Number(counts[page.dataset.plugin]) || 0;
+      if (!n) return;
+      const out = page.querySelector("[data-plugin-installs]");
+      out.textContent = new Intl.NumberFormat(lang).format(n) + " " + (words[new Intl.PluralRules(lang).select(n)] || words.other);
+      out.hidden = false;
+    })
+    .catch(() => {});
+</script>

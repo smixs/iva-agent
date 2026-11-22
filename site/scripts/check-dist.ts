@@ -306,6 +306,39 @@ for (const page of pages) {
     `${path.relative(dist, page)}: emoji outside the chat`,
   );
 }
+// Plugins: every plugin of the list is on the list page of both languages and has a page of
+// its own with the command that installs it. These pages are the site's own text, so the
+// no-emoji rule covers them whole.
+const catalog = JSON.parse(readFileSync("src/data/plugins.json", "utf8"));
+assert.ok(catalog.plugins.length >= 6, "plugins: the list is read");
+for (const prefix of ["", "ru/"]) {
+  const list = readFileSync(path.join(dist, prefix, "plugins/index.html"), "utf8");
+  assert.equal(
+    (list.match(/<li class="plugin-card"/g) || []).length,
+    catalog.plugins.length,
+    `${prefix}plugins: every plugin is in the HTML`,
+  );
+  assert.deepEqual(findEmoji(list), [], `${prefix}plugins: emoji`);
+  for (const plugin of catalog.plugins) {
+    assert.ok(
+      list.includes(`href="/${prefix}plugins/${plugin.name}/"`),
+      `${prefix}plugins: link to ${plugin.name}`,
+    );
+    const page = readFileSync(
+      path.join(dist, prefix, "plugins", plugin.name, "index.html"),
+      "utf8",
+    );
+    assert.ok(
+      page.includes(`iva plugin add ${plugin.name}</code>`),
+      `${prefix}plugins/${plugin.name}: the install command`,
+    );
+    assert.ok(
+      page.includes(`href="${plugin.repository}"`),
+      `${prefix}plugins/${plugin.name}: the author's repository`,
+    );
+    assert.deepEqual(findEmoji(page), [], `${prefix}plugins/${plugin.name}: emoji`);
+  }
+}
 console.log(
   `HTML: ${pages.length} pages; ${json} JSON-LD blocks parsed; 6 FAQ entries per locale; ${links} internal references checked.`,
 );

@@ -1,0 +1,245 @@
+{
+  "list": "https://github.com/smixs/iva-plugins",
+  "commit": "895d80ab9e4c39711ae1f87cb911d911f95143c8",
+  "categories": [
+    {
+      "id": "voice",
+      "en": "Voice",
+      "ru": "Голос"
+    },
+    {
+      "id": "services",
+      "en": "Services and shopping",
+      "ru": "Сервисы и покупки"
+    },
+    {
+      "id": "tools",
+      "en": "Tools",
+      "ru": "Инструменты"
+    },
+    {
+      "id": "authors",
+      "en": "For plugin authors",
+      "ru": "Авторам плагинов"
+    }
+  ],
+  "plugins": [
+    {
+      "name": "trace",
+      "title": "Trace",
+      "description": "Viewer for the turn journal: the schema of Iva with the path of a turn lit across it, the turn feed and a replay.",
+      "category": "tools",
+      "author": {
+        "name": "Sergey Shima",
+        "github": "smixs",
+        "picture": "/media/authors/smixs.jpg"
+      },
+      "repository": "https://github.com/smixs/iva-plugins/tree/main/trace",
+      "added": "2026-08-18",
+      "version": "0.1.1",
+      "commit": "895d80ab9e4c39711ae1f87cb911d911f95143c8",
+      "summary": {
+        "en": "A viewer for Iva's turn journal: the schema of Iva with the path of a turn lit across it, a feed of turns and a replay. You see what Iva did in a turn, step by step, and where the time went.",
+        "ru": "Просмотр журнала ходов Ивы: схема Ивы, на которой подсвечен путь хода, лента ходов и повтор. Видно, что Ива делала в ходе шаг за шагом и куда ушло время."
+      },
+      "runs": {
+        "en": "One service on the server: a local web page on 127.0.0.1. No code inside the agent's process.",
+        "ru": "Один сервис на сервере: локальная веб-страница на 127.0.0.1. Кода внутри процесса агента нет."
+      },
+      "keys": [],
+      "network": [],
+      "parts": {
+        "skills": [
+          "trace"
+        ],
+        "code": false,
+        "services": [
+          "viewer"
+        ],
+        "mcp": []
+      }
+    },
+    {
+      "name": "hello",
+      "title": "Hello",
+      "description": "The demo for plugin authors: the smallest plugin that carries code - one skill, one tool.",
+      "category": "authors",
+      "author": {
+        "name": "Sergey Shima",
+        "github": "smixs",
+        "picture": "/media/authors/smixs.jpg"
+      },
+      "repository": "https://github.com/smixs/iva-plugins/tree/main/hello",
+      "added": "2026-08-18",
+      "version": "0.1.1",
+      "commit": "895d80ab9e4c39711ae1f87cb911d911f95143c8",
+      "summary": {
+        "en": "The smallest plugin that carries code: one skill and one tool that greets by name. Copy the folder, rename it, and the whole path of a code plugin is already wired.",
+        "ru": "Самый маленький плагин с кодом: один скилл и один инструмент, который здоровается по имени. Скопируйте папку, переименуйте, и весь путь плагина с кодом уже собран."
+      },
+      "runs": {
+        "en": "One tool inside the agent's process. Iva rebuilds and restarts after the install.",
+        "ru": "Один инструмент внутри процесса агента. После установки Ива пересобирается и перезапускается."
+      },
+      "keys": [],
+      "network": [],
+      "parts": {
+        "skills": [
+          "hello"
+        ],
+        "code": true,
+        "services": [],
+        "mcp": []
+      }
+    },
+    {
+      "name": "yandex-taxi",
+      "title": "Yandex Taxi",
+      "description": "Orders Yandex Taxi through a browser: price quote, order, car tracking. No order without the owner's explicit yes.",
+      "category": "services",
+      "author": {
+        "name": "Sergey Shima",
+        "github": "smixs",
+        "picture": "/media/authors/smixs.jpg"
+      },
+      "repository": "https://github.com/smixs/yandex-taxi-skill",
+      "added": "2026-11-22",
+      "version": "1.1.0",
+      "commit": "895d80ab9e4c39711ae1f87cb911d911f95143c8",
+      "summary": {
+        "en": "Iva orders Yandex Taxi in a browser from your account: she quotes the price, picks the tariff and the card, places the order and watches where the car is. Nothing is ordered without your explicit yes.",
+        "ru": "Ива заказывает Яндекс Такси в браузере от вашего аккаунта: называет цену, выбирает тариф и карту, оформляет заказ и следит, где машина. Без вашего явного «да» заказ не делается."
+      },
+      "runs": {
+        "en": "Skills and one shell script that drives agent-browser. No code inside the agent's process, no restart.",
+        "ru": "Скиллы и один shell-скрипт, который управляет agent-browser. Кода внутри процесса агента нет, перезапуск не нужен."
+      },
+      "keys": [],
+      "network": [
+        "taxi.yandex.uz"
+      ],
+      "parts": {
+        "skills": [
+          "yandex-taxi-skill"
+        ],
+        "code": false,
+        "services": [],
+        "mcp": []
+      }
+    },
+    {
+      "name": "voice-reply",
+      "title": "Voice Reply",
+      "description": "Voice replies in Telegram: a speak button under long answers, a choice of voices, OpenRouter or a local Silero engine.",
+      "category": "voice",
+      "author": {
+        "name": "Entset",
+        "github": "Entset",
+        "picture": "/media/authors/entset.png"
+      },
+      "repository": "https://github.com/Entset/iva-voice-reply",
+      "added": "2026-11-22",
+      "version": "0.6.2",
+      "commit": "6653001a5a22ab5dfc6b349405a8a32cdba42916",
+      "summary": {
+        "en": "Iva answers with voice messages in Telegram. A speak button appears under long answers, and you can ask her to read any text aloud. Two engines to choose from at install: paid OpenRouter voices or the free local Silero.",
+        "ru": "Ива отвечает голосовыми сообщениями в Telegram. Под длинными ответами появляется кнопка озвучки, и любой текст можно попросить озвучить. Два движка на выбор при установке: платные голоса OpenRouter или бесплатный локальный Silero."
+      },
+      "runs": {
+        "en": "Code inside the agent's process: three tools and two hooks. It starts ffmpeg, and for the free engine a Python script with the Silero model that you install yourself. It reads the bot token to send voice messages.",
+        "ru": "Код внутри процесса агента: три инструмента и два хука. Запускает ffmpeg, а для бесплатного движка Python-скрипт с моделью Silero, которую вы ставите сами. Читает токен бота, чтобы отправлять голосовые."
+      },
+      "keys": [
+        "OPENROUTER_API_KEY",
+        "TELEGRAM_BOT_TOKEN"
+      ],
+      "network": [
+        "openrouter.ai",
+        "api.telegram.org"
+      ],
+      "parts": {
+        "skills": [],
+        "code": true,
+        "services": [],
+        "mcp": []
+      }
+    },
+    {
+      "name": "alice-webhook",
+      "title": "Alice",
+      "description": "Yandex Alice as a voice front end: a smart speaker passes what you say to Iva and reads her answer aloud.",
+      "category": "voice",
+      "author": {
+        "name": "Entset",
+        "github": "Entset",
+        "picture": "/media/authors/entset.png"
+      },
+      "repository": "https://github.com/Entset/iva-alice",
+      "added": "2026-11-22",
+      "version": "0.1.1",
+      "commit": "0ec7693dbcd3cb6dc37ed54fc9d8139a8417262e",
+      "summary": {
+        "en": "Yandex Alice becomes a voice front end for Iva. You say “Alice, open the Iva Assistant skill”, the speaker passes your words to Iva and reads her answer aloud. Memory and search stay with Iva; links and long answers go to Telegram.",
+        "ru": "Яндекс Алиса становится голосовым входом в Иву. Вы говорите «Алиса, включи навык Помощник Ива», колонка передаёт реплику Иве и произносит её ответ. Память и поиск остаются у Ивы; ссылки и длинные ответы уходят в Telegram."
+      },
+      "runs": {
+        "en": "Code inside the agent's process: a channel with one public route, /alice, closed by a shared secret. The setup script, which you run with sudo, installs Caddy and opens that one path to the internet over HTTPS.",
+        "ru": "Код внутри процесса агента: канал с одним публичным путём /alice, закрытым общим секретом. Скрипт настройки, который вы запускаете через sudo, ставит Caddy и открывает в интернет по HTTPS только этот путь."
+      },
+      "keys": [
+        "ALICE_WEBHOOK_TOKEN"
+      ],
+      "network": [
+        "dialogs.yandex.ru",
+        "api.ipify.org"
+      ],
+      "parts": {
+        "skills": [],
+        "code": true,
+        "services": [],
+        "mcp": []
+      }
+    },
+    {
+      "name": "runet",
+      "title": "Runet",
+      "description": "Russian sites and shops from a server abroad: a browser with a kept profile, orders at Market, WB and grocery chains, the VkusVill MCP.",
+      "category": "services",
+      "author": {
+        "name": "Entset",
+        "github": "Entset",
+        "picture": "/media/authors/entset.png"
+      },
+      "repository": "https://github.com/Entset/iva-runet",
+      "added": "2026-11-22",
+      "version": "1.3.1",
+      "commit": "9ef798d41711e970b20c06eeab798be9157fa839",
+      "summary": {
+        "en": "Russian sites and shops for an Iva that lives on a server abroad. A browser with a kept profile and a human pace opens Samokat, Pyaterochka, Ozon and others; Iva fills the cart at Yandex Market, Wildberries and grocery chains, and you pay yourself. The official VkusVill MCP comes with it.",
+        "ru": "Российские сайты и магазины для Ивы на зарубежном сервере. Браузер с постоянным профилем и человеческим темпом открывает Самокат, Пятёрочку, Озон и другие; Ива собирает корзину на Яндекс Маркете, Wildberries и в продуктовых сетях, а платите вы сами. В комплекте официальный MCP ВкусВилла."
+      },
+      "runs": {
+        "en": "Skills with scripts that start a browser (Chrome, optionally Camoufox) on the server, and one remote MCP server. One optional script adds the Russian state root certificates to the browser profile. A route through a Russian IP is set up separately, by the author's guide.",
+        "ru": "Скиллы со скриптами, которые запускают на сервере браузер (Chrome, по желанию Camoufox), и один удалённый MCP-сервер. Один необязательный скрипт добавляет в профиль браузера корневые сертификаты Минцифры. Маршрут через российский IP настраивается отдельно, по инструкции автора."
+      },
+      "keys": [],
+      "network": [
+        "mcp.vkusvill.ru",
+        "market.yandex.ru",
+        "www.wildberries.ru"
+      ],
+      "parts": {
+        "skills": [
+          "market-order",
+          "rts-it2-access",
+          "ru-web"
+        ],
+        "code": false,
+        "services": [],
+        "mcp": [
+          "vkusvill"
+        ]
+      }
+    }
+  ]
+}

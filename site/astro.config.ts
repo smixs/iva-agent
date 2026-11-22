@@ -59,6 +59,7 @@ export default defineConfig({
         } else if (p.includes("about"))
           source = p.startsWith("/ru/") ? "src/data/about-ru.html" : "src/data/about-en.html";
         else if (p === "/privacy/") source = "src/data/privacy.html";
+        else if (p.includes("/plugins/")) source = "src/data/plugins.json";
         item.lastmod = lastModified(source).toISOString();
         return item;
       },

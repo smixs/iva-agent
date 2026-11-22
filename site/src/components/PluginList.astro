@@ -1,0 +1,176 @@
+---
+// The Plugins page: every plugin of the default Marketplace is in the HTML, so a search engine
+// and a browser without scripts see all of them. Search, the category filter and the sort only
+// hide and reorder what is already there; the install numbers come from /api/plugins/installs.
+import Base from "../layouts/Base.astro";
+import type { Lang } from "../lib/copy";
+import { categories, categoryName, labels, plugins, pluginUrl, pluginsUrl } from "../lib/plugins";
+import { breadcrumbs, pageTitle, SITE } from "../lib/seo";
+const { lang } = Astro.props as { lang: Lang };
+const t = labels[lang];
+const home = lang === "ru" ? "/ru/" : "/";
+const docs = lang === "ru" ? "/ru/docs/plugins/" : "/docs/plugins/";
+const used = categories.filter((category) => plugins.some((plugin) => plugin.category === category.id));
+const schema = [
+  breadcrumbs([
+    { name: t.home, url: home },
+    { name: t.plugins, url: pluginsUrl(lang) },
+  ]),
+  {
+    "@context": "https://schema.org",
+    "@type": "ItemList",
+    name: t.title,
+    itemListElement: plugins.map((plugin, index) => ({
+      "@type": "ListItem",
+      position: index + 1,
+      name: plugin.title,
+      url: SITE + pluginUrl(lang, plugin.name),
+    })),
+  },
+];
+---
+
+<Base title={pageTitle(t.title, lang)} description={t.description} lang={lang} en="/plugins/" ru="/ru/plugins/" schema={schema}>
+  <section class="section plugins" data-plugins>
+    <h1>{t.title}</h1>
+    <p class="plugins-lead">{t.lead}</p>
+    <div class="plugin-tools">
+      <label class="plugin-search">
+        <span class="sr-only">{t.search}</span>
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.6-3.6"></path></svg>
+        <input type="search" placeholder={t.search} autocomplete="off" spellcheck="false" data-plugin-search />
+      </label>
+      <label class="plugin-sort">
+        <span>{t.sort}</span>
+        <select data-plugin-sort>
+          <option value="popular">{t.popular}</option>
+          <option value="new">{t.newest}</option>
+          <option value="name">{t.byName}</option>
+        </select>
+      </label>
+      <div class="plugin-filter" role="group" aria-label={t.category}>
+        <button type="button" aria-pressed="true" data-plugin-category="all">{t.all} <span>{plugins.length}</span></button>
+        {used.map((category) => (
+          <button type="button" aria-pressed="false" data-plugin-category={category.id}>
+            {category[lang]} <span>{plugins.filter((plugin) => plugin.category === category.id).length}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+    <ul class="plugin-grid" data-plugin-grid>
+      {plugins.map((plugin, index) => (
+        <li
+          class="plugin-card"
+          data-plugin={plugin.name}
+          data-category={plugin.category}
+          data-added={plugin.added}
+          data-order={index}
+          data-search={[plugin.name, plugin.title, plugin.summary[lang], plugin.author.name, categoryName(lang, plugin.category)].join(" ").toLowerCase()}
+        >
+          <div class="plugin-card-head">
+            <img src={plugin.author.picture} alt="" width="44" height="44" loading="lazy" decoding="async" />
+            <div>
+              <h2><a href={pluginUrl(lang, plugin.name)}>{plugin.title}</a></h2>
+              <p class="plugin-by">{plugin.author.name}</p>
+            </div>
+          </div>
+          <p class="plugin-summary">{plugin.summary[lang]}</p>
+          <p class="plugin-meta">
+            <span>{categoryName(lang, plugin.category)}</span>
+            <span data-plugin-installs hidden></span>
+          </p>
+        </li>
+      ))}
+    </ul>
+    <p class="plugin-empty" data-plugin-empty hidden>
+      {t.empty} <button type="button" data-plugin-reset>{t.reset}</button>
+    </p>
+    <p class="plugin-note">{t.counted} <a href={docs + "#install-count"}>{t.countedLink}</a></p>
+  </section>
+  <section class="section plugin-make">
+    <h2>{t.makeTitle}</h2>
+    <div>
+      <p>{t.makeText}</p>
+      <ul>
+        <li><a href={`https://github.com/smixs/iva-plugins/blob/main/PUBLISH${lang === "ru" ? ".ru" : ""}.md`}>{t.runbook}</a></li>
+        <li><a href={docs}>{t.guide}</a></li>
+        <li><a href="https://github.com/topics/iva-plugin">{t.topic}</a></li>
+      </ul>
+    </div>
+  </section>
+</Base>
+<script is:inline define:vars={{ lang }}>
+  const root = document.querySelector("[data-plugins]");
+  const grid = root.querySelector("[data-plugin-grid]");
+  const cards = [...grid.children];
+  const search = root.querySelector("[data-plugin-search]");
+  const sort = root.querySelector("[data-plugin-sort]");
+  const chips = [...root.querySelectorAll("[data-plugin-category]")];
+  const empty = root.querySelector("[data-plugin-empty]");
+  const installs = new Map();
+  const params = new URLSearchParams(location.search);
+  const state = {
+    q: params.get("q") || "",
+    category: chips.some((chip) => chip.dataset.pluginCategory === params.get("category")) ? params.get("category") : "all",
+    sort: ["popular", "new", "name"].includes(params.get("sort")) ? params.get("sort") : "popular",
+  };
+  let touched = location.search.length > 1;
+  const count = (card) => installs.get(card.dataset.plugin) || 0;
+  const order = {
+    popular: (a, b) => count(b) - count(a) || a.dataset.order - b.dataset.order,
+    new: (a, b) => b.dataset.added.localeCompare(a.dataset.added) || a.dataset.order - b.dataset.order,
+    name: (a, b) => a.dataset.plugin.localeCompare(b.dataset.plugin),
+  };
+  const apply = () => {
+    const q = state.q.trim().toLowerCase();
+    let shown = 0;
+    for (const card of cards) {
+      const visible = (state.category === "all" || card.dataset.category === state.category) && (!q || card.dataset.search.includes(q));
+      card.hidden = !visible;
+      if (visible) shown++;
+    }
+    grid.append(...[...cards].sort(order[state.sort]));
+    empty.hidden = shown > 0;
+    for (const chip of chips) chip.setAttribute("aria-pressed", String(chip.dataset.pluginCategory === state.category));
+    search.value = state.q;
+    sort.value = state.sort;
+    // The address keeps the view, so a reload or the back button returns to the same list.
+    const next = new URLSearchParams();
+    if (q) next.set("q", state.q.trim());
+    if (state.category !== "all") next.set("category", state.category);
+    if (state.sort !== "popular") next.set("sort", state.sort);
+    const query = next.toString();
+    history.replaceState(null, "", location.pathname + (query ? "?" + query : ""));
+  };
+  const change = (patch) => {
+    touched = true;
+    Object.assign(state, patch);
+    apply();
+  };
+  search.addEventListener("input", () => change({ q: search.value }));
+  sort.addEventListener("change", () => change({ sort: sort.value }));
+  for (const chip of chips) chip.addEventListener("click", () => change({ category: chip.dataset.pluginCategory }));
+  root.querySelector("[data-plugin-reset]").addEventListener("click", () => {
+    change({ q: "", category: "all" });
+    search.focus();
+  });
+  if (touched) apply();
+  const words = lang === "ru" ? { one: "установка", few: "установки", many: "установок", other: "установки" } : { one: "install", other: "installs" };
+  const plural = new Intl.PluralRules(lang);
+  const number = new Intl.NumberFormat(lang);
+  fetch("/api/plugins/installs")
+    .then((response) => (response.ok ? response.json() : {}))
+    .then((counts) => {
+      for (const card of cards) {
+        const n = Number(counts[card.dataset.plugin]) || 0;
+        if (!n) continue;
+        installs.set(card.dataset.plugin, n);
+        const label = card.querySelector("[data-plugin-installs]");
+        label.textContent = number.format(n) + " " + (words[plural.select(n)] || words.other);
+        label.hidden = false;
+      }
+      // The order follows the numbers only while the visitor has not started to look around.
+      if (!touched && state.sort === "popular") grid.append(...[...cards].sort(order.popular));
+    })
+    .catch(() => {});
+</script>

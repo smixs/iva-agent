@@ -46,6 +46,11 @@ const nav = isRu
   ? ["Примеры задач", "Сервисы", "Цена", "Установка"]
   : ["Features", "Services", "Price", "Install"];
 const links = ["features", "connections", "price", "install"];
+// The sections of the home page, then the pages of their own.
+const menu: [string, string][] = [
+  ...nav.map((name, i): [string, string] => [name, home + "#" + links[i]]),
+  [isRu ? "Плагины" : "Plugins", isRu ? "/ru/plugins/" : "/plugins/"],
+];
 ---
 
 <!doctype html>
@@ -135,8 +140,8 @@ const links = ["features", "connections", "price", "install"];
         />
       </a>
       <nav aria-label={isRu ? "Главная навигация" : "Main navigation"}>
-        {nav.map((n, i) => (
-          <a href={home + "#" + links[i]}>{n}</a>
+        {menu.map(([name, href]) => (
+          <a href={href}>{name}</a>
         ))}
       </nav>
       <div class="header-actions">
@@ -179,8 +184,8 @@ const links = ["features", "connections", "price", "install"];
       aria-label={isRu ? "Мобильная навигация" : "Mobile navigation"}
     >
       <div class="mobile-nav-links">
-        {nav.map((n, i) => (
-          <a href={home + "#" + links[i]}><span>{n}</span></a>
+        {menu.map(([name, href]) => (
+          <a href={href}><span>{name}</span></a>
         ))}
       </div>
       <div class="mobile-nav-footer">

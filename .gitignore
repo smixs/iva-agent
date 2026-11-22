@@ -79,3 +79,7 @@ site/dist/
 site/.astro/
 !site/src/data/
 !site/src/data/**
+
+# Local state of `wrangler pages dev` on the site
+site/.wrangler/
+site/.dev.vars

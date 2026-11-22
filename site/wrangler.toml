@@ -1,2 +1,17 @@
 name = "iva-site"
 pages_build_output_dir = "dist"
+compatibility_date = "2026-11-01"
+
+# The install count of the Plugins page (functions/api/plugins/installs.ts). Its salt is the
+# secret INSTALLS_SALT, set with `wrangler pages secret put`; it is not in this file.
+[[d1_databases]]
+binding = "INSTALLS"
+database_name = "iva-plugin-installs"
+database_id = "d87050c8-d154-4707-b1eb-081979a3379c"
+
+# Preview deployments count into a database of their own.
+[env.preview]
+[[env.preview.d1_databases]]
+binding = "INSTALLS"
+database_name = "iva-plugin-installs-preview"
+database_id = "1b9c8977-06e6-4d15-a00c-7d89ce837cb2"
