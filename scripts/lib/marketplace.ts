@@ -625,6 +625,8 @@ export function resolveMarketplacePlugin(
 ): {
   readonly source: PluginSource;
   readonly marketplace: string;
+  /** Строка источника списка: по ней отличают список по умолчанию (ADR-0029). */
+  readonly recorded: string;
   readonly name: string;
 } {
   // Квалификатор называет список либо именем из файла, либо строкой источника: имя
@@ -693,6 +695,7 @@ export function resolveMarketplacePlugin(
     return {
       source: marketplaceEntrySource(entry, one.repo),
       marketplace: one.label,
+      recorded: one.recorded,
       name: entry.name,
     };
   } catch (error) {

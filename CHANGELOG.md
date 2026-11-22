@@ -2,6 +2,7 @@
 
 ## [Unreleased]
 
+- 🧩 **Плагины на сайте и счёт установок**: список `smixs/iva-plugins` теперь проверяется — запись попадает в него pull request'ом после чтения кода, а плагины с авторами и репозиториями собраны на [iva-agent.com/plugins](https://iva-agent.com/plugins). После установки плагина из этого списка Ива отправляет на сайт его имя, и больше ничего: ни идентификатора установки, ни версии, ни ключей; команда печатает строку о каждой отправке. Выключить — `IVA_PLUGIN_STATS=off` в `.env` или `DO_NOT_TRACK=1`. Скилл `make-plugin` доводит свой плагин до публичного репозитория и заявки в список. The default Marketplace is reviewed and shown at iva-agent.com/plugins; installing from it sends the plugin name alone, and `IVA_PLUGIN_STATS=off` turns that off.
 - 🖼️ **Картинки приходят фото, а не файлом**: `send_file` отправляет JPG, PNG и WebP до 10 МБ через `sendPhoto` — картинка сразу видна в чате и в «Медиа». Если Telegram отказал (размеры, соотношение сторон) или файл больше 10 МБ, он уходит документом. `as: "document"` отправляет картинку без сжатия. `send_file` sends images as photos and falls back to a document when Telegram rejects the photo.
 
 ## [0.5.14] - 2026-11-17

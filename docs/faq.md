@@ -12,7 +12,7 @@ Yes — Iva runs entirely on your own keys: one model-provider key (OpenCode Go,
 
 ## Is my data private?
 
-Your memory is a plain-markdown vault in a private git repo you own; no third party stores it. An outbound gate redacts secrets before every Telegram send, and the user allowlist fails closed. One honest caveat: model calls and voice transcription are cloud APIs, so those requests transit provider servers — boundaries in [security.md](security.md).
+Your memory is a plain-markdown vault in a private git repo you own; no third party stores it. An outbound gate redacts secrets before every Telegram send, and the user allowlist fails closed. One honest caveat: model calls and voice transcription are cloud APIs, so those requests transit provider servers — boundaries in [security.md](security.md). Iva reports nothing about you or your installation to us; the one thing she sends unasked is the name of a plugin you install from the default list, and one line in `.env` turns that off ([plugins.md](plugins.md#install-count)).
 
 ## How much does it cost to run?
 

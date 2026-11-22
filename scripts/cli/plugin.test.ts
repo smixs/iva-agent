@@ -394,6 +394,8 @@ function commands(
     interactive?: boolean;
     env?: Record<string, string>;
     sends?: ProposalSends;
+    /** Счёт установок (ADR-0029): без него команда наружу не отправляет ничего. */
+    countInstall?: (name: string) => Promise<boolean>;
     /** Зовётся на каждом шаге команды: так тест вклинивается между шагами установки. */
     onStep?: (message: string) => void;
   } = {},
@@ -445,6 +447,7 @@ function commands(
     cwd: () => root,
     interactive: () => extra.interactive ?? true,
     ...(extra.sends ? { sends: extra.sends } : {}),
+    ...(extra.countInstall ? { countInstall: extra.countInstall } : {}),
   });
   return { cmdPlugin, events, printed, data: join(root, "data") };
 }
@@ -2164,9 +2167,9 @@ function processPlugin(
 }
 
 /** MCP-only Plugin: skills plus a stdio server, no eve Extension. */
-function mcpOnlyPlugin(name: string, server: string): string {
+function mcpOnlyPlugin(name: string, server: string, skill = "alpha"): string {
   const folder = join(world("mcp-only"), name);
-  plantPlugin(folder, name);
+  plantPlugin(folder, name, skill);
   write(
     folder,
     "mcp.json",
@@ -3728,3 +3731,221 @@ for (const mode of ["inactive", "error"] as const)
       /^restarted:.*iva-plugin-trace-web\.service/mu,
     );
   });
+
+// ── Счёт установок из списка по умолчанию (ADR-0029) ──
+//
+// Выключатели читаются и из окружения команды, поэтому окружение машины, на которой идут
+// тесты, чистится здесь: иначе `DO_NOT_TRACK=1` разработчика гасил бы счёт в тесте.
+delete process.env.IVA_PLUGIN_STATS;
+delete process.env.DO_NOT_TRACK;
+
+/**
+ * Список по умолчанию, достижимый без сети: его https-адрес git переписывает в локальный
+ * репозиторий. Записи `local` получают тот же адрес и приезжают тем же путём.
+ */
+function defaultMarketplace(
+  list: unknown,
+  seed: (work: string) => void = () => undefined,
+): NodeJS.ProcessEnv {
+  return httpsInsteadOf([
+    [
+      `https://github.com/${DEFAULT_MARKETPLACE}.git`,
+      marketplaceRemote(list, seed).url,
+    ],
+  ]);
+}
+
+function countRecorder(answer = true) {
+  const counted: string[] = [];
+  return {
+    counted,
+    countInstall: (name: string) => {
+      counted.push(name);
+      return Promise.resolve(answer);
+    },
+  };
+}
+
+const ALPHA_LIST = {
+  name: "iva-plugins",
+  plugins: [{ name: "alpha", source: "./plugins/alpha" }],
+};
+const plantAlpha = (work: string): void =>
+  plantPlugin(join(work, "plugins/alpha"), "alpha", "alpha-skill");
+const COUNT_LINE = /install count: sending the name alpha to iva-agent\.com/u;
+
+test("add by name from the default marketplace is counted once, and says what leaves the machine", async () => {
+  const { counted, countInstall } = countRecorder();
+  const { cmdPlugin, printed, events } = commands(
+    home(),
+    undefined,
+    undefined,
+    defaultMarketplace(ALPHA_LIST, plantAlpha),
+    undefined,
+    { countInstall },
+  );
+
+  await cmdPlugin(["add", "alpha"]);
+  assert.deepEqual(counted, ["alpha"]);
+  assert.match(printed.join("\n"), COUNT_LINE);
+  assert.match(printed.join("\n"), /IVA_PLUGIN_STATS=off in \.env/u);
+  // Счёт — последнее действие: «installed» сказано раньше, чем что-то ушло наружу.
+  assert.match(messages(events, "ok"), /alpha installed/u);
+
+  // Повторный `add` стоящего плагина отказывает, и отказ в счёт не идёт.
+  printed.length = 0;
+  await assert.rejects(cmdPlugin(["add", "alpha"]), /already installed/u);
+  assert.deepEqual(counted, ["alpha"]);
+  assert.doesNotMatch(printed.join("\n"), COUNT_LINE);
+});
+
+test("a site that did not take the count leaves the plugin installed and the command quiet", async () => {
+  const refused = countRecorder(false);
+  const { cmdPlugin, events, data } = commands(
+    home(),
+    undefined,
+    undefined,
+    defaultMarketplace(ALPHA_LIST, plantAlpha),
+    undefined,
+    { countInstall: refused.countInstall },
+  );
+
+  await cmdPlugin(["add", "alpha"]);
+
+  assert.deepEqual(refused.counted, ["alpha"]);
+  assert.equal((await readPluginsState(data)).plugins[0].name, "alpha");
+  assert.equal(messages(events, "bad"), "");
+  assert.equal(messages(events, "warn").includes("count"), false);
+});
+
+test("either switch turns the count off: nothing is sent and nothing is printed about it", async () => {
+  const switches: Array<[Record<string, string>, Record<string, string>]> = [
+    [{ IVA_PLUGIN_STATS: "off" }, {}],
+    [{ DO_NOT_TRACK: "1" }, {}],
+    [{}, { IVA_PLUGIN_STATS: "OFF" }],
+    [{}, { DO_NOT_TRACK: "1" }],
+    // Одно место говорит «включено», другое «выключено» — выключено.
+    [{ IVA_PLUGIN_STATS: "on" }, { IVA_PLUGIN_STATS: "off" }],
+  ];
+  for (const [dotenv, shell] of switches) {
+    const { counted, countInstall } = countRecorder();
+    const { cmdPlugin, printed, data } = commands(
+      home(),
+      undefined,
+      undefined,
+      defaultMarketplace(ALPHA_LIST, plantAlpha),
+      undefined,
+      { countInstall, env: dotenv },
+    );
+    Object.assign(process.env, shell);
+    try {
+      await cmdPlugin(["add", "alpha"]);
+    } finally {
+      for (const key of Object.keys(shell)) delete process.env[key];
+    }
+    const label = JSON.stringify([dotenv, shell]);
+    assert.equal(
+      (await readPluginsState(data)).plugins[0].name,
+      "alpha",
+      label,
+    );
+    assert.deepEqual(counted, [], label);
+    assert.doesNotMatch(printed.join("\n"), /install count/u, label);
+  }
+});
+
+test("a list of the owner's own, a folder and a repository are never counted", async () => {
+  const market = marketplaceRemote(
+    {
+      name: "mine",
+      plugins: [{ name: "alpha", source: "./plugins/alpha" }],
+    },
+    plantAlpha,
+  );
+  const own = remote("gamma", "gamma-skill");
+  const folder = join(world("skills"), "notes");
+  plantPlugin(folder, "notes");
+  const { counted, countInstall } = countRecorder();
+  const { cmdPlugin, printed, data } = commands(
+    home(),
+    offlineDefault,
+    undefined,
+    {},
+    undefined,
+    { countInstall },
+  );
+
+  await cmdPlugin(["marketplace", "add", market.url]);
+  // То же имя, что в списке по умолчанию, но взято из своего списка.
+  await cmdPlugin(["add", "alpha"]);
+  await cmdPlugin(["add", own.url]);
+  await cmdPlugin(["add", folder]);
+
+  assert.deepEqual(
+    (await readPluginsState(data)).plugins.map((entry) => entry.name).sort(),
+    ["alpha", "gamma", "notes"],
+  );
+  assert.deepEqual(counted, []);
+  assert.doesNotMatch(printed.join("\n"), /install count/u);
+});
+
+test("an install after the owner's tap is counted by name when the default list has that name", async () => {
+  const relayUrl = "https://git.example.test/someone/relay.git";
+  const relay = bareRemote((work) => {
+    plantPlugin(work, "relay");
+    write(work, "mcp.json", "{}");
+  });
+  const gitEnv = {
+    ...defaultMarketplace({
+      name: "iva-plugins",
+      plugins: [
+        {
+          name: "relay",
+          source: { source: "url", url: relayUrl, ref: null, sha: null },
+        },
+      ],
+    }),
+  };
+  const withRelay = httpsInsteadOf([[relayUrl, relay.url]]);
+  // Обе подмены адресов в одном окружении: вторая пара получает следующий номер.
+  gitEnv.GIT_CONFIG_COUNT = "2";
+  gitEnv.GIT_CONFIG_KEY_1 = withRelay.GIT_CONFIG_KEY_0;
+  gitEnv.GIT_CONFIG_VALUE_1 = withRelay.GIT_CONFIG_VALUE_0;
+
+  const root = home();
+  const { counted, countInstall } = countRecorder();
+  const sends = recordingSends();
+  const shell = () =>
+    commands(root, undefined, undefined, gitEnv, undefined, {
+      interactive: false,
+      env: OWNER_ENV,
+      sends: sends.sends,
+      countInstall,
+    });
+
+  // Как это идёт в жизни: модель просит плагин по имени, получает отказ с `propose`, и
+  // список по умолчанию после этого лежит в кэше.
+  await assert.rejects(
+    shell().cmdPlugin(["add", "relay"]),
+    /iva plugin propose/u,
+  );
+  assert.deepEqual(counted, [], "a refused install is not an install");
+
+  const listed = await takenProposal(root, mcpOnlyPlugin("relay", "viewer"));
+  await shell().cmdPlugin(["install-proposal", listed]);
+  assert.deepEqual(counted, ["relay"]);
+
+  // Черновик самой Ивы с именем, которого в списке нет, остаётся на машине.
+  const drafted = await takenProposal(
+    root,
+    mcpOnlyPlugin("notes", "jotter", "notes-skill"),
+  );
+  await shell().cmdPlugin(["install-proposal", drafted]);
+  assert.deepEqual(
+    (await readPluginsState(join(root, "data"))).plugins
+      .map((entry) => entry.name)
+      .sort(),
+    ["notes", "relay"],
+  );
+  assert.deepEqual(counted, ["relay"]);
+});

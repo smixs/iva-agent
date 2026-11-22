@@ -66,6 +66,12 @@ type PluginDependencies = {
   readonly interactive?: () => boolean;
   /** Telegram sends of `propose` and `install-proposal`. */
   readonly sends?: ProposalSends;
+  /**
+   * Tells iva-agent.com the name of a plugin installed from the default Marketplace
+   * (ADR-0029). Absent, nothing is sent: only the real CLI passes it, so a test or a
+   * script that builds these commands never reaches the site.
+   */
+  readonly countInstall?: (name: string) => Promise<boolean>;
 };
 
 /** Режим плагина словами владельца: два тумблера, как он их и переключает. */
@@ -140,6 +146,9 @@ ${C.b}iva plugin${C.x} — ${translate("install and manage plugins", "устан
       log,
       interactive,
       ...(buildVersion ? { buildVersion } : {}),
+      ...(dependencies.countInstall
+        ? { countInstall: dependencies.countInstall }
+        : {}),
     });
     const marketplace = createPluginMarketplaceCommands(context);
     const trust = createPluginTrustCommands(context);

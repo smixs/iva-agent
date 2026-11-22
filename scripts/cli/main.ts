@@ -1,4 +1,5 @@
 import * as deferred from "../lib/deferred-command.ts";
+import { sendInstallCount } from "../lib/install-count.ts";
 import { serviceManager } from "../lib/service-manager.ts";
 import { createAccountCommands } from "./account.ts";
 import { createConfigCommand } from "./config.ts";
@@ -164,6 +165,7 @@ export function createCliMain(root: string) {
   // second path to the same probe, flip and restart.
   const plugin = createPluginCommands(runtime, {
     buildVersion: versionUpdate.rebuild,
+    countInstall: (name) => sendInstallCount(name),
   });
 
   const cmdHelp = (): void => printHelp(C);

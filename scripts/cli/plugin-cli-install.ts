@@ -20,6 +20,7 @@ import { mkdir } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import type { PluginManifest, PluginReport } from "#lib/plugin-reader.ts";
 import type { PluginEntry, PluginsState } from "#lib/plugin-store.ts";
+import { installCountEnabled } from "../lib/install-count.ts";
 import { parseMarketplaceRequest } from "../lib/marketplace.ts";
 import {
   namespaceTaken,
@@ -98,6 +99,7 @@ export function createPluginInstallCommands(
     now,
     log,
     interactive,
+    countInstall,
     components,
     absolute,
     locked,
@@ -113,7 +115,7 @@ export function createPluginInstallCommands(
     reconcileUnits,
     restartMoved,
   } = trust;
-  const { ok, warn, bad, step, confirm, dataDirAbs } = runtime;
+  const { C, ok, warn, bad, step, confirm, dataDirAbs, readEnv } = runtime;
   const { pluginTreeDigest, readPlugin } = core.reader;
   const {
     findPlugin,
@@ -476,6 +478,7 @@ export function createPluginInstallCommands(
     const request = parseMarketplaceRequest(raw);
     const typed = request ? null : parsePluginSource(raw);
     const data = dataDirAbs();
+    let fromDefault = false;
 
     // Состояние читается и пишется ВНУТРИ лока: прочитать до лока значило бы
     // записать поверх чужого `disable`, который случился, пока шла установка.
@@ -485,9 +488,12 @@ export function createPluginInstallCommands(
         warn(translate(RISK_EN, RISK_RU));
         log();
       }
-      const { source, provenance } = request
+      const hit = request
         ? await marketplace.sourceByName(data, state, request)
-        : { source: typed as PluginSource, provenance: null };
+        : null;
+      fromDefault = hit?.fromDefault ?? false;
+      const source = hit?.source ?? (typed as PluginSource);
+      const provenance = hit?.provenance ?? null;
       step(
         provenance
           ? `Installing ${provenance.expect} from ${provenance.marketplace} (${formatPluginSource(source)})`
@@ -594,6 +600,47 @@ export function createPluginInstallCommands(
               "тулы его MCP-серверов появятся у агента после сборки версии",
             ),
       );
+    // Запись без источника, которую `add` перекрыл, — плагин уже стоял: это не новая
+    // установка, и в счёт она не идёт (ADR-0029).
+    if (undo.previous === null)
+      await countDefaultInstall(data, entry.name, {
+        fromDefault,
+        fromProposal: options?.fromProposal === true,
+      });
+  }
+
+  /**
+   * Счёт установок: имя плагина из списка по умолчанию уходит на iva-agent.com, и больше
+   * ничего (ADR-0029). Последнее действие `add`: плагин уже стоит, и ни отказ сети, ни
+   * молчащий сайт этого не меняют. Строка печатается до отправки — что уходит и как
+   * выключить владелец читает раньше, чем запрос ушёл.
+   */
+  async function countDefaultInstall(
+    data: string,
+    name: string,
+    how: { readonly fromDefault: boolean; readonly fromProposal: boolean },
+  ): Promise<void> {
+    if (!countInstall) return;
+    // Выключатель слышен из обоих мест: из `.env` инсталляции и из окружения команды.
+    if (!installCountEnabled(readEnv()) || !installCountEnabled(process.env))
+      return;
+    // Плагин с кодом приходит к тапу папкой: со списком его связывает только имя.
+    const listed =
+      how.fromDefault ||
+      (how.fromProposal &&
+        (await marketplace.listedByDefault(
+          data,
+          await readPluginsState(data),
+          name,
+        )));
+    if (!listed) return;
+    log(
+      `${C.d}${translate(
+        `install count: sending the name ${name} to iva-agent.com, nothing else — IVA_PLUGIN_STATS=off in .env turns this off`,
+        `счёт установок: на iva-agent.com уходит имя ${name}, и больше ничего — выключить: IVA_PLUGIN_STATS=off в .env`,
+      )}${C.x}`,
+    );
+    await countInstall(name);
   }
 
   async function remove(): Promise<void> {
