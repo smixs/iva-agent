@@ -17,6 +17,8 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test, { type TestContext } from "node:test";
+import fc from "fast-check";
+import { isTransientPushError, PUSH_DELAYS_MS } from "./brain.ts";
 
 const ROOT = resolve(import.meta.dirname, "../..");
 const git = (cwd: string, ...args: string[]) =>
@@ -437,4 +439,656 @@ void test("Brain: провал индекса эмбеддингов — бэк�
   assert.ok(fx.called());
   assert.ok(fx.backedUp(), "провал индекса не отменяет бэкап");
   assert.match(run.stderr, /brain alert: .*эмбеддинг/u);
+});
+
+/** Brain с подставным git на пути PATH: push перехватывается сценарием, остальные команды идут в настоящий git. */
+function pushFixture(t: TestContext, pushBody: string) {
+  const fx = brainFixture(t);
+  const bare = join(fx.root, "backup.git");
+  git(fx.root, "init", "-q", "--bare", bare);
+  git(fx.vault, "remote", "add", "origin", bare);
+  const pushCount = join(fx.root, "push-count");
+  const pushLog = join(fx.root, "push-calls.log");
+  const fakeGit = join(fx.root, "bin/git");
+  writeFileSync(
+    fakeGit,
+    [
+      "#!/bin/sh",
+      'if [ "$1" = "push" ]; then',
+      `  n=$(($(cat "${pushCount}" 2>/dev/null || echo 0) + 1))`,
+      `  echo "$n" > "${pushCount}"`,
+      `  printf '%s\\n' "$*" >> "${pushLog}"`,
+      pushBody,
+      "fi",
+      `PATH=${JSON.stringify(process.env.PATH ?? "")} exec git "$@"`,
+      "",
+    ].join("\n"),
+  );
+  chmodSync(fakeGit, 0o755);
+  const sent = join(fx.root, "sent.log");
+  const preload = join(fx.root, "telegram-double.mjs");
+  writeFileSync(
+    preload,
+    `import { appendFileSync } from "node:fs";
+globalThis.fetch = async (_url, init) => {
+  appendFileSync(${JSON.stringify(sent)}, String(init?.body ?? "") + "\\n");
+  return new Response(JSON.stringify({ ok: true, result: { message_id: 1 } }));
+};
+`,
+  );
+  const run = (env: Record<string, string> = {}) =>
+    fx.brain({
+      TELEGRAM_BOT_TOKEN: "123:abc",
+      TELEGRAM_DIGEST_CHAT_ID: "42",
+      NODE_OPTIONS: `--import=${preload}`,
+      IVA_TEST_PUSH_DELAYS_MS: "0,0",
+      ...env,
+    });
+  const pushCalls = () =>
+    existsSync(pushLog)
+      ? readFileSync(pushLog, "utf8").trim().split("\n").filter(Boolean)
+      : [];
+  const alerts = () =>
+    existsSync(sent)
+      ? readFileSync(sent, "utf8").trim().split("\n").filter(Boolean)
+      : [];
+  return { bare, vault: fx.vault, run, pushCalls, alerts };
+}
+
+void test("Brain push: временная ошибка remote, успех на 2-й попытке — код 0, Alert нет", (t) => {
+  const fx = pushFixture(
+    t,
+    [
+      '  if [ "$n" -eq 1 ]; then',
+      '    printf "%s\\n" "remote: Internal Server Error" " ! [remote rejected] HEAD -> master (Internal Server Error)" >&2',
+      "    exit 1",
+      "  fi",
+    ].join("\n"),
+  );
+  const run = fx.run();
+  assert.equal(run.status, 0, run.stderr);
+  assert.equal(fx.pushCalls().length, 2);
+  assert.deepEqual(fx.alerts(), []);
+  assert.doesNotMatch(run.stderr, /backup push failed/u);
+  assert.equal(
+    git(fx.bare, "rev-parse", "HEAD"),
+    git(fx.vault, "rev-parse", "HEAD"),
+  );
+});
+
+void test("Brain push: постоянная временная ошибка — ровно 3 попытки и один Alert", (t) => {
+  const fx = pushFixture(
+    t,
+    [
+      '  printf "%s\\n" "error: RPC failed; HTTP 503 curl 22 The requested URL returned error: 503" >&2',
+      "  exit 1",
+    ].join("\n"),
+  );
+  const run = fx.run();
+  assert.equal(run.status, 1, run.stderr);
+  assert.equal(fx.pushCalls().length, 3);
+  assert.equal(fx.alerts().length, 1);
+  assert.match(fx.alerts()[0], /Бэкап vault не ушёл/u);
+});
+
+void test("Brain push: невременная ошибка (доступ) — 1 попытка и один Alert", (t) => {
+  const fx = pushFixture(
+    t,
+    [
+      '  printf "%s\\n" "git@github.com: Permission denied (publickey)." "fatal: Could not read from remote repository." >&2',
+      "  exit 1",
+    ].join("\n"),
+  );
+  const run = fx.run();
+  assert.equal(run.status, 1, run.stderr);
+  assert.equal(fx.pushCalls().length, 1);
+  assert.equal(fx.alerts().length, 1);
+  assert.match(fx.alerts()[0], /Бэкап vault не ушёл/u);
+});
+
+void test("Brain push: non-fast-forward — 1 попытка и один Alert", (t) => {
+  const fx = pushFixture(
+    t,
+    [
+      '  printf "%s\\n" " ! [rejected]        HEAD -> master (non-fast-forward)" "error: failed to push some refs" >&2',
+      "  exit 1",
+    ].join("\n"),
+  );
+  const run = fx.run();
+  assert.equal(run.status, 1, run.stderr);
+  assert.equal(fx.pushCalls().length, 1);
+  assert.equal(fx.alerts().length, 1);
+  assert.match(fx.alerts()[0], /Бэкап vault не ушёл/u);
+});
+
+void test("Brain push: временная ошибка, затем невременная — останавливается на 2-й и один Alert", (t) => {
+  const fx = pushFixture(
+    t,
+    [
+      '  if [ "$n" -eq 1 ]; then',
+      '    printf "%s\\n" "fatal: the remote end hung up unexpectedly" >&2',
+      "    exit 1",
+      "  fi",
+      '  printf "%s\\n" "remote: Repository not found." >&2',
+      "  exit 1",
+    ].join("\n"),
+  );
+  const run = fx.run();
+  assert.equal(run.status, 1, run.stderr);
+  assert.equal(fx.pushCalls().length, 2);
+  assert.equal(fx.alerts().length, 1);
+  assert.match(fx.alerts()[0], /Бэкап vault не ушёл/u);
+});
+
+void test("Brain push: две временные ошибки, успех на 3-й попытке — код 0, Alert нет", (t) => {
+  const fx = pushFixture(
+    t,
+    [
+      '  if [ "$n" -eq 1 ]; then',
+      '    printf "%s\\n" "fatal: unable to access: Could not resolve host: github.com" >&2',
+      "    exit 1",
+      "  fi",
+      '  if [ "$n" -eq 2 ]; then',
+      '    printf "%s\\n" "fatal: index-pack failed" >&2',
+      "    exit 1",
+      "  fi",
+    ].join("\n"),
+  );
+  const run = fx.run({ IVA_TEST_PUSH_DELAYS_MS: "5,10" });
+  assert.equal(run.status, 0, run.stderr);
+  assert.equal(fx.pushCalls().length, 3);
+  assert.deepEqual(fx.alerts(), []);
+  assert.match(run.stderr, /waiting 5ms/u);
+  assert.match(run.stderr, /waiting 10ms/u);
+  assert.doesNotMatch(run.stderr, /backup push failed/u);
+  assert.equal(
+    git(fx.bare, "rev-parse", "HEAD"),
+    git(fx.vault, "rev-parse", "HEAD"),
+  );
+});
+
+void test("Brain push: невременная ошибка с именем remote 'connection reset.git' (non-fast-forward) — 1 попытка и один Alert", (t) => {
+  const fx = brainFixture(t);
+  const branch = git(fx.vault, "branch", "--show-current");
+  const bare = join(fx.root, "connection reset.git");
+  const other = join(fx.root, "other");
+  mkdirSync(other, { recursive: true });
+  git(fx.root, "init", "-q", "--bare", bare);
+  git(fx.vault, "remote", "add", "origin", bare);
+  git(other, "init", "-q", "-b", branch);
+  git(other, "config", "user.email", "brain@example.invalid");
+  git(other, "config", "user.name", "Brain");
+  writeFileSync(join(other, "other.md"), "# Other\n");
+  git(other, "add", "-A");
+  git(other, "commit", "-qm", "other");
+  git(other, "remote", "add", "origin", bare);
+  git(other, "push", "-q", "origin", "HEAD");
+  git(fx.vault, "fetch", "-q", "origin");
+
+  const pushLog = join(fx.root, "push-calls.log");
+  const fakeGit = join(fx.root, "bin/git");
+  writeFileSync(
+    fakeGit,
+    [
+      "#!/bin/sh",
+      'if [ "$1" = "push" ]; then',
+      `  printf '%s\\n' "$*" >> ${JSON.stringify(pushLog)}`,
+      "fi",
+      `PATH=${JSON.stringify(process.env.PATH ?? "")} exec git "$@"`,
+      "",
+    ].join("\n"),
+  );
+  chmodSync(fakeGit, 0o755);
+
+  const sent = join(fx.root, "sent.log");
+  const preload = join(fx.root, "telegram-double.mjs");
+  writeFileSync(
+    preload,
+    `import { appendFileSync } from "node:fs";
+globalThis.fetch = async (_url, init) => {
+  appendFileSync(${JSON.stringify(sent)}, String(init?.body ?? "") + "\\n");
+  return new Response(JSON.stringify({ ok: true, result: { message_id: 1 } }));
+};
+`,
+  );
+
+  const run = fx.brain({
+    TELEGRAM_BOT_TOKEN: "123:abc",
+    TELEGRAM_DIGEST_CHAT_ID: "42",
+    NODE_OPTIONS: `--import=${preload}`,
+    IVA_TEST_PUSH_DELAYS_MS: "2,4",
+  });
+  const pushCalls = readFileSync(pushLog, "utf8")
+    .trim()
+    .split("\n")
+    .filter(Boolean);
+  const alerts = existsSync(sent)
+    ? readFileSync(sent, "utf8").trim().split("\n").filter(Boolean)
+    : [];
+
+  assert.equal(run.status, 1, run.stderr);
+  assert.equal(pushCalls.length, 1, run.stderr);
+  assert.equal(alerts.length, 1, run.stderr);
+  assert.match(alerts[0], /Бэкап vault не ушёл/u);
+  assert.doesNotMatch(run.stderr, /transient error|waiting/u);
+});
+
+void test("Brain push: отсутствующий remote 'connection reset.git' — 1 попытка и один Alert", (t) => {
+  const fx = brainFixture(t);
+  git(
+    fx.vault,
+    "remote",
+    "add",
+    "origin",
+    join(fx.root, "missing", "connection reset.git"),
+  );
+  const pushLog = join(fx.root, "push-calls.log");
+  const fakeGit = join(fx.root, "bin/git");
+  writeFileSync(
+    fakeGit,
+    [
+      "#!/bin/sh",
+      'if [ "$1" = "push" ]; then',
+      `  printf '%s\\n' "$*" >> ${JSON.stringify(pushLog)}`,
+      "fi",
+      `PATH=${JSON.stringify(process.env.PATH ?? "")} exec git "$@"`,
+      "",
+    ].join("\n"),
+  );
+  chmodSync(fakeGit, 0o755);
+
+  const sent = join(fx.root, "sent.log");
+  const preload = join(fx.root, "telegram-double.mjs");
+  writeFileSync(
+    preload,
+    `import { appendFileSync } from "node:fs";
+globalThis.fetch = async (_url, init) => {
+  appendFileSync(${JSON.stringify(sent)}, String(init?.body ?? "") + "\\n");
+  return new Response(JSON.stringify({ ok: true, result: { message_id: 1 } }));
+};
+`,
+  );
+
+  const run = fx.brain({
+    TELEGRAM_BOT_TOKEN: "123:abc",
+    TELEGRAM_DIGEST_CHAT_ID: "42",
+    NODE_OPTIONS: `--import=${preload}`,
+    IVA_TEST_PUSH_DELAYS_MS: "2,4",
+  });
+  const pushCalls = readFileSync(pushLog, "utf8")
+    .trim()
+    .split("\n")
+    .filter(Boolean);
+  const alerts = readFileSync(sent, "utf8").trim().split("\n").filter(Boolean);
+
+  assert.equal(run.status, 1, run.stderr);
+  assert.equal(pushCalls.length, 1, run.stderr);
+  assert.equal(alerts.length, 1, run.stderr);
+  assert.match(alerts[0], /Бэкап vault не ушёл/u);
+  assert.doesNotMatch(run.stderr, /transient error|waiting/u);
+});
+
+void test("Brain push: отсутствующий remote с апострофом 'owner's connection reset.git' — 1 попытка и один Alert", (t) => {
+  const fx = brainFixture(t);
+  git(
+    fx.vault,
+    "remote",
+    "add",
+    "origin",
+    join(fx.root, "missing", "owner's connection reset.git"),
+  );
+  const pushLog = join(fx.root, "push-calls.log");
+  const fakeGit = join(fx.root, "bin/git");
+  writeFileSync(
+    fakeGit,
+    [
+      "#!/bin/sh",
+      'if [ "$1" = "push" ]; then',
+      `  printf '%s\\n' "$*" >> ${JSON.stringify(pushLog)}`,
+      "fi",
+      `PATH=${JSON.stringify(process.env.PATH ?? "")} exec git "$@"`,
+      "",
+    ].join("\n"),
+  );
+  chmodSync(fakeGit, 0o755);
+
+  const sent = join(fx.root, "sent.log");
+  const preload = join(fx.root, "telegram-double.mjs");
+  writeFileSync(
+    preload,
+    `import { appendFileSync } from "node:fs";
+globalThis.fetch = async (_url, init) => {
+  appendFileSync(${JSON.stringify(sent)}, String(init?.body ?? "") + "\\n");
+  return new Response(JSON.stringify({ ok: true, result: { message_id: 1 } }));
+};
+`,
+  );
+
+  const run = fx.brain({
+    TELEGRAM_BOT_TOKEN: "123:abc",
+    TELEGRAM_DIGEST_CHAT_ID: "42",
+    NODE_OPTIONS: `--import=${preload}`,
+    IVA_TEST_PUSH_DELAYS_MS: "2,4",
+  });
+  const pushCalls = readFileSync(pushLog, "utf8")
+    .trim()
+    .split("\n")
+    .filter(Boolean);
+  const alerts = existsSync(sent)
+    ? readFileSync(sent, "utf8").trim().split("\n").filter(Boolean)
+    : [];
+
+  assert.equal(run.status, 1, run.stderr);
+  assert.equal(pushCalls.length, 1, run.stderr);
+  assert.equal(alerts.length, 1, run.stderr);
+  assert.match(alerts[0], /Бэкап vault не ушёл/u);
+  assert.doesNotMatch(run.stderr, /transient error|waiting/u);
+});
+
+void test("Brain push: Permission denied с адресом remote (учётные данные, апостроф, скобки, кавычки) — 1 попытка и один Alert", (t) => {
+  const remoteWithCreds = `https://user:secret@example.invalid/owner's (HTTP 503) "connection reset".git`;
+  const remoteNoCreds = `https://example.invalid/owner's (HTTP 503) "connection reset".git`;
+  const fx = pushFixture(
+    t,
+    [
+      `  printf "%s\\n" ${JSON.stringify(`${remoteNoCreds}: Permission denied (publickey).`)} ${JSON.stringify(`fatal: unable to access '${remoteNoCreds}/': The requested URL returned error: 403`)} "fatal: Could not read from remote repository." >&2`,
+      "  exit 1",
+    ].join("\n"),
+  );
+  git(fx.vault, "remote", "set-url", "origin", remoteWithCreds);
+  const run = fx.run({ IVA_TEST_PUSH_DELAYS_MS: "2,4" });
+  assert.equal(run.status, 1, run.stderr);
+  assert.equal(fx.pushCalls().length, 1, run.stderr);
+  assert.equal(fx.alerts().length, 1, run.stderr);
+  assert.match(fx.alerts()[0], /Бэкап vault не ушёл/u);
+  assert.doesNotMatch(run.stderr, /transient error|waiting/u);
+});
+
+void test("Brain push: настоящий bare remote с pre-receive Internal Server Error на 1-й попытке — успех на 2-й, Alert нет", (t) => {
+  const fx = brainFixture(t);
+  const bare = join(fx.root, "connection reset.git");
+  git(fx.root, "init", "-q", "--bare", bare);
+  const marker = join(fx.root, "hook-failed-once");
+  const hook = join(bare, "hooks/pre-receive");
+  writeFileSync(
+    hook,
+    [
+      "#!/bin/sh",
+      `if [ ! -f ${JSON.stringify(marker)} ]; then`,
+      `  : > ${JSON.stringify(marker)}`,
+      '  echo "Internal Server Error" >&2',
+      "  exit 1",
+      "fi",
+      "exit 0",
+      "",
+    ].join("\n"),
+  );
+  chmodSync(hook, 0o755);
+  git(fx.vault, "remote", "add", "origin", bare);
+
+  const pushLog = join(fx.root, "push-calls.log");
+  const fakeGit = join(fx.root, "bin/git");
+  writeFileSync(
+    fakeGit,
+    [
+      "#!/bin/sh",
+      'if [ "$1" = "push" ]; then',
+      `  printf '%s\\n' "$*" >> ${JSON.stringify(pushLog)}`,
+      "fi",
+      `PATH=${JSON.stringify(process.env.PATH ?? "")} exec git "$@"`,
+      "",
+    ].join("\n"),
+  );
+  chmodSync(fakeGit, 0o755);
+
+  const sent = join(fx.root, "sent.log");
+  const preload = join(fx.root, "telegram-double.mjs");
+  writeFileSync(
+    preload,
+    `import { appendFileSync } from "node:fs";
+globalThis.fetch = async (_url, init) => {
+  appendFileSync(${JSON.stringify(sent)}, String(init?.body ?? "") + "\\n");
+  return new Response(JSON.stringify({ ok: true, result: { message_id: 1 } }));
+};
+`,
+  );
+
+  const run = fx.brain({
+    TELEGRAM_BOT_TOKEN: "123:abc",
+    TELEGRAM_DIGEST_CHAT_ID: "42",
+    NODE_OPTIONS: `--import=${preload}`,
+    IVA_TEST_PUSH_DELAYS_MS: "2,4",
+  });
+  const pushCalls = readFileSync(pushLog, "utf8")
+    .trim()
+    .split("\n")
+    .filter(Boolean);
+  const alerts = existsSync(sent)
+    ? readFileSync(sent, "utf8").trim().split("\n").filter(Boolean)
+    : [];
+
+  assert.equal(run.status, 0, run.stderr);
+  assert.equal(pushCalls.length, 2, run.stderr);
+  assert.deepEqual(alerts, []);
+  assert.equal(
+    git(bare, "rev-parse", "HEAD"),
+    git(fx.vault, "rev-parse", "HEAD"),
+  );
+});
+
+void test("Brain push: классификатор временных ошибок и паузы по умолчанию (property)", () => {
+  assert.deepEqual(PUSH_DELAYS_MS, [30_000, 120_000]);
+  const seed = Number(process.env.IVA_TEST_SEED ?? 20261125);
+  const safeNoise = fc
+    .string({ minLength: 0, maxLength: 40 })
+    .filter((s) => !/[\r\n'"]/u.test(s) && !isTransientPushError(s));
+  const transientToken = fc.oneof(
+    fc.integer({ min: 500, max: 599 }).map((code) => `HTTP ${code}`),
+    fc.integer({ min: 500, max: 599 }).map((code) => `HTTP/2 ${code}`),
+    fc
+      .integer({ min: 500, max: 599 })
+      .map((code) => `The requested URL returned error: ${code}`),
+    fc.constantFrom(
+      "remote: Internal Server Error",
+      "fatal: index-pack failed",
+      "Could not resolve host: github.com",
+      "Connection timed out",
+      "Recv failure: Connection reset by peer",
+      "fatal: early EOF",
+      "fatal: the remote end hung up unexpectedly",
+      "502 Bad Gateway",
+      "503 Service Unavailable",
+      "504 Gateway Timeout",
+    ),
+  );
+  const transientPhrase = fc.oneof(
+    fc.integer({ min: 500, max: 599 }).map((code) => `HTTP ${code}`),
+    fc.constantFrom(
+      "Internal Server Error",
+      "Bad Gateway",
+      "Service Unavailable",
+      "Gateway Timeout",
+      "index-pack failed",
+      "Could not resolve host",
+      "Connection timed out",
+      "Connection reset",
+      "early EOF",
+      "The remote end hung up",
+    ),
+  );
+  fc.assert(
+    fc.property(
+      safeNoise,
+      transientToken,
+      safeNoise,
+      fc.boolean(),
+      (pre, token, post, upper) => {
+        const msg = `${pre}\n${upper ? token.toUpperCase() : token.toLowerCase()}\n${post}`;
+        assert.equal(isTransientPushError(msg), true);
+      },
+    ),
+    { seed, numRuns: 100 },
+  );
+
+  // Реальная диагностика в [remote rejected] (...), fatal: unable to access '...': <err> и после \r прогресса
+  fc.assert(
+    fc.property(transientPhrase, (phrase) => {
+      assert.equal(
+        isTransientPushError(
+          `To /tmp/backup.git\n ! [remote rejected] HEAD -> master (${phrase})\nerror: failed to push some refs to '/tmp/backup.git'`,
+        ),
+        true,
+      );
+      assert.equal(
+        isTransientPushError(
+          `fatal: unable to access 'https://github.com/u/iva-vault.git/': ${phrase}`,
+        ),
+        true,
+      );
+      assert.equal(
+        isTransientPushError(
+          `remote: Counting objects: 100% (3/3), done.\rremote: ${phrase}\n`,
+        ),
+        true,
+      );
+    }),
+    { seed, numRuns: 100 },
+  );
+
+  // Токены временного сбоя в адресе remote (с любыми кавычками, апострофами, скобками,
+  // учётными данными и схемами), в ref или hint не считаются временной ошибкой.
+  const arbitraryNoise = fc.string({
+    unit: fc.constantFrom(
+      "a",
+      "b",
+      " ",
+      "'",
+      '"',
+      "(",
+      ")",
+      "[",
+      "]",
+      ":",
+      "%",
+      "-",
+      "_",
+    ),
+    minLength: 0,
+    maxLength: 8,
+  });
+  const punctuation = fc.oneof(
+    fc.constantFrom(
+      "owner's ",
+      "'single' ",
+      '"double" ',
+      "(parens) ",
+      "[brackets] ",
+      "a': ",
+      'owner\'s (x) "y" ',
+      "",
+    ),
+    arbitraryNoise,
+  );
+  const remoteKind = fc.constantFrom(
+    "local",
+    "file",
+    "https",
+    "https-creds",
+    "ssh-creds",
+    "scp",
+  );
+  fc.assert(
+    fc.property(
+      transientPhrase,
+      punctuation,
+      punctuation,
+      remoteKind,
+      (phrase, prePunct, postPunct, kind) => {
+        const segment = `${prePunct}${phrase}${postPunct}`.trim();
+        const remote =
+          kind === "local"
+            ? `/tmp/missing/${segment}.git`
+            : kind === "file"
+              ? `file:///tmp/missing/${segment}.git`
+              : kind === "https"
+                ? `https://example.invalid/u/${segment}.git`
+                : kind === "https-creds"
+                  ? `https://user:sec'ret@example.invalid/u/${segment}.git`
+                  : kind === "ssh-creds"
+                    ? `ssh://git:tok@example.invalid/u/${segment}.git`
+                    : `git@example.invalid:u/${segment}.git`;
+        const displayed =
+          kind === "file"
+            ? `/tmp/missing/${segment}.git`
+            : kind === "https-creds"
+              ? `https://example.invalid/u/${segment}.git`
+              : kind === "ssh-creds"
+                ? `ssh://example.invalid/u/${segment}.git`
+                : remote;
+        const permanentOutputs = [
+          [
+            `To ${displayed}`,
+            " ! [rejected]        HEAD -> master (non-fast-forward)",
+            `error: failed to push some refs to '${displayed}'`,
+            `hint: Updates were rejected (${phrase})`,
+          ].join("\n"),
+          `fatal: '${displayed}' does not appear to be a git repository\nfatal: Could not read from remote repository.`,
+          `${displayed}: Permission denied (publickey).\nfatal: Could not read from remote repository.`,
+          `fatal: could not open '${displayed}/objects': Permission denied`,
+          `fatal: unable to access '${displayed}/': The requested URL returned error: 403`,
+          `To ${displayed}\n ! [remote rejected] HEAD -> ${phrase.replace(/\s+/gu, "-")} (pre-receive hook declined)\nerror: failed to push some refs to '${displayed}'`,
+        ];
+        for (const output of permanentOutputs) {
+          assert.equal(isTransientPushError(output, [remote]), false, output);
+        }
+        // Даже без передачи remoteUrls известные постоянные строки с апострофом не дают ложный повтор
+        assert.equal(
+          isTransientPushError(
+            `fatal: '/tmp/missing/owner's ${phrase}.git' does not appear to be a git repository\nfatal: Could not read from remote repository.`,
+          ),
+          false,
+        );
+        // Настоящая временная ошибка на том же remote остаётся временной
+        assert.equal(
+          isTransientPushError(
+            `remote: Internal Server Error\nTo ${displayed}\n ! [remote rejected] HEAD -> master (Internal Server Error)\nerror: failed to push some refs to '${displayed}'`,
+            [remote],
+          ),
+          true,
+        );
+        assert.equal(
+          isTransientPushError(
+            `fatal: unable to access '${displayed}/': The requested URL returned error: 503`,
+            [remote],
+          ),
+          true,
+        );
+      },
+    ),
+    { seed, numRuns: 100 },
+  );
+
+  const permanentToken = fc.oneof(
+    fc.integer({ min: 400, max: 499 }).map((code) => `HTTP ${code}`),
+    fc
+      .integer({ min: 400, max: 499 })
+      .map((code) => `The requested URL returned error: ${code}`),
+    fc.constantFrom(
+      "Permission denied (publickey)",
+      "Authentication failed",
+      "Repository not found",
+      "! [rejected] HEAD -> master (non-fast-forward)",
+      "! [rejected] HEAD -> master (fetch first)",
+      "remote: error: File big.bin is 500.00 MB; exceeds GitHub file size limit",
+      "500abcd..599ef01",
+      "git push failed",
+    ),
+  );
+  fc.assert(
+    fc.property(safeNoise, permanentToken, safeNoise, (pre, token, post) => {
+      const msg = `${pre} ${token} ${post}`;
+      assert.equal(isTransientPushError(msg), false);
+    }),
+    { seed, numRuns: 100 },
+  );
 });

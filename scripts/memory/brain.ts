@@ -1,6 +1,8 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
+import { setTimeout as pause } from "node:timers/promises";
+import { fileURLToPath } from "node:url";
 import { resolveDataDir } from "../../packages/data-dir/index.ts";
 import {
   alertOnce,
@@ -10,8 +12,168 @@ import {
 import { notificationChat } from "../../packages/notification-chat/index.ts";
 import { vaultDirOrExit } from "../lib/vault-boundary.ts";
 
-const vault = vaultDirOrExit();
-const dataDir = resolveDataDir(process.cwd());
+let vault = "";
+let dataDir = "";
+
+/** Паузы перед 2-й и 3-й попытками git push (всего 3 попытки: сразу, +30 с, +120 с). */
+export const PUSH_DELAYS_MS = [30_000, 120_000] as const;
+
+const TRANSIENT_PUSH_ERROR =
+  /\bHTTP(?:\/[\d.]+)?\s+5\d\d\b|returned error:\s*5\d\d\b|internal server error|bad gateway|service unavailable|gateway time-?out|index-pack failed|could not resolve host|connection timed out|connection reset|early eof|the remote end hung up/iu;
+
+const isWordChar = (ch: string | undefined): boolean =>
+  ch !== undefined && /[A-Za-z0-9]/u.test(ch);
+
+function stripLiteral(text: string, token: string): string {
+  if (!token) return text;
+  let out = "";
+  let from = 0;
+  while (from < text.length) {
+    const idx = text.indexOf(token, from);
+    if (idx === -1) return out + text.slice(from);
+    if (!isWordChar(text[idx - 1]) && !isWordChar(text[idx + token.length])) {
+      out += `${text.slice(from, idx)}\uFFFD`;
+      from = idx + token.length;
+    } else {
+      out += text.slice(from, idx + 1);
+      from = idx + 1;
+    }
+  }
+  return out;
+}
+
+/** Собирает варианты записи известного адреса remote (исходный, без учётных данных,
+ * без file://, без хвостового слэша и в нормализованном/декодированном виде URL). */
+function remoteUrlVariants(urls: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const add = (value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed) return;
+    seen.add(trimmed);
+    const noSlash = trimmed.replace(/\/+$/u, "");
+    if (noSlash) seen.add(noSlash);
+    if (trimmed.includes("%")) {
+      try {
+        const decoded = decodeURIComponent(trimmed);
+        if (decoded && decoded !== trimmed) {
+          seen.add(decoded);
+          const decodedNoSlash = decoded.replace(/\/+$/u, "");
+          if (decodedNoSlash) seen.add(decodedNoSlash);
+        }
+      } catch {
+        // Невалидная %-последовательность в локальном пути — оставляем как есть.
+      }
+    }
+  };
+  for (const raw of urls) {
+    const trimmed = raw.trim();
+    if (!trimmed) continue;
+    add(trimmed);
+    const schemeCredsGreedy = trimmed.match(
+      /^([a-z][a-z0-9+.-]*:\/\/)([^/?#]+)@(.*)$/iu,
+    );
+    if (schemeCredsGreedy) {
+      add(`${schemeCredsGreedy[1]}${schemeCredsGreedy[3]}`);
+      const colon = schemeCredsGreedy[2].indexOf(":");
+      if (colon > 0) {
+        add(
+          `${schemeCredsGreedy[1]}${schemeCredsGreedy[2].slice(0, colon)}@${schemeCredsGreedy[3]}`,
+        );
+      }
+      const schemeCredsLazy = trimmed.match(
+        /^([a-z][a-z0-9+.-]*:\/\/)([^/?#]+?)@(.*)$/iu,
+      );
+      if (schemeCredsLazy) add(`${schemeCredsLazy[1]}${schemeCredsLazy[3]}`);
+    }
+    const scp = trimmed.match(/^[^/@:\s]+@([^/@:\s]+:.+)$/u);
+    if (scp) add(scp[1]);
+    if (/^file:\/\/(?:localhost)?(?=\/)/iu.test(trimmed)) {
+      add(trimmed.replace(/^file:\/\/(?:localhost)?/iu, ""));
+    }
+    try {
+      const parsed = new URL(trimmed);
+      if (parsed.protocol === "file:") add(parsed.pathname);
+      parsed.username = "";
+      parsed.password = "";
+      add(parsed.href);
+    } catch {
+      // Локальные пути и SCP-адреса не являются WHATWG URL.
+    }
+  }
+  return [...seen].sort((a, b) => b.length - a.length);
+}
+
+function stripRemoteUrls(line: string, variants: readonly string[]): string {
+  let result = line;
+  for (const variant of variants) {
+    result = stripLiteral(result, variant);
+  }
+  return result;
+}
+
+/** Выделяет диагностический текст строки вывода git push, вырезая известный адрес
+ * remote и отбрасывая сводку refs, подсказки и постоянные отказы адресации. */
+function pushDiagnostic(
+  line: string,
+  remoteVariants: readonly string[],
+): string | null {
+  const trimmed = line.trim();
+  if (!trimmed) return null;
+  if (
+    /^To\s+/u.test(trimmed) ||
+    /^hint:/iu.test(trimmed) ||
+    /^error:\s+failed to push some refs to\b/iu.test(trimmed) ||
+    /^!\s+\[rejected\]\b/u.test(trimmed) ||
+    /^(?:[+\-*=]\s+\[|[0-9a-f]{4,}\.\.\.?[0-9a-f]{4,}\s)/u.test(trimmed) ||
+    /^(?:remote:\s*)?(?:Enumerating|Counting|Delta compression|Compressing|Writing|Resolving|Total)\b/u.test(
+      trimmed,
+    ) ||
+    /^fatal:\s+'.*'\s+does not appear to be a git repository$/iu.test(
+      trimmed,
+    ) ||
+    /^fatal:\s+repository\s+'.*'\s+(?:not found|does not exist)\.?$/iu.test(
+      trimmed,
+    )
+  ) {
+    return null;
+  }
+  if (/^!\s+\[remote rejected\]\b/u.test(trimmed)) {
+    const reason = trimmed.match(
+      /^!\s+\[remote rejected\]\s+(?:\S+\s+->\s+)?\S+\s+\((.+)\)\s*$/u,
+    )?.[1];
+    return reason ? stripRemoteUrls(reason, remoteVariants) : null;
+  }
+  const cleaned = stripRemoteUrls(trimmed, remoteVariants);
+  const unableToAccess =
+    cleaned.match(/^fatal:\s+unable to access\s+'[^']*':\s*(.+)$/iu) ??
+    cleaned.match(/^fatal:\s+unable to access\s+'.*':\s*(.+)$/iu);
+  if (unableToAccess) return unableToAccess[1];
+  return cleaned;
+}
+
+export function isTransientPushError(
+  output: string,
+  remoteUrls: readonly string[] = [],
+): boolean {
+  const variants = remoteUrlVariants(remoteUrls);
+  for (const line of output.split(/\r?\n|\r/u)) {
+    const diagnostic = pushDiagnostic(line, variants);
+    if (diagnostic && TRANSIENT_PUSH_ERROR.test(diagnostic)) return true;
+  }
+  return false;
+}
+
+function pushDelaysMs(): readonly number[] {
+  const override = process.env.IVA_TEST_PUSH_DELAYS_MS;
+  if (!override) return PUSH_DELAYS_MS;
+  const parsed = override.split(",").map((part) => Number(part.trim()));
+  if (
+    parsed.length !== PUSH_DELAYS_MS.length ||
+    parsed.some((ms) => !Number.isFinite(ms) || ms < 0)
+  )
+    return PUSH_DELAYS_MS;
+  return parsed;
+}
 
 /** Агентское дерево — динамическим импортом: юнит грузится и на установке, где agent/
  * нет или он переписан наполовину (scripts/authored-tree-guard.test.ts). */
@@ -151,6 +313,15 @@ function ensureRemote(): Missing | null {
   return origin() ? null : noRemote();
 }
 
+function originPushUrls(): string[] {
+  const urls = run("git", ["remote", "get-url", "--push", "--all", "origin"]);
+  if (urls.status !== 0) return [];
+  return urls.stdout
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
 async function pushBackup(): Promise<boolean> {
   const missing = ensureRemote();
   if (missing) {
@@ -160,9 +331,25 @@ async function pushBackup(): Promise<boolean> {
     );
     return false;
   }
-  const push = run("git", ["push", "origin", "HEAD"]);
-  if (push.status === 0) return true;
-  const reason = (push.stderr || push.stdout || "git push failed").trim();
+  const remoteUrls = originPushUrls();
+  const delays = pushDelaysMs();
+  const totalAttempts = delays.length + 1;
+  let reason = "git push failed";
+  for (let attempt = 0; attempt < totalAttempts; attempt++) {
+    const push = run("git", ["push", "origin", "HEAD"]);
+    if (push.status === 0) return true;
+    reason = (push.stderr || push.stdout || "git push failed").trim();
+    const output = `${push.stderr ?? ""}\n${push.stdout ?? ""}`;
+    if (attempt < delays.length && isTransientPushError(output, remoteUrls)) {
+      const delayMs = delays[attempt];
+      console.error(
+        `brain: backup push transient error (${attempt + 1}/${totalAttempts}), waiting ${delayMs}ms: ${reason}`,
+      );
+      await pause(delayMs);
+      continue;
+    }
+    break;
+  }
   console.error(`brain: backup push failed: ${reason}`);
   await alertOnce(dataDir, "brain-backup", reason, () =>
     send(
@@ -176,6 +363,8 @@ async function pushBackup(): Promise<boolean> {
 }
 
 async function main(): Promise<number> {
+  vault = vaultDirOrExit();
+  dataDir = resolveDataDir(process.cwd());
   if (!existsSync(vault)) {
     console.error(`brain: vault not found: ${vault}`);
     return 1;
@@ -196,4 +385,13 @@ async function main(): Promise<number> {
   return ownerCommitted && graphRefreshed && indexed && pushed ? 0 : 1;
 }
 
-process.exitCode = await main();
+const isMain = (() => {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  try {
+    return realpathSync(fileURLToPath(import.meta.url)) === realpathSync(entry);
+  } catch {
+    return false;
+  }
+})();
+if (isMain) process.exitCode = await main();
