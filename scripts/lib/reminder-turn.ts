@@ -141,7 +141,24 @@ export type ReminderFire = {
   readonly text: string;
   /** Срок в зоне владельца, как его видел пользователь. */
   readonly scheduledAt?: string;
+  /**
+   * Ходу разрешён исход «решила молчать» (пометка `iva:none`): только ход строки
+   * Reminder с заданием. Signal и разовое `iva remind` всегда отвечают.
+   */
+  readonly allowQuiet?: boolean;
 };
+
+/** Пометка исхода «решила молчать» первой строкой финального текста хода — как `iva:silent`. */
+const NONE_MARKER = /^<!-- iva:none -->(?:\r?\n|$)/u;
+
+/**
+ * Явное молчание хода: пометка первой строкой, после неё — итог одной строкой для журнала
+ * и факта строки. Пометки нет — null; пустой итог после пометки молчанием остаётся.
+ */
+export function parseNoneReply(text: string): { readonly note: string } | null {
+  const marker = NONE_MARKER.exec(text)?.[0];
+  return marker ? { note: text.slice(marker.length).trim() } : null;
+}
 
 /**
  * Голое QUIET — «писать не о чем» планового хода, а не текст для владельца: в любом регистре, в
@@ -169,7 +186,14 @@ export function reminderPrompt(
     "If it is a plain reminder with nothing to do, return the short reminder text. " +
     "If it checks a long-running background job, load the background-check skill " +
     "and return a bounded status snapshot instead of waiting for the job to finish. " +
-    "The answer is never empty. " +
+    (fire.allowQuiet === true
+      ? "If the work is done and there is nothing worth telling the owner (a check " +
+        "that found nothing new), end the turn with <!-- iva:none --> on the first " +
+        "line and a one-line outcome after it: nothing is sent, and the outcome " +
+        "stays in the journal and the schedule list. A plain reminder the owner " +
+        "asked to receive is always returned as text. An empty answer or a bare " +
+        "QUIET is a failure, not silence. "
+      : "The answer is never empty. ") +
     `Write it ${writtenInLanguage(tr)}. ` +
     "Do not send anything yourself: no rich messages and no Telegram tool that writes " +
     "(send, reply, forward, edit, delete, react, mark read). " +

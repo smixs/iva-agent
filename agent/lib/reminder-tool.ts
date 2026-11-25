@@ -26,6 +26,8 @@ export interface ReminderView {
   /** Дошёл ли текст до чата: true/false, null — факта ещё нет. */
   readonly delivered: boolean | null;
   readonly error: string | null;
+  /** Итог хода, который явно промолчал (phase quiet); null — последнее срабатывание не молчало. */
+  readonly quiet_note: string | null;
 }
 
 /**
@@ -70,6 +72,7 @@ export function describeReminder(
     fired_at: row.firedAt === null ? null : formatZoned(row.firedAt, tz),
     delivered: row.delivered,
     error: row.error,
+    quiet_note: row.quietNote ?? null,
   };
 }
 

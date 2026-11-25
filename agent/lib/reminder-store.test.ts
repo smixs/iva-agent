@@ -38,6 +38,7 @@ const {
   list,
   recordDelivery,
   reminderFile,
+  reminderPhase,
   remove,
   recordTurnSession,
   sweepFired,
@@ -329,6 +330,31 @@ test("строка без поля sessionId (таблица старой вер
     ).record.sessionId,
     "",
   );
+});
+
+test("строка без поля quietNote не получает ключа при чтении; факт молчания его пишет", async () => {
+  const legacy = row({ id: "old", nextRunAtMs: 8 }) as unknown as Record<
+    string,
+    unknown
+  >;
+  delete legacy.quietNote;
+  await saveJsonAtomic(reminderFile(), {
+    schemaVersion: REMINDER_SCHEMA_VERSION,
+    rows: [legacy],
+  });
+  const [read] = await list();
+  assert.equal(read?.quietNote, undefined);
+  assert.ok(!Object.hasOwn(read, "quietNote"), "ключа не дорисовываем");
+
+  const [fired] = await fireDue(8, 10);
+  const quiet = await recordDelivery("old", {
+    firedAt: fired.firedAt,
+    delivered: false,
+    error: null,
+    quietNote: "новых нет",
+  });
+  assert.equal(quiet.quietNote, "новых нет");
+  assert.equal(reminderPhase(quiet, 8), "quiet");
 });
 
 test("результат старого срока не переписывает факт нового и уходит в журнал", async () => {

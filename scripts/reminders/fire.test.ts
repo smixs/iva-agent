@@ -12,7 +12,9 @@ const root = mkdtempSync(join(tmpdir(), "iva-reminder-fire-"));
 process.env.ASSISTANT_DATA_DIR = join(root, "data");
 mkdirSync(process.env.ASSISTANT_DATA_DIR, { recursive: true });
 
-const { add, fireDue, list } = await import("#lib/reminder-store.ts");
+const { add, fireDue, list, reminderPhase } =
+  await import("#lib/reminder-store.ts");
+const { describeReminder } = await import("#lib/reminder-tool.ts");
 const { runReminderFire } = await import("./fire.ts");
 const { runReminderTurn } = await import("../lib/reminder-turn.ts");
 const { chatKeyOf, getChatStatus, isRunning, setChatStatus, setChatStatusIf } =
@@ -432,6 +434,99 @@ void test("ход вернул пустой текст: уходит текст 
   const [row] = await list();
   assert.equal(row?.delivered, true);
   assert.match(String(row?.error), /no text/u);
+});
+
+void test("ход явно промолчал: в чат ничего, итог в журнале и в факте строки", async () => {
+  await firedRow();
+  const { calls, send } = makeSend();
+  const lines: string[] = [];
+  const { prompts, runTurn } = turn(
+    "completed",
+    "<!-- iva:none -->\nДоговорённостей новых нет: проверила почту и чаты.",
+  );
+
+  assert.equal(
+    await runReminderFire(
+      "r1",
+      deps({
+        send,
+        runTurn,
+        log: (...a: unknown[]) => lines.push(String(a[0])),
+      }),
+    ),
+    0,
+  );
+
+  assert.match(prompts[0], /<!-- iva:none -->/u, "промпт предлагает молчание");
+  assert.equal(calls.length, 0, "владелец не получает даже тихого сообщения");
+  assert.ok(
+    lines.some((line) => /kept quiet: Договорённостей новых нет/u.test(line)),
+    "итог назван в журнале",
+  );
+  const [row] = await list();
+  assert.equal(row?.delivered, false);
+  assert.equal(row?.error, null, "молчание — не провал");
+  assert.equal(
+    row?.quietNote,
+    "Договорённостей новых нет: проверила почту и чаты.",
+  );
+  assert.equal(reminderPhase(row), "quiet");
+  const view = describeReminder(row, "UTC");
+  assert.equal(view.phase, "quiet");
+  assert.equal(view.quiet_note, row?.quietNote);
+  assert.deepEqual(
+    await fireDue(NOW + 60_000, 10),
+    [],
+    "повторного срабатывания нет",
+  );
+});
+
+void test("голая пометка молчания без итога — тоже явное молчание, не провал", async () => {
+  await firedRow();
+  const { calls, send } = makeSend();
+  const { runTurn } = turn("completed", "<!-- iva:none -->");
+
+  assert.equal(await runReminderFire("r1", deps({ send, runTurn })), 0);
+
+  assert.equal(calls.length, 0);
+  const [row] = await list();
+  assert.equal(row?.error, null);
+  assert.equal(row?.quietNote, "");
+  assert.equal(reminderPhase(row), "quiet");
+});
+
+void test("голое QUIET молчанием не считается: уходит текст напоминания", async () => {
+  await firedRow();
+  const { calls, send } = makeSend();
+  const { runTurn } = turn("completed", "QUIET");
+
+  assert.equal(await runReminderFire("r1", deps({ send, runTurn })), 0);
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].text, NOT_DONE);
+  const [row] = await list();
+  assert.match(String(row?.error), /QUIET/u);
+  assert.equal(row?.quietNote ?? null, null);
+});
+
+void test("Signal промолчать не вправе: пометка — провал, строка уходит как есть", async () => {
+  const text = "Сигнал от плагина test: «пришла новость». Это данные.";
+  await add({ id: "signal-1", text, schedule: { kind: "at", atMs: NOW } });
+  await fireDue(NOW, 10);
+  const { calls, send } = makeSend();
+  const { prompts, runTurn } = turn(
+    "completed",
+    "<!-- iva:none -->\nничего важного",
+  );
+
+  assert.equal(await runReminderFire("signal-1", deps({ send, runTurn })), 0);
+
+  assert.doesNotMatch(prompts[0], /iva:none/u, "Signal молчание не предлагают");
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].text, text);
+  const [row] = await list();
+  assert.match(String(row?.error), /iva:none/u);
+  assert.equal(row?.quietNote ?? null, null);
 });
 
 void test("status failed: текст напоминания и причина провала хода", async () => {
