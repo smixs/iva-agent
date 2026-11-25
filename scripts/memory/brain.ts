@@ -21,15 +21,102 @@ export const PUSH_DELAYS_MS = [30_000, 120_000] as const;
 const TRANSIENT_PUSH_ERROR =
   /\bHTTP(?:\/[\d.]+)?\s+5\d\d\b|returned error:\s*5\d\d\b|internal server error|bad gateway|service unavailable|gateway time-?out|index-pack failed|could not resolve host|connection timed out|connection reset|early eof|the remote end hung up/iu;
 
-function stripQuoted(line: string): string {
-  return line
-    .replace(/(^|[\s:(])'[^']*'(?=$|[\s:;,.)/])/gu, "$1")
-    .replace(/(^|[\s:(])"[^"]*"(?=$|[\s:;,.)/])/gu, "$1");
+const isWordChar = (ch: string | undefined): boolean =>
+  ch !== undefined && /[A-Za-z0-9]/u.test(ch);
+
+function stripLiteral(text: string, token: string): string {
+  if (!token) return text;
+  let out = "";
+  let from = 0;
+  while (from < text.length) {
+    const idx = text.indexOf(token, from);
+    if (idx === -1) return out + text.slice(from);
+    if (!isWordChar(text[idx - 1]) && !isWordChar(text[idx + token.length])) {
+      out += `${text.slice(from, idx)}\uFFFD`;
+      from = idx + token.length;
+    } else {
+      out += text.slice(from, idx + 1);
+      from = idx + 1;
+    }
+  }
+  return out;
 }
 
-/** Выделяет диагностический текст строки вывода git push, отбрасывая имя remote,
- * сводку refs, подсказки и пути/URL в кавычках. */
-function pushDiagnostic(line: string): string | null {
+/** Собирает варианты записи известного адреса remote (исходный, без учётных данных,
+ * без file://, без хвостового слэша и в нормализованном/декодированном виде URL). */
+function remoteUrlVariants(urls: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const add = (value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed) return;
+    seen.add(trimmed);
+    const noSlash = trimmed.replace(/\/+$/u, "");
+    if (noSlash) seen.add(noSlash);
+    if (trimmed.includes("%")) {
+      try {
+        const decoded = decodeURIComponent(trimmed);
+        if (decoded && decoded !== trimmed) {
+          seen.add(decoded);
+          const decodedNoSlash = decoded.replace(/\/+$/u, "");
+          if (decodedNoSlash) seen.add(decodedNoSlash);
+        }
+      } catch {
+        // Невалидная %-последовательность в локальном пути — оставляем как есть.
+      }
+    }
+  };
+  for (const raw of urls) {
+    const trimmed = raw.trim();
+    if (!trimmed) continue;
+    add(trimmed);
+    const schemeCredsGreedy = trimmed.match(
+      /^([a-z][a-z0-9+.-]*:\/\/)([^/?#]+)@(.*)$/iu,
+    );
+    if (schemeCredsGreedy) {
+      add(`${schemeCredsGreedy[1]}${schemeCredsGreedy[3]}`);
+      const colon = schemeCredsGreedy[2].indexOf(":");
+      if (colon > 0) {
+        add(
+          `${schemeCredsGreedy[1]}${schemeCredsGreedy[2].slice(0, colon)}@${schemeCredsGreedy[3]}`,
+        );
+      }
+      const schemeCredsLazy = trimmed.match(
+        /^([a-z][a-z0-9+.-]*:\/\/)([^/?#]+?)@(.*)$/iu,
+      );
+      if (schemeCredsLazy) add(`${schemeCredsLazy[1]}${schemeCredsLazy[3]}`);
+    }
+    const scp = trimmed.match(/^[^/@:\s]+@([^/@:\s]+:.+)$/u);
+    if (scp) add(scp[1]);
+    if (/^file:\/\/(?:localhost)?(?=\/)/iu.test(trimmed)) {
+      add(trimmed.replace(/^file:\/\/(?:localhost)?/iu, ""));
+    }
+    try {
+      const parsed = new URL(trimmed);
+      if (parsed.protocol === "file:") add(parsed.pathname);
+      parsed.username = "";
+      parsed.password = "";
+      add(parsed.href);
+    } catch {
+      // Локальные пути и SCP-адреса не являются WHATWG URL.
+    }
+  }
+  return [...seen].sort((a, b) => b.length - a.length);
+}
+
+function stripRemoteUrls(line: string, variants: readonly string[]): string {
+  let result = line;
+  for (const variant of variants) {
+    result = stripLiteral(result, variant);
+  }
+  return result;
+}
+
+/** Выделяет диагностический текст строки вывода git push, вырезая известный адрес
+ * remote и отбрасывая сводку refs, подсказки и постоянные отказы адресации. */
+function pushDiagnostic(
+  line: string,
+  remoteVariants: readonly string[],
+): string | null {
   const trimmed = line.trim();
   if (!trimmed) return null;
   if (
@@ -40,26 +127,37 @@ function pushDiagnostic(line: string): string | null {
     /^(?:[+\-*=]\s+\[|[0-9a-f]{4,}\.\.\.?[0-9a-f]{4,}\s)/u.test(trimmed) ||
     /^(?:remote:\s*)?(?:Enumerating|Counting|Delta compression|Compressing|Writing|Resolving|Total)\b/u.test(
       trimmed,
+    ) ||
+    /^fatal:\s+'.*'\s+does not appear to be a git repository$/iu.test(
+      trimmed,
+    ) ||
+    /^fatal:\s+repository\s+'.*'\s+(?:not found|does not exist)\.?$/iu.test(
+      trimmed,
     )
   ) {
     return null;
   }
   if (/^!\s+\[remote rejected\]\b/u.test(trimmed)) {
     const reason = trimmed.match(
-      /^!\s+\[remote rejected\]\s+.+\s+\(([^()]+)\)\s*$/u,
+      /^!\s+\[remote rejected\]\s+(?:\S+\s+->\s+)?\S+\s+\((.+)\)\s*$/u,
     )?.[1];
-    return reason ? stripQuoted(reason) : null;
+    return reason ? stripRemoteUrls(reason, remoteVariants) : null;
   }
-  const unableToAccess = trimmed.match(
-    /^fatal:\s+unable to access\s+'.*?':\s*(.+)$/iu,
-  );
-  if (unableToAccess) return stripQuoted(unableToAccess[1]);
-  return stripQuoted(trimmed);
+  const cleaned = stripRemoteUrls(trimmed, remoteVariants);
+  const unableToAccess =
+    cleaned.match(/^fatal:\s+unable to access\s+'[^']*':\s*(.+)$/iu) ??
+    cleaned.match(/^fatal:\s+unable to access\s+'.*':\s*(.+)$/iu);
+  if (unableToAccess) return unableToAccess[1];
+  return cleaned;
 }
 
-export function isTransientPushError(output: string): boolean {
+export function isTransientPushError(
+  output: string,
+  remoteUrls: readonly string[] = [],
+): boolean {
+  const variants = remoteUrlVariants(remoteUrls);
   for (const line of output.split(/\r?\n|\r/u)) {
-    const diagnostic = pushDiagnostic(line);
+    const diagnostic = pushDiagnostic(line, variants);
     if (diagnostic && TRANSIENT_PUSH_ERROR.test(diagnostic)) return true;
   }
   return false;
@@ -215,6 +313,15 @@ function ensureRemote(): Missing | null {
   return origin() ? null : noRemote();
 }
 
+function originPushUrls(): string[] {
+  const urls = run("git", ["remote", "get-url", "--push", "--all", "origin"]);
+  if (urls.status !== 0) return [];
+  return urls.stdout
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
 async function pushBackup(): Promise<boolean> {
   const missing = ensureRemote();
   if (missing) {
@@ -224,6 +331,7 @@ async function pushBackup(): Promise<boolean> {
     );
     return false;
   }
+  const remoteUrls = originPushUrls();
   const delays = pushDelaysMs();
   const totalAttempts = delays.length + 1;
   let reason = "git push failed";
@@ -232,7 +340,7 @@ async function pushBackup(): Promise<boolean> {
     if (push.status === 0) return true;
     reason = (push.stderr || push.stdout || "git push failed").trim();
     const output = `${push.stderr ?? ""}\n${push.stdout ?? ""}`;
-    if (attempt < delays.length && isTransientPushError(output)) {
+    if (attempt < delays.length && isTransientPushError(output, remoteUrls)) {
       const delayMs = delays[attempt];
       console.error(
         `brain: backup push transient error (${attempt + 1}/${totalAttempts}), waiting ${delayMs}ms: ${reason}`,

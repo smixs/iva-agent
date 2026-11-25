@@ -728,6 +728,82 @@ globalThis.fetch = async (_url, init) => {
   assert.doesNotMatch(run.stderr, /transient error|waiting/u);
 });
 
+void test("Brain push: отсутствующий remote с апострофом 'owner's connection reset.git' — 1 попытка и один Alert", (t) => {
+  const fx = brainFixture(t);
+  git(
+    fx.vault,
+    "remote",
+    "add",
+    "origin",
+    join(fx.root, "missing", "owner's connection reset.git"),
+  );
+  const pushLog = join(fx.root, "push-calls.log");
+  const fakeGit = join(fx.root, "bin/git");
+  writeFileSync(
+    fakeGit,
+    [
+      "#!/bin/sh",
+      'if [ "$1" = "push" ]; then',
+      `  printf '%s\\n' "$*" >> ${JSON.stringify(pushLog)}`,
+      "fi",
+      `PATH=${JSON.stringify(process.env.PATH ?? "")} exec git "$@"`,
+      "",
+    ].join("\n"),
+  );
+  chmodSync(fakeGit, 0o755);
+
+  const sent = join(fx.root, "sent.log");
+  const preload = join(fx.root, "telegram-double.mjs");
+  writeFileSync(
+    preload,
+    `import { appendFileSync } from "node:fs";
+globalThis.fetch = async (_url, init) => {
+  appendFileSync(${JSON.stringify(sent)}, String(init?.body ?? "") + "\\n");
+  return new Response(JSON.stringify({ ok: true, result: { message_id: 1 } }));
+};
+`,
+  );
+
+  const run = fx.brain({
+    TELEGRAM_BOT_TOKEN: "123:abc",
+    TELEGRAM_DIGEST_CHAT_ID: "42",
+    NODE_OPTIONS: `--import=${preload}`,
+    IVA_TEST_PUSH_DELAYS_MS: "2,4",
+  });
+  const pushCalls = readFileSync(pushLog, "utf8")
+    .trim()
+    .split("\n")
+    .filter(Boolean);
+  const alerts = existsSync(sent)
+    ? readFileSync(sent, "utf8").trim().split("\n").filter(Boolean)
+    : [];
+
+  assert.equal(run.status, 1, run.stderr);
+  assert.equal(pushCalls.length, 1, run.stderr);
+  assert.equal(alerts.length, 1, run.stderr);
+  assert.match(alerts[0], /Бэкап vault не ушёл/u);
+  assert.doesNotMatch(run.stderr, /transient error|waiting/u);
+});
+
+void test("Brain push: Permission denied с адресом remote (учётные данные, апостроф, скобки, кавычки) — 1 попытка и один Alert", (t) => {
+  const remoteWithCreds = `https://user:secret@example.invalid/owner's (HTTP 503) "connection reset".git`;
+  const remoteNoCreds = `https://example.invalid/owner's (HTTP 503) "connection reset".git`;
+  const fx = pushFixture(
+    t,
+    [
+      `  printf "%s\\n" ${JSON.stringify(`${remoteNoCreds}: Permission denied (publickey).`)} ${JSON.stringify(`fatal: unable to access '${remoteNoCreds}/': The requested URL returned error: 403`)} "fatal: Could not read from remote repository." >&2`,
+      "  exit 1",
+    ].join("\n"),
+  );
+  git(fx.vault, "remote", "set-url", "origin", remoteWithCreds);
+  const run = fx.run({ IVA_TEST_PUSH_DELAYS_MS: "2,4" });
+  assert.equal(run.status, 1, run.stderr);
+  assert.equal(fx.pushCalls().length, 1, run.stderr);
+  assert.equal(fx.alerts().length, 1, run.stderr);
+  assert.match(fx.alerts()[0], /Бэкап vault не ушёл/u);
+  assert.doesNotMatch(run.stderr, /transient error|waiting/u);
+});
+
 void test("Brain push: настоящий bare remote с pre-receive Internal Server Error на 1-й попытке — успех на 2-й, Alert нет", (t) => {
   const fx = brainFixture(t);
   const bare = join(fx.root, "connection reset.git");
@@ -879,25 +955,116 @@ void test("Brain push: классификатор временных ошибо�
     { seed, numRuns: 100 },
   );
 
-  // Токены временного сбоя в имени remote, пути, ref или hint не считаются временной ошибкой
+  // Токены временного сбоя в адресе remote (с любыми кавычками, апострофами, скобками,
+  // учётными данными и схемами), в ref или hint не считаются временной ошибкой.
+  const arbitraryNoise = fc.string({
+    unit: fc.constantFrom(
+      "a",
+      "b",
+      " ",
+      "'",
+      '"',
+      "(",
+      ")",
+      "[",
+      "]",
+      ":",
+      "%",
+      "-",
+      "_",
+    ),
+    minLength: 0,
+    maxLength: 8,
+  });
+  const punctuation = fc.oneof(
+    fc.constantFrom(
+      "owner's ",
+      "'single' ",
+      '"double" ',
+      "(parens) ",
+      "[brackets] ",
+      "a': ",
+      'owner\'s (x) "y" ',
+      "",
+    ),
+    arbitraryNoise,
+  );
+  const remoteKind = fc.constantFrom(
+    "local",
+    "file",
+    "https",
+    "https-creds",
+    "ssh-creds",
+    "scp",
+  );
   fc.assert(
-    fc.property(transientPhrase, (phrase) => {
-      const nonDiagnosticOutputs = [
-        [
-          `To /tmp/${phrase}.git`,
-          " ! [rejected]        HEAD -> master (non-fast-forward)",
-          `error: failed to push some refs to '/tmp/${phrase}.git'`,
-          `hint: Updates were rejected (${phrase})`,
-        ].join("\n"),
-        `fatal: '/tmp/${phrase}.git' does not appear to be a git repository\nfatal: Could not read from remote repository.`,
-        `fatal: unable to access 'https://example.com/${phrase}.git/': The requested URL returned error: 403`,
-        `To /tmp/${phrase}.git\n ! [remote rejected] HEAD -> ${phrase.replace(/\s+/gu, "-")} (pre-receive hook declined)\nerror: failed to push some refs to '/tmp/${phrase}.git'`,
-        `remote: error: File '${phrase}.bin' is 500.00 MB; exceeds GitHub file size limit`,
-      ];
-      for (const output of nonDiagnosticOutputs) {
-        assert.equal(isTransientPushError(output), false, output);
-      }
-    }),
+    fc.property(
+      transientPhrase,
+      punctuation,
+      punctuation,
+      remoteKind,
+      (phrase, prePunct, postPunct, kind) => {
+        const segment = `${prePunct}${phrase}${postPunct}`.trim();
+        const remote =
+          kind === "local"
+            ? `/tmp/missing/${segment}.git`
+            : kind === "file"
+              ? `file:///tmp/missing/${segment}.git`
+              : kind === "https"
+                ? `https://example.invalid/u/${segment}.git`
+                : kind === "https-creds"
+                  ? `https://user:sec'ret@example.invalid/u/${segment}.git`
+                  : kind === "ssh-creds"
+                    ? `ssh://git:tok@example.invalid/u/${segment}.git`
+                    : `git@example.invalid:u/${segment}.git`;
+        const displayed =
+          kind === "file"
+            ? `/tmp/missing/${segment}.git`
+            : kind === "https-creds"
+              ? `https://example.invalid/u/${segment}.git`
+              : kind === "ssh-creds"
+                ? `ssh://example.invalid/u/${segment}.git`
+                : remote;
+        const permanentOutputs = [
+          [
+            `To ${displayed}`,
+            " ! [rejected]        HEAD -> master (non-fast-forward)",
+            `error: failed to push some refs to '${displayed}'`,
+            `hint: Updates were rejected (${phrase})`,
+          ].join("\n"),
+          `fatal: '${displayed}' does not appear to be a git repository\nfatal: Could not read from remote repository.`,
+          `${displayed}: Permission denied (publickey).\nfatal: Could not read from remote repository.`,
+          `fatal: could not open '${displayed}/objects': Permission denied`,
+          `fatal: unable to access '${displayed}/': The requested URL returned error: 403`,
+          `To ${displayed}\n ! [remote rejected] HEAD -> ${phrase.replace(/\s+/gu, "-")} (pre-receive hook declined)\nerror: failed to push some refs to '${displayed}'`,
+        ];
+        for (const output of permanentOutputs) {
+          assert.equal(isTransientPushError(output, [remote]), false, output);
+        }
+        // Даже без передачи remoteUrls известные постоянные строки с апострофом не дают ложный повтор
+        assert.equal(
+          isTransientPushError(
+            `fatal: '/tmp/missing/owner's ${phrase}.git' does not appear to be a git repository\nfatal: Could not read from remote repository.`,
+          ),
+          false,
+        );
+        // Настоящая временная ошибка на том же remote остаётся временной
+        assert.equal(
+          isTransientPushError(
+            `remote: Internal Server Error\nTo ${displayed}\n ! [remote rejected] HEAD -> master (Internal Server Error)\nerror: failed to push some refs to '${displayed}'`,
+            [remote],
+          ),
+          true,
+        );
+        assert.equal(
+          isTransientPushError(
+            `fatal: unable to access '${displayed}/': The requested URL returned error: 503`,
+            [remote],
+          ),
+          true,
+        );
+      },
+    ),
     { seed, numRuns: 100 },
   );
 
