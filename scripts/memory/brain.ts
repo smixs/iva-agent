@@ -21,8 +21,48 @@ export const PUSH_DELAYS_MS = [30_000, 120_000] as const;
 const TRANSIENT_PUSH_ERROR =
   /\bHTTP(?:\/[\d.]+)?\s+5\d\d\b|returned error:\s*5\d\d\b|internal server error|bad gateway|service unavailable|gateway time-?out|index-pack failed|could not resolve host|connection timed out|connection reset|early eof|the remote end hung up/iu;
 
+function stripQuoted(line: string): string {
+  return line
+    .replace(/(^|[\s:(])'[^']*'(?=$|[\s:;,.)/])/gu, "$1")
+    .replace(/(^|[\s:(])"[^"]*"(?=$|[\s:;,.)/])/gu, "$1");
+}
+
+/** Выделяет диагностический текст строки вывода git push, отбрасывая имя remote,
+ * сводку refs, подсказки и пути/URL в кавычках. */
+function pushDiagnostic(line: string): string | null {
+  const trimmed = line.trim();
+  if (!trimmed) return null;
+  if (
+    /^To\s+/u.test(trimmed) ||
+    /^hint:/iu.test(trimmed) ||
+    /^error:\s+failed to push some refs to\b/iu.test(trimmed) ||
+    /^!\s+\[rejected\]\b/u.test(trimmed) ||
+    /^(?:[+\-*=]\s+\[|[0-9a-f]{4,}\.\.\.?[0-9a-f]{4,}\s)/u.test(trimmed) ||
+    /^(?:remote:\s*)?(?:Enumerating|Counting|Delta compression|Compressing|Writing|Resolving|Total)\b/u.test(
+      trimmed,
+    )
+  ) {
+    return null;
+  }
+  if (/^!\s+\[remote rejected\]\b/u.test(trimmed)) {
+    const reason = trimmed.match(
+      /^!\s+\[remote rejected\]\s+.+\s+\(([^()]+)\)\s*$/u,
+    )?.[1];
+    return reason ? stripQuoted(reason) : null;
+  }
+  const unableToAccess = trimmed.match(
+    /^fatal:\s+unable to access\s+'.*?':\s*(.+)$/iu,
+  );
+  if (unableToAccess) return stripQuoted(unableToAccess[1]);
+  return stripQuoted(trimmed);
+}
+
 export function isTransientPushError(output: string): boolean {
-  return TRANSIENT_PUSH_ERROR.test(output);
+  for (const line of output.split(/\r?\n|\r/u)) {
+    const diagnostic = pushDiagnostic(line);
+    if (diagnostic && TRANSIENT_PUSH_ERROR.test(diagnostic)) return true;
+  }
+  return false;
 }
 
 function pushDelaysMs(): readonly number[] {
