@@ -1,6 +1,8 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
+import { setTimeout as pause } from "node:timers/promises";
+import { fileURLToPath } from "node:url";
 import { resolveDataDir } from "../../packages/data-dir/index.ts";
 import {
   alertOnce,
@@ -10,8 +12,30 @@ import {
 import { notificationChat } from "../../packages/notification-chat/index.ts";
 import { vaultDirOrExit } from "../lib/vault-boundary.ts";
 
-const vault = vaultDirOrExit();
-const dataDir = resolveDataDir(process.cwd());
+let vault = "";
+let dataDir = "";
+
+/** Паузы перед 2-й и 3-й попытками git push (всего 3 попытки: сразу, +30 с, +120 с). */
+export const PUSH_DELAYS_MS = [30_000, 120_000] as const;
+
+const TRANSIENT_PUSH_ERROR =
+  /\bHTTP(?:\/[\d.]+)?\s+5\d\d\b|returned error:\s*5\d\d\b|internal server error|bad gateway|service unavailable|gateway time-?out|index-pack failed|could not resolve host|connection timed out|connection reset|early eof|the remote end hung up/iu;
+
+export function isTransientPushError(output: string): boolean {
+  return TRANSIENT_PUSH_ERROR.test(output);
+}
+
+function pushDelaysMs(): readonly number[] {
+  const override = process.env.IVA_TEST_PUSH_DELAYS_MS;
+  if (!override) return PUSH_DELAYS_MS;
+  const parsed = override.split(",").map((part) => Number(part.trim()));
+  if (
+    parsed.length !== PUSH_DELAYS_MS.length ||
+    parsed.some((ms) => !Number.isFinite(ms) || ms < 0)
+  )
+    return PUSH_DELAYS_MS;
+  return parsed;
+}
 
 /** Агентское дерево — динамическим импортом: юнит грузится и на установке, где agent/
  * нет или он переписан наполовину (scripts/authored-tree-guard.test.ts). */
@@ -160,9 +184,24 @@ async function pushBackup(): Promise<boolean> {
     );
     return false;
   }
-  const push = run("git", ["push", "origin", "HEAD"]);
-  if (push.status === 0) return true;
-  const reason = (push.stderr || push.stdout || "git push failed").trim();
+  const delays = pushDelaysMs();
+  const totalAttempts = delays.length + 1;
+  let reason = "git push failed";
+  for (let attempt = 0; attempt < totalAttempts; attempt++) {
+    const push = run("git", ["push", "origin", "HEAD"]);
+    if (push.status === 0) return true;
+    reason = (push.stderr || push.stdout || "git push failed").trim();
+    const output = `${push.stderr ?? ""}\n${push.stdout ?? ""}`;
+    if (attempt < delays.length && isTransientPushError(output)) {
+      const delayMs = delays[attempt];
+      console.error(
+        `brain: backup push transient error (${attempt + 1}/${totalAttempts}), waiting ${delayMs}ms: ${reason}`,
+      );
+      await pause(delayMs);
+      continue;
+    }
+    break;
+  }
   console.error(`brain: backup push failed: ${reason}`);
   await alertOnce(dataDir, "brain-backup", reason, () =>
     send(
@@ -176,6 +215,8 @@ async function pushBackup(): Promise<boolean> {
 }
 
 async function main(): Promise<number> {
+  vault = vaultDirOrExit();
+  dataDir = resolveDataDir(process.cwd());
   if (!existsSync(vault)) {
     console.error(`brain: vault not found: ${vault}`);
     return 1;
@@ -196,4 +237,13 @@ async function main(): Promise<number> {
   return ownerCommitted && graphRefreshed && indexed && pushed ? 0 : 1;
 }
 
-process.exitCode = await main();
+const isMain = (() => {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  try {
+    return realpathSync(fileURLToPath(import.meta.url)) === realpathSync(entry);
+  } catch {
+    return false;
+  }
+})();
+if (isMain) process.exitCode = await main();
