@@ -6,6 +6,7 @@ import {
   readFileSync,
   rmSync,
   mkdirSync,
+  symlinkSync,
   openSync,
   closeSync,
   writeSync,
@@ -241,17 +242,24 @@ void test("repair 10: running must keep the same pid for at least a second", (t)
 void test(
   "repair 5/7/9: plist shutdown budget, HOME and Homebrew node paths survive upgrades",
   { skip: process.platform !== "darwin" },
-  () => {
+  (t) => {
+    const root = dir(t);
+    const old = join(root, "Cellar/node@24/24.21.0/bin/node");
+    const stable = join(root, "opt/node@24/bin/node");
+    mkdirSync(join(root, "Cellar/node@24/24.21.0/bin"), { recursive: true });
+    mkdirSync(join(root, "opt/node@24/bin"), { recursive: true });
+    symlinkSync(process.execPath, old);
+    symlinkSync(old, stable);
     const xml = unitToPlist(
       {
         unit: "iva.service",
-        body: "ExecStart=/opt/homebrew/Cellar/node@24/24.21.0/bin/node /fixture/main.ts\nRestart=always\n",
+        body: `ExecStart=${old} /fixture/main.ts\nRestart=always\n`,
       },
       undefined,
       {
         root: "/fixture/current",
         home: "/fixture/isolated",
-        node: "/opt/homebrew/Cellar/node@24/24.21.0/bin/node",
+        node: old,
       },
     );
     const p = spawnSync(
@@ -267,14 +275,8 @@ void test(
     };
     assert.equal(value.EnvironmentVariables.HOME, "/fixture/isolated");
     assert.ok(value.ExitTimeOut > 20);
-    assert.equal(
-      value.ProgramArguments[0],
-      "/opt/homebrew/opt/node@24/bin/node",
-    );
-    assert.equal(
-      value.ProgramArguments.at(-2),
-      "/opt/homebrew/opt/node@24/bin/node",
-    );
+    assert.equal(value.ProgramArguments[0], stable);
+    assert.equal(value.ProgramArguments.at(-2), stable);
   },
 );
 void test("repair 6: writing a plist disables implicit login startup and preserves explicit enable", (t) => {

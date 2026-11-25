@@ -1,3 +1,4 @@
+import { stableNodeExecutable } from "../lib/node-executable.ts";
 import { spawnSync, type SpawnSyncOptions } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -49,7 +50,7 @@ export function createCliRuntime(root: string) {
       ? "Library/LaunchAgents"
       : ".config/systemd/user",
   );
-  const NODE = process.execPath;
+  const NODE = stableNodeExecutable(process.execPath);
   const NODE_BIN_DIR = dirname(NODE);
   const NPM = existsSync(join(NODE_BIN_DIR, "npm"))
     ? join(NODE_BIN_DIR, "npm")

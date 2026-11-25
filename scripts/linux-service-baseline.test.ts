@@ -16,6 +16,7 @@ import { dirname, join } from "node:path";
 import test, { snapshot } from "node:test";
 import { fileURLToPath } from "node:url";
 import { plantCliTree } from "./fixtures/cli-tree.ts";
+import { stableNodeExecutable } from "./lib/node-executable.ts";
 import { mcpProxyUnitBody, pluginServiceUnitBody } from "./lib/plugin-units.ts";
 import { SystemdControlError } from "./lib/systemd-control.ts";
 
@@ -90,11 +91,16 @@ writeFileSync(path, JSON.stringify(states));
     IVA_BASELINE_TRACE: trace,
     IVA_BASELINE_STATE: state,
   };
+  const nodeBinDirs = [
+    dirname(process.execPath),
+    dirname(stableNodeExecutable(process.execPath)),
+  ];
   const normalize = (value: string): string =>
     value
       .replaceAll(realpathSync(dir), "<fixture>")
       .replaceAll(dir, "<fixture>")
-      .replaceAll(dirname(process.execPath), "<node-bin>");
+      .replaceAll(nodeBinDirs[0], "<node-bin>")
+      .replaceAll(nodeBinDirs[1], "<node-bin>");
   const calls = (): string[][] => {
     const text = existsSync(trace) ? readFileSync(trace, "utf8").trim() : "";
     return text

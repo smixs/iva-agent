@@ -1,3 +1,4 @@
+import { stableNodeExecutable } from "./node-executable.ts";
 import { spawnSync } from "node:child_process";
 import {
   chmodSync,
@@ -47,10 +48,7 @@ const supported = new Set([
 ]);
 
 function stableNode(path: string): string {
-  return path.replace(
-    /^(.*)\/Cellar\/([^/]+)\/[^/]+\/bin\/node$/u,
-    "$1/opt/$2/bin/node",
-  );
+  return stableNodeExecutable(path, "darwin");
 }
 
 function plistControl(args: string[]): { code: number; out: string } {

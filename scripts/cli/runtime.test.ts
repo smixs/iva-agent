@@ -1,3 +1,4 @@
+import { stableNodeExecutable } from "../lib/node-executable.ts";
 /* eslint-disable @typescript-eslint/no-floating-promises -- Node's test runner owns registrations. */
 import "../fixtures/systemd-env.ts";
 import assert from "node:assert/strict";
@@ -67,12 +68,15 @@ test("runtime exposes the CLI primitives and shared unit constants", async (t) =
   assert.equal(runtime.ROOT, root);
   assert.equal(runtime.ENV_PATH, join(root, ".env"));
   assert.equal(runtime.UNIT_DIR, join(homedir(), ".config/systemd/user"));
-  assert.equal(runtime.NODE, process.execPath);
-  assert.equal(runtime.NODE_BIN_DIR, dirname(process.execPath));
+  assert.equal(runtime.NODE, stableNodeExecutable(process.execPath));
+  assert.equal(
+    runtime.NODE_BIN_DIR,
+    dirname(stableNodeExecutable(process.execPath)),
+  );
   assert.equal(
     runtime.NPM,
-    existsSync(join(dirname(process.execPath), "npm"))
-      ? join(dirname(process.execPath), "npm")
+    existsSync(join(dirname(stableNodeExecutable(process.execPath)), "npm"))
+      ? join(dirname(stableNodeExecutable(process.execPath)), "npm")
       : "npm",
   );
   assert.deepEqual(runtime.SERVICES, [
@@ -107,9 +111,9 @@ test("runtime resolves executable uv from its captured child PATH", async (t) =>
     if (previousPath === undefined) delete process.env.PATH;
     else process.env.PATH = previousPath;
   });
-  process.env.PATH = `${bin}:${dirname(process.execPath)}`;
+  process.env.PATH = `${bin}:${dirname(stableNodeExecutable(process.execPath))}`;
   const runtime = createCliRuntime(root);
-  process.env.PATH = dirname(process.execPath);
+  process.env.PATH = dirname(stableNodeExecutable(process.execPath));
 
   assert.equal(runtime.uvExecutable(), uv);
   assert.equal(runtime.cap(runtime.uvExecutable()!, []).code, 0);
@@ -171,19 +175,27 @@ test("run and cap preserve caller option precedence", async (t) => {
     "process.stdout.write(`${process.cwd()}|${process.env.IVA_RUNTIME_OPTION_TEST || ''}`)";
   const overrideEnv = { IVA_RUNTIME_OPTION_TEST: "caller" };
 
-  const runResult = runtime.run(process.execPath, ["-e", childScript], {
-    cwd: overrideCwd,
-    encoding: "utf8",
-    env: overrideEnv,
-    stdio: "pipe",
-  });
+  const runResult = runtime.run(
+    stableNodeExecutable(process.execPath),
+    ["-e", childScript],
+    {
+      cwd: overrideCwd,
+      encoding: "utf8",
+      env: overrideEnv,
+      stdio: "pipe",
+    },
+  );
   assert.equal(runResult.status, 0);
   assert.equal(runResult.stdout, `${evaluatedCwd}|caller`);
 
-  const capResult = runtime.cap(process.execPath, ["-e", childScript], {
-    cwd: overrideCwd,
-    env: overrideEnv,
-  });
+  const capResult = runtime.cap(
+    stableNodeExecutable(process.execPath),
+    ["-e", childScript],
+    {
+      cwd: overrideCwd,
+      env: overrideEnv,
+    },
+  );
   assert.deepEqual(capResult, {
     code: 0,
     out: `${evaluatedCwd}|caller`,
@@ -196,7 +208,7 @@ test("cap trims output and normalizes a missing status to one", async (t) => {
   const runtime = createCliRuntime(root);
 
   assert.deepEqual(
-    runtime.cap(process.execPath, [
+    runtime.cap(stableNodeExecutable(process.execPath), [
       "-e",
       "process.stdout.write('  output \\n'); process.stderr.write('  warning \\n'); process.exit(7)",
     ]),
@@ -310,7 +322,7 @@ test("childEnv keeps the caller's PATH order when NODE_BIN_DIR is already on it"
   t.after(() => {
     process.env.PATH = originalPath;
   });
-  const nodeBinDir = dirname(process.execPath);
+  const nodeBinDir = dirname(stableNodeExecutable(process.execPath));
   // Both fixture entries live under the sandbox, so neither can accidentally
   // equal nodeBinDir on a machine that keeps node somewhere unusual.
   const stubBin = join(root, "stub-bin");
@@ -330,7 +342,7 @@ test("childEnv prepends NODE_BIN_DIR when PATH does not carry it", async (t) => 
   t.after(() => {
     process.env.PATH = originalPath;
   });
-  const nodeBinDir = dirname(process.execPath);
+  const nodeBinDir = dirname(stableNodeExecutable(process.execPath));
   process.env.PATH = "/nonexistent-a:/nonexistent-b";
 
   assert.equal(
@@ -349,7 +361,7 @@ test("property: childEnv stably filters PATH and prepends NODE_BIN_DIR only when
   t.after(() => {
     process.env.PATH = originalPath;
   });
-  const nodeBinDir = dirname(process.execPath);
+  const nodeBinDir = dirname(stableNodeExecutable(process.execPath));
   const otherSegment = fc.oneof(
     fc.constantFrom(
       join(root, "stub-bin"),

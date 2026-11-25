@@ -36,6 +36,8 @@ const { RETIRE_MARKER, retireCheckout, retireIdentity } =
   await import("../scripts/update-finish.ts");
 const { refreshOwnedShim, shimScript, SHIM_CLAIM_TTL_MS } =
   await import("../scripts/lib/version-layout.ts");
+const { stableNodeExecutable } =
+  await import("../scripts/lib/node-executable.ts");
 
 const SEED = 20_260_914;
 /** Имя заявки нового формата: pid + uuid, как их пишет claimDirectoryName. */
@@ -280,7 +282,11 @@ await test("НАХОДКА R4-4: обрыв при обновлении шима
   const home = tempDir("pbt-r4-shim-home-");
   const bin = tempDir("pbt-r4-shim-bin-");
   const shim = join(bin, "iva");
-  const desired = shimScript(home, process.execPath, join(home, "data"));
+  const desired = shimScript(
+    home,
+    stableNodeExecutable(process.execPath),
+    join(home, "data"),
+  );
   // Заявка обрыва: имя несёт pid процесса, которого больше нет.
   const claim = join(bin, claimName(deadPid()));
   mkdirSync(claim, { recursive: true });
@@ -304,7 +310,11 @@ await test("НАХОДКА R4-4: имя старого формата с вед�
   const home = tempDir("pbt-r4-shim-home-");
   const bin = tempDir("pbt-r4-shim-bin-");
   const shim = join(bin, "iva");
-  const desired = shimScript(home, process.execPath, join(home, "data"));
+  const desired = shimScript(
+    home,
+    stableNodeExecutable(process.execPath),
+    join(home, "data"),
+  );
   writeFileSync(shim, desired, { mode: 0o755 });
   const claim = join(bin, ".iva-shim-refresh-2avFo0");
   mkdirSync(claim, { recursive: true });
@@ -324,7 +334,11 @@ await test("НАХОДКА R4-4: заявка с чужим живым pid уб�
   const home = tempDir("pbt-r4-shim-home-");
   const bin = tempDir("pbt-r4-shim-bin-");
   const shim = join(bin, "iva");
-  const desired = shimScript(home, process.execPath, join(home, "data"));
+  const desired = shimScript(
+    home,
+    stableNodeExecutable(process.execPath),
+    join(home, "data"),
+  );
   writeFileSync(shim, desired, { mode: 0o755 });
   const foreign = spawn("sleep", ["60"], { detached: true, stdio: "ignore" });
   try {
@@ -349,7 +363,11 @@ await test("НАХОДКА R4-4: заявка с единственной коп
   const home = tempDir("pbt-r4-shim-home-");
   const bin = tempDir("pbt-r4-shim-bin-");
   const shim = join(bin, "iva");
-  const desired = shimScript(home, process.execPath, join(home, "data"));
+  const desired = shimScript(
+    home,
+    stableNodeExecutable(process.execPath),
+    join(home, "data"),
+  );
   const claim = join(bin, claimName(deadPid()));
   mkdirSync(claim, { recursive: true });
   writeFileSync(join(claim, "previous"), desired, { mode: 0o755 });
@@ -369,7 +387,11 @@ await test("НАХОДКА R4-4: заявка с нашим pid старше ч�
   const home = tempDir("pbt-r4-shim-home-");
   const bin = tempDir("pbt-r4-shim-bin-");
   const shim = join(bin, "iva");
-  const desired = shimScript(home, process.execPath, join(home, "data"));
+  const desired = shimScript(
+    home,
+    stableNodeExecutable(process.execPath),
+    join(home, "data"),
+  );
   const claim = join(bin, claimName(process.pid));
   mkdirSync(claim, { recursive: true });
   writeFileSync(join(claim, "previous"), desired, { mode: 0o755 });
@@ -390,7 +412,11 @@ await test("НАХОДКА R4-4: брошенная заявка старого 
   const home = tempDir("pbt-r4-shim-home-");
   const bin = tempDir("pbt-r4-shim-bin-");
   const shim = join(bin, "iva");
-  const desired = shimScript(home, process.execPath, join(home, "data"));
+  const desired = shimScript(
+    home,
+    stableNodeExecutable(process.execPath),
+    join(home, "data"),
+  );
   writeFileSync(shim, desired, { mode: 0o755 });
   const stale = mkdtempSync(join(bin, ".iva-shim-refresh-"));
   writeFileSync(join(stale, "previous"), desired, { mode: 0o755 });
@@ -407,7 +433,11 @@ await test("зелёное: свежую заявку старого форма�
   const home = tempDir("pbt-r4-shim-home-");
   const bin = tempDir("pbt-r4-shim-bin-");
   const shim = join(bin, "iva");
-  const desired = shimScript(home, process.execPath, join(home, "data"));
+  const desired = shimScript(
+    home,
+    stableNodeExecutable(process.execPath),
+    join(home, "data"),
+  );
   writeFileSync(shim, desired, { mode: 0o755 });
   const fresh = mkdtempSync(join(bin, ".iva-shim-refresh-"));
   writeFileSync(join(fresh, "previous"), desired, { mode: 0o755 });
@@ -422,7 +452,11 @@ await test("зелёное: заявку живого процесса убор�
   const home = tempDir("pbt-r4-shim-home-");
   const bin = tempDir("pbt-r4-shim-bin-");
   const shim = join(bin, "iva");
-  const desired = shimScript(home, process.execPath, join(home, "data"));
+  const desired = shimScript(
+    home,
+    stableNodeExecutable(process.execPath),
+    join(home, "data"),
+  );
   writeFileSync(shim, desired, { mode: 0o755 });
   const child = spawn(
     process.execPath,
