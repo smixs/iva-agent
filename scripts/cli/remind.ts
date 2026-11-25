@@ -3,6 +3,7 @@
 import { readEnvFresh } from "../lib/env-file.ts";
 import { notificationChat } from "../../packages/notification-chat/index.ts";
 import {
+  parseNoneReply,
   reminderClientOptions,
   reminderPrompt,
   runReminderTurn,
@@ -75,7 +76,13 @@ async function runAgent(
     // Срока у хода нет (решение владельца 21.09.2026): он идёт, сколько нужно работе,
     // а кончают его тишина внутри хода или стоп из чата.
     const turn = await runner(prompt);
-    if (turn.status !== "failed" && turn.message)
+    // Разовое `iva remind` владелец запустил сам ради сообщения: пометка молчания здесь
+    // не действует, ход с ней считается не давшим текста — уйдёт исходный текст.
+    if (
+      turn.status !== "failed" &&
+      turn.message &&
+      parseNoneReply(turn.message.trim()) === null
+    )
       return { turn, message: turn.message };
     console.error(`remind: agent turn failed: ${noTextCause(turn)}`);
     return { turn };

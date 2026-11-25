@@ -7,6 +7,9 @@ import { stepLimitNotice } from "#lib/model-response.ts";
 // напоминание попросили. Ход упал, вышел со status "failed" или промолчал — код шлёт сам
 // начало текста напоминания (до ALERT_EXCERPT знаков) и строку «не выполнено»: короткое
 // напоминание доходит целиком, а длинное задание не уходит владельцу простынёй (14.11.2026).
+// Третий исход — явное молчание: ход Reminder с заданием кончается пометкой
+// `<!-- iva:none -->` и однострочным итогом; итог идёт в журнал и в факт строки
+// (quietNote, phase quiet), в чат не уходит ничего и провалом это не считается.
 // Повторов нет по решению владельца 12.09: одна попытка хода, одна отправка. Факт
 // (delivered/error) дописывается в ту же строку; если процесс упал, не сказав факта, тик
 // запишет delivered=false с причиной по коду выхода.
@@ -55,6 +58,7 @@ import { formatZoned } from "#lib/zoned-time.ts";
 import { noticeTranslator } from "../lib/notice-policy.ts";
 import {
   isQuietReply,
+  parseNoneReply,
   reminderClientOptions,
   reminderPrompt,
   runReminderTurn,
@@ -112,6 +116,11 @@ type Outcome = {
   /** Ход погашен снаружи (/stop): отправлять нечего и не нужно. */
   readonly cancelled?: boolean;
   readonly ownerStopped?: boolean;
+  /**
+   * Ход явно решил промолчать (`<!-- iva:none -->`): итог для журнала и факта строки,
+   * владельцу не отправляется ничего. Назван — значит молчание, пустая строка тоже.
+   */
+  readonly quietNote?: string;
 };
 
 /** Итог отправки: причина есть, только если Telegram отказал. */
@@ -286,15 +295,37 @@ function failedText(
   return `${subject(row)}\n\n${note}`;
 }
 
+/** Сколько итога молчания хранят журнал и строка: одна строка, а не простыня хода. */
+const QUIET_NOTE_MAX = 500;
+
+/** Итог молчания одной строкой с пределом — той же меркой, что отрывок для Alert. */
+function quietNoteText(note: string): string {
+  const flat = note.replace(/\s+/gu, " ").trim();
+  return flat.length > QUIET_NOTE_MAX
+    ? `${flat.slice(0, QUIET_NOTE_MAX)}…`
+    : flat;
+}
+
 /**
  * Пустой ответ хода — такой же провал, как упавший ход: владелец получает текст строки. Голое
  * QUIET (модель спутала ход напоминания или Signal с Watch) — тоже: слово QUIET владельцу не
- * уходит.
+ * уходит. Явное молчание — только пометка `iva:none` и только где оно разрешено (ход
+ * Reminder с заданием): в Signal та же пометка — провал, строка уходит владельцу как есть.
  */
-function textOrFallback(reply: string | undefined, fallback: string): Outcome {
+function textOrFallback(
+  reply: string | undefined,
+  fallback: string,
+  allowQuiet: boolean,
+): Outcome {
   const text = (reply ?? "").trim();
   if (text === "")
     return { text: fallback, error: "agent turn returned no text" };
+  const none = parseNoneReply(text);
+  if (none !== null) {
+    if (!allowQuiet)
+      return { text: fallback, error: "agent turn returned iva:none" };
+    return { text: "", error: null, quietNote: quietNoteText(none.note) };
+  }
   if (isQuietReply(text))
     return { text: fallback, error: "agent turn returned QUIET" };
   return { text, error: null };
@@ -325,6 +356,7 @@ function replyOf(
   },
   fallback: string,
   limitText: string,
+  allowQuiet: boolean,
 ): Outcome {
   if (turn.cancelled === true)
     return { text: fallback, error: CANCELLED_BY_OWNER, cancelled: true };
@@ -338,7 +370,7 @@ function replyOf(
       text: fallback,
       error: `agent turn failed: ${turn.message ?? "unknown"}`,
     };
-  return textOrFallback(turn.message, fallback);
+  return textOrFallback(turn.message, fallback, allowQuiet);
 }
 
 /** Клиент хода строки: Signal называет себя своим видом, остальное — Reminder. */
@@ -353,11 +385,14 @@ async function agentOutcome(
 ): Promise<Outcome> {
   const tz = resolveTimeZone(deps.env.ASSISTANT_TIMEZONE);
   const tr = await deps.translator(deps.env);
+  // Молчать вправе ход Reminder с заданием; Signal — данные плагина, у него всегда ответ.
+  const allowQuiet = !isSignal(row);
   const prompt = reminderPrompt(
     {
       id: row.id,
       text: row.text,
       scheduledAt: formatZoned(row.firedAt ?? row.nextRunAtMs, tz),
+      allowQuiet,
     },
     tr,
   );
@@ -376,6 +411,7 @@ async function agentOutcome(
         turn,
         notice ? `${subject(row)}\n${notice}` : failedText(row, tr),
         sessionLimitText(subject(row), tr),
+        allowQuiet,
       ),
       ownerStopped,
     };
@@ -419,11 +455,17 @@ async function recordFact(
   sent: Sent,
   error: string | null,
   deps: Wiring,
+  quietNote?: string,
 ): Promise<void> {
   try {
     await deps.recordDelivery(
       row.id,
-      { firedAt: row.firedAt, delivered: sent.delivered, error },
+      {
+        firedAt: row.firedAt,
+        delivered: sent.delivered,
+        error,
+        ...(quietNote === undefined ? {} : { quietNote }),
+      },
       { log: deps.log },
     );
   } catch (failure) {
@@ -474,6 +516,21 @@ async function fireRow(row: Reminder, deps: Wiring): Promise<void> {
   }
 
   noteTurnFailure(row, outcome, deps);
+  if (outcome.quietNote !== undefined) {
+    // Ход отработал и решил молчать: итог — в журнал и в факт строки, в чат ничего,
+    // даже тихого. Провалом это не считается: ни error, ни Alert.
+    deps.log(
+      `reminders: ${row.id} kept quiet${outcome.quietNote === "" ? "" : `: ${outcome.quietNote}`}`,
+    );
+    await recordFact(
+      row,
+      { delivered: false, error: null },
+      null,
+      deps,
+      outcome.quietNote,
+    );
+    return;
+  }
   if (outcome.cancelled === true) {
     // Владелец погасил ход сам: дословный текст напоминания ему не отправляем, в строке —
     // факт отмены (повторного срабатывания у сработавшей строки нет).

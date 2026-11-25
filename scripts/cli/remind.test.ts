@@ -64,6 +64,30 @@ void test("iva remind delivers model buttons through sendRichMessage", async () 
   ]);
 });
 
+void test("iva remind ignores the iva:none marker and sends the original text", async () => {
+  const sent: string[] = [];
+  const remind = createRemindCommand(createCliRuntime(ROOT), {
+    readEnv: () =>
+      Promise.resolve({
+        TELEGRAM_BOT_TOKEN: "test-bot",
+        TELEGRAM_DIGEST_CHAT_ID: "555",
+        ASSISTANT_BEARER: "test-bearer",
+      }),
+    runAgentTurn: () =>
+      Promise.resolve({
+        status: "completed",
+        message: "<!-- iva:none -->\nнового нет",
+        feedback: () => Promise.resolve(),
+      }),
+    send: (_bot, _chat, text) => {
+      sent.push(String(text));
+      return Promise.resolve({ ok: true, fellBack: false, error: "" });
+    },
+  });
+  await remind(["Позвонить врачу"]);
+  assert.deepEqual(sent, ["⏰ Позвонить врачу"]);
+});
+
 type AgentOutcome = "ok" | "empty" | "failed" | "throw";
 type SendResult = { ok: boolean; fellBack: boolean; error: string };
 type SendCall = readonly [
