@@ -80,6 +80,9 @@ async function site(
     });
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  // A test that hangs on a broken time limit fails by its own timeout; the server it leaves
+  // behind must not keep the run going after that.
+  server.unref();
   const { port } = server.address() as AddressInfo;
   const published = new URL(ROLL_CALL_URL);
   const request: typeof fetch = (input, init) => {
@@ -191,6 +194,8 @@ test(`the gap: 0 first, nothing twice a day, days since the last one, at most 31
     { seed: SEED },
   );
   assert.equal(gapSince(null, "2026-11-26"), 0);
+  // 30 February parses as 2 March: read as a day it would give a gap of 1 on 3 March.
+  assert.equal(gapSince("2026-02-30", "2026-03-03"), ROLL_CALL_MAX_GAP);
   for (const unreadable of [
     undefined,
     "",
@@ -595,18 +600,21 @@ test("the daily check hands its data folder and branch to the roll call and logs
       ["Roll call failed: boom", "Roll call failed: no git"],
     );
 
-    // The branch is read before the lock is taken: a git that hangs holds no lock.
+    // The branch is read before the lock is taken: a git that hangs holds no lock. What is
+    // seen is kept and asserted outside, since rollCall swallows a throw.
+    let freeWhileGit = false;
     await rollCall(
       root,
       env,
       () => Promise.resolve({ status: "off" }),
       () => {
         const free = acquireUpdateLock(storage);
-        assert.ok(free, "the lock is free while git runs");
-        free.release();
+        freeWhileGit = free !== null;
+        free?.release();
         return Promise.resolve("beta");
       },
     );
+    assert.equal(freeWhileGit, true, "the lock is free while git runs");
 
     // Switched off, nothing runs at all: no git, no lock, not even the data folder.
     const quiet = join(root, "switched-off");
@@ -664,6 +672,13 @@ test("the branch is the one iva update reads: unset is main, an unknown one or n
     assert.equal(await updateBranchOf(root), "beta");
     // A value of several lines that looks like the key further down does not pass for it.
     git("config", "--local", "iva.note", "x\niva.updatebranch=main");
+    assert.equal(await updateBranchOf(root), "beta");
+    // Several values: the last one wins, as git config --get reads it.
+    git("config", "--local", "--add", "iva.updateBranch", "main");
+    assert.equal(await updateBranchOf(root), "main");
+    git("config", "--local", "--unset-all", "iva.updateBranch");
+    assert.equal(await updateBranchOf(root), "main", "unset again");
+    git("config", "--local", "iva.updateBranch", "beta");
     assert.equal(await updateBranchOf(root), "beta");
     git("config", "--local", "iva.updateBranch", "my-feature");
     assert.equal(await updateBranchOf(root), "other");
