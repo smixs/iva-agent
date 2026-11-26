@@ -43,14 +43,11 @@ const schema = [
         <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.6-3.6"></path></svg>
         <input type="search" placeholder={t.search} autocomplete="off" spellcheck="false" data-plugin-search />
       </label>
-      <label class="plugin-sort">
-        <span>{t.sort}</span>
-        <select data-plugin-sort>
-          <option value="popular">{t.popular}</option>
-          <option value="new">{t.newest}</option>
-          <option value="name">{t.byName}</option>
-        </select>
-      </label>
+      <div class="plugin-sort" role="radiogroup" aria-label={t.sort}>
+        <button type="button" role="radio" aria-checked="true" data-plugin-sort="popular">{t.popular}</button>
+        <button type="button" role="radio" aria-checked="false" data-plugin-sort="new">{t.newest}</button>
+        <button type="button" role="radio" aria-checked="false" data-plugin-sort="name">{t.byName}</button>
+      </div>
       <div class="plugin-filter" role="group" aria-label={t.filter}>
         <button type="button" aria-pressed="true" data-plugin-category="all">{t.all} <span>{plugins.length}</span></button>
         {used.map((category) => (
@@ -70,11 +67,11 @@ const schema = [
           data-order={index}
           data-search={[plugin.name, plugin.title, plugin.tagline[lang], plugin.summary[lang], plugin.author.name, categoryName(lang, plugin.category)].join(" ").toLowerCase()}
         >
-          <Plug seed={plugin.commit} size={56} />
+          <Plug seed={plugin.commit} size={44} />
           <h2><a href={pluginUrl(lang, plugin.name)}>{plugin.title}</a></h2>
           <p class="plugin-summary">{plugin.tagline[lang]}</p>
           <p class="plugin-meta">
-            <img src={plugin.author.picture} alt="" width="24" height="24" loading="lazy" decoding="async" />
+            <img src={plugin.author.picture} alt="" width="20" height="20" loading="lazy" decoding="async" />
             <span>{plugin.author.name}</span>
             <span data-plugin-installs hidden></span>
           </p>
@@ -102,7 +99,7 @@ const schema = [
   const grid = root.querySelector("[data-plugin-grid]");
   const cards = [...grid.children];
   const search = root.querySelector("[data-plugin-search]");
-  const sort = root.querySelector("[data-plugin-sort]");
+  const sorts = [...root.querySelectorAll("[data-plugin-sort]")];
   const chips = [...root.querySelectorAll("[data-plugin-category]")];
   const empty = root.querySelector("[data-plugin-empty]");
   const installs = new Map();
@@ -131,7 +128,11 @@ const schema = [
     empty.hidden = shown > 0;
     for (const chip of chips) chip.setAttribute("aria-pressed", String(chip.dataset.pluginCategory === state.category));
     search.value = state.q;
-    sort.value = state.sort;
+    for (const option of sorts) {
+      const on = option.dataset.pluginSort === state.sort;
+      option.setAttribute("aria-checked", String(on));
+      option.tabIndex = on ? 0 : -1;
+    }
     // The address keeps the view, so a reload or the back button returns to the same list.
     const next = new URLSearchParams();
     if (q) next.set("q", state.q.trim());
@@ -146,7 +147,19 @@ const schema = [
     apply();
   };
   search.addEventListener("input", () => change({ q: search.value }));
-  sort.addEventListener("change", () => change({ sort: sort.value }));
+  // One stop in the tab order; arrows move the choice, as in any radio group.
+  sorts.forEach((option, index) => {
+    option.tabIndex = option.dataset.pluginSort === state.sort ? 0 : -1;
+    option.addEventListener("click", () => change({ sort: option.dataset.pluginSort }));
+    option.addEventListener("keydown", (event) => {
+      const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[event.key];
+      if (!step) return;
+      event.preventDefault();
+      const next = sorts[(index + step + sorts.length) % sorts.length];
+      change({ sort: next.dataset.pluginSort });
+      next.focus();
+    });
+  });
   for (const chip of chips) chip.addEventListener("click", () => change({ category: chip.dataset.pluginCategory }));
   root.querySelector("[data-plugin-reset]").addEventListener("click", () => {
     change({ q: "", category: "all" });
