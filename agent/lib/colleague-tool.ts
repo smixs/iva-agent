@@ -1,8 +1,13 @@
 import { z } from "zod";
 import {
   configuredTelegramBots,
+  resolveTelegramBot,
   validTelegramBotId,
 } from "../../packages/telegram-bots/index.ts";
+import {
+  sendColleagueAssignment,
+  type ColleagueAssignmentRecord,
+} from "./colleague-assignments.ts";
 import {
   COLLEAGUE_ROLES,
   COLLEAGUE_ROLE_SPECS,
@@ -18,7 +23,7 @@ import {
   type ColleagueEntry,
   type SuggestedColleagueModel,
 } from "./colleagues.ts";
-import { isHelperTurn } from "./eve-auth.ts";
+import { colleagueBotIdOfTurn, isHelperTurn } from "./eve-auth.ts";
 import { MODEL_PROVIDER_NAMES } from "./model-provider.ts";
 import { readSettings, updateSettings } from "./settings.ts";
 
@@ -40,14 +45,16 @@ export type ColleagueToolContext = {
 // Плоский object на проводе — без oneOf/anyOf/allOf в корне (scripts/tool-wire-schema.test.ts).
 export const colleagueInputSchema = z.object({
   action: z
-    .enum(["list", "suggest_model", "configure", "set_model"])
+    .enum(["list", "suggest_model", "configure", "set_model", "delegate"])
     .describe(
-      "list — показать опцию и коллег; suggest_model — предложить модель под роль; configure — задать роль и модель коллеги; set_model — сменить провайдера и модель коллеги",
+      "list — показать опцию и коллег; suggest_model — предложить модель под роль; configure — задать роль и модель коллеги; set_model — сменить провайдера и модель коллеги; delegate — передать поручение другому боту личным сообщением (владелец увидит строку в чате коллеги)",
     ),
   bot_id: z
     .string()
     .optional()
-    .describe("Числовой bot_id коллеги (для configure и set_model)"),
+    .describe(
+      "Числовой bot_id коллеги или Ивы (для configure, set_model, delegate)",
+    ),
   role: z
     .enum(COLLEAGUE_ROLES)
     .optional()
@@ -61,6 +68,10 @@ export const colleagueInputSchema = z.object({
     .optional()
     .describe("Провайдер модели из MODEL_PROVIDER_NAMES"),
   model: z.string().optional().describe("Имя модели у выбранного провайдера"),
+  task: z
+    .string()
+    .optional()
+    .describe("Текст поручения боту-коллеге (для delegate)"),
 });
 
 export type ColleagueToolResult =
@@ -79,6 +90,7 @@ export type ColleagueToolResult =
       }[];
       readonly suggestion?: SuggestedColleagueModel;
       readonly colleague?: ColleagueEntry;
+      readonly assignment?: ColleagueAssignmentRecord;
     }
   | { readonly ok: false; readonly error: string };
 
@@ -94,6 +106,17 @@ export function isPrivateOwnerTurn(ctx?: ColleagueToolContext | null): boolean {
     current.principalType === "user" &&
     init.attributes?.chat_type === "private" &&
     current.attributes?.chat_type === "private"
+  );
+}
+
+/** Поручения между ботами разрешены в любом Telegram-ходе (личка, группа, межоботовая личка), кроме Helper. */
+export function isTelegramBotTurn(ctx?: ColleagueToolContext | null): boolean {
+  const init = ctx?.session?.auth?.initiator;
+  const current = ctx?.session?.auth?.current;
+  if (isHelperTurn(ctx)) return false;
+  return (
+    init?.authenticator === "telegram-webhook" &&
+    current?.authenticator === "telegram-webhook"
   );
 }
 
@@ -148,6 +171,13 @@ export function colleagueExecute(
       return {
         ok: true,
         suggestion: suggestColleagueModel(data.role, env),
+      };
+    }
+
+    if (data.action === "delegate") {
+      return {
+        ok: false,
+        error: "delegate requires async execution via colleagueExecuteAsync",
       };
     }
 
@@ -240,4 +270,68 @@ export function colleagueExecute(
       error: error instanceof Error ? error.message : String(error),
     };
   }
+}
+
+export async function colleagueExecuteAsync(
+  input: unknown,
+  ctx?: ColleagueToolContext | null,
+  deps: {
+    readonly env?: NodeJS.ProcessEnv;
+    readonly settingsFile?: string;
+    readonly storeFile?: string;
+    readonly apiBaseUrl?: string;
+    readonly fetchImpl?: typeof fetch;
+    readonly ownerChatId?: string | null;
+    readonly now?: () => number;
+  } = {},
+): Promise<ColleagueToolResult> {
+  const parsed = colleagueInputSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.message };
+  }
+  if (parsed.data.action !== "delegate") {
+    return colleagueExecute(input, ctx, deps);
+  }
+  if (!isTelegramBotTurn(ctx)) {
+    return {
+      ok: false,
+      error:
+        "Delegating tasks between bots is allowed only during a Telegram turn.",
+    };
+  }
+  const env = deps.env ?? process.env;
+  const fromBotId =
+    colleagueBotIdOfTurn(ctx, env) ?? resolveTelegramBot(null, env)?.botId;
+  if (!fromBotId) {
+    return {
+      ok: false,
+      error: "Cannot determine sender bot ID for delegation.",
+    };
+  }
+  const toBotId = parsed.data.bot_id?.trim() ?? "";
+  if (!validTelegramBotId(toBotId)) {
+    return {
+      ok: false,
+      error: "delegate requires numeric bot_id of the recipient bot",
+    };
+  }
+  const task = parsed.data.task?.trim() ?? "";
+  if (!task) {
+    return { ok: false, error: "delegate requires a non-empty task" };
+  }
+  const sent = await sendColleagueAssignment({
+    fromBotId,
+    toBotId,
+    task,
+    ownerChatId: deps.ownerChatId,
+    env,
+    settingsFile: deps.settingsFile,
+    storeFile: deps.storeFile,
+    apiBaseUrl: deps.apiBaseUrl,
+    fetchImpl: deps.fetchImpl,
+    now: deps.now,
+  });
+  return sent.ok
+    ? { ok: true, assignment: sent.assignment }
+    : { ok: false, error: sent.error };
 }

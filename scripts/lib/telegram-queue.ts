@@ -796,9 +796,15 @@ export function shouldQueueBusyUpdate(
   {
     allowedUserIds,
     botUsername,
+    colleaguesEnabled = false,
+    peerBotIds,
+    receiverBotId,
   }: {
     allowedUserIds?: ReadonlySet<string> | Iterable<unknown> | null;
     botUsername?: unknown;
+    colleaguesEnabled?: boolean;
+    peerBotIds?: ReadonlySet<string> | Iterable<string> | null;
+    receiverBotId?: string | null;
   },
 ): boolean {
   const message = update?.message;
@@ -807,19 +813,30 @@ export function shouldQueueBusyUpdate(
     : [message];
   if (
     !message ||
-    message.from?.is_bot === true ||
     !parts.some((part: unknown) => isRecord(part) && hasMessagePayload(part))
   ) {
     return false;
   }
-  const allowed =
-    allowedUserIds instanceof Set
-      ? allowedUserIds
-      : new Set(allowedUserIds ?? []);
   const from = String(message.from?.id ?? "");
-  if (!allowed.size || !allowed.has(from)) return false;
+  if (message.from?.is_bot === true) {
+    if (!colleaguesEnabled || from.length === 0 || from === receiverBotId) {
+      return false;
+    }
+    const peers =
+      peerBotIds instanceof Set ? peerBotIds : new Set(peerBotIds ?? []);
+    if (!peers.has(from)) return false;
+  } else {
+    const allowed =
+      allowedUserIds instanceof Set
+        ? allowedUserIds
+        : new Set(allowedUserIds ?? []);
+    if (!allowed.size || !allowed.has(from)) return false;
+  }
   if (message.chat?.type === "private") return true;
   if (message.chat?.type === "channel") return false;
+  // При включённых коллегах каждый бот в группе получает её сообщения без @ и сам
+  // решает, отвечать или промолчать (ADR-0030, T911).
+  if (colleaguesEnabled) return true;
   if (isReplyToBot(message)) return true;
   const username = normalizeBotUsername(botUsername);
   return parts.some((part: unknown) => {

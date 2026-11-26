@@ -1,6 +1,6 @@
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { TELEGRAM_ACCEPTANCE_ROUTE } from "#lib/telegram-acceptance.ts";
+import { TELEGRAM_ACCEPTANCE_ROUTE } from "#lib/telegram-acceptance-wire.ts";
 import { TELEGRAM_CANCEL_ROUTE } from "#lib/telegram-cancel-route.ts";
 import {
   dataDirSetting,

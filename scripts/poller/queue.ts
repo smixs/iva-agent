@@ -46,6 +46,7 @@ import { tr } from "#lib/i18n.ts";
 import { appendTrace, type TraceInput } from "#lib/trace.ts";
 import { DATA_DIR, SECRET, RESET_ROUTE, TOKEN, log } from "./config.ts";
 import {
+  botIdFromUpdate,
   parseBotScopedKey,
   resolveTelegramBot,
 } from "../../packages/telegram-bots/index.ts";
@@ -1452,25 +1453,33 @@ export function queuedNoticeText(
 
 async function acknowledgeQueued(update: TelegramQueueUpdate, count: number) {
   const message = update.message as TelegramQueueMessage;
-  await tg("setMessageReaction", {
-    chat_id: message.chat?.id,
-    message_id: message.message_id,
-    reaction: [{ type: "emoji", emoji: "👀" }],
-  }).catch((error: unknown) => log("reaction failed:", errorMessage(error)));
-  await tg("sendMessage", {
-    chat_id: message.chat?.id,
-    text: queuedNoticeText(
-      count,
-      getChatStatus(
-        chatKeyOf(String(message.chat?.id), message.message_thread_id),
+  const botId = botIdFromUpdate(update);
+  const tokenOpt = botId ? { token: tokenForBotId(botId) } : undefined;
+  await tg(
+    "setMessageReaction",
+    {
+      chat_id: message.chat?.id,
+      message_id: message.message_id,
+      reaction: [{ type: "emoji", emoji: "👀" }],
+    },
+    tokenOpt,
+  ).catch((error: unknown) => log("reaction failed:", errorMessage(error)));
+  await tg(
+    "sendMessage",
+    {
+      chat_id: message.chat?.id,
+      text: queuedNoticeText(
+        count,
+        getChatStatus(
+          chatKeyOf(String(message.chat?.id), message.message_thread_id, botId),
+        ),
       ),
-    ),
-    ...(message.message_thread_id === undefined
-      ? {}
-      : { message_thread_id: message.message_thread_id }),
-  }).catch((error: unknown) =>
-    log("queue status failed:", errorMessage(error)),
-  );
+      ...(message.message_thread_id === undefined
+        ? {}
+        : { message_thread_id: message.message_thread_id }),
+    },
+    tokenOpt,
+  ).catch((error: unknown) => log("queue status failed:", errorMessage(error)));
 }
 
 export {

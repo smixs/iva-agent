@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { randomBytes, timingSafeEqual } from "node:crypto";
+import { timingSafeEqual } from "node:crypto";
 import { join } from "node:path";
 import type {
   TelegramChannelState,
@@ -8,7 +8,7 @@ import type {
   TelegramMessage,
 } from "eve/channels/telegram";
 import { parseTelegramUpdate } from "eve/channels/telegram";
-import type { ChannelSource, RouteHandlerArgs, TurnPolicy } from "eve/channels";
+import type { ChannelSource, RouteHandlerArgs } from "eve/channels";
 import {
   acquireLock,
   loadJsonStrict,
@@ -20,27 +20,51 @@ import { quarantineDamagedRecord } from "./damaged-record.ts";
 import { chatKeyOf, hasTelegramPendingInputRequests } from "./run-status.ts";
 import { traceInboundOutcome } from "./trace.ts";
 import { TELEGRAM_QUEUE_RECEIPT_FIELD } from "./telegram-parts.ts";
-import { readSettings } from "./settings.ts";
 import { isRecord } from "../../packages/guards/index.ts";
 import {
   botIdFromUpdate,
   botScopedKey,
+  isConfiguredPeerBot,
   resolveTelegramBot,
+  TELEGRAM_BOT_ID_FIELD,
   TELEGRAM_BOT_ID_HEADER,
+  TELEGRAM_PEER_BOT_FROM_FIELD,
   validTelegramBotId,
+  type TelegramBotConfig,
 } from "../../packages/telegram-bots/index.ts";
+import {
+  claimInboundPeerAssignment,
+  completeInboundPeerAssignment,
+} from "./colleague-assignments.ts";
 import { colleagueBotIdOf, withTelegramBot } from "./telegram-bot-context.ts";
 import { isColleaguesEnabled } from "./colleagues.ts";
+import {
+  addTelegramQueueReceipt,
+  TELEGRAM_ACCEPTANCE_KIND_HEADER,
+  TELEGRAM_ACCEPTANCE_ROUTE,
+  TELEGRAM_CLOSED_SESSION_KIND,
+  telegramTurnPolicy,
+  validReceipt,
+} from "./telegram-acceptance-wire.ts";
 
-export const TELEGRAM_ACCEPTANCE_ROUTE = "/eve/v1/telegram/accepted";
-export const TELEGRAM_ACCEPTANCE_KIND_HEADER = "x-iva-telegram-acceptance";
-// Ответ на сообщение закрытой сессии нельзя доставить как input response.
-// Bridge узнаёт этот класс по заголовку и хоронит апдейт вместо ретрая.
-export const TELEGRAM_CLOSED_SESSION_KIND = "closed-session";
+export {
+  addTelegramQueueReceipt,
+  TELEGRAM_ACCEPTANCE_KIND_HEADER,
+  TELEGRAM_ACCEPTANCE_ROUTE,
+  TELEGRAM_CLOSED_SESSION_KIND,
+  telegramTurnPolicy,
+};
 
 type ReceiptContext = { receipt: string | null; handled: boolean };
 type CompletedLedger = { botId: string; updates: number[] };
-type AcceptedWebhookOptions = { completedUpdatesFile?: string };
+type AcceptedWebhookOptions = {
+  completedUpdatesFile?: string;
+  assignmentsFile?: string;
+  settingsFile?: string;
+  env?: NodeJS.ProcessEnv;
+  apiBaseUrl?: string;
+  fetchImpl?: typeof fetch;
+};
 type AcceptedWebhookHandler<TState> = (
   request: Request,
   args: RouteHandlerArgs<TState>,
@@ -54,26 +78,16 @@ type RequestMetadata = {
   receipt: string | null;
   reroute: TelegramReroute | null;
   updateId: number | null;
+  isBatchedPeerDm: boolean;
 };
 
 const receiptContext = new AsyncLocalStorage<ReceiptContext>();
-const RECEIPT_PATTERN = /^[a-f0-9]{32}$/u;
 const BOT_ID_PATTERN = /^(?<id>[1-9]\d*):/u;
 const COMPLETED_UPDATES_LIMIT = 200;
 // Process-local fence for bridge retries while one acceptance is still running.
 // Remove with vercel/eve#2876, when replay can no longer outlive the 90 s acceptance window.
 const inFlightUpdates = new Map<string, Promise<Response>>();
 let missingWebhookSecretReported = false;
-
-function validReceipt(value: unknown): value is string {
-  return typeof value === "string" && RECEIPT_PATTERN.test(value);
-}
-
-export function telegramTurnPolicy(
-  settings: Record<string, unknown> = readSettings(),
-): TurnPolicy {
-  return settings.turnPolicy === "steer" ? "steer" : "queue";
-}
 
 function telegramReroute(body: unknown): TelegramReroute | null {
   const update = parseTelegramUpdate(body);
@@ -100,8 +114,11 @@ function telegramReroute(body: unknown): TelegramReroute | null {
   };
 }
 
-function hasValidWebhookSecret(request: Request): boolean {
-  const expected = process.env.TELEGRAM_WEBHOOK_SECRET_TOKEN;
+function hasValidWebhookSecret(
+  request: Request,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const expected = env.TELEGRAM_WEBHOOK_SECRET_TOKEN;
   if (!expected) {
     if (!missingWebhookSecretReported) {
       console.error(
@@ -118,33 +135,252 @@ function hasValidWebhookSecret(request: Request): boolean {
   return left.length === right.length && timingSafeEqual(left, right);
 }
 
+export interface PreparedPeerBotWebhookRequest {
+  readonly request: Request;
+  readonly peerBot: TelegramBotConfig | null;
+  readonly assignmentId: string | null;
+  readonly assignmentIds: readonly string[];
+  readonly duplicateAssignment: boolean;
+}
+
+function stripPeerField(msg: Record<string, unknown>): {
+  readonly cleaned: Record<string, unknown>;
+  readonly stripped: boolean;
+} {
+  let stripped = false;
+  const cleaned: Record<string, unknown> = { ...msg };
+  if (TELEGRAM_PEER_BOT_FROM_FIELD in cleaned) {
+    Reflect.deleteProperty(cleaned, TELEGRAM_PEER_BOT_FROM_FIELD);
+    stripped = true;
+  }
+  if (Array.isArray(cleaned.iva_parts)) {
+    cleaned.iva_parts = cleaned.iva_parts.map((part: unknown): unknown => {
+      if (!isRecord(part) || !(TELEGRAM_PEER_BOT_FROM_FIELD in part)) {
+        return part;
+      }
+      stripped = true;
+      const copy = { ...part };
+      Reflect.deleteProperty(copy, TELEGRAM_PEER_BOT_FROM_FIELD);
+      return copy;
+    });
+  }
+  return { cleaned, stripped };
+}
+
+function rebuildJsonRequest(request: Request, body: unknown): Request {
+  const headers = new Headers(request.headers);
+  headers.delete("content-length");
+  headers.set("content-type", "application/json");
+  return new Request(request.url, {
+    method: request.method,
+    headers,
+    body: JSON.stringify(body),
+  });
+}
+
+/**
+ * Готовит входящий webhook-запрос для eve, не изменяя код eve/:
+ *   1) всегда удаляет внешнее поле `iva_peer_bot_from` (защита от подделки);
+ *   2) если запрос аутентифицирован, опция коллег включена и отправитель `from.is_bot=true`
+ *      является другим настроенным ботом этой установки (can_communicate_with_bots),
+ *      переписывает `from.is_bot=false` и ставит доверенную метку `iva_peer_bot_from`,
+ *      чтобы eve передала сообщение в runTelegramInbound;
+ *   3) для личного поручения бота другому боту (private DM) регистрирует его в ledger
+ *      поручений (дедупликация и однократная видимая строка владельцу в чате коллеги).
+ */
+export async function preparePeerBotWebhookRequest(
+  request: Request,
+  options: {
+    readonly resolvedBot: TelegramBotConfig | null;
+    readonly authenticated?: boolean;
+    readonly env?: NodeJS.ProcessEnv;
+    readonly settingsFile?: string;
+    readonly assignmentsFile?: string;
+    readonly apiBaseUrl?: string;
+    readonly fetchImpl?: typeof fetch;
+  },
+): Promise<PreparedPeerBotWebhookRequest> {
+  const env = options.env ?? process.env;
+  const authenticated =
+    options.authenticated ?? hasValidWebhookSecret(request, env);
+  let body: unknown;
+  try {
+    body = await request.clone().json();
+  } catch {
+    return {
+      request,
+      peerBot: null,
+      assignmentId: null,
+      assignmentIds: [],
+      duplicateAssignment: false,
+    };
+  }
+  if (!isRecord(body) || !isRecord(body.message)) {
+    return {
+      request,
+      peerBot: null,
+      assignmentId: null,
+      assignmentIds: [],
+      duplicateAssignment: false,
+    };
+  }
+  const { cleaned: cleanMessage, stripped } = stripPeerField(body.message);
+  const from = isRecord(cleanMessage.from) ? cleanMessage.from : null;
+  const peerBot =
+    authenticated &&
+    isColleaguesEnabled(options.settingsFile) &&
+    from !== null &&
+    from.is_bot === true
+      ? isConfiguredPeerBot(
+          from.id as string | number | null | undefined,
+          options.resolvedBot?.botId,
+          env,
+        )
+      : null;
+
+  if (peerBot === null) {
+    return {
+      request: stripped
+        ? rebuildJsonRequest(request, { ...body, message: cleanMessage })
+        : request,
+      peerBot: null,
+      assignmentId: null,
+      assignmentIds: [],
+      duplicateAssignment: false,
+    };
+  }
+
+  const origin = {
+    botId: peerBot.botId as string,
+    ...(peerBot.username ? { username: peerBot.username } : {}),
+  };
+  const nextMessage: Record<string, unknown> = {
+    ...cleanMessage,
+    from: { ...from, is_bot: false },
+    [TELEGRAM_PEER_BOT_FROM_FIELD]: origin,
+  };
+  if (Array.isArray(nextMessage.iva_parts)) {
+    nextMessage.iva_parts = nextMessage.iva_parts.map(
+      (part: unknown): unknown => {
+        if (
+          !isRecord(part) ||
+          !isRecord(part.from) ||
+          part.from.is_bot !== true
+        ) {
+          return part;
+        }
+        const partFromId =
+          typeof part.from.id === "string" || typeof part.from.id === "number"
+            ? String(part.from.id)
+            : "";
+        if (partFromId !== peerBot.botId) return part;
+        return {
+          ...part,
+          from: { ...part.from, is_bot: false },
+          [TELEGRAM_PEER_BOT_FROM_FIELD]: origin,
+        };
+      },
+    );
+  }
+
+  let finalMessage: Record<string, unknown> = nextMessage;
+  const assignmentIds: string[] = [];
+  const chat = isRecord(nextMessage.chat) ? nextMessage.chat : null;
+  if (chat?.type === "private" && options.resolvedBot?.botId) {
+    const hasPartsArray =
+      Array.isArray(nextMessage.iva_parts) && nextMessage.iva_parts.length > 0;
+    const candidateParts: Record<string, unknown>[] = hasPartsArray
+      ? (nextMessage.iva_parts as unknown[]).filter(isRecord)
+      : [nextMessage];
+    const freshParts: Record<string, unknown>[] = [];
+    const seenFreshIds = new Set<string>();
+    let lastClaimedId: string | null = null;
+    const fallbackId =
+      typeof nextMessage.message_id === "number" ||
+      typeof nextMessage.message_id === "string"
+        ? nextMessage.message_id
+        : typeof body.update_id === "number"
+          ? body.update_id
+          : 0;
+
+    for (const part of candidateParts) {
+      const partText =
+        typeof part.text === "string"
+          ? part.text
+          : typeof part.caption === "string"
+            ? part.caption
+            : "";
+      const partMessageId =
+        typeof part.message_id === "number" ||
+        typeof part.message_id === "string"
+          ? part.message_id
+          : fallbackId;
+      const claimed = await claimInboundPeerAssignment({
+        fromBotId: peerBot.botId as string,
+        toBotId: options.resolvedBot.botId,
+        messageId: partMessageId,
+        text: partText,
+        env,
+        settingsFile: options.settingsFile,
+        storeFile: options.assignmentsFile,
+        apiBaseUrl: options.apiBaseUrl,
+        fetchImpl: options.fetchImpl,
+      });
+      lastClaimedId = claimed.assignmentId;
+      if (!claimed.duplicate && !seenFreshIds.has(claimed.assignmentId)) {
+        seenFreshIds.add(claimed.assignmentId);
+        assignmentIds.push(claimed.assignmentId);
+        freshParts.push(part);
+      }
+    }
+
+    if (freshParts.length === 0) {
+      return {
+        request,
+        peerBot,
+        assignmentId: lastClaimedId,
+        assignmentIds: [],
+        duplicateAssignment: true,
+      };
+    }
+
+    if (hasPartsArray) {
+      const carrier: Record<string, unknown> = { ...freshParts[0] };
+      Reflect.deleteProperty(carrier, "iva_parts");
+      if (
+        TELEGRAM_QUEUE_RECEIPT_FIELD in nextMessage &&
+        !(TELEGRAM_QUEUE_RECEIPT_FIELD in carrier)
+      ) {
+        carrier[TELEGRAM_QUEUE_RECEIPT_FIELD] =
+          nextMessage[TELEGRAM_QUEUE_RECEIPT_FIELD];
+      }
+      if (
+        TELEGRAM_BOT_ID_FIELD in nextMessage &&
+        !(TELEGRAM_BOT_ID_FIELD in carrier)
+      ) {
+        carrier[TELEGRAM_BOT_ID_FIELD] = nextMessage[TELEGRAM_BOT_ID_FIELD];
+      }
+      finalMessage =
+        freshParts.length === 1
+          ? carrier
+          : { ...carrier, iva_parts: freshParts };
+    }
+  }
+
+  return {
+    request: rebuildJsonRequest(request, { ...body, message: finalMessage }),
+    peerBot,
+    assignmentId: assignmentIds[0] ?? null,
+    assignmentIds,
+    duplicateAssignment: false,
+  };
+}
+
 function configuredBotId(): string | null {
   return (
     BOT_ID_PATTERN.exec(process.env.TELEGRAM_BOT_TOKEN ?? "")?.groups?.id ??
     null
   );
-}
-
-export function addTelegramQueueReceipt<T extends Record<string, unknown>>(
-  update: T,
-  receipt = randomBytes(16).toString("hex"),
-): T {
-  if (
-    !isRecord(update) ||
-    !isRecord(update.message) ||
-    !validReceipt(receipt)
-  ) {
-    throw new Error(
-      "Telegram queue receipt requires a message update and a 128-bit hex id",
-    );
-  }
-  return {
-    ...update,
-    message: {
-      ...update.message,
-      [TELEGRAM_QUEUE_RECEIPT_FIELD]: receipt,
-    },
-  };
 }
 
 export function wrapTelegramQueueOnMessage(
@@ -193,10 +429,16 @@ async function metadataFromRequest(request: Request): Promise<RequestMetadata> {
   const validHeaderBotId = validTelegramBotId(headerBotId) ? headerBotId : null;
   try {
     const body: unknown = await request.clone().json();
-    const receipt =
-      isRecord(body) && isRecord(body.message)
-        ? body.message[TELEGRAM_QUEUE_RECEIPT_FIELD]
-        : undefined;
+    const message =
+      isRecord(body) && isRecord(body.message) ? body.message : null;
+    const receipt = message?.[TELEGRAM_QUEUE_RECEIPT_FIELD];
+    const chat = message && isRecord(message.chat) ? message.chat : null;
+    const from = message && isRecord(message.from) ? message.from : null;
+    const isBatchedPeerDm =
+      chat?.type === "private" &&
+      from?.is_bot === true &&
+      Array.isArray(message?.iva_parts) &&
+      message.iva_parts.length > 1;
     return {
       botId: validHeaderBotId ?? botIdFromUpdate(body),
       receipt: validReceipt(receipt) ? receipt : null,
@@ -208,6 +450,7 @@ async function metadataFromRequest(request: Request): Promise<RequestMetadata> {
         body.update_id >= 0
           ? body.update_id
           : null,
+      isBatchedPeerDm,
     };
   } catch (error) {
     console.error(
@@ -218,6 +461,7 @@ async function metadataFromRequest(request: Request): Promise<RequestMetadata> {
       receipt: null,
       reroute: null,
       updateId: null,
+      isBatchedPeerDm: false,
     };
   }
 }
@@ -322,21 +566,23 @@ export async function handleAcceptedTelegramWebhook<TState>(
   args: RouteHandlerArgs<TState>,
   options: AcceptedWebhookOptions = {},
 ): Promise<Response> {
+  const env = options.env ?? process.env;
   const {
     botId: requestedBotId,
     receipt,
     reroute,
     updateId,
+    isBatchedPeerDm,
   } = await metadataFromRequest(request);
-  const authenticated = hasValidWebhookSecret(request);
-  const resolvedBot = resolveTelegramBot(requestedBotId);
+  const authenticated = hasValidWebhookSecret(request, env);
+  const resolvedBot = resolveTelegramBot(requestedBotId, env);
   if (requestedBotId !== null && authenticated && resolvedBot === null) {
     return new Response(`unknown Telegram bot ${requestedBotId}`, {
       status: 404,
     });
   }
   const colleagueId = colleagueBotIdOf(resolvedBot);
-  if (colleagueId !== null && !isColleaguesEnabled()) {
+  if (colleagueId !== null && !isColleaguesEnabled(options.settingsFile)) {
     return new Response(null, {
       status: 204,
       headers: { [TELEGRAM_ACCEPTANCE_KIND_HEADER]: "handled" },
@@ -352,7 +598,11 @@ export async function handleAcceptedTelegramWebhook<TState>(
         : "completed-updates.json",
     );
   // Старые/нестандартные payload без update_id сохраняют прежний путь обработки.
+  // Для склеенной пачки межоботовых DM (iva_parts > 1) ранний выход по одному update_id
+  // пропускается: preparePeerBotWebhookRequest проверяет каждую часть пачки по ledger
+  // поручений, чтобы свежее поручение рядом с повтором не потерялось (specs/GroupAndAssignments.tla).
   if (
+    !isBatchedPeerDm &&
     updateId !== null &&
     authenticated &&
     botId !== null &&
@@ -363,6 +613,22 @@ export async function handleAcceptedTelegramWebhook<TState>(
       headers: { [TELEGRAM_ACCEPTANCE_KIND_HEADER]: "handled" },
     });
   }
+  const prepared = await preparePeerBotWebhookRequest(request, {
+    resolvedBot,
+    authenticated,
+    env,
+    settingsFile: options.settingsFile,
+    assignmentsFile: options.assignmentsFile,
+    apiBaseUrl: options.apiBaseUrl,
+    fetchImpl: options.fetchImpl,
+  });
+  if (prepared.duplicateAssignment) {
+    return new Response(null, {
+      status: 204,
+      headers: { [TELEGRAM_ACCEPTANCE_KIND_HEADER]: "handled" },
+    });
+  }
+  const effectiveRequest = prepared.request;
   const inFlightKey =
     updateId !== null && authenticated && botId !== null
       ? `${botId}:${updateId}`
@@ -519,7 +785,7 @@ export async function handleAcceptedTelegramWebhook<TState>(
           background.push(Promise.resolve(task));
         },
       };
-      const invoke = () => handler(request, wrappedArgs);
+      const invoke = () => handler(effectiveRequest, wrappedArgs);
       const response = await (resolvedBot
         ? withTelegramBot(resolvedBot, invoke)
         : invoke());
@@ -528,6 +794,20 @@ export async function handleAcceptedTelegramWebhook<TState>(
       await Promise.allSettled(background);
       const handled = receiptContext.getStore()?.handled === true;
       if (accepted || handled) {
+        if (accepted && prepared.assignmentIds.length > 0) {
+          for (const assignmentId of prepared.assignmentIds) {
+            try {
+              await completeInboundPeerAssignment(assignmentId, {
+                storeFile: options.assignmentsFile,
+              });
+            } catch (error) {
+              console.error(
+                "[telegram] не смог завершить запись поручения:",
+                error,
+              );
+            }
+          }
+        }
         if (updateId !== null && authenticated && botId !== null) {
           try {
             await recordCompletedUpdate(completedFile, botId, updateId);

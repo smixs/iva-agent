@@ -5,6 +5,18 @@
 /** Поле конверта Telegram-апдейта и сообщения, несущее числовой id бота-коллеги. */
 export const TELEGRAM_BOT_ID_FIELD = "iva_bot_id";
 
+/**
+ * Доверенное внутреннее поле конверта сообщения, которым Channel помечает входящее
+ * сообщение от другого бота этой же установки (can_communicate_with_bots, ADR-0030).
+ * Любое внешнее значение этого поля сбрасывается на входе до проверки отправителя.
+ */
+export const TELEGRAM_PEER_BOT_FROM_FIELD = "iva_peer_bot_from";
+
+export interface PeerBotOrigin {
+  readonly botId: string;
+  readonly username?: string;
+}
+
 /** HTTP-заголовок между Bridge и Channel с числовым id бота-адресата. */
 export const TELEGRAM_BOT_ID_HEADER = "x-iva-telegram-bot-id";
 
@@ -121,6 +133,64 @@ export function allTelegramBotTokens(
   env: NodeJS.ProcessEnv = process.env,
 ): string[] {
   return [...new Set(configuredTelegramBots(env).map((bot) => bot.token))];
+}
+
+/** Множество числовых id всех настроенных ботов этой установки (Ива + коллеги). */
+export function configuredTelegramBotIds(
+  env: NodeJS.ProcessEnv = process.env,
+): ReadonlySet<string> {
+  const ids = new Set<string>();
+  for (const bot of configuredTelegramBots(env)) {
+    if (bot.botId !== null) ids.add(bot.botId);
+  }
+  return ids;
+}
+
+/**
+ * Проверяет, что отправитель — другой настроенный бот этой же установки (не чужой бот
+ * и не сам получатель). Возвращает конфиг бота-отправителя или null.
+ */
+export function isConfiguredPeerBot(
+  senderId: string | number | null | undefined,
+  receiverBotId: string | null | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+): TelegramBotConfig | null {
+  if (senderId === null || senderId === undefined) return null;
+  const normalized = String(senderId).trim();
+  if (!validTelegramBotId(normalized)) return null;
+  if (validTelegramBotId(receiverBotId) && normalized === receiverBotId) {
+    return null;
+  }
+  return (
+    configuredTelegramBots(env).find((bot) => bot.botId === normalized) ?? null
+  );
+}
+
+/** Разбирает внутреннюю пометку отправителя-бота из `iva_peer_bot_from`. */
+export function parsePeerBotOrigin(value: unknown): PeerBotOrigin | null {
+  if (!isPlainRecord(value) || !validTelegramBotId(value.botId)) return null;
+  const username = normalizeUsername(
+    typeof value.username === "string" ? value.username : undefined,
+  );
+  return username === undefined
+    ? { botId: value.botId }
+    : { botId: value.botId, username };
+}
+
+/**
+ * Общий ключ координации очереди ответов разных ботов в одной группе/супергруппе
+ * (`specs/GroupAndAssignments.tla`: в группе одновременно идёт ход не более одного бота).
+ * Для личных чатов (`chatId > 0`) возвращает null — лички ботов друг друга не блокируют.
+ */
+export function groupCoordKeyOf(chatKey: string): string | null {
+  const { key } = parseBotScopedKey(chatKey);
+  const colon = key.indexOf(":");
+  if (colon <= 0) return null;
+  const chatId = key.slice(0, colon);
+  if (!/^-\d+$/u.test(chatId)) return null;
+  const threadId = key.slice(colon + 1);
+  if (threadId !== "" && !/^\d+$/u.test(threadId)) return null;
+  return `group:${chatId}:${threadId}`;
 }
 
 /**

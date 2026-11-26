@@ -3,7 +3,7 @@ import {
   addTelegramQueueReceipt,
   TELEGRAM_ACCEPTANCE_KIND_HEADER,
   TELEGRAM_CLOSED_SESSION_KIND,
-} from "#lib/telegram-acceptance.ts";
+} from "#lib/telegram-acceptance-wire.ts";
 import { classifyDeliverStatus } from "../lib/deliver-policy.ts";
 import { tr } from "#lib/i18n.ts";
 import {

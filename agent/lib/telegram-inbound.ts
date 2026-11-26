@@ -5,6 +5,11 @@
 //
 // Модуль намеренно не знает про eve: канал (agent/channels/telegram.ts) остаётся
 // адаптером и приносит сюда только эффекты, поэтому пайплайн проверяется голым node.
+import {
+  parsePeerBotOrigin,
+  TELEGRAM_PEER_BOT_FROM_FIELD,
+  type PeerBotOrigin,
+} from "../../packages/telegram-bots/index.ts";
 import { tr } from "./i18n.ts";
 import { hasInboundAttackSignal, sanitizeInbound } from "./security-gate.ts";
 import { allowedTelegramUsers } from "./telegram-allowlist.ts";
@@ -77,7 +82,10 @@ export type TelegramInboundTurn = {
 
 export type TelegramInboundEffects = TelegramMediaEffects & {
   readonly botId?: string;
+  readonly selfBotId?: string;
   readonly botUsername?: string;
+  readonly colleaguesEnabled?: boolean;
+  readonly peerBotIds?: ReadonlySet<string>;
   readonly startTyping: () => Promise<unknown>;
   // Апдейт наш и дальше идёт медленная работа (медиа, провайдеры, гейт) —
   // канал успевает показать статус до неё.
@@ -223,10 +231,32 @@ function mentionsBot(text: string, bot?: string): boolean {
   ).test(text);
 }
 
-function shouldDispatch(msg: TelegramInboundMessage, bot?: string): boolean {
+export function isExplicitlyAddressedInGroup(
+  msg: Pick<TelegramInboundMessage, "text" | "caption" | "replyToMessage">,
+  bot?: string,
+): boolean {
+  const text: string = msg.text || msg.caption || "";
+  return (
+    msg.replyToMessage?.from?.isBot === true ||
+    isBotCommand(text, bot) ||
+    mentionsBot(text, bot)
+  );
+}
+
+function shouldDispatch(
+  msg: TelegramInboundMessage,
+  bot?: string,
+  allowUnaddressedGroup = false,
+): boolean {
   if (msg.from?.isBot === true || msg.chat.type === "channel") return false;
   const text: string = msg.text || msg.caption || "";
   if (!(text.trim().length > 0 || msg.attachments.length > 0)) return false;
+  if (
+    allowUnaddressedGroup &&
+    (msg.chat.type === "group" || msg.chat.type === "supergroup")
+  ) {
+    return true;
+  }
   return (
     msg.chat.type === "private" ||
     msg.replyToMessage?.from?.isBot === true ||
@@ -237,14 +267,22 @@ function shouldDispatch(msg: TelegramInboundMessage, bot?: string): boolean {
 
 // Для медиа text/attachments пусты (eve не парсит голос/видео в attachments),
 // поэтому обычный shouldDispatch их всегда отбрасывает (строка с проверкой длины).
-// Фильтруем по чату: личка — всегда; группа/супергруппа — только реплай боту,
-// команда или @упоминание в подписи. Иначе в группе чужой голос ушёл бы в Deepgram.
+// Фильтруем по чату: личка — всегда; группа/супергруппа — при выключенных коллегах
+// только реплай боту, команда или @упоминание в подписи; при включённых коллегах
+// каждый бот в группе получает сообщение и решает сам, отвечать ли.
 function shouldDispatchMedia(
   msg: TelegramInboundMessage,
   bot?: string,
+  allowUnaddressedGroup = false,
 ): boolean {
   if (msg.from?.isBot === true || msg.chat.type === "channel") return false;
   if (msg.chat.type === "private") return true;
+  if (
+    allowUnaddressedGroup &&
+    (msg.chat.type === "group" || msg.chat.type === "supergroup")
+  ) {
+    return true;
+  }
   const caption: string = msg.caption || "";
   return (
     msg.replyToMessage?.from?.isBot === true ||
@@ -313,6 +351,7 @@ function digestRequest(msg: TelegramInboundMessage): string {
 function buildAuth(
   msg: TelegramInboundMessage,
   botId?: string,
+  peerOrigin?: PeerBotOrigin | null,
 ): TelegramInboundAuth | null {
   const u = msg.from;
   if (!u) return null;
@@ -324,6 +363,7 @@ function buildAuth(
     user_id: u.id,
   };
   if (botId !== undefined && botId.length > 0) attributes.bot_id = botId;
+  if (peerOrigin) attributes.peer_bot_id = peerOrigin.botId;
   if (msg.chat.title !== undefined) attributes.chat_title = msg.chat.title;
   if (msg.messageThreadId !== undefined)
     attributes.message_thread_id = String(msg.messageThreadId);
@@ -335,7 +375,7 @@ function buildAuth(
     principalId: isGroup
       ? `telegram:${msg.chat.id}:${u.id}`
       : `telegram:${u.id}`,
-    principalType: u.isBot ? "service" : "user",
+    principalType: u.isBot || peerOrigin ? "service" : "user",
   };
 }
 
@@ -568,14 +608,32 @@ export async function runTelegramInbound(
   // пишут швы снаружи — acceptance-обёртка, Gate, Outbox, старт хода.
   traceInboundReceived(message);
 
-  // 1. Allowlist — главный барьер доступа.
+  const raw: TelegramRawMessage = message.raw;
+  const colleaguesEnabled = effects.colleaguesEnabled === true;
+  const selfBotId =
+    effects.selfBotId ??
+    effects.botId ??
+    process.env.TELEGRAM_BOT_TOKEN?.trim().split(":")[0];
+  const rawPeerOrigin = parsePeerBotOrigin(raw[TELEGRAM_PEER_BOT_FROM_FIELD]);
+  const peerOrigin =
+    colleaguesEnabled &&
+    rawPeerOrigin !== null &&
+    effects.peerBotIds?.has(rawPeerOrigin.botId) === true &&
+    rawPeerOrigin.botId !== selfBotId &&
+    userId === rawPeerOrigin.botId
+      ? rawPeerOrigin
+      : null;
+
+  // 1. Allowlist — главный барьер доступа (плюс доверенный бот-коллега этой же установки).
   const allowed = allowedTelegramUsers();
-  if (allowed.size === 0 || !userId || !allowed.has(userId)) {
+  if (
+    peerOrigin === null &&
+    (allowed.size === 0 || !userId || !allowed.has(userId))
+  ) {
     await noAccessNote(message, effects, allowed.size === 0);
     return null; // дропаем апдейт
   }
 
-  const raw: TelegramRawMessage = message.raw;
   const partsRaw = messageParts(raw);
   const media = mediaFromRaw(raw);
   const readings = partsRaw.map((partRaw) =>
@@ -587,7 +645,7 @@ export async function runTelegramInbound(
   const carrierReading =
     singleReading ??
     readTelegramMessageText(raw, message.text, message.caption);
-  const recordDaily = effects.botId === undefined;
+  const recordDaily = effects.botId === undefined && peerOrigin === null;
   const singleLocationContext =
     partsRaw.length === 1 ? telegramLocationContext(raw) : null;
   if (recordDaily) appendNonFileParts(partsRaw);
@@ -607,14 +665,16 @@ export async function runTelegramInbound(
                   : [],
             },
             effects.botUsername,
+            colleaguesEnabled,
           )
         : media
-          ? shouldDispatchMedia(message, effects.botUsername)
+          ? shouldDispatchMedia(message, effects.botUsername, colleaguesEnabled)
           : shouldDispatch(
               singleLocationContext === null
                 ? message
                 : messageViewForRaw(message, raw, carrierReading),
               effects.botUsername,
+              colleaguesEnabled,
             )
       : partsRaw.some((partRaw, partIndex) => {
           // Нечитаемая часть и одна хода не начала бы: в пачке тоже не начинает.
@@ -625,8 +685,16 @@ export async function runTelegramInbound(
             readings[partIndex],
           );
           return mediaFromRaw(partRaw)
-            ? shouldDispatchMedia(partMessage, effects.botUsername)
-            : shouldDispatch(partMessage, effects.botUsername);
+            ? shouldDispatchMedia(
+                partMessage,
+                effects.botUsername,
+                colleaguesEnabled,
+              )
+            : shouldDispatch(
+                partMessage,
+                effects.botUsername,
+                colleaguesEnabled,
+              );
         });
   if (!shouldDispatchAny) {
     await unreadableNotes(message, effects, partsRaw, readings);
@@ -634,11 +702,43 @@ export async function runTelegramInbound(
   }
   await effects.onAccepted();
 
+  const isGroupChat =
+    message.chat.type === "group" || message.chat.type === "supergroup";
+  const unaddressedGroup =
+    colleaguesEnabled &&
+    isGroupChat &&
+    !isExplicitlyAddressedInGroup(message, effects.botUsername);
+  const startTypingIfAddressed = async () => {
+    if (unaddressedGroup) return;
+    await effects.startTyping();
+  };
+
   // 1a-стоп. Пометка о прерванном ходе + совместимость с апдейтом от старого bridge,
   // который приклеивал busy-time строки в message.raw.iva_buffered. Текущий bridge
   // хранит исходные апдейты в durable FIFO и доставляет их самостоятельно; этот путь
   // нужен только для безопасного rolling upgrade уже подготовленного carrier-апдейта.
   const operationalPreContext: string[] = [];
+  if (peerOrigin !== null) {
+    const handle = peerOrigin.username ? `@${peerOrigin.username}, ` : "";
+    operationalPreContext.push(
+      isGroupChat
+        ? tr(
+            `[Group message from peer bot (${handle}bot_id=${peerOrigin.botId}). Reply only if your role adds value; otherwise respond with <!-- iva:none -->.]`,
+            `[Сообщение в группе от бота-коллеги (${handle}bot_id=${peerOrigin.botId}). Отвечай, только если по твоей роли есть что добавить; иначе ответь <!-- iva:none -->.]`,
+          )
+        : tr(
+            `[Direct bot-to-bot assignment/message from peer bot (${handle}bot_id=${peerOrigin.botId}). Handle the request concisely; if no reply is needed, respond with <!-- iva:none -->.]`,
+            `[Личное поручение/сообщение от бота-коллеги (${handle}bot_id=${peerOrigin.botId}). Выполни запрос кратко; если ответ не нужен, ответь <!-- iva:none -->.]`,
+          ),
+    );
+  } else if (unaddressedGroup) {
+    operationalPreContext.push(
+      tr(
+        "[Group message without @mention. Decide yourself whether to reply or stay silent; to stay silent without sending a message, respond with <!-- iva:none --> on the first line.]",
+        "[Сообщение в группе без @упоминания. Реши сам, отвечать или промолчать; чтобы промолчать без сообщения, ответь <!-- iva:none --> первой строкой.]",
+      ),
+    );
+  }
   if (effects.consumeCancelledMark()) {
     operationalPreContext.push(
       tr(
@@ -715,7 +815,7 @@ export async function runTelegramInbound(
   }
 
   // Обёртка диспатчащих return'ов: preContext едет ПЕРЕД остальным контекстом хода.
-  const auth = () => buildAuth(message, effects.botId);
+  const auth = () => buildAuth(message, effects.botId, peerOrigin);
   const withPre = (res: TelegramInboundTurn): TelegramInboundTurn =>
     preContext.length
       ? { ...res, context: [...preContext, ...(res.context ?? [])] }
@@ -731,7 +831,7 @@ export async function runTelegramInbound(
     const rest = cmdText.slice(cmdText.split(/\s+/)[0].length).trim();
     if (cmd === "/task") {
       if (recordDaily) appendDaily("[text]", dailyMessageText(cmdText, raw));
-      await effects.startTyping();
+      await startTypingIfAddressed();
       return withPre({
         auth: auth(),
         context: [
@@ -746,7 +846,7 @@ export async function runTelegramInbound(
     }
     if (cmd === "/tasks") {
       if (recordDaily) appendDaily("[text]", dailyMessageText(cmdText, raw));
-      await effects.startTyping();
+      await startTypingIfAddressed();
       return withPre({
         auth: auth(),
         context: [
@@ -759,7 +859,7 @@ export async function runTelegramInbound(
     }
     if (cmd === "/digest") {
       if (recordDaily) appendDaily("[text]", dailyMessageText(cmdText, raw));
-      await effects.startTyping();
+      await startTypingIfAddressed();
       return withPre({
         auth: auth(),
         context: [digestRequest(message)],
@@ -771,7 +871,7 @@ export async function runTelegramInbound(
   // 2. Любой присланный файл (фото/документ/голос/аудио/видео/кружок/анимация/стикер).
   // uploadPolicy "disabled" → message.attachments пуст; берём ВСЁ из raw сами.
   if (singleReading?.rich) {
-    await effects.startTyping();
+    await startTypingIfAddressed();
     const carrier = carrierTextEntries(
       singleReading.text,
       forwardLabel(raw),
@@ -788,7 +888,7 @@ export async function runTelegramInbound(
   }
 
   if (partsRaw.length === 1 && media) {
-    await effects.startTyping();
+    await startTypingIfAddressed();
     const result = await processMediaPart(effects, raw, media, {
       dropSilent: !operationalPreContext.length,
     });
@@ -800,7 +900,7 @@ export async function runTelegramInbound(
   }
 
   if (singleLocationContext !== null) {
-    await effects.startTyping();
+    await startTypingIfAddressed();
     return withPre({
       auth: auth(),
       context: [singleLocationContext],
@@ -817,7 +917,7 @@ export async function runTelegramInbound(
       recordDaily,
     );
 
-    await effects.startTyping();
+    await startTypingIfAddressed();
 
     // Санитайз: чистим невидимые/гомоглифы, флагуем инъекции (важно для ПЕРЕСЛАННОГО текста).
     // Обычный текст без сигналов — оставляем штатный поток нетронутым (context не переопределяем).
@@ -828,7 +928,7 @@ export async function runTelegramInbound(
     return withPre({ auth: auth() });
   }
 
-  await effects.startTyping();
+  await startTypingIfAddressed();
   const context: string[] = [];
   for (const [partIndex, partRaw] of partsRaw.entries()) {
     const reading = readings[partIndex];
