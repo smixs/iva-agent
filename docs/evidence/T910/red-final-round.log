@@ -37,14 +37,14 @@ test at scripts/colleague-hire.test.ts:1369:1
 ✖ последний круг A: permanent getManagedBotToken failure is acknowledged and the next message enters (1.192833ms)
   AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
   + actual - expected
-  
+
     {
   +   ingressBlocked: true,
   +   offset: 1010
   -   ingressBlocked: false,
   -   offset: 1012
     }
-  
+
       at TestContext.<anonymous> (file:///Users/majento/dev/factory-work/iva/scripts/colleague-hire.test.ts:1449:12)
       at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
       at async Test.run (node:internal/test_runner/test:1409:7)
@@ -61,10 +61,10 @@ test at scripts/colleague-hire.test.ts:1463:1
 ✖ последний круг B1: incomplete hire does not start polling after restart and is completed without a repeated event (8.059333ms)
   AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
   + actual - expected
-  
+
   + 'undefined'
   - 'function'
-  
+
       at TestContext.<anonymous> (file:///Users/majento/dev/factory-work/iva/scripts/colleague-hire.test.ts:1547:12)
       at async Test.run (node:internal/test_runner/test:1409:7)
       at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
@@ -79,9 +79,9 @@ test at scripts/colleague-hire.test.ts:1463:1
 test at scripts/colleague-hire.test.ts:1608:1
 ✖ последний круг B2: settings failure is consumed without losing the hire and never turns a disabled existing colleague on (7.1125ms)
   AssertionError [ERR_ASSERTION]: corrupt settings must not pin the whole Telegram ingress forever
-  
+
   true !== false
-  
+
       at TestContext.<anonymous> (file:///Users/majento/dev/factory-work/iva/scripts/colleague-hire.test.ts:1662:14)
       at async Test.run (node:internal/test_runner/test:1409:7)
       at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
@@ -97,9 +97,9 @@ test at scripts/colleague-hire.test.ts:1707:1
 ✖ последний круг C: colleague token is redacted from polling initialization errors (176.457792ms)
   AssertionError [ERR_ASSERTION]: initialization log leaked token:
   [bot:555555555] offset init: deleteWebhook failed: deleteWebhook failed upstream echoed 555555555:EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE
-  
+
   true !== false
-  
+
       at TestContext.<anonymous> (file:///Users/majento/dev/factory-work/iva/scripts/colleague-hire.test.ts:1742:12)
       at async Test.run (node:internal/test_runner/test:1409:7)
       at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
