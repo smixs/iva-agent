@@ -65,6 +65,8 @@ test("a roll call is exactly seven fields in their shapes; anything else is refu
     body({ version: "0.5.16-beta" }),
     body({ model: "http://box:11434/llama" }),
     body({ model: "203.0.113.7" }),
+    body({ model: "12345" }),
+    body({ model: "1.2:3" }),
     body({ model: "10.0.0.1:11434" }),
     body({ model: "192.168.1.5:11434/llama3" }),
     body({ model: "fe80::1" }),
