@@ -26,15 +26,19 @@ const REPAIR = join(ROOT, "repair.sh");
 /**
  * git as these tests run it: none of the machine's settings and no cleanup behind the
  * command's back. A commit of a whole release tree leaves thousands of loose objects, so
- * git starts `gc --auto` detached, and it repacks the store while the next command reads
- * it: `hardlink different from source ... tmp_pack_`, `unable to read sha1 file`.
+ * git starts its maintenance detached, and it repacks the store while `git clone` copies
+ * that store file by file: `hardlink different from source ... tmp_pack_`, `failed to copy
+ * file`, and later `unable to read tree` in the copy. `maintenance.auto` is the switch of
+ * git 2.29 and newer, `gc.auto` the one before it.
  */
 const GIT_ENV = {
   GIT_CONFIG_GLOBAL: "/dev/null",
   // Чужая среда (агентная сессия) может подменять адреса через GIT_CONFIG_*: счёт заново.
-  GIT_CONFIG_COUNT: "1",
-  GIT_CONFIG_KEY_0: "gc.auto",
-  GIT_CONFIG_VALUE_0: "0",
+  GIT_CONFIG_COUNT: "2",
+  GIT_CONFIG_KEY_0: "maintenance.auto",
+  GIT_CONFIG_VALUE_0: "false",
+  GIT_CONFIG_KEY_1: "gc.auto",
+  GIT_CONFIG_VALUE_1: "0",
 };
 
 function git(cwd: string, ...args: string[]): string {
