@@ -41,7 +41,7 @@ import { traceBridgeQueued } from "#lib/trace.ts";
 import {
   TELEGRAM_CLOSED_SESSION_KIND,
   telegramTurnPolicy,
-} from "#lib/telegram-acceptance.ts";
+} from "#lib/telegram-acceptance-wire.ts";
 import {
   ACCEPTANCE_ROUTE,
   ALLOWED,

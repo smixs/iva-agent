@@ -48,6 +48,8 @@ export interface ColleagueAssignmentRecord {
   readonly task: string;
   readonly phase: ColleagueAssignmentPhase;
   readonly ownerNotified: boolean;
+  /** Durable CAS-слот захвата отправки строки владельцу под замком до сети (specs/GroupAndAssignments.tla). */
+  readonly ownerNoticeClaimed?: boolean;
   readonly dmMessageId?: number;
   readonly ownerMessageId?: number;
   readonly error?: string;
@@ -129,6 +131,9 @@ function parseAssignmentRecord(
     task: value.task,
     phase: value.phase as ColleagueAssignmentPhase,
     ownerNotified: value.ownerNotified,
+    ...(typeof value.ownerNoticeClaimed === "boolean"
+      ? { ownerNoticeClaimed: value.ownerNoticeClaimed }
+      : {}),
     ...(typeof value.dmMessageId === "number"
       ? { dmMessageId: value.dmMessageId }
       : {}),
@@ -425,13 +430,18 @@ export async function sendColleagueAssignment(
   });
 
   if (!dmSent.ok) {
-    const failedRecord: ColleagueAssignmentRecord = {
+    let failedRecord: ColleagueAssignmentRecord = {
       ...initialRecord,
       phase: "failed",
       error: dmSent.error,
       updatedAt: now(),
     };
     await withLedger(storeFile, async (ledger, save) => {
+      const existing = ledger.records[id];
+      if (existing && existing.phase !== "pending") {
+        failedRecord = existing;
+        return;
+      }
       await save({
         version: LEDGER_VERSION,
         records: { ...ledger.records, [id]: failedRecord },
@@ -444,6 +454,7 @@ export async function sendColleagueAssignment(
     };
   }
 
+  const ownerChat = input.ownerChatId?.trim() || notificationChat(env) || null;
   let deliveredRecord: ColleagueAssignmentRecord = {
     ...initialRecord,
     phase: "delivered",
@@ -453,8 +464,36 @@ export async function sendColleagueAssignment(
     updatedAt: now(),
   };
 
-  const ownerChat = input.ownerChatId?.trim() || notificationChat(env) || null;
-  if (ownerChat) {
+  // Граница claim -> send -> commit (specs/GroupAndAssignments.tla: BeginOwnerNotice / FinishOwnerNotice):
+  // сначала под файловым замком сверяем актуальную запись и захватываем CAS-слот ownerNoticeClaimed,
+  // чтобы получатель, успевший принять DM до ответа API отправителю, не привёл к дублю строки владельцу.
+  let shouldSendNotice = false;
+  await withLedger(storeFile, async (ledger, save) => {
+    const existing = ledger.records[id];
+    const alreadyClaimedOrSent =
+      existing?.ownerNotified === true ||
+      existing?.ownerNoticeClaimed === true;
+    shouldSendNotice = ownerChat !== null && !alreadyClaimedOrSent;
+    const merged: ColleagueAssignmentRecord = {
+      ...(existing ?? initialRecord),
+      phase: existing?.phase === "done" ? "done" : "delivered",
+      ...(dmSent.messageId === undefined
+        ? {}
+        : { dmMessageId: existing?.dmMessageId ?? dmSent.messageId }),
+      ownerNotified: existing?.ownerNotified === true,
+      ...(alreadyClaimedOrSent || shouldSendNotice
+        ? { ownerNoticeClaimed: true }
+        : {}),
+      updatedAt: now(),
+    };
+    await save({
+      version: LEDGER_VERSION,
+      records: { ...ledger.records, [id]: merged },
+    });
+    deliveredRecord = merged;
+  });
+
+  if (shouldSendNotice && ownerChat) {
     const noticeBot = ownerNoticeBotFor(fromBot, toBot);
     const noticeText = formatOwnerAssignmentNotice(fromLabel, toLabel, task);
     const noticeSent = await postBotMessage(noticeBot, ownerChat, noticeText, {
@@ -462,40 +501,29 @@ export async function sendColleagueAssignment(
       fetchImpl,
     });
     if (noticeSent.ok) {
-      deliveredRecord = {
-        ...deliveredRecord,
-        ownerNotified: true,
-        ...(noticeSent.messageId === undefined
-          ? {}
-          : { ownerMessageId: noticeSent.messageId }),
-        updatedAt: now(),
-      };
+      await withLedger(storeFile, async (ledger, save) => {
+        const current = ledger.records[id] ?? deliveredRecord;
+        const notified: ColleagueAssignmentRecord = {
+          ...current,
+          ownerNotified: true,
+          ownerNoticeClaimed: true,
+          ...(noticeSent.messageId === undefined
+            ? {}
+            : { ownerMessageId: current.ownerMessageId ?? noticeSent.messageId }),
+          updatedAt: now(),
+        };
+        await save({
+          version: LEDGER_VERSION,
+          records: { ...ledger.records, [id]: notified },
+        });
+        deliveredRecord = notified;
+      });
     } else {
       console.error(
         `[colleagues] не смог отправить строку о поручении ${id} владельцу: ${noticeSent.error}`,
       );
     }
   }
-
-  await withLedger(storeFile, async (ledger, save) => {
-    const existing = ledger.records[id];
-    const merged: ColleagueAssignmentRecord = existing
-      ? {
-          ...deliveredRecord,
-          phase: existing.phase === "done" ? "done" : deliveredRecord.phase,
-          ownerNotified:
-            existing.ownerNotified || deliveredRecord.ownerNotified,
-          ownerMessageId:
-            existing.ownerMessageId ?? deliveredRecord.ownerMessageId,
-          updatedAt: now(),
-        }
-      : deliveredRecord;
-    await save({
-      version: LEDGER_VERSION,
-      records: { ...ledger.records, [id]: merged },
-    });
-    deliveredRecord = merged;
-  });
 
   return { ok: true, assignment: deliveredRecord };
 }
@@ -550,10 +578,17 @@ export async function claimInboundPeerAssignment(
   const fromBot = resolveTelegramBot(input.fromBotId, env);
   const toBot = resolveTelegramBot(input.toBotId, env);
 
-  return withLedger(storeFile, async (ledger, save) => {
+  let claimedRecord!: ColleagueAssignmentRecord;
+  let isDuplicate = false;
+  let shouldSendNotice = false;
+
+  // Шаг 1 (под замком, без сети): проверяем дубль и захватываем CAS-слот ownerNoticeClaimed.
+  await withLedger(storeFile, async (ledger, save) => {
     const existing = ledger.records[assignmentId];
     if (existing && assignmentPhase(existing) === "done") {
-      return { duplicate: true, assignmentId, record: existing };
+      isDuplicate = true;
+      claimedRecord = existing;
+      return;
     }
     const timestamp = now();
     let record: ColleagueAssignmentRecord = existing ?? {
@@ -566,38 +601,71 @@ export async function claimInboundPeerAssignment(
       createdAt: timestamp,
       updatedAt: timestamp,
     };
-
-    if (!record.ownerNotified && ownerChat && fromBot && toBot) {
-      const fromLabel = botDisplayLabel(input.fromBotId, env, settingsFile);
-      const toLabel = botDisplayLabel(input.toBotId, env, settingsFile);
-      const noticeBot = ownerNoticeBotFor(fromBot, toBot);
-      const noticeText = formatOwnerAssignmentNotice(
-        fromLabel,
-        toLabel,
-        record.task,
-      );
-      const sent = await postBotMessage(noticeBot, ownerChat, noticeText, {
-        apiBaseUrl,
-        fetchImpl,
-      });
-      if (sent.ok) {
-        record = {
-          ...record,
-          ownerNotified: true,
-          ...(sent.messageId === undefined
-            ? {}
-            : { ownerMessageId: sent.messageId }),
-          updatedAt: now(),
-        };
-      }
+    const alreadyClaimedOrSent =
+      record.ownerNotified === true || record.ownerNoticeClaimed === true;
+    shouldSendNotice =
+      !alreadyClaimedOrSent &&
+      ownerChat !== null &&
+      fromBot !== null &&
+      toBot !== null;
+    if (shouldSendNotice) {
+      record = {
+        ...record,
+        ownerNoticeClaimed: true,
+        updatedAt: now(),
+      };
     }
-
     await save({
       version: LEDGER_VERSION,
       records: { ...ledger.records, [assignmentId]: record },
     });
-    return { duplicate: false, assignmentId, record };
+    claimedRecord = record;
   });
+
+  if (isDuplicate) {
+    return { duplicate: true, assignmentId, record: claimedRecord };
+  }
+
+  // Шаг 2 (вне замка, сеть) + Шаг 3 (под замком, запись ownerNotified=true).
+  if (shouldSendNotice && ownerChat && fromBot && toBot) {
+    const fromLabel = botDisplayLabel(input.fromBotId, env, settingsFile);
+    const toLabel = botDisplayLabel(input.toBotId, env, settingsFile);
+    const noticeBot = ownerNoticeBotFor(fromBot, toBot);
+    const noticeText = formatOwnerAssignmentNotice(
+      fromLabel,
+      toLabel,
+      claimedRecord.task,
+    );
+    const sent = await postBotMessage(noticeBot, ownerChat, noticeText, {
+      apiBaseUrl,
+      fetchImpl,
+    });
+    if (sent.ok) {
+      await withLedger(storeFile, async (ledger, save) => {
+        const current = ledger.records[assignmentId] ?? claimedRecord;
+        const notified: ColleagueAssignmentRecord = {
+          ...current,
+          ownerNotified: true,
+          ownerNoticeClaimed: true,
+          ...(sent.messageId === undefined
+            ? {}
+            : { ownerMessageId: current.ownerMessageId ?? sent.messageId }),
+          updatedAt: now(),
+        };
+        await save({
+          version: LEDGER_VERSION,
+          records: { ...ledger.records, [assignmentId]: notified },
+        });
+        claimedRecord = notified;
+      });
+    } else {
+      console.error(
+        `[colleagues] не смог отправить строку о поручении ${assignmentId} владельцу: ${sent.error}`,
+      );
+    }
+  }
+
+  return { duplicate: false, assignmentId, record: claimedRecord };
 }
 
 /** Помечает входящее поручение исполненным (`done`) после принятия хода Channel. */

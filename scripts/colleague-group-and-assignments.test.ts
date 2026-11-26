@@ -116,9 +116,10 @@ const [
   { createTelegramChannel },
   { addTelegramQueueReceipt, TELEGRAM_ACCEPTANCE_ROUTE },
   teamInstructionModule,
-  { admitTelegramUpdate },
+  { admitTelegramUpdate, inboxKeyFor, promoteReadyInbox },
   { drainReadyQueueHeads, routeMessageUpdate },
-  { emptyQueueDocument, enqueueItem, createQueueItem },
+  { emptyQueueDocument, enqueueItem, createQueueItem, removeQueueItems },
+  { joinUpdates },
   { chatKeyOf, getChatStatus, setChatStatus },
   { ContextContainer, contextStorage },
   { SessionKey },
@@ -132,6 +133,7 @@ const [
   import("./poller/inbox.ts"),
   import("./poller/routing.ts"),
   import("./lib/telegram-queue.ts"),
+  import("./lib/telegram-collect.ts"),
   import("#lib/run-status.ts"),
   import("../node_modules/eve/dist/src/context/container.js"),
   import("../node_modules/eve/dist/src/context/keys.js"),
@@ -251,7 +253,12 @@ function makeHarness() {
           adapterCtx: unknown,
         ) => Promise<void>;
         "message.completed": (
-          data: { turnId: string; finishReason: string; message: string },
+          data: {
+            turnId: string;
+            stepIndex?: number;
+            finishReason: string;
+            message: string;
+          },
           adapterCtx: unknown,
         ) => Promise<void>;
         "turn.completed": (
@@ -286,6 +293,13 @@ function makeHarness() {
     sessionId: string,
     turnId: string,
     replyText: string,
+    options?: {
+      readonly toolCallProgress?: {
+        readonly ageMs: number;
+        readonly text: string;
+        readonly chatKey: string;
+      };
+    },
   ): Promise<void> {
     const container = new ContextContainer();
     container.set(SessionKey, {
@@ -305,8 +319,27 @@ function makeHarness() {
         ctx: container as unknown as Record<string, unknown>,
       });
       await compiledAdapter["turn.started"]({ turnId }, adapterCtx);
+      if (options?.toolCallProgress) {
+        setChatStatus(options.toolCallProgress.chatKey, {
+          turnAt: Date.now() - options.toolCallProgress.ageMs,
+        });
+        await compiledAdapter["message.completed"](
+          {
+            turnId,
+            stepIndex: 0,
+            finishReason: "tool-calls",
+            message: options.toolCallProgress.text,
+          },
+          adapterCtx,
+        );
+      }
       await compiledAdapter["message.completed"](
-        { turnId, finishReason: "stop", message: replyText },
+        {
+          turnId,
+          stepIndex: options?.toolCallProgress ? 1 : 0,
+          finishReason: "stop",
+          message: replyText,
+        },
         adapterCtx,
       );
       await compiledAdapter["turn.completed"]({ turnId }, adapterCtx);
@@ -845,4 +878,195 @@ test("п.4: bots added by owner to a group accept its messages and serialize tur
   });
   assert.deepEqual(deliveredKeys, ["private:5202", "group:5201"]);
   assert.equal(queueDoc.queues[criticGroupKey], undefined);
+});
+
+// --- Возврат п.2: длинный ход с инструментом в группе, завершившийся <!-- iva:none --> ---
+test("п.2 (длинный ход с инструментом): group turn >60s with tool-calls ending in iva:none sends zero messages and zero deletes", async () => {
+  writeTeamSettings(true);
+  botApiCalls.length = 0;
+  const harness = makeHarness();
+
+  const groupUpdate = {
+    update_id: 7101,
+    message: {
+      message_id: 7101,
+      date: 1700007101,
+      chat: { id: -100779, type: "supergroup", title: "Long Quiet Group" },
+      from: { id: OWNER_ID, is_bot: false, username: "owner" },
+      text: "Кто может подхватить проверку релиза?",
+    },
+  };
+  const resp = await harness.postUpdate(groupUpdate);
+  assert.equal(resp.status, 204);
+  assert.equal(resp.headers.get("x-iva-telegram-acceptance"), "turn");
+  const ivaTurn = harness.sentTurns[0];
+  assert.ok(ivaTurn?.state);
+
+  const beforeCalls = botApiCalls.length;
+  await harness.completeTurn(
+    ivaTurn.state,
+    "sess_iva_long_quiet",
+    "turn_iva_long_quiet",
+    "<!-- iva:none -->\nПроверил заметки — добавлять нечего.",
+    {
+      toolCallProgress: {
+        ageMs: 61_000,
+        text: "Проверяю заметки и статус задач…",
+        chatKey: chatKeyOf("-100779"),
+      },
+    },
+  );
+  const turnMessageCalls = botApiCalls
+    .slice(beforeCalls)
+    .filter((c) =>
+      ["sendMessage", "editMessageText", "deleteMessage"].includes(c.method),
+    );
+  assert.deepEqual(
+    turnMessageCalls,
+    [],
+    "long group turn ending in iva:none must send zero status/reply/delete messages",
+  );
+  assert.equal(getChatStatus(chatKeyOf("-100779"))?.status, "idle");
+});
+
+// --- Возврат п.3б: пачка inbox с повтором 8201 рядом с новым поручением 8203 ---
+test("п.3 (пачка с повтором и новым поручением): promoteReadyInbox delivers fresh 8203 alongside replayed 8201", async () => {
+  writeTeamSettings(true);
+  botApiCalls.length = 0;
+  const harness = makeHarness();
+
+  const makeDmUpdate = (updateId: number, assignmentId: string, body: string) => ({
+    update_id: updateId,
+    iva_bot_id: CRITIC_BOT_ID,
+    message: {
+      message_id: updateId,
+      date: 1700008000 + updateId,
+      chat: { id: Number(IVA_BOT_ID), type: "private" },
+      from: {
+        id: Number(IVA_BOT_ID),
+        is_bot: true,
+        username: "iva_main_bot",
+      },
+      text: `Поручение от Ива (@iva_main_bot) [${assignmentId}]:\n${body}`,
+      iva_bot_id: CRITIC_BOT_ID,
+    },
+  });
+
+  const firstId = "asg_820100000001";
+  const secondId = "asg_820300000002";
+  const firstUpdate = makeDmUpdate(8201, firstId, "Первое поручение 8201");
+  const secondUpdate = makeDmUpdate(8203, secondId, "Второе новое поручение 8203");
+
+  // 1. First assignment 8201 is accepted and marked done.
+  const firstRes = await harness.postUpdate(firstUpdate, CRITIC_BOT_ID);
+  assert.equal(firstRes.status, 204);
+  assert.equal(firstRes.headers.get("x-iva-telegram-acceptance"), "turn");
+  assert.equal(harness.sentTurns.length, 1);
+
+  // 2. Replay of 8201 arrives in the durable inbox together with fresh 8203 from the same bot.
+  const key = inboxKeyFor(firstUpdate);
+  assert.ok(key);
+  let inboxDoc = emptyQueueDocument();
+  inboxDoc = enqueueItem(inboxDoc, key, createQueueItem(firstUpdate, 1_000)).document;
+  inboxDoc = enqueueItem(inboxDoc, key, createQueueItem(secondUpdate, 1_100)).document;
+  const ackedBatches: number[][] = [];
+  const acceptanceKinds: Array<string | null> = [];
+
+  const remaining = await promoteReadyInbox({
+    now: () => 5_000,
+    loadImpl: () => Promise.resolve(inboxDoc),
+    acknowledgeImpl: (ackKey, ids) => {
+      ackedBatches.push([...ids]);
+      inboxDoc = removeQueueItems(inboxDoc, ackKey, ids).document;
+      return Promise.resolve();
+    },
+    routeImpl: (candidate) =>
+      routeMessageUpdate(candidate, {
+        loadQueueImpl: () => emptyQueueDocument(),
+        runningImpl: () => false,
+        colleaguesEnabledImpl: () => true,
+        deliverImpl: async (deliveredUpdate) => {
+          const res = await harness.postUpdate(deliveredUpdate, CRITIC_BOT_ID);
+          const kind = res.headers.get("x-iva-telegram-acceptance");
+          acceptanceKinds.push(kind);
+          if (res.status !== 204) return false;
+          return kind === "handled" ? "handled" : true;
+        },
+      }),
+  });
+
+  assert.equal(remaining, 0);
+  assert.deepEqual(ackedBatches, [[8201, 8203]]);
+  assert.deepEqual(
+    acceptanceKinds,
+    ["turn"],
+    "batch with replayed 8201 + fresh 8203 must start a turn, not return handled",
+  );
+  assert.equal(
+    harness.sentTurns.length,
+    2,
+    "fresh assignment 8203 alongside replayed 8201 must trigger a second turn",
+  );
+  const turnMessageText = (msg: unknown): string =>
+    typeof msg === "string" ? msg : JSON.stringify(msg ?? "");
+  const secondTurnText = turnMessageText(harness.sentTurns[1]?.message);
+  assert.ok(
+    secondTurnText.includes("Второе новое поручение 8203"),
+    `second turn must carry fresh 8203, got: ${secondTurnText}`,
+  );
+  assert.ok(
+    !secondTurnText.includes("Первое поручение 8201"),
+    "replayed 8201 must be stripped from the second turn payload",
+  );
+
+  const ledger = await listColleagueAssignments();
+  assert.equal(ledger.find((r) => r.id === firstId)?.phase, "done");
+  assert.equal(ledger.find((r) => r.id === secondId)?.phase, "done");
+
+  const ownerNotices = botApiCalls.filter(
+    (c) =>
+      c.token === CRITIC_TOKEN &&
+      c.method === "sendMessage" &&
+      c.body.chat_id === String(OWNER_ID),
+  );
+  assert.equal(
+    ownerNotices.length,
+    2,
+    "each distinct assignment (8201 and 8203) must send exactly one owner notice",
+  );
+
+  // 3. Direct batch with [fresh3, replay2] (reverse order) and [fresh4, fresh5] (two fresh + full replay).
+  const thirdId = "asg_820500000003";
+  const thirdUpdate = makeDmUpdate(8205, thirdId, "Третье поручение 8205");
+  const mixedReverse = joinUpdates([thirdUpdate, secondUpdate]);
+  const reverseRes = await harness.postUpdate(mixedReverse, CRITIC_BOT_ID);
+  assert.equal(reverseRes.status, 204);
+  assert.equal(reverseRes.headers.get("x-iva-telegram-acceptance"), "turn");
+  assert.equal(harness.sentTurns.length, 3);
+  const thirdTurnText = turnMessageText(harness.sentTurns[2]?.message);
+  assert.ok(thirdTurnText.includes("Третье поручение 8205"));
+  assert.ok(!thirdTurnText.includes("Второе новое поручение 8203"));
+  assert.equal(
+    (await listColleagueAssignments()).find((r) => r.id === thirdId)?.phase,
+    "done",
+  );
+
+  const fourthId = "asg_820700000004";
+  const fifthId = "asg_820900000005";
+  const twoFreshBatch = joinUpdates([
+    makeDmUpdate(8207, fourthId, "Четвёртое поручение 8207"),
+    makeDmUpdate(8209, fifthId, "Пятое поручение 8209"),
+  ]);
+  const twoFreshRes = await harness.postUpdate(twoFreshBatch, CRITIC_BOT_ID);
+  assert.equal(twoFreshRes.status, 204);
+  assert.equal(twoFreshRes.headers.get("x-iva-telegram-acceptance"), "turn");
+  assert.equal(harness.sentTurns.length, 4);
+  const allAfterTwoFresh = await listColleagueAssignments();
+  assert.equal(allAfterTwoFresh.find((r) => r.id === fourthId)?.phase, "done");
+  assert.equal(allAfterTwoFresh.find((r) => r.id === fifthId)?.phase, "done");
+
+  const replayedTwoRes = await harness.postUpdate(twoFreshBatch, CRITIC_BOT_ID);
+  assert.equal(replayedTwoRes.status, 204);
+  assert.equal(replayedTwoRes.headers.get("x-iva-telegram-acceptance"), "handled");
+  assert.equal(harness.sentTurns.length, 4);
 });

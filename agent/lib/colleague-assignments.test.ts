@@ -404,3 +404,170 @@ test("colleagueExecuteAsync delegate works in Telegram turns and blocks Helper t
     cleanup();
   }
 });
+
+test("sendColleagueAssignment + claimInboundPeerAssignment send at most one owner notice in both delivery orders", async () => {
+  const { settingsFile, storeFile, cleanup } = makeTempFiles();
+  try {
+    const env = makeTestEnv();
+
+    // Order 1 (return #3a): DM is delivered and claimed+completed by receiver BEFORE
+    // Bot API returns the sendMessage response to the sender.
+    const callsOrder1: Array<{
+      readonly kind: "bot-dm" | "owner-notice";
+      readonly token: string;
+      readonly chatId: string;
+    }> = [];
+    let msgSeq = 700;
+    const fetchOrder1: typeof fetch = async (input, init) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.href
+            : input.url;
+      const match = /\/bot([^/]+)\/([A-Za-z0-9_]+)$/u.exec(url);
+      assert.ok(match);
+      const token = match[1];
+      const body = JSON.parse(
+        typeof init?.body === "string" ? init.body : "{}",
+      ) as Record<string, unknown>;
+      const chatId =
+        typeof body.chat_id === "string" || typeof body.chat_id === "number"
+          ? String(body.chat_id)
+          : "";
+      const text = typeof body.text === "string" ? body.text : "";
+      const isDm = token === IVA_TOKEN && chatId === CRITIC_BOT_ID;
+      callsOrder1.push({
+        kind: isDm ? "bot-dm" : "owner-notice",
+        token,
+        chatId,
+      });
+      msgSeq += 1;
+      const myMsgId = msgSeq;
+      if (isDm) {
+        const claimed = await claimInboundPeerAssignment({
+          fromBotId: IVA_BOT_ID,
+          toBotId: CRITIC_BOT_ID,
+          messageId: myMsgId,
+          text,
+          ownerChatId: "42",
+          env,
+          settingsFile,
+          storeFile,
+          fetchImpl: fetchOrder1,
+        });
+        assert.equal(claimed.duplicate, false);
+        await completeInboundPeerAssignment(claimed.assignmentId, { storeFile });
+      }
+      return new Response(
+        JSON.stringify({ ok: true, result: { message_id: myMsgId } }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    };
+
+    const sent1 = await sendColleagueAssignment({
+      fromBotId: IVA_BOT_ID,
+      toBotId: CRITIC_BOT_ID,
+      task: "Проверь порядок доставки до ответа отправителю",
+      ownerChatId: "42",
+      env,
+      settingsFile,
+      storeFile,
+      fetchImpl: fetchOrder1,
+    });
+    assert.equal(sent1.ok, true);
+    assert.equal(sent1.assignment.ownerNotified, true);
+    assert.equal(sent1.assignment.phase, "done");
+    assert.deepEqual(
+      callsOrder1.map((c) => c.kind),
+      ["bot-dm", "owner-notice"],
+      "receiver-first delivery must still emit exactly one owner-notice",
+    );
+
+    // Order 2: sender has claimed owner-notice and its HTTP request is still in-flight
+    // when receiver calls claimInboundPeerAssignment concurrently.
+    const callsOrder2: Array<{ readonly kind: "bot-dm" | "owner-notice" }> = [];
+    let dmTextOrder2 = "";
+    let releaseSenderNotice!: () => void;
+    const senderNoticeStarted = new Promise<void>((resolve) => {
+      let resolved = false;
+      releaseSenderNotice = () => {
+        if (!resolved) {
+          resolved = true;
+          resolve();
+        }
+      };
+    });
+    let allowSenderNoticeFinish!: () => void;
+    const waitSenderNoticeFinish = new Promise<void>((resolve) => {
+      allowSenderNoticeFinish = resolve;
+    });
+
+    const fetchOrder2: typeof fetch = async (input, init) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.href
+            : input.url;
+      const match = /\/bot([^/]+)\/([A-Za-z0-9_]+)$/u.exec(url);
+      assert.ok(match);
+      const token = match[1];
+      const body = JSON.parse(
+        typeof init?.body === "string" ? init.body : "{}",
+      ) as Record<string, unknown>;
+      const chatId =
+        typeof body.chat_id === "string" || typeof body.chat_id === "number"
+          ? String(body.chat_id)
+          : "";
+      const isDm = token === IVA_TOKEN && chatId === CRITIC_BOT_ID;
+      callsOrder2.push({ kind: isDm ? "bot-dm" : "owner-notice" });
+      msgSeq += 1;
+      if (isDm) {
+        dmTextOrder2 = typeof body.text === "string" ? body.text : "";
+      } else {
+        releaseSenderNotice();
+        await waitSenderNoticeFinish;
+      }
+      return new Response(
+        JSON.stringify({ ok: true, result: { message_id: msgSeq } }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    };
+
+    const senderPromise = sendColleagueAssignment({
+      fromBotId: IVA_BOT_ID,
+      toBotId: CRITIC_BOT_ID,
+      task: "Конкурентная проверка слота уведомления владельца",
+      ownerChatId: "42",
+      env,
+      settingsFile,
+      storeFile,
+      fetchImpl: fetchOrder2,
+    });
+    await senderNoticeStarted;
+    const concurrentClaim = await claimInboundPeerAssignment({
+      fromBotId: IVA_BOT_ID,
+      toBotId: CRITIC_BOT_ID,
+      messageId: 999,
+      text: dmTextOrder2,
+      ownerChatId: "42",
+      env,
+      settingsFile,
+      storeFile,
+      fetchImpl: fetchOrder2,
+    });
+    assert.equal(concurrentClaim.duplicate, false);
+    allowSenderNoticeFinish();
+    const sent2 = await senderPromise;
+    assert.equal(sent2.ok, true);
+    assert.equal(sent2.assignment.ownerNotified, true);
+    assert.deepEqual(
+      callsOrder2.map((c) => c.kind),
+      ["bot-dm", "owner-notice"],
+      "in-flight sender owner-notice must prevent duplicate receiver owner-notice",
+    );
+  } finally {
+    cleanup();
+  }
+});
