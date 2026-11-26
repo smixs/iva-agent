@@ -5,7 +5,11 @@ import { real } from "../lib/version-layout.ts";
 import { createHelperOutcomeScan } from "./helper-outcomes.ts";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { isColleaguesEnabled } from "#lib/colleagues.ts";
+import {
+  isColleaguesEnabled,
+  parseColleaguesConfig,
+} from "#lib/colleagues.ts";
+import { readSettings } from "#lib/settings.ts";
 
 import { COLLECT_QUIET_MS } from "../lib/telegram-collect.ts";
 import {
@@ -55,12 +59,27 @@ import { prepareTelegramStartup } from "./startup-state.ts";
 import {
   handleManagedBotUpdate,
   reconcilePendingColleagueAvatars,
+  reconcilePendingColleagueHires,
 } from "./managed-bot.ts";
 import * as queue from "./queue.ts";
 import * as routing from "./routing.ts";
 import * as updateFlow from "./update-flow.ts";
 import * as control from "./control.ts";
 import * as wizards from "./wizards.ts";
+
+/** Colleagues whose hire wrote both token and role/model settings may be polled at startup. */
+export function selectStartupColleagueBots(
+  bots: readonly TelegramBotConfig[],
+  settingsFile = join(DATA_DIR, "settings.json"),
+): TelegramBotConfig[] {
+  const config = parseColleaguesConfig(readSettings(settingsFile), () => {});
+  return bots.filter(
+    (bot): bot is TelegramBotConfig & { botId: string } =>
+      !bot.isPrimary &&
+      typeof bot.botId === "string" &&
+      config.items[bot.botId] !== undefined,
+  );
+}
 
 /** Sleep/alert policy for consecutive getUpdates Conflict responses. Pure, no I/O. */
 export function conflictBackoff(consecutiveConflicts: number): {
@@ -765,8 +784,15 @@ export async function main({
     });
 
   launchBotLoop(primaryBot, offset, undefined, primaryControl);
-  for (const colleague of bots.slice(1)) {
+  const startupColleagues = selectStartupColleagueBots(bots);
+  for (const colleague of startupColleagues) {
     ensureColleaguePollLoop(colleague);
+  }
+  const deferredColleagues = bots.length - 1 - startupColleagues.length;
+  if (deferredColleagues > 0) {
+    log(
+      `colleague polling deferred for ${deferredColleagues} incomplete hire(s)`,
+    );
   }
   if (bots.length > 1) {
     log(
@@ -805,6 +831,11 @@ export async function main({
             throw new Error("Deferred command report failed");
         },
         log,
+      });
+    });
+    scheduleBridgeTask("colleague-hires", async () => {
+      await reconcilePendingColleagueHires({
+        onColleagueHired: ensureColleaguePollLoop,
       });
     });
     scheduleBridgeTask("colleague-avatars", async () => {
