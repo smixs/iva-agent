@@ -118,6 +118,7 @@ const [
     handleManagedBotUpdate,
     parseManagedBotUpdate,
     reconcilePendingColleagueAvatars,
+    reconcilePendingColleagueHires,
   },
   { handleControl },
   { processTelegramBatch, processTelegramUpdate, runBotPollLoop },
@@ -1371,6 +1372,152 @@ test("возврат 5: known colleague tokens are redacted from managed_bot and
   }
 });
 
+
+test("T940: persistent temporary getManagedBotToken failure is bounded, releases ingress, and background reconciliation completes the hire", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "iva-hire-token-defer-"));
+  const localSettings = join(dir, "settings.json");
+  const localEnvPath = join(dir, ".env");
+  const hireStateDir = join(dir, "colleague-hires.d");
+  writeHireTestEnv(localEnvPath);
+  try {
+    const localEnv: NodeJS.ProcessEnv = {
+      TELEGRAM_BOT_TOKEN: IVA_TOKEN,
+      TELEGRAM_BOT_USERNAME: "iva_main_bot",
+      MODEL_PROVIDER: "ollama",
+    };
+    const managed = makeManagedHireUpdate(
+      1010,
+      HIRED_BOT_ID,
+      "iva_main_critic_bot",
+    );
+    const ordinary = {
+      update_id: 1011,
+      message: {
+        message_id: 11,
+        date: 1,
+        text: "hello",
+        from: { id: 42, is_bot: false, first_name: "Sergei" },
+        chat: { id: 42, type: "private" },
+      },
+    } as TelegramQueueUpdate;
+    const managedLogs: string[] = [];
+    const admitted: number[] = [];
+    const hiredBots: TelegramBotConfig[] = [];
+    const ownerNotices: string[] = [];
+    let tokenCalls = 0;
+    let tokenAvailable = false;
+    const tgImpl = (method: string) => {
+      if (method === "getManagedBotToken") {
+        tokenCalls += 1;
+        if (!tokenAvailable) {
+          return Promise.reject(
+            new DOMException(
+              "The operation was aborted due to timeout",
+              "TimeoutError",
+            ),
+          );
+        }
+        return Promise.resolve({ ok: true, result: HIRED_TOKEN });
+      }
+      return Promise.resolve({ ok: true, result: true });
+    };
+    const controlImpl = (u: TelegramQueueUpdate) => {
+      if (!u.managed_bot) return Promise.resolve(false);
+      return handleControl(u, {
+        managedBotImpl: (managedUpdate) =>
+          handleManagedBotUpdate(managedUpdate, {
+            allowedUserIds: new Set(["42"]),
+            primaryBotId: IVA_BOT_ID,
+            primaryBotToken: IVA_TOKEN,
+            envPath: localEnvPath,
+            settingsFile: localSettings,
+            hireStateDir,
+            env: localEnv,
+            now: () => 1_700_000_000_100,
+            tgImpl,
+            logImpl: (...args: unknown[]) =>
+              managedLogs.push(args.map(String).join(" ")),
+          }),
+      });
+    };
+    const processImpl = (u: TelegramQueueUpdate, current: number) =>
+      processTelegramUpdate(u, current, {
+        handleControlImpl: controlImpl,
+        admitImpl: (candidate) => {
+          admitted.push(candidate.update_id);
+          return Promise.resolve("owned");
+        },
+        saveOffsetImpl: () => Promise.resolve(),
+        logImpl: () => {},
+      });
+
+    let batch = { offset: 1010, ingressBlocked: false };
+    for (let pass = 0; pass < 5 && batch.offset !== 1012; pass += 1) {
+      batch = await processTelegramBatch(
+        [{ update: managed }, { update: ordinary }],
+        batch.offset,
+        {
+          processImpl,
+          saveOffsetImpl: () => Promise.resolve(),
+          logImpl: () => {},
+        },
+      );
+    }
+
+    assert.deepEqual(batch, { offset: 1012, ingressBlocked: false });
+    assert.deepEqual(admitted, [1011]);
+    assert.equal(tokenCalls, 3);
+    assert.ok(
+      managedLogs.some(
+        (line) =>
+          line.includes("update_id=1010") && line.includes("acknowledged"),
+      ),
+      `missing acknowledgement journal line with update_id: ${managedLogs.join("\n")}`,
+    );
+    const stateFile = join(hireStateDir, `${HIRED_BOT_ID}.json`);
+    assert.equal(existsSync(stateFile), true);
+    const durable = JSON.parse(readFileSync(stateFile, "utf8")) as {
+      updateId?: number;
+      attempts?: number;
+    };
+    assert.equal(durable.updateId, 1010);
+    assert.equal(durable.attempts, 3);
+
+    tokenAvailable = true;
+    const completed = await reconcilePendingColleagueHires({
+      settingsFile: localSettings,
+      envPath: localEnvPath,
+      env: localEnv,
+      hireStateDir,
+      now: () => 1_700_000_060_100,
+      tgImpl,
+      replyImpl: (_chatId, text) => {
+        ownerNotices.push(text);
+        return Promise.resolve({ message_id: 1 });
+      },
+      onColleagueHired: (bot) => hiredBots.push(bot),
+      lang: () => "ru",
+      logImpl: () => {},
+    });
+    assert.deepEqual(completed, { attempted: 1, completed: 1 });
+    assert.equal(existsSync(stateFile), false);
+    assert.equal(hiredBots.length, 1);
+    assert.equal(ownerNotices.length, 1);
+    const cfg = parseColleaguesConfig(
+      JSON.parse(readFileSync(localSettings, "utf8")) as unknown,
+      () => {},
+    );
+    assert.equal(cfg.enabled, true);
+    assert.equal(cfg.items[HIRED_BOT_ID]?.role, "critic");
+    const envAfter = parseEnvText(readFileSync(localEnvPath, "utf8"));
+    assert.ok(
+      envAfter.TELEGRAM_COLLEAGUE_BOT_TOKENS?.includes(HIRED_TOKEN),
+      "reconciliation must store the managed bot token in .env",
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 test("последний круг A: permanent getManagedBotToken failure is acknowledged and the next message enters", async () => {
   const dir = mkdtempSync(join(tmpdir(), "iva-hire-terminal-token-"));
