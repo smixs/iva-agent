@@ -71,7 +71,7 @@ test("a roll call is exactly seven fields in their shapes; anything else is refu
     body({ model: "2001:db8:0:1:2:3:4:5" }),
     body({ branch: "Main" }),
     body({ model: "My Model" }),
-    body({ model: "/home/owner/model.gguf" }),
+    body({ model: "/srv/models/model.gguf" }),
     body({ provider: "Codex" }),
     body({ os: "linux; rm -rf" }),
     body({ model: "a".repeat(65) }),
