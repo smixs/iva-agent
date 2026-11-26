@@ -297,6 +297,7 @@ void test("lagging or stalled bot does not delay another bot polling in the same
       assert.ok(lease);
     },
     colleaguesEnabledImpl: () => true,
+    colleagueCompleteImpl: () => true,
     shouldContinue: () => keepRunningColleague,
     tgImpl: (_method, body, options) => {
       assert.equal(options?.token, COLLEAGUE_BOT.token);
@@ -350,6 +351,7 @@ void test("colleague offset initialization waits for enablement and retries with
     initialOffset: 0,
     assertLease: () => {},
     colleaguesEnabledImpl: () => enabled,
+    colleagueCompleteImpl: () => true,
     initializeOffsetImpl: () => {
       events.push("init");
       initAttempts += 1;
@@ -395,6 +397,7 @@ void test("lease loss during lazy colleague initialization stops before the firs
       initialOffset: 0,
       assertLease: () => assertTelegramProcessLease(lease),
       colleaguesEnabledImpl: () => true,
+      colleagueCompleteImpl: () => true,
       initializeOffsetImpl: async () => {
         await lease.close();
         return 10;

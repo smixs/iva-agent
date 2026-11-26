@@ -397,6 +397,7 @@ export type BotPollLoopOptions = {
   readonly onConflictAlert?: (bot: TelegramBotConfig) => Promise<boolean>;
   readonly alertResolvedImpl?: (bot: TelegramBotConfig) => void;
   readonly colleaguesEnabledImpl?: () => boolean;
+  readonly colleagueCompleteImpl?: () => boolean;
   /** Lazy per-bot startup for colleagues: runs only after the option is enabled, never while it is off. */
   readonly initializeOffsetImpl?: () => Promise<number>;
   readonly shouldContinue?: () => boolean;
@@ -423,10 +424,19 @@ export async function runBotPollLoop({
   alertResolvedImpl,
   colleaguesEnabledImpl = () =>
     isColleaguesEnabled(join(DATA_DIR, "settings.json")),
+  colleagueCompleteImpl,
   initializeOffsetImpl,
   shouldContinue = () => true,
   logImpl = log,
 }: BotPollLoopOptions): Promise<{ offset: number }> {
+  const colleagueComplete =
+    colleagueCompleteImpl ??
+    (() =>
+      typeof bot.botId === "string" &&
+      parseColleaguesConfig(
+        readSettings(join(DATA_DIR, "settings.json")),
+        () => {},
+      ).items[bot.botId] !== undefined);
   const label = bot.isPrimary ? "iva" : `bot:${bot.botId ?? "unknown"}`;
   const offsetFile = botOffsetFile(bot);
   const persistOffset =
@@ -453,7 +463,10 @@ export async function runBotPollLoop({
 
   while (shouldContinue()) {
     assertLease();
-    if (!bot.isPrimary && !colleaguesEnabledImpl()) {
+    if (
+      !bot.isPrimary &&
+      (!colleaguesEnabledImpl() || !colleagueComplete())
+    ) {
       await sleepImpl(3000);
       continue;
     }

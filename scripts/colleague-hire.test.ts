@@ -729,6 +729,11 @@ test("п.2: managed_bot fetches token, stores it in .env beside TELEGRAM_BOT_TOK
         JSON.parse(readFileSync(settingsFile, "utf8")) as unknown,
         () => {},
       ).enabled,
+    colleagueCompleteImpl: () =>
+      parseColleaguesConfig(
+        JSON.parse(readFileSync(settingsFile, "utf8")) as unknown,
+        () => {},
+      ).items[HIRED_BOT_ID] !== undefined,
     tgImpl: (method, body, opts) => {
       assert.equal(opts?.token, HIRED_TOKEN);
       assert.equal(method, "getUpdates");
@@ -1320,6 +1325,7 @@ test("возврат 5: known colleague tokens are redacted from managed_bot and
       initialOffset: 0,
       assertLease: () => assertTelegramProcessLease(lease),
       colleaguesEnabledImpl: () => true,
+      colleagueCompleteImpl: () => true,
       tgImpl: (method) => {
         if (method === "getUpdates") {
           pollCalls += 1;
@@ -1587,6 +1593,30 @@ test("последний круг B1: incomplete hire does not start polling aft
     );
     assert.deepEqual(startupColleagues, []);
 
+    // Даже если токен незавершённого найма случайно попал в цикл напрямую,
+    // сам цикл обязан ждать complete-записи роли/модели, а не опрашивать Telegram.
+    const incompleteBot = configured.find((bot) => bot.botId === HIRED_BOT_ID);
+    assert.ok(incompleteBot);
+    let prematurePolls = 0;
+    let loopChecks = 0;
+    await runBotPollLoop({
+      bot: incompleteBot,
+      initialOffset: 0,
+      assertLease: () => {},
+      colleaguesEnabledImpl: () => true,
+      tgImpl: (method) => {
+        if (method === "getUpdates") prematurePolls += 1;
+        return Promise.resolve({ ok: true, result: [] });
+      },
+      sleepImpl: () => Promise.resolve(),
+      shouldContinue: () => {
+        loopChecks += 1;
+        return loopChecks <= 2;
+      },
+      logImpl: () => {},
+    });
+    assert.equal(prematurePolls, 0);
+
     const managedModule = (await import("./poller/managed-bot.ts")) as typeof import("./poller/managed-bot.ts") & {
       reconcilePendingColleagueHires?: (deps?: Record<string, unknown>) => Promise<{
         attempted: number;
@@ -1769,6 +1799,7 @@ test("последний круг C: colleague token is redacted from polling in
       initialOffset: 0,
       assertLease: () => assertTelegramProcessLease(lease),
       colleaguesEnabledImpl: () => true,
+      colleagueCompleteImpl: () => true,
       initializeOffsetImpl: async () => {
         initCalls += 1;
         const response = (await tgStub("deleteWebhook")) as {
