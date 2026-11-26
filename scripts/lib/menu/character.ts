@@ -18,7 +18,7 @@ import { resolveVaultDir } from "../../../packages/vault-dir/index.ts";
 import { button, buttonRow, menuBackLine } from "../telegram-buttons.ts";
 
 const SID = "chr";
-const PARENT = "r";
+const PARENT = "gc";
 
 type Lang = "en" | "ru";
 type QuizState = { i: number; answers: number[]; code: string | null };

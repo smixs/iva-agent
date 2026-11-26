@@ -4,7 +4,9 @@
 // (cron-скрипты, init-vault) были согласованы на своём следующем запуске без правок.
 import { writeSettings } from "#lib/settings.ts";
 import { upsertEnv } from "../env-file.ts";
-import { button, buttonRow } from "../telegram-buttons.ts";
+import { button, buttonRow, menuBackLine } from "../telegram-buttons.ts";
+
+const PARENT = "gc";
 
 type Lang = "en" | "ru";
 type MenuState = { page: number };
@@ -17,7 +19,7 @@ type MenuContext = {
 };
 
 export default {
-  parent: "r",
+  parent: PARENT,
   render(_st: MenuState, ctx: MenuContext) {
     const cur = ctx.getLang();
     const mark = (v: Lang) => (cur === v ? " ✓" : "");
@@ -27,7 +29,7 @@ export default {
         button(`Русский${mark("ru")}`, "iva_menu:lang:set:ru"),
         button(`English${mark("en")}`, "iva_menu:lang:set:en"),
       ]),
-      button(ctx.tr("‹ Menu", "‹ Меню"), "iva_menu:r:o"),
+      menuBackLine(ctx, PARENT),
     ];
     return { text: text.join("\n\n") };
   },

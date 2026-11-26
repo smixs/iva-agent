@@ -97,7 +97,7 @@ test("reports render off and Watch on on a fresh installation, in either languag
     ["○ Отчёты памяти", "iva_menu:ntc:set:rep:1"],
     ["✓ Сама пишет", "iva_menu:ntc:set:pro:0"],
     ["○ Инсайт", "iva_menu:ntc:ins:1130"],
-    ["‹ Меню", "iva_menu:r:o"],
+    ["‹ Назад", "iva_menu:gsch:o"],
   ]);
   assert.doesNotMatch(
     russian.text,
@@ -114,12 +114,12 @@ test("reports render off and Watch on on a fresh installation, in either languag
     ["○ Memory reports", "iva_menu:ntc:set:rep:1"],
     ["✓ Writes on her own", "iva_menu:ntc:set:pro:0"],
     ["○ Insight", "iva_menu:ntc:ins:1130"],
-    ["‹ Menu", "iva_menu:r:o"],
+    ["‹ Back", "iva_menu:gsch:o"],
   ]);
   assert.doesNotMatch(english.text, /Watch for missed items|a plugin draft/u);
   assert.match(english.text, /Daily brief: 08:30 and 14:00/u);
   assert.doesNotMatch(english.text, /digest/iu);
-  assert.equal(screen.parent, "r");
+  assert.equal(screen.parent, "gsch");
 });
 
 test("a switched-on toggle is ticked and offers the way back off", () => {
@@ -134,7 +134,7 @@ test("a switched-on toggle is ticked and offers the way back off", () => {
     ["✓ Отчёты памяти", "iva_menu:ntc:set:rep:0"],
     ["○ Сама пишет", "iva_menu:ntc:set:pro:1"],
     ["○ Инсайт", "iva_menu:ntc:ins:1130"],
-    ["‹ Меню", "iva_menu:r:o"],
+    ["‹ Назад", "iva_menu:gsch:o"],
   ]);
   assert.match(view.text, /Обзор дня: 09:00 и 18:00/u);
 });
@@ -270,7 +270,7 @@ test("a switched-on Insight is ticked, offers its times and says when it comes",
     ["09:30", "iva_menu:ntc:ins:0930"],
     ["11:30 ✓", "iva_menu:ntc:ins:1130"],
     ["17:30", "iva_menu:ntc:ins:1730"],
-    ["‹ Меню", "iva_menu:r:o"],
+    ["‹ Назад", "iva_menu:gsch:o"],
   ]);
   assert.match(view.text, /Инсайт: каждый день в 11:30/u);
   assert.doesNotMatch(view.text, /не придёт|Последний инсайт/u);
@@ -456,14 +456,14 @@ test("property: junk Insight arguments write nothing and redraw nothing", async 
   );
 });
 
-test("classic menu: [reports, writes], [Insight, ‹ Menu] or the times row between; every data fits 64 bytes", () => {
+test("classic menu: [reports, writes], [Insight, ‹ Back] or the times row between; every data fits 64 bytes", () => {
   rmSync(proactivePath, { force: true });
   for (const [times, rows] of [
     [
       [],
       [
         ["○ Отчёты памяти", "✓ Сама пишет"],
-        ["○ Инсайт", "‹ Меню"],
+        ["○ Инсайт", "‹ Назад"],
       ],
     ],
     [
@@ -472,7 +472,7 @@ test("classic menu: [reports, writes], [Insight, ‹ Menu] or the times row betw
         ["○ Отчёты памяти", "✓ Сама пишет"],
         ["✓ Инсайт"],
         ["09:30", "11:30 ✓", "17:30"],
-        ["‹ Меню"],
+        ["‹ Назад"],
       ],
     ],
   ] as const) {

@@ -24,9 +24,9 @@ import {
   type InsightState,
 } from "../../proactive/state.ts";
 import { memoryReportsEnabled } from "../notice-policy.ts";
-import { button, buttonRow } from "../telegram-buttons.ts";
+import { button, buttonRow, menuBackLine } from "../telegram-buttons.ts";
 
-const PARENT = "r";
+const PARENT = "gsch";
 
 type MenuState = { page: number };
 type Translate = (english: string, russian: string) => string;
@@ -219,7 +219,7 @@ export default {
       toggle(proactive.enabled, T("Writes on her own", "Сама пишет"), "pro"),
       insightSwitch(proactive.insightTimes, T),
       ...insightTimes(proactive.insightTimes),
-      button(T("‹ Menu", "‹ Меню"), `iva_menu:${PARENT}:o`),
+      menuBackLine(ctx, PARENT),
     ];
     return { text: text.join("\n\n") };
   },

@@ -65,7 +65,7 @@ type Exec = (
 const errorMessage = (error: unknown) => (error as ErrorLike).message;
 
 const SID = "ub";
-const PARENT = "r";
+const PARENT = "gcon";
 const SVC = "iva-telegram-userbot.service";
 
 const isPrivate = (st: MenuState) => Number(st.chatId) > 0;

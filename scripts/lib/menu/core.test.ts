@@ -155,7 +155,7 @@ void test("core render handles an empty vault and trims an oversized CORE excerp
   const state = makeState();
 
   const empty = await core.render(state, context);
-  assert.equal(core.parent, "r");
+  assert.equal(core.parent, "gmem");
   assert.match(empty.text, /^# 💾 Ядро памяти$/m);
   assert.match(empty.text, /Ядро памяти пусто/);
   assert.match(

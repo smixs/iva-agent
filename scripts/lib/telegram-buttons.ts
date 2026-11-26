@@ -282,12 +282,14 @@ export function buttonRow(buttons: readonly string[]): string {
   return `<tg-button-row>${buttons.join("")}</tg-button-row>`;
 }
 
-/** Кнопка «‹ Меню»: одна у всех экранов /menu. */
+/** Кнопка возврата в /menu: в корень — «‹ Меню», в раздел — «‹ Назад». */
 export function menuBackLine(
   ctx: { readonly tr: (en: string, ru: string) => string },
   parent: string,
 ): string {
-  return button(ctx.tr("‹ Menu", "‹ Меню"), `iva_menu:${parent}:o`);
+  const label =
+    parent === "r" ? ctx.tr("‹ Menu", "‹ Меню") : ctx.tr("‹ Back", "‹ Назад");
+  return button(label, `iva_menu:${parent}:o`);
 }
 
 /**

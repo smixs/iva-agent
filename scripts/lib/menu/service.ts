@@ -9,8 +9,7 @@ import { logHint } from "../systemd-control.ts";
 import { join } from "node:path";
 import { readEnvValues } from "../env-file.ts";
 import { updateRunning } from "../version-store.ts";
-import { button } from "../telegram-buttons.ts";
-import { menuStyle } from "../telegram-buttons.ts";
+import { button, menuBackLine, menuStyle } from "../telegram-buttons.ts";
 import { writeSettings } from "#lib/settings.ts";
 import { betaOf, setBeta } from "../update-channel.ts";
 import {
@@ -68,6 +67,7 @@ function backLine(ctx: MenuServiceContext): string {
   return button(ctx.tr("‹ Back", "‹ Назад"), "iva_menu:svc:o");
 }
 
+const PARENT = "gsys";
 const CMDS = new Set<ServiceCommand>(["doc", "cln", "mem"]);
 const MEM_UNIT = "iva-brain.service";
 
@@ -266,7 +266,7 @@ function idleView(
           "iva_menu:svc:menu:rich",
           "success",
         ),
-    button(T("‹ Menu", "‹ Меню"), "iva_menu:r:o"),
+    menuBackLine(ctx, PARENT),
   );
   return { text: lines.join("\n\n") };
 }
@@ -447,7 +447,7 @@ function confirmView(
 }
 
 const service = {
-  parent: "r",
+  parent: PARENT,
   // eslint-disable-next-line @typescript-eslint/require-await -- async preserves the original synchronous run snapshot before returning a Promise.
   async render(
     st: MenuServiceState,

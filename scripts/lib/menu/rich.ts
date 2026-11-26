@@ -14,7 +14,7 @@ import {
 } from "../telegram-buttons.ts";
 
 const SID = "rich";
-const PARENT = "r";
+const PARENT = "gc";
 const VAR = "TELEGRAM_RICH_REPLIES";
 const WIDGETS = "TELEGRAM_WIDGETS";
 

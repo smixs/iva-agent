@@ -128,11 +128,19 @@ const fastRun = {
   pollMs: 5,
 } satisfies Partial<RunOptions>;
 
-test("svc зарегистрирован в движке, root ведёт на него, Закрыть в конце", () => {
+test("svc зарегистрирован в движке, root ведёт в «Систему», оттуда на svc, Закрыть в конце", () => {
   assert.equal(SCREENS.svc, service);
   const view = root.render(newState({ screen: "r" }), makeCtx().ctx);
   const buttons = buttonsOf(view.text);
-  assert.ok(buttons.some(([, data]) => data === "iva_menu:svc:o"));
+  assert.ok(buttons.some(([, data]) => data === "iva_menu:gsys:o"));
+  const sysView = (
+    SCREENS.gsys as {
+      render: (state: TestState, ctx: MenuServiceContext) => MenuServiceView;
+    }
+  ).render(newState({ screen: "gsys" }), makeCtx().ctx);
+  assert.ok(
+    buttonsOf(sysView.text).some(([, data]) => data === "iva_menu:svc:o"),
+  );
   const close = buttons.filter(([, data]) => data === "iva_menu:r:x");
   assert.equal(close.length, 1);
   assert.deepEqual(buttons.at(-1), ["✖ Закрыть", "iva_menu:r:x"]);

@@ -24,7 +24,7 @@ import { button, menuBackLine } from "../telegram-buttons.ts";
 import type { AwaitText } from "../tg-flow.ts";
 
 const SID = "gws";
-const PARENT = "r";
+const PARENT = "gcon";
 const CONFIG_DIR = join(homedir(), ".config/gws");
 const SECRET_PATH = join(CONFIG_DIR, "client_secret.json");
 const CACHE_TTL_MS = 60_000;

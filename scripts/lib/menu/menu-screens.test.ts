@@ -384,7 +384,7 @@ test("rich: кривое значение .env названо на экране 
   );
   // Переключатель всё равно на месте: этим экраном значение и чинится.
   assert.deepEqual(dataOf(view.text).sort(), [
-    "iva_menu:r:o",
+    "iva_menu:gc:o",
     "iva_menu:rich:set:auto",
     "iva_menu:rich:set:never",
     "iva_menu:rich:w:auto",
