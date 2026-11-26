@@ -80,6 +80,7 @@ test("where the name goes, how long the install waits and what turns it off are 
   assert.equal(INSTALL_COUNT_TIMEOUT_MS, 2500);
   assert.deepEqual(INSTALL_COUNT_SWITCHES, [
     "IVA_PLUGIN_STATS",
+    "IVA_STATS",
     "DO_NOT_TRACK",
   ]);
   for (const name of INSTALL_COUNT_SWITCHES)
@@ -160,15 +161,16 @@ const anyCase = (word: string) =>
         .join(""),
     );
 
-test(`IVA_PLUGIN_STATS turns the count off in any spelling of "off" (seed ${SEED})`, () => {
+test(`IVA_PLUGIN_STATS and IVA_STATS turn the count off in any spelling of "off" (seed ${SEED})`, () => {
   fc.assert(
     fc.property(
+      fc.constantFrom("IVA_PLUGIN_STATS", "IVA_STATS"),
       fc.constantFrom(...OFF_WORDS).chain(anyCase),
       padding,
       padding,
-      (word, before, after) => {
+      (name, word, before, after) => {
         assert.equal(
-          installCountEnabled({ IVA_PLUGIN_STATS: `${before}${word}${after}` }),
+          installCountEnabled({ [name]: `${before}${word}${after}` }),
           false,
         );
       },
@@ -177,7 +179,7 @@ test(`IVA_PLUGIN_STATS turns the count off in any spelling of "off" (seed ${SEED
   );
 });
 
-test(`the count is on unless one of the two switches says otherwise (seed ${SEED})`, () => {
+test(`the count is on unless one of the switches says otherwise (seed ${SEED})`, () => {
   const other = fc
     .string({ maxLength: 12 })
     .filter(
@@ -191,7 +193,11 @@ test(`the count is on unless one of the two switches says otherwise (seed ${SEED
       fc.option(untracked, { nil: undefined }),
       (stats, track) => {
         assert.equal(
-          installCountEnabled({ IVA_PLUGIN_STATS: stats, DO_NOT_TRACK: track }),
+          installCountEnabled({
+            IVA_PLUGIN_STATS: stats,
+            IVA_STATS: stats,
+            DO_NOT_TRACK: track,
+          }),
           true,
         );
         // DO_NOT_TRACK=1 перекрывает любое значение своего выключателя.

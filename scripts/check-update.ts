@@ -4,6 +4,7 @@ import { isEntrypoint, upstreamQuery } from "./lib/version-layout.ts";
 import { noticeLang } from "./lib/notice-policy.ts";
 import { acquireUpdateLock } from "./lib/version-store.ts";
 import { betaChannel, BranchUnavailableError } from "./lib/update-channel.ts";
+import { runRollCall, type Channel } from "./lib/roll-call.ts";
 import { resolveDataDir } from "../packages/data-dir/index.ts";
 import {
   gitAt,
@@ -218,5 +219,40 @@ export async function main(entryUrl = import.meta.url): Promise<void> {
       `Update check failed: ${(error as { message: string }).message}`,
     );
     process.exitCode = 1;
+  }
+  // After the check and whatever it said: the roll call neither waits on the check nor
+  // changes how the check ended (ADR-0031).
+  await rollCall(ROOT, process.env);
+}
+
+/** The roll call of this installation; one line in the journal, never an exit code. */
+export async function rollCall(
+  root: string,
+  env: UpdateEnvironment,
+  run: typeof runRollCall = runRollCall,
+): Promise<void> {
+  const result = await run({
+    root,
+    storage: dataDir(root, env),
+    channel: await channelOf(root),
+    env,
+  });
+  if (result.status === "sent")
+    console.log(`Roll call: ${JSON.stringify(result.body)}`);
+  else if (result.status === "not-taken")
+    console.error("Roll call: the site did not take it");
+  else if (result.status === "failed")
+    console.error(`Roll call failed: ${result.error}`);
+}
+
+/** The update channel, as the update check reads it; "other" when it cannot be read. */
+async function channelOf(root: string): Promise<Channel> {
+  try {
+    const upstream = upstreamQuery(root);
+    return (await betaChannel((...args) => gitAt(upstream.root, args)))
+      ? "beta"
+      : "main";
+  } catch {
+    return "other";
   }
 }

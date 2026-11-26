@@ -86,8 +86,12 @@ the draft is not bound to the tap. This is an accepted risk
 Your vault is a private git repo on your own server — and once `gh` is authenticated on
 that server, the nightly Brain pass mirrors it to a private `iva-vault` repo under your
 GitHub account. The model and transcription are cloud APIs you pick and pay for: their
-operators see the text you send them. Iva sends its authors one thing, and one line turns
-it off: after you install a plugin from the default Marketplace, the name of that plugin
-goes to iva-agent.com, with nothing that tells your installation from another
-([Install count](docs/plugins.md#install-count); `IVA_PLUGIN_STATS=off` in `.env`). Nothing
-else about you or your use of Iva is collected.
+operators see the text you send them. Iva sends its authors two things, and one line,
+`IVA_STATS=off` in `.env`, turns both off; neither carries anything that tells your
+installation from another. After you install a plugin from the default Marketplace, the
+name of that plugin goes to iva-agent.com ([Install count](docs/plugins.md#install-count)).
+Once a day, after the update check, the roll call tells iva-agent.com that an Iva is alive:
+its version, channel, OS, architecture, provider and model, each from a closed list, and the
+days since its last roll call (`IVA_STATS` in [configuration.md](docs/configuration.md),
+ADR-0031). The site keeps counts, not addresses. Nothing else about you or your use of Iva
+is collected.

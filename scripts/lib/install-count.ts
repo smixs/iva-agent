@@ -18,16 +18,21 @@ export const INSTALL_COUNT_TIMEOUT_MS = 2500;
  */
 export const INSTALL_COUNT_SWITCHES = [
   "IVA_PLUGIN_STATS",
+  "IVA_STATS",
   "DO_NOT_TRACK",
 ] as const;
 
 const OFF = new Set(["off", "0", "false", "no"]);
 
-/** `IVA_PLUGIN_STATS=off` in `.env`, or `DO_NOT_TRACK=1`, turns the count off. */
+/**
+ * `IVA_PLUGIN_STATS=off` in `.env` turns the count off; so does `IVA_STATS=off`, the switch
+ * of everything Iva reports on its own (the roll call too, ADR-0031), and `DO_NOT_TRACK=1`.
+ */
 export function installCountEnabled(
   env: Readonly<Record<string, string | undefined>>,
 ): boolean {
   if (OFF.has((env.IVA_PLUGIN_STATS ?? "").trim().toLowerCase())) return false;
+  if (OFF.has((env.IVA_STATS ?? "").trim().toLowerCase())) return false;
   return (env.DO_NOT_TRACK ?? "").trim() !== "1";
 }
 
