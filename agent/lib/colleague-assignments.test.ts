@@ -571,3 +571,337 @@ test("sendColleagueAssignment + claimInboundPeerAssignment send at most one owne
     cleanup();
   }
 });
+
+test("owner notice uses the owner's private chat instead of digest chat, including receiver-first delivery", async () => {
+  const { settingsFile, storeFile, cleanup } = makeTempFiles();
+  try {
+    const env = {
+      ...makeTestEnv(),
+      TELEGRAM_DIGEST_CHAT_ID: "-100998",
+    };
+    const calls: Array<{
+      readonly token: string;
+      readonly chatId: string;
+      readonly text: string;
+    }> = [];
+    let msgSeq = 900;
+    const fetchImpl: typeof fetch = async (input, init) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.href
+            : input.url;
+      const match = /\/bot([^/]+)\/([A-Za-z0-9_]+)$/u.exec(url);
+      assert.ok(match, `unexpected Bot API URL: ${url}`);
+      const token = match[1];
+      const body = JSON.parse(
+        typeof init?.body === "string" ? init.body : "{}",
+      ) as Record<string, unknown>;
+      const chatId =
+        typeof body.chat_id === "string" || typeof body.chat_id === "number"
+          ? String(body.chat_id)
+          : "";
+      const text = typeof body.text === "string" ? body.text : "";
+      calls.push({ token, chatId, text });
+      msgSeq += 1;
+      const messageId = msgSeq;
+      if (token === IVA_TOKEN && chatId === CRITIC_BOT_ID) {
+        const claimed = await claimInboundPeerAssignment({
+          fromBotId: IVA_BOT_ID,
+          toBotId: CRITIC_BOT_ID,
+          messageId,
+          text,
+          env,
+          settingsFile,
+          storeFile,
+          fetchImpl,
+        });
+        assert.equal(claimed.duplicate, false);
+        await completeInboundPeerAssignment(claimed.assignmentId, { storeFile });
+      }
+      return new Response(
+        JSON.stringify({ ok: true, result: { message_id: messageId } }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    };
+
+    const sent = await sendColleagueAssignment({
+      fromBotId: IVA_BOT_ID,
+      toBotId: CRITIC_BOT_ID,
+      task: "Проверь адрес строки владельцу при отдельном digest-чате",
+      env,
+      settingsFile,
+      storeFile,
+      fetchImpl,
+    });
+
+    assert.equal(sent.ok, true);
+    const ownerNotices = calls.filter((call) => call.token === CRITIC_TOKEN);
+    assert.equal(ownerNotices.length, 1);
+    assert.equal(ownerNotices[0]?.chatId, "42");
+    assert.equal(
+      calls.some((call) => call.chatId === "-100998"),
+      false,
+      "owner notice must not use TELEGRAM_DIGEST_CHAT_ID",
+    );
+    assert.equal(
+      ownerNotices.some(
+        (call) => call.chatId === IVA_BOT_ID || call.chatId === CRITIC_BOT_ID,
+      ),
+      false,
+      "owner notice must not be sent to a bot chat",
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test("confirmed 429 owner-notice rejection releases the claim and a receiver pass retries it exactly once", async () => {
+  const { settingsFile, storeFile, cleanup } = makeTempFiles();
+  try {
+    const env = makeTestEnv();
+    let dmText = "";
+    let ownerNoticeAttempts = 0;
+    let acceptedOwnerNotices = 0;
+    const fetchImpl: typeof fetch = async (input, init) => {
+      await Promise.resolve();
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.href
+            : input.url;
+      const match = /\/bot([^/]+)\/([A-Za-z0-9_]+)$/u.exec(url);
+      assert.ok(match, `unexpected Bot API URL: ${url}`);
+      const token = match[1];
+      const body = JSON.parse(
+        typeof init?.body === "string" ? init.body : "{}",
+      ) as Record<string, unknown>;
+      const chatId =
+        typeof body.chat_id === "string" || typeof body.chat_id === "number"
+          ? String(body.chat_id)
+          : "";
+      const text = typeof body.text === "string" ? body.text : "";
+      if (token === IVA_TOKEN && chatId === CRITIC_BOT_ID) {
+        dmText = text;
+        return new Response(
+          JSON.stringify({ ok: true, result: { message_id: 1001 } }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      assert.equal(token, CRITIC_TOKEN);
+      assert.equal(chatId, "42");
+      ownerNoticeAttempts += 1;
+      if (ownerNoticeAttempts === 1) {
+        return new Response(
+          JSON.stringify({
+            ok: false,
+            description: "Too Many Requests: retry after 1",
+            parameters: { retry_after: 1 },
+          }),
+          { status: 429, headers: { "content-type": "application/json" } },
+        );
+      }
+      acceptedOwnerNotices += 1;
+      return new Response(
+        JSON.stringify({ ok: true, result: { message_id: 1002 } }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    };
+
+    const sent = await sendColleagueAssignment({
+      fromBotId: IVA_BOT_ID,
+      toBotId: CRITIC_BOT_ID,
+      task: "Проверь повтор строки владельцу после подтверждённого 429",
+      env,
+      settingsFile,
+      storeFile,
+      fetchImpl,
+    });
+    assert.equal(sent.ok, true);
+    assert.equal(sent.assignment.ownerNotified, false);
+    assert.notEqual(
+      sent.assignment.ownerNoticeClaimed,
+      true,
+      "confirmed rejection must release the owner-notice CAS slot",
+    );
+    assert.equal(ownerNoticeAttempts, 1);
+    assert.notEqual(dmText, "");
+
+    const firstClaim = await claimInboundPeerAssignment({
+      fromBotId: IVA_BOT_ID,
+      toBotId: CRITIC_BOT_ID,
+      messageId: 1001,
+      text: dmText,
+      env,
+      settingsFile,
+      storeFile,
+      fetchImpl,
+    });
+    assert.equal(firstClaim.duplicate, false);
+    await completeInboundPeerAssignment(firstClaim.assignmentId, { storeFile });
+    const secondClaim = await claimInboundPeerAssignment({
+      fromBotId: IVA_BOT_ID,
+      toBotId: CRITIC_BOT_ID,
+      messageId: 1001,
+      text: dmText,
+      env,
+      settingsFile,
+      storeFile,
+      fetchImpl,
+    });
+
+    assert.equal(secondClaim.duplicate, true);
+    assert.equal(ownerNoticeAttempts, 2);
+    assert.equal(acceptedOwnerNotices, 1);
+    const rows = await listColleagueAssignments(storeFile);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0]?.ownerNotified, true);
+    assert.equal(rows[0]?.ownerNoticeClaimed, true);
+  } finally {
+    cleanup();
+  }
+});
+
+test("uncertain owner-notice failure keeps the claim and receiver pass does not duplicate the line", async () => {
+  const { settingsFile, storeFile, cleanup } = makeTempFiles();
+  try {
+    const env = makeTestEnv();
+    let dmText = "";
+    let ownerNoticeAttempts = 0;
+    const fetchImpl: typeof fetch = async (input, init) => {
+      await Promise.resolve();
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.href
+            : input.url;
+      const match = /\/bot([^/]+)\/([A-Za-z0-9_]+)$/u.exec(url);
+      assert.ok(match, `unexpected Bot API URL: ${url}`);
+      const token = match[1];
+      const body = JSON.parse(
+        typeof init?.body === "string" ? init.body : "{}",
+      ) as Record<string, unknown>;
+      const chatId =
+        typeof body.chat_id === "string" || typeof body.chat_id === "number"
+          ? String(body.chat_id)
+          : "";
+      const text = typeof body.text === "string" ? body.text : "";
+      if (token === IVA_TOKEN && chatId === CRITIC_BOT_ID) {
+        dmText = text;
+        return new Response(
+          JSON.stringify({ ok: true, result: { message_id: 1101 } }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      assert.equal(token, CRITIC_TOKEN);
+      assert.equal(chatId, "42");
+      ownerNoticeAttempts += 1;
+      throw new TypeError("socket hang up");
+    };
+
+    const sent = await sendColleagueAssignment({
+      fromBotId: IVA_BOT_ID,
+      toBotId: CRITIC_BOT_ID,
+      task: "Проверь, что обрыв сети не освобождает слот строки владельцу",
+      env,
+      settingsFile,
+      storeFile,
+      fetchImpl,
+    });
+    assert.equal(sent.ok, true);
+    assert.equal(sent.assignment.ownerNotified, false);
+    assert.equal(sent.assignment.ownerNoticeClaimed, true);
+    assert.equal(ownerNoticeAttempts, 1);
+
+    const firstClaim = await claimInboundPeerAssignment({
+      fromBotId: IVA_BOT_ID,
+      toBotId: CRITIC_BOT_ID,
+      messageId: 1101,
+      text: dmText,
+      env,
+      settingsFile,
+      storeFile,
+      fetchImpl,
+    });
+    assert.equal(firstClaim.duplicate, false);
+    assert.equal(ownerNoticeAttempts, 1);
+    assert.equal(firstClaim.record.ownerNotified, false);
+    assert.equal(firstClaim.record.ownerNoticeClaimed, true);
+  } finally {
+    cleanup();
+  }
+});
+
+test("colleagueExecuteAsync delegate defaults owner notice to the configured owner chat, not digest or group user id", async () => {
+  const { settingsFile, storeFile, cleanup } = makeTempFiles();
+  try {
+    const env = {
+      ...makeTestEnv(),
+      TELEGRAM_ALLOWED_USER_IDS: "42,43",
+      TELEGRAM_DIGEST_CHAT_ID: "-100998",
+    };
+    const calls: Array<{ readonly token: string; readonly chatId: string }> = [];
+    const fetchImpl: typeof fetch = (input, init) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.href
+            : input.url;
+      const match = /\/bot([^/]+)\/([A-Za-z0-9_]+)$/u.exec(url);
+      assert.ok(match, `unexpected Bot API URL: ${url}`);
+      const body = JSON.parse(
+        typeof init?.body === "string" ? init.body : "{}",
+      ) as Record<string, unknown>;
+      calls.push({
+        token: match[1],
+        chatId:
+          typeof body.chat_id === "string" || typeof body.chat_id === "number"
+            ? String(body.chat_id)
+            : "",
+      });
+      return Promise.resolve(
+        new Response(JSON.stringify({ ok: true, result: { message_id: 55 } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    };
+    const groupCtx = {
+      session: {
+        auth: {
+          initiator: {
+            authenticator: "telegram-webhook",
+            principalType: "user",
+            attributes: { chat_type: "supergroup", user_id: "43" },
+          },
+          current: {
+            authenticator: "telegram-webhook",
+            principalType: "user",
+            attributes: { chat_type: "supergroup", user_id: "43" },
+          },
+        },
+      },
+    };
+
+    const result = await colleagueExecuteAsync(
+      { action: "delegate", bot_id: CODER_BOT_ID, task: "Собери факты" },
+      groupCtx,
+      { env, settingsFile, storeFile, fetchImpl },
+    );
+
+    assert.equal(result.ok, true);
+    const ownerNotice = calls.find((call) => call.token === CODER_TOKEN);
+    assert.equal(ownerNotice?.chatId, "42");
+    assert.equal(
+      calls.some((call) => call.chatId === "-100998" || call.chatId === "43"),
+      false,
+      "automatic delegation must not use digest chat or group user id as owner chat",
+    );
+  } finally {
+    cleanup();
+  }
+});

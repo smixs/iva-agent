@@ -319,21 +319,11 @@ export async function colleagueExecuteAsync(
   if (!task) {
     return { ok: false, error: "delegate requires a non-empty task" };
   }
-  const authUserId =
-    ctx?.session?.auth?.current?.principalType === "user"
-      ? ctx.session.auth.current.attributes?.user_id
-      : undefined;
-  const ownerChatId =
-    deps.ownerChatId ??
-    (typeof authUserId === "string" && authUserId.length > 0
-      ? authUserId
-      : undefined);
-
   const sent = await sendColleagueAssignment({
     fromBotId,
     toBotId,
     task,
-    ownerChatId,
+    ownerChatId: deps.ownerChatId,
     env,
     settingsFile: deps.settingsFile,
     storeFile: deps.storeFile,

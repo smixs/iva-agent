@@ -25,7 +25,11 @@
 \*                                проверка и CAS-захват слота ownerNoticeClaimed под замком
 \*                                (actor \in {"sender", "receiver"}) до сетевого вызова
 \*   FinishOwnerNotice(a, actor)  agent/lib/colleague-assignments.ts (postBotMessage + commit):
-\*                                сетевой sendMessage владельцу и фиксация ownerNotified=TRUE
+\*                                принятый Bot API sendMessage владельцу и фиксация ownerNotified=TRUE
+\*   RejectOwnerNotice(a, actor)  подтверждённый отказ Bot API (например, 429): строка точно
+\*                                не принята, durable CAS-слот освобождается для повтора
+\*   UncertainOwnerNotice(a, actor) обрыв/таймаут без ответа Bot API: слот остаётся занятым,
+\*                                повтор запрещён, потому что строка могла уйти владельцу
 \*   ExecuteAssignmentBatch(B)    agent/lib/telegram-acceptance.ts (preparePeerBotWebhookRequest)
 \*                                + scripts/poller/inbox.ts (promoteReadyInbox): разбор пачки
 \*                                поручений B (повтор + новое), фильтрация дублей, запуск свежих
@@ -40,6 +44,7 @@
 \*   AckOnlyAfterAccept           пачка поручений снимается только после принятия в Channel
 \*   ClaimBeforeSendOwnerNotice   отправитель и получатель захватывают слот под замком до sendMessage
 \*   CheckAllBatchAssignments     пачка проверяет каждое поручение (а не только первое)
+\*   ReleaseOwnerNoticeAfterReject подтверждённый отказ Bot API освобождает слот для повтора
 EXTENDS Naturals, FiniteSets
 
 CONSTANTS
@@ -53,14 +58,15 @@ CONSTANTS
   DeduplicateAssignments,
   AckOnlyAfterAccept,
   ClaimBeforeSendOwnerNotice,
-  CheckAllBatchAssignments
+  CheckAllBatchAssignments,
+  ReleaseOwnerNoticeAfterReject
 
 ASSUME MaxGroupMsgs \in Nat \ {0}
 ASSUME MaxAssignments \in Nat \ {0}
 ASSUME MaxCrashes \in Nat
 ASSUME {SerializeGroupTurns, QueueWhileGroupBusy, DeduplicateGroupUpdates,
         DeduplicateAssignments, AckOnlyAfterAccept, ClaimBeforeSendOwnerNotice,
-        CheckAllBatchAssignments} \subseteq BOOLEAN
+        CheckAllBatchAssignments, ReleaseOwnerNoticeAfterReject} \subseteq BOOLEAN
 
 GroupMsgs == 1..MaxGroupMsgs
 Assignments == 1..MaxAssignments
@@ -88,7 +94,8 @@ VARIABLES
   ownerNoticeClaimed,  \* [Assignments -> BOOLEAN] — durable CAS-слот под замком
   ownerNoticeInFlight, \* [Assignments -> SUBSET NoticeActors] — HTTP sendMessage в полёте
   ownerNotified,       \* [Assignments -> BOOLEAN] — durable признак после ответа Bot API
-  ownerNoticeCount,    \* [Assignments -> 0..2] — фактическое число sendMessage владельцу
+  ownerNoticeCount,    \* [Assignments -> 0..2] — число принятых Bot API строк владельцу
+  ownerNoticeUncertain, \* [Assignments -> BOOLEAN] — обрыв/таймаут без ответа Bot API; слот не освобождается
   \* --- Сбои моста ---
   crashes              \* 0..MaxCrashes
 
@@ -96,7 +103,7 @@ vars == <<groupReceived, groupQueue, groupActive, groupCompleted, groupPendingAc
           groupExecCount, groupReplyCount, groupSilentCount,
           assignPhase, assignFrom, assignTo, assignQueued, assignPendingAck,
           assignExecCount, ownerNoticeClaimed, ownerNoticeInFlight,
-          ownerNotified, ownerNoticeCount, crashes>>
+          ownerNotified, ownerNoticeCount, ownerNoticeUncertain, crashes>>
 
 ActiveGroupBots == {b \in Bots : groupActive[b] /= 0}
 GroupBusy == ActiveGroupBots /= {}
@@ -120,6 +127,7 @@ Init ==
   /\ ownerNoticeInFlight = [a \in Assignments |-> {}]
   /\ ownerNotified = [a \in Assignments |-> FALSE]
   /\ ownerNoticeCount = [a \in Assignments |-> 0]
+  /\ ownerNoticeUncertain = [a \in Assignments |-> FALSE]
   /\ crashes = 0
 
 \* Сообщение группы дошло до бота b. Если группа занята (или уже есть очередь), в рабочей
@@ -134,7 +142,7 @@ GroupMsgArrive(b, m) ==
                  groupReplyCount, groupSilentCount, assignPhase, assignFrom, assignTo,
                  assignQueued, assignPendingAck, assignExecCount,
                  ownerNoticeClaimed, ownerNoticeInFlight, ownerNotified,
-                 ownerNoticeCount, crashes>>
+                 ownerNoticeCount, ownerNoticeUncertain, crashes>>
 
 \* Мост доставляет очередное сообщение m из очереди бота b в Channel.
 StartGroupTurn(b, m) ==
@@ -153,7 +161,7 @@ StartGroupTurn(b, m) ==
   /\ UNCHANGED <<groupReceived, groupQueue, groupReplyCount, groupSilentCount,
                  assignPhase, assignFrom, assignTo, assignQueued, assignPendingAck,
                  assignExecCount, ownerNoticeClaimed, ownerNoticeInFlight,
-                 ownerNotified, ownerNoticeCount, crashes>>
+                 ownerNotified, ownerNoticeCount, ownerNoticeUncertain, crashes>>
 
 \* Бот b завершает ход в группе: отвечает (reply) либо штатно молчит (silent, iva:none).
 FinishGroupTurn(b, outcome) ==
@@ -168,7 +176,7 @@ FinishGroupTurn(b, outcome) ==
   /\ UNCHANGED <<groupReceived, groupQueue, groupCompleted, groupPendingAck,
                  groupExecCount, assignPhase, assignFrom, assignTo, assignQueued,
                  assignPendingAck, assignExecCount, ownerNoticeClaimed,
-                 ownerNoticeInFlight, ownerNotified, ownerNoticeCount, crashes>>
+                 ownerNoticeInFlight, ownerNotified, ownerNoticeCount, ownerNoticeUncertain, crashes>>
 
 \* Мост снимает принятое сообщение с durable-очереди бота b.
 AckGroupQueue(b, m) ==
@@ -179,7 +187,7 @@ AckGroupQueue(b, m) ==
                  groupReplyCount, groupSilentCount, assignPhase, assignFrom, assignTo,
                  assignQueued, assignPendingAck, assignExecCount,
                  ownerNoticeClaimed, ownerNoticeInFlight, ownerNotified,
-                 ownerNoticeCount, crashes>>
+                 ownerNoticeCount, ownerNoticeUncertain, crashes>>
 
 \* Поручение бота fromB боту toB личным сообщением Bot API (самому себе запрещено).
 \* Номера поручений выдаются последовательно (1, затем 2) для сжатия симметрий TLC.
@@ -194,7 +202,7 @@ SendAssignment(a, fromB, toB) ==
   /\ UNCHANGED <<groupReceived, groupQueue, groupActive, groupCompleted, groupPendingAck,
                  groupExecCount, groupReplyCount, groupSilentCount, assignPendingAck,
                  assignExecCount, ownerNoticeClaimed, ownerNoticeInFlight,
-                 ownerNotified, ownerNoticeCount, crashes>>
+                 ownerNotified, ownerNoticeCount, ownerNoticeUncertain, crashes>>
 
 \* Начало отправки видимой строки владельцу в чате коллеги (разделено с FinishOwnerNotice):
 \*   - в рабочей модели (ClaimBeforeSendOwnerNotice) отправитель и получатель берут
@@ -219,9 +227,9 @@ BeginOwnerNotice(a, actor) ==
   /\ UNCHANGED <<groupReceived, groupQueue, groupActive, groupCompleted, groupPendingAck,
                  groupExecCount, groupReplyCount, groupSilentCount, assignPhase,
                  assignFrom, assignTo, assignQueued, assignPendingAck, assignExecCount,
-                 ownerNotified, ownerNoticeCount, crashes>>
+                 ownerNotified, ownerNoticeCount, ownerNoticeUncertain, crashes>>
 
-\* Завершение сетевой отправки sendMessage владельцу и фиксация ownerNotified в ledger.
+\* Успешное завершение сетевой отправки sendMessage владельцу и фиксация ownerNotified в ledger.
 FinishOwnerNotice(a, actor) ==
   /\ actor \in ownerNoticeInFlight[a]
   /\ ownerNoticeInFlight' = [ownerNoticeInFlight EXCEPT ![a] = @ \ {actor}]
@@ -230,7 +238,32 @@ FinishOwnerNotice(a, actor) ==
   /\ UNCHANGED <<groupReceived, groupQueue, groupActive, groupCompleted, groupPendingAck,
                  groupExecCount, groupReplyCount, groupSilentCount, assignPhase,
                  assignFrom, assignTo, assignQueued, assignPendingAck, assignExecCount,
-                 ownerNoticeClaimed, crashes>>
+                 ownerNoticeClaimed, ownerNoticeUncertain, crashes>>
+
+\* Подтверждённый отказ Bot API (например, 429 с ответом в JSON): строка точно не принята.
+\* В рабочей модели durable CAS-слот освобождается, поэтому следующий проход sender/receiver
+\* может повторить строку; мутант ~ReleaseOwnerNoticeAfterReject оставляет слот занятым навсегда.
+RejectOwnerNotice(a, actor) ==
+  /\ actor \in ownerNoticeInFlight[a]
+  /\ ownerNoticeInFlight' = [ownerNoticeInFlight EXCEPT ![a] = @ \ {actor}]
+  /\ IF ReleaseOwnerNoticeAfterReject
+       THEN ownerNoticeClaimed' = [ownerNoticeClaimed EXCEPT ![a] = FALSE]
+       ELSE UNCHANGED ownerNoticeClaimed
+  /\ UNCHANGED <<groupReceived, groupQueue, groupActive, groupCompleted, groupPendingAck,
+                 groupExecCount, groupReplyCount, groupSilentCount, assignPhase,
+                 assignFrom, assignTo, assignQueued, assignPendingAck, assignExecCount,
+                 ownerNotified, ownerNoticeCount, ownerNoticeUncertain, crashes>>
+
+\* Неопределённый результат (обрыв сети или таймаут до ответа Bot API): строка могла
+\* уйти владельцу. Слот не освобождается, поэтому повтора и возможного дубля нет.
+UncertainOwnerNotice(a, actor) ==
+  /\ actor \in ownerNoticeInFlight[a]
+  /\ ownerNoticeInFlight' = [ownerNoticeInFlight EXCEPT ![a] = @ \ {actor}]
+  /\ ownerNoticeUncertain' = [ownerNoticeUncertain EXCEPT ![a] = TRUE]
+  /\ UNCHANGED <<groupReceived, groupQueue, groupActive, groupCompleted, groupPendingAck,
+                 groupExecCount, groupReplyCount, groupSilentCount, assignPhase,
+                 assignFrom, assignTo, assignQueued, assignPendingAck, assignExecCount,
+                 ownerNoticeClaimed, ownerNotified, ownerNoticeCount, crashes>>
 
 \* Получатель принимает пачку поручений batch \subseteq queued из inbox/очереди DM.
 \* В рабочей модели (CheckAllBatchAssignments) preparePeerBotWebhookRequest проверяет
@@ -278,7 +311,7 @@ ExecuteAssignmentBatch(batch) ==
                       ELSE ownerNoticeInFlight[a]]
   /\ UNCHANGED <<groupReceived, groupQueue, groupActive, groupCompleted, groupPendingAck,
                  groupExecCount, groupReplyCount, groupSilentCount, assignFrom, assignTo,
-                 assignQueued, ownerNotified, ownerNoticeCount, crashes>>
+                 assignQueued, ownerNotified, ownerNoticeCount, ownerNoticeUncertain, crashes>>
 
 \* Снятие принятой пачки поручений с durable inbox/очереди.
 \* В мутанте ~AckOnlyAfterAccept мост может снять элемент до принятия, теряя поручение.
@@ -295,7 +328,7 @@ AckAssignmentBatch ==
   /\ UNCHANGED <<groupReceived, groupQueue, groupActive, groupCompleted, groupPendingAck,
                  groupExecCount, groupReplyCount, groupSilentCount, assignPhase,
                  assignFrom, assignTo, assignExecCount, ownerNoticeClaimed,
-                 ownerNoticeInFlight, ownerNotified, ownerNoticeCount, crashes>>
+                 ownerNoticeInFlight, ownerNotified, ownerNoticeCount, ownerNoticeUncertain, crashes>>
 
 \* Обрыв моста до снятия ack: оперативная память pendingAck теряется, но дисковые очереди,
 \* ledger завершённых апдейтов/поручений и CAS-слот уведомлений переживают перезапуск.
@@ -308,13 +341,15 @@ CrashBeforeAck ==
   /\ UNCHANGED <<groupReceived, groupQueue, groupActive, groupCompleted, groupExecCount,
                  groupReplyCount, groupSilentCount, assignPhase, assignFrom, assignTo,
                  assignQueued, assignExecCount, ownerNoticeClaimed, ownerNoticeInFlight,
-                 ownerNotified, ownerNoticeCount>>
+                 ownerNotified, ownerNoticeCount, ownerNoticeUncertain>>
 
 Next ==
   \/ \E b \in Bots, m \in GroupMsgs : GroupMsgArrive(b, m) \/ StartGroupTurn(b, m) \/ AckGroupQueue(b, m)
   \/ \E b \in Bots, o \in GroupOutcomes : FinishGroupTurn(b, o)
   \/ \E a \in Assignments, f \in Bots, t \in Bots : SendAssignment(a, f, t)
-  \/ \E a \in Assignments, actor \in NoticeActors : BeginOwnerNotice(a, actor) \/ FinishOwnerNotice(a, actor)
+  \/ \E a \in Assignments, actor \in NoticeActors :
+       BeginOwnerNotice(a, actor) \/ FinishOwnerNotice(a, actor) \/
+       RejectOwnerNotice(a, actor) \/ UncertainOwnerNotice(a, actor)
   \/ \E batch \in SUBSET Assignments : ExecuteAssignmentBatch(batch)
   \/ AckAssignmentBatch
   \/ CrashBeforeAck
@@ -340,6 +375,7 @@ TypeOK ==
   /\ ownerNoticeInFlight \in [Assignments -> SUBSET NoticeActors]
   /\ ownerNotified \in [Assignments -> BOOLEAN]
   /\ ownerNoticeCount \in [Assignments -> 0..2]
+  /\ ownerNoticeUncertain \in [Assignments -> BOOLEAN]
   /\ crashes \in 0..MaxCrashes
 
 \* (1) В одной группе одновременно работает не более одного бота (очерёдность ответов).
@@ -374,13 +410,16 @@ NoDuplicateAssignment ==
 AtMostOneOwnerNotice ==
   \A a \in Assignments : ownerNoticeCount[a] <= 1
 
-\* (8) Исполненное поручение всегда имеет захваченный/отправленный слот уведомления владельцу,
-\*     а после завершения сетевой отправки — ровно 1 строку владельцу.
+\* (8) Исполненное поручение не застревает в занятом слоте уведомления владельцу:
+\*     успех фиксирует ровно одну принятую строку; подтверждённый отказ освобождает
+\*     слот для повтора; только неопределённый обрыв может удерживать слот без повтора
+\*     (иначе возможен дубль строки, если обрыв случился после фактической отправки).
 DoneAssignmentNotifiedOwner ==
   \A a \in Assignments :
     assignPhase[a] = "done" =>
-      /\ (ownerNoticeClaimed[a] \/ ownerNotified[a])
-      /\ (ownerNoticeInFlight[a] = {} => ownerNoticeCount[a] = 1)
+      /\ (ownerNotified[a] => ownerNoticeCount[a] = 1)
+      /\ ~(ownerNoticeClaimed[a] /\ ~ownerNotified[a] /\
+           ownerNoticeInFlight[a] = {} /\ ~ownerNoticeUncertain[a])
 
 \* Свидетель достижимости (нарочно ложный инвариант в отдельном .cfg):
 \* доказывает, что достижима трасса, где один ход в группе завершился ответом,

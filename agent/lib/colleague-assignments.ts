@@ -8,7 +8,7 @@
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import { isRecord } from "../../packages/guards/index.ts";
-import { notificationChat } from "../../packages/notification-chat/index.ts";
+import { ownerChat } from "../../packages/notification-chat/index.ts";
 import {
   configuredTelegramBots,
   resolveTelegramBot,
@@ -268,7 +268,12 @@ export function formatOwnerAssignmentNotice(
 
 type TelegramSendResult =
   | { readonly ok: true; readonly messageId?: number }
-  | { readonly ok: false; readonly error: string };
+  | {
+      readonly ok: false;
+      readonly error: string;
+      /** true только при подтверждённом ответе Bot API об отказе; обрыв сети остаётся неопределённым. */
+      readonly confirmed: boolean;
+    };
 
 async function postBotMessage(
   bot: TelegramBotConfig,
@@ -309,14 +314,43 @@ async function postBotMessage(
       typeof body?.description === "string"
         ? body.description
         : `HTTP ${response.status}`;
-    return { ok: false, error: reason };
+    return { ok: false, error: reason, confirmed: body?.ok === false };
   } catch (error) {
     const rawMessage = error instanceof Error ? error.message : String(error);
     return {
       ok: false,
       error: rawMessage.replaceAll(bot.token, "***"),
+      confirmed: false,
     };
   }
+}
+
+/** Освобождает CAS-слот строки владельцу после подтверждённого отказа Bot API. */
+async function releaseOwnerNoticeClaim(
+  storeFile: string,
+  assignmentId: string,
+  now: () => number,
+): Promise<ColleagueAssignmentRecord | null> {
+  let releasedRecord: ColleagueAssignmentRecord | null = null;
+  await withLedger(storeFile, async (ledger, save) => {
+    const current = ledger.records[assignmentId];
+    if (!current) return;
+    if (current.ownerNotified || current.ownerNoticeClaimed !== true) {
+      releasedRecord = current;
+      return;
+    }
+    const released: ColleagueAssignmentRecord = {
+      ...current,
+      ownerNoticeClaimed: false,
+      updatedAt: now(),
+    };
+    await save({
+      version: LEDGER_VERSION,
+      records: { ...ledger.records, [assignmentId]: released },
+    });
+    releasedRecord = released;
+  });
+  return releasedRecord;
 }
 
 /** Чей чат с владельцем показывает строку о поручении: всегда чат коллеги. */
@@ -454,7 +488,7 @@ export async function sendColleagueAssignment(
     };
   }
 
-  const ownerChat = input.ownerChatId?.trim() || notificationChat(env) || null;
+  const ownerChatId = input.ownerChatId?.trim() || ownerChat(env) || null;
   let deliveredRecord: ColleagueAssignmentRecord = {
     ...initialRecord,
     phase: "delivered",
@@ -473,7 +507,7 @@ export async function sendColleagueAssignment(
     const alreadyClaimedOrSent =
       existing?.ownerNotified === true ||
       existing?.ownerNoticeClaimed === true;
-    shouldSendNotice = ownerChat !== null && !alreadyClaimedOrSent;
+    shouldSendNotice = ownerChatId !== null && !alreadyClaimedOrSent;
     const merged: ColleagueAssignmentRecord = {
       ...(existing ?? initialRecord),
       phase: existing?.phase === "done" ? "done" : "delivered",
@@ -493,10 +527,10 @@ export async function sendColleagueAssignment(
     deliveredRecord = merged;
   });
 
-  if (shouldSendNotice && ownerChat) {
+  if (shouldSendNotice && ownerChatId) {
     const noticeBot = ownerNoticeBotFor(fromBot, toBot);
     const noticeText = formatOwnerAssignmentNotice(fromLabel, toLabel, task);
-    const noticeSent = await postBotMessage(noticeBot, ownerChat, noticeText, {
+    const noticeSent = await postBotMessage(noticeBot, ownerChatId, noticeText, {
       apiBaseUrl,
       fetchImpl,
     });
@@ -522,6 +556,10 @@ export async function sendColleagueAssignment(
       console.error(
         `[colleagues] не смог отправить строку о поручении ${id} владельцу: ${noticeSent.error}`,
       );
+      if (noticeSent.confirmed) {
+        deliveredRecord =
+          (await releaseOwnerNoticeClaim(storeFile, id, now)) ?? deliveredRecord;
+      }
     }
   }
 
@@ -574,7 +612,7 @@ export async function claimInboundPeerAssignment(
   const assignmentId =
     parseAssignmentId(input.text) ??
     `dm:${input.fromBotId}:${input.toBotId}:${String(input.messageId)}`;
-  const ownerChat = input.ownerChatId?.trim() || notificationChat(env) || null;
+  const ownerChatId = input.ownerChatId?.trim() || ownerChat(env) || null;
   const fromBot = resolveTelegramBot(input.fromBotId, env);
   const toBot = resolveTelegramBot(input.toBotId, env);
 
@@ -583,13 +621,10 @@ export async function claimInboundPeerAssignment(
   let shouldSendNotice = false;
 
   // Шаг 1 (под замком, без сети): проверяем дубль и захватываем CAS-слот ownerNoticeClaimed.
+  // Дубль не запускает исполнение повторно, но всё ещё может доказать строку владельцу,
+  // если прежняя отправка получила подтверждённый отказ и слот уже освобождён.
   await withLedger(storeFile, async (ledger, save) => {
     const existing = ledger.records[assignmentId];
-    if (existing && assignmentPhase(existing) === "done") {
-      isDuplicate = true;
-      claimedRecord = existing;
-      return;
-    }
     const timestamp = now();
     let record: ColleagueAssignmentRecord = existing ?? {
       id: assignmentId,
@@ -601,11 +636,12 @@ export async function claimInboundPeerAssignment(
       createdAt: timestamp,
       updatedAt: timestamp,
     };
+    isDuplicate = existing !== undefined && assignmentPhase(existing) === "done";
     const alreadyClaimedOrSent =
       record.ownerNotified === true || record.ownerNoticeClaimed === true;
     shouldSendNotice =
       !alreadyClaimedOrSent &&
-      ownerChat !== null &&
+      ownerChatId !== null &&
       fromBot !== null &&
       toBot !== null;
     if (shouldSendNotice) {
@@ -622,12 +658,8 @@ export async function claimInboundPeerAssignment(
     claimedRecord = record;
   });
 
-  if (isDuplicate) {
-    return { duplicate: true, assignmentId, record: claimedRecord };
-  }
-
   // Шаг 2 (вне замка, сеть) + Шаг 3 (под замком, запись ownerNotified=true).
-  if (shouldSendNotice && ownerChat && fromBot && toBot) {
+  if (shouldSendNotice && ownerChatId && fromBot && toBot) {
     const fromLabel = botDisplayLabel(input.fromBotId, env, settingsFile);
     const toLabel = botDisplayLabel(input.toBotId, env, settingsFile);
     const noticeBot = ownerNoticeBotFor(fromBot, toBot);
@@ -636,7 +668,7 @@ export async function claimInboundPeerAssignment(
       toLabel,
       claimedRecord.task,
     );
-    const sent = await postBotMessage(noticeBot, ownerChat, noticeText, {
+    const sent = await postBotMessage(noticeBot, ownerChatId, noticeText, {
       apiBaseUrl,
       fetchImpl,
     });
@@ -662,10 +694,15 @@ export async function claimInboundPeerAssignment(
       console.error(
         `[colleagues] не смог отправить строку о поручении ${assignmentId} владельцу: ${sent.error}`,
       );
+      if (sent.confirmed) {
+        claimedRecord =
+          (await releaseOwnerNoticeClaim(storeFile, assignmentId, now)) ??
+          claimedRecord;
+      }
     }
   }
 
-  return { duplicate: false, assignmentId, record: claimedRecord };
+  return { duplicate: isDuplicate, assignmentId, record: claimedRecord };
 }
 
 /** Помечает входящее поручение исполненным (`done`) после принятия хода Channel. */
