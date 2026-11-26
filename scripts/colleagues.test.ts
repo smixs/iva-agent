@@ -435,14 +435,9 @@ test("п.1 regression: bridge started with colleagues off accepts a colleague up
       mode: 0o600,
     },
   );
-  mkdirSync(join(dataPath, "telegram-offsets.d"), { recursive: true });
-  for (const botId of [CRITIC_BOT_ID, CODER_BOT_ID, SECRETARY_BOT_ID]) {
-    writeFileSync(
-      join(dataPath, "telegram-offsets.d", `${botId}.json`),
-      JSON.stringify({ offset: 1 }),
-      { mode: 0o600 },
-    );
-  }
+  // No telegram-offsets.d directory and no cursor files: first activation must
+  // create the cursor directory itself. The regression must prove that
+  // `iva colleague on` does not drop the pending Telegram queue while initializing it.
 
   const guardDir = mkdtempSync(join(tmpdir(), "iva-col-main-lock-"));
   const lease = await acquireTelegramProcessLock({

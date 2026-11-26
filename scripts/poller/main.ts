@@ -25,7 +25,6 @@ import {
   ROUTE,
   SECRET,
   TOKEN,
-  botBacklogMarkerFile,
   botOffsetFile,
   log,
   sleep,
@@ -411,9 +410,6 @@ export async function runBotPollLoop({
       try {
         offset = await initializeOffset();
         initializeOffset = undefined;
-        // The owner may have switched the option back off while webhook/offset
-        // initialization was in flight; the gate is checked again before the first poll.
-        if (!bot.isPrimary && !colleaguesEnabledImpl()) continue;
       } catch (error) {
         // A lost lease is fatal for the whole bridge; a bad or unreachable colleague
         // token must only retry this colleague and must not stop Iva's own polling.
@@ -422,6 +418,12 @@ export async function runBotPollLoop({
         await sleepImpl(3000);
         continue;
       }
+      // Initialization awaits webhook/offset I/O. The lease may have closed in that
+      // window, so the first getUpdates needs a fresh lease check after the await.
+      assertLease();
+      // The owner may have switched the option back off while webhook/offset
+      // initialization was in flight; the gate is checked again before the first poll.
+      if (!bot.isPrimary && !colleaguesEnabledImpl()) continue;
     }
     const pollSeconds = pollTimeoutSeconds();
     let data: TelegramResponse;
@@ -542,23 +544,27 @@ async function initColleagueBotOffset(
   processLease: TelegramProcessLease,
 ): Promise<number> {
   const offsetFile = botOffsetFile(bot);
-  const markerFile = botBacklogMarkerFile(bot);
-  const startup = await prepareTelegramStartup(processLease, {
-    markerFile,
-    loadOffsetImpl: () => loadOffset({ file: offsetFile }),
-  });
-  await deleteWebhookOrThrow(startup.firstRun, { token: bot.token });
-  if (startup.firstRun) {
-    const offset = await fastForwardOffset({ token: bot.token });
+  assertTelegramProcessLease(processLease);
+  // Unlike Iva's install first run, a colleague's first activation must not drop
+  // or fast-forward the Telegram backlog: those updates are owner messages sent
+  // while the option was off. Read any existing cursor before the webhook call,
+  // delete a stale webhook without dropping pending updates, and start at 0 when
+  // there is no cursor yet.
+  const stored = await loadOffset({ file: offsetFile });
+  assertTelegramProcessLease(processLease);
+  await deleteWebhookOrThrow(false, { token: bot.token });
+  assertTelegramProcessLease(processLease);
+  if (stored.offset === null) {
+    await saveOffset(0, { file: offsetFile });
+    assertTelegramProcessLease(processLease);
     log(
-      `bot:${bot.botId} first run — offset past the tail of the queue:`,
-      offset,
+      `bot:${bot.botId} first activation — pending queue preserved; starting offset:`,
+      0,
     );
-    await saveOffset(offset, { file: offsetFile });
-    return offset;
+    return 0;
   }
-  log(`bot:${bot.botId} starting offset:`, startup.offset);
-  return startup.offset;
+  log(`bot:${bot.botId} starting offset:`, stored.offset);
+  return stored.offset;
 }
 
 const rawCollectQuietMs = Number(

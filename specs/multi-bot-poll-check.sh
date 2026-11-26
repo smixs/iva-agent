@@ -26,6 +26,7 @@ check() { # config expected
 }
 check MultiBotPoll none
 check MultiBotPoll-shared-offset NoSkippedUpdate
+check MultiBotPoll-drop-activation-backlog NoSkippedUpdate
 check MultiBotPoll-no-lock SinglePollerLock
 check MultiBotPoll-no-bot-tag ExactBotAttribution
 check MultiBotPoll-independent-witness NoIndependentProgress

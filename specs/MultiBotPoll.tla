@@ -12,11 +12,14 @@
 \*   ToggleSlow(b)     бот b подвис на long-poll / получил 409 conflict backoff или восстановился
 \*   Admit(p, b)       scripts/poller/inbox.ts: admitTelegramUpdate с меткой бота b (iva_bot_id)
 \*   SaveOffset(p, b)  scripts/poller/offset.ts: saveOffset в файл бота b (или общий в мутанте)
+\*   ToggleColleagues  владелец включает/выключает опцию colleagues (iva colleague on/off)
+\*   InitColleague(p, b)  scripts/poller/main.ts: lazy init коллеги после включения опции
 \*
 \* Переключатели (TRUE в рабочей модели; каждый мутант снимает один):
 \*   PerBotOffset        свой файл offset на каждого бота (FALSE -> общий курсор)
 \*   EnforceProcessLock  один процесс под общим замком (FALSE -> два поллера одновременно)
 \*   PerBotTag           метка бота в ключе inbox (FALSE -> общий update_id двух ботов сталкивается)
+\*   PreserveActivationBacklog  первая активация коллеги сохраняет очередь (FALSE -> drop/fast-forward)
 EXTENDS Naturals, FiniteSets
 
 CONSTANTS
@@ -26,11 +29,12 @@ CONSTANTS
   MaxRestarts,
   PerBotOffset,
   EnforceProcessLock,
-  PerBotTag
+  PerBotTag,
+  PreserveActivationBacklog
 
 ASSUME MaxUpdates \in Nat \ {0}
 ASSUME MaxRestarts \in Nat
-ASSUME {PerBotOffset, EnforceProcessLock, PerBotTag} \subseteq BOOLEAN
+ASSUME {PerBotOffset, EnforceProcessLock, PerBotTag, PreserveActivationBacklog} \subseteq BOOLEAN
 
 Updates == 1..MaxUpdates
 Offsets == 1..(MaxUpdates + 1)
@@ -47,10 +51,13 @@ VARIABLES
   inboxUntagged,  \* SUBSET Updates — при ~PerBotTag: ключи без метки бота
   restarts,       \* 0..MaxRestarts
   overlapBad,     \* два процесса одновременно опрашивали Telegram
-  wrongBotBad     \* апдейт бота потерялся из-за столкновения update_id другого бота
+  wrongBotBad,    \* апдейт бота потерялся из-за столкновения update_id другого бота
+  colleaguesEnabled, \* опция коллег в настройках; по умолчанию FALSE
+  initialized       \* [Procs -> [Bots -> BOOLEAN]] — lazy init бота завершён в этом процессе
 
 vars == <<lockHolder, procState, tgUpdates, diskOffset, memOffset, pendingSave,
-          botSlow, admitted, inboxUntagged, restarts, overlapBad, wrongBotBad>>
+          botSlow, admitted, inboxUntagged, restarts, overlapBad, wrongBotBad,
+          colleaguesEnabled, initialized>>
 
 RunningProcs == {p \in Procs : procState[p] = "running"}
 
@@ -67,6 +74,8 @@ Init ==
   /\ restarts = 0
   /\ overlapBad = FALSE
   /\ wrongBotBad = FALSE
+  /\ colleaguesEnabled = FALSE
+  /\ initialized = [p \in Procs |-> [b \in Bots |-> b = "iva"]]
 
 StartProc(p) ==
   /\ procState[p] = "idle"
@@ -75,8 +84,9 @@ StartProc(p) ==
   /\ procState' = [procState EXCEPT ![p] = "running"]
   /\ memOffset' = [memOffset EXCEPT ![p] = diskOffset]
   /\ pendingSave' = [pendingSave EXCEPT ![p] = [b \in Bots |-> 0]]
+  /\ initialized' = [initialized EXCEPT ![p] = [b \in Bots |-> b = "iva"]]
   /\ UNCHANGED <<tgUpdates, diskOffset, botSlow, admitted, inboxUntagged,
-                 restarts, overlapBad, wrongBotBad>>
+                 restarts, overlapBad, wrongBotBad, colleaguesEnabled>>
 
 CrashProc(p) ==
   /\ procState[p] = "running"
@@ -86,25 +96,61 @@ CrashProc(p) ==
   /\ lockHolder' = IF lockHolder = p THEN "none" ELSE lockHolder
   /\ memOffset' = [memOffset EXCEPT ![p] = [b \in Bots |-> 1]]
   /\ pendingSave' = [pendingSave EXCEPT ![p] = [b \in Bots |-> 0]]
+  /\ initialized' = [initialized EXCEPT ![p] = [b \in Bots |-> b = "iva"]]
   /\ UNCHANGED <<tgUpdates, diskOffset, botSlow, admitted, inboxUntagged,
-                 overlapBad, wrongBotBad>>
+                 overlapBad, wrongBotBad, colleaguesEnabled>>
 
 TelegramReceive(b) ==
   /\ tgUpdates[b] < MaxUpdates
   /\ tgUpdates' = [tgUpdates EXCEPT ![b] = @ + 1]
   /\ UNCHANGED <<lockHolder, procState, diskOffset, memOffset, pendingSave,
-                 botSlow, admitted, inboxUntagged, restarts, overlapBad, wrongBotBad>>
+                 botSlow, admitted, inboxUntagged, restarts, overlapBad, wrongBotBad,
+                 colleaguesEnabled, initialized>>
 
 ToggleSlow(b) ==
   /\ botSlow' = [botSlow EXCEPT ![b] = ~@]
   /\ UNCHANGED <<lockHolder, procState, tgUpdates, diskOffset, memOffset,
-                 pendingSave, admitted, inboxUntagged, restarts, overlapBad, wrongBotBad>>
+                 pendingSave, admitted, inboxUntagged, restarts, overlapBad, wrongBotBad,
+                 colleaguesEnabled, initialized>>
+
+\* Владелец переключает опцию colleagues. Цикл коллеги уже существует, но пока опция
+\* выключена он спит до проверки настройки и не трогает Telegram.
+ToggleColleagues ==
+  /\ colleaguesEnabled' = ~colleaguesEnabled
+  /\ UNCHANGED <<lockHolder, procState, tgUpdates, diskOffset, memOffset,
+                 pendingSave, botSlow, admitted, inboxUntagged, restarts,
+                 overlapBad, wrongBotBad, initialized>>
+
+\* Отложенная инициализация коллеги после включения опции. В рабочей модели она
+\* сохраняет очередь первой активации: отсутствие cursor-файла означает опрос с первого
+\* неподтверждённого апдейта (модельный offset 1), а не fast-forward за хвост очереди.
+\* Мутант PreserveActivationBacklog=FALSE воспроизводит ошибочный drop/fast-forward:
+\* апдейты, пришедшие до включения, перепрыгиваются без durable admit и ловятся
+\* инвариантом NoSkippedUpdate.
+InitColleague(p, b) ==
+  /\ procState[p] = "running"
+  /\ b /= "iva"
+  /\ colleaguesEnabled
+  /\ ~initialized[p][b]
+  /\ EnforceProcessLock => lockHolder = p
+  /\ initialized' = [initialized EXCEPT ![p][b] = TRUE]
+  /\ LET next == tgUpdates[b] + 1 IN
+     /\ diskOffset' = IF PreserveActivationBacklog
+          THEN diskOffset
+          ELSE [diskOffset EXCEPT ![b] = IF diskOffset[b] = 1 THEN next ELSE diskOffset[b]]
+     /\ memOffset' = IF PreserveActivationBacklog
+          THEN memOffset
+          ELSE [memOffset EXCEPT ![p][b] = IF diskOffset[b] = 1 THEN next ELSE memOffset[p][b]]
+  /\ UNCHANGED <<lockHolder, procState, tgUpdates, pendingSave, botSlow,
+                 admitted, inboxUntagged, restarts, overlapBad, wrongBotBad,
+                 colleaguesEnabled>>
 
 \* Бот b принимает следующий апдейт u = memOffset[p][b] независимо от состояния других ботов.
 Admit(p, b) ==
   /\ procState[p] = "running"
   /\ ~botSlow[b]
   /\ pendingSave[p][b] = 0
+  /\ b = "iva" \/ (colleaguesEnabled /\ initialized[p][b])
   /\ LET u == memOffset[p][b] IN
      /\ u <= tgUpdates[b]
      /\ overlapBad' = (overlapBad \/ Cardinality(RunningProcs) > 1)
@@ -119,7 +165,8 @@ Admit(p, b) ==
                       /\ inboxUntagged' = inboxUntagged \cup {u}
                       /\ UNCHANGED wrongBotBad
      /\ pendingSave' = [pendingSave EXCEPT ![p][b] = u + 1]
-  /\ UNCHANGED <<lockHolder, procState, tgUpdates, diskOffset, memOffset, botSlow, restarts>>
+  /\ UNCHANGED <<lockHolder, procState, tgUpdates, diskOffset, memOffset, botSlow, restarts,
+                 colleaguesEnabled, initialized>>
 
 \* Сохранение offset на диск после durable admit. В мутанте ~PerBotOffset один общий offset
 \* сдвигает курсоры всех ботов разом.
@@ -135,12 +182,13 @@ SaveOffset(p, b) ==
                     [x \in Bots |-> IF next > memOffset[p][x] THEN next ELSE memOffset[p][x]]]
      /\ pendingSave' = [pendingSave EXCEPT ![p][b] = 0]
   /\ UNCHANGED <<lockHolder, procState, tgUpdates, botSlow, admitted, inboxUntagged,
-                 restarts, overlapBad, wrongBotBad>>
+                 restarts, overlapBad, wrongBotBad, colleaguesEnabled, initialized>>
 
 Next ==
   \/ \E p \in Procs : StartProc(p) \/ CrashProc(p)
   \/ \E b \in Bots : TelegramReceive(b) \/ ToggleSlow(b)
-  \/ \E p \in Procs, b \in Bots : Admit(p, b) \/ SaveOffset(p, b)
+  \/ ToggleColleagues
+  \/ \E p \in Procs, b \in Bots : InitColleague(p, b) \/ Admit(p, b) \/ SaveOffset(p, b)
 
 Spec == Init /\ [][Next]_vars
 
@@ -157,6 +205,8 @@ TypeOK ==
   /\ restarts \in 0..MaxRestarts
   /\ overlapBad \in BOOLEAN
   /\ wrongBotBad \in BOOLEAN
+  /\ colleaguesEnabled \in BOOLEAN
+  /\ initialized \in [Procs -> [Bots -> BOOLEAN]]
 
 \* (1) В каждый момент не больше одного живого процесса Bridge держит опрос.
 SinglePollerLock == ~overlapBad /\ Cardinality(RunningProcs) <= 1
