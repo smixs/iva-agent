@@ -1,0 +1,28 @@
+✖ последний круг A: successful token response without a token is terminal (1.846875ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 382.782541
+
+✖ failing tests:
+
+test at scripts/colleague-hire.test.ts:1463:1
+✖ последний круг A: successful token response without a token is terminal (1.846875ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  true !== false
+  
+      at TestContext.<anonymous> (file:///Users/majento/dev/factory-work/iva/scripts/colleague-hire.test.ts:1488:45)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: true,
+    expected: false,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
