@@ -285,26 +285,31 @@ export async function updateBranchOf(root: string): Promise<Branch> {
     const upstream = upstreamQuery(root);
     // The whole local config, not `--get`: `--get` says "not set" and "git failed" with the
     // same 1, and its `--default` needs git 2.18. Any exit but 0 here is a failure.
-    // `-z`: entries end with NUL and a key is split from its value by the first newline, so a
-    // value of several lines cannot pass for another key.
     const read = await gitAt(upstream.root, [
       "config",
       "--local",
       "--null",
       "--list",
     ]);
-    if (read.code !== 0) return "other";
-    // `--list` lowers the key and keeps the value; the last entry wins, as with `--get`.
-    const key = UPDATE_BRANCH_CONFIG.toLowerCase();
-    let branch: string | null | undefined;
-    for (const entry of String(read.stdout ?? "").split("\0")) {
-      const split = entry.indexOf("\n");
-      if ((split < 0 ? entry : entry.slice(0, split)).toLowerCase() === key)
-        branch = split < 0 ? null : entry.slice(split + 1);
-    }
-    if (branch === undefined) return "main";
-    return branch === "main" || branch === "beta" ? branch : "other";
+    return read.code === 0 ? branchIn(String(read.stdout ?? "")) : "other";
   } catch {
     return "other";
   }
+}
+
+/**
+ * The update branch in the output of `git config --null --list`. `-z`: entries end with NUL
+ * and a key is split from its value by the first newline, so a value of several lines cannot
+ * pass for another key. The key comes lowered; the last entry wins, as with `--get`.
+ */
+function branchIn(list: string): Branch {
+  const key = UPDATE_BRANCH_CONFIG.toLowerCase();
+  let branch: string | null | undefined;
+  for (const entry of list.split("\0")) {
+    const split = entry.indexOf("\n");
+    if ((split < 0 ? entry : entry.slice(0, split)).toLowerCase() === key)
+      branch = split < 0 ? null : entry.slice(split + 1);
+  }
+  if (branch === undefined) return "main";
+  return branch === "main" || branch === "beta" ? branch : "other";
 }
