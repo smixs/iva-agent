@@ -25,6 +25,7 @@ interface RenderedCard {
   classicText: string;
   classicRows: ButtonSpec[][];
   richMarkdown: string;
+  richHtml: string;
 }
 
 interface PreviewData {
@@ -61,6 +62,122 @@ function safeJsonForScript(value: unknown): string {
     .replaceAll("<", "\\u003c")
     .replaceAll(">", "\\u003e")
     .replaceAll("&", "\\u0026");
+}
+
+const RICH_BUTTON_RE = /<tg-button(?=[\s>])([^>]*)>([\s\S]*?)<\/tg-button>/gi;
+
+function decodeAttribute(value: string): string {
+  return value
+    .replaceAll("&quot;", '"')
+    .replaceAll("&lt;", "<")
+    .replaceAll("&gt;", ">")
+    .replaceAll("&amp;", "&");
+}
+
+function richAttr(attrs: string, name: string): string | undefined {
+  const match = new RegExp(`\\b${name}="([^"]*)"`, "i").exec(attrs);
+  return match ? decodeAttribute(match[1]) : undefined;
+}
+
+function unescapeRichText(value: string): string {
+  return value.replace(/\\([*_#|<])/g, "$1");
+}
+
+function renderRichButton(attrs: string, label: string): string | null {
+  const text = label.replace(/<[^>]+>/g, "").trim();
+  if (!text) return null;
+  const data = richAttr(attrs, "data");
+  const style = richAttr(attrs, "style");
+  const styleClass =
+    style === "danger" || style === "success" || style === "link"
+      ? ` style-${style}`
+      : "";
+  const callback = data ? ` data-cb="${escapeHtml(data)}"` : "";
+  return `<button type="button" class="tg-btn${styleClass}"${callback}>${escapeHtml(text)}</button>`;
+}
+
+function renderRichButtons(source: string): string {
+  return [...source.matchAll(RICH_BUTTON_RE)]
+    .map((match) => renderRichButton(match[1], match[2]))
+    .filter((html): html is string => html !== null)
+    .join("");
+}
+
+function renderRichMarkdownHtml(markdown: string): string {
+  const html: string[] = [];
+  for (const raw of markdown.split(/\n\n+/)) {
+    const block = raw.trim();
+    if (!block) continue;
+    if (/^<tg-button-row\b/i.test(block)) {
+      const lines = block.split("\n");
+      const rowLine = lines[0].trim();
+      const rowMatch =
+        /^<tg-button-row\b[^>]*>([\s\S]*?)<\/tg-button-row>$/i.exec(rowLine);
+      const buttons = renderRichButtons(rowMatch?.[1] ?? "");
+      if (buttons) {
+        html.push(
+          `<div class="rich-buttons"><div class="tg-row">${buttons}</div></div>`,
+        );
+      }
+      const caption = lines.slice(1).join("\n").trim();
+      if (caption) {
+        html.push(
+          `<p>${escapeHtml(unescapeRichText(caption)).replaceAll("\n", "<br>")}</p>`,
+        );
+      }
+      continue;
+    }
+    if (/^<tg-button(?=[\s>])/i.test(block)) {
+      const buttons = renderRichButtons(block);
+      if (buttons) {
+        html.push(
+          `<div class="rich-buttons"><div class="tg-row">${buttons}</div></div>`,
+        );
+      }
+      const rest = unescapeRichText(block.replace(RICH_BUTTON_RE, "")).trim();
+      if (rest) html.push(`<p>${escapeHtml(rest)}</p>`);
+      continue;
+    }
+    if (/^#\s+/.test(block)) {
+      html.push(
+        `<div class="tg-title">${escapeHtml(block.replace(/^#+\s+/, ""))}</div>`,
+      );
+      continue;
+    }
+    const lines = block.split("\n");
+    if (
+      lines.length >= 2 &&
+      lines[0].startsWith("|") &&
+      lines[1].startsWith("| ---")
+    ) {
+      const header = lines[0]
+        .slice(1, -1)
+        .split("|")
+        .map((cell) => `<th>${escapeHtml(cell.trim())}</th>`)
+        .join("");
+      const rows = lines
+        .slice(2)
+        .map((line) => {
+          const cells = line
+            .slice(1, -1)
+            .split("|")
+            .map(
+              (cell) => `<td>${escapeHtml(unescapeRichText(cell.trim()))}</td>`,
+            )
+            .join("");
+          return `<tr>${cells}</tr>`;
+        })
+        .join("");
+      html.push(
+        `<table class="tg-table"><thead><tr>${header}</tr></thead><tbody>${rows}</tbody></table>`,
+      );
+      continue;
+    }
+    html.push(
+      `<p>${escapeHtml(unescapeRichText(block)).replaceAll("\n", "<br>")}</p>`,
+    );
+  }
+  return html.join("");
 }
 
 async function buildPreviewData(): Promise<PreviewData> {
@@ -152,8 +269,12 @@ async function buildPreviewData(): Promise<PreviewData> {
 
   try {
     const { SCREENS } = await import("./lib/menu/index.ts");
-    const { blockButtons, button, classicScreen, menuBackLine } =
+    const { blockButtons, button, classicScreen } =
       await import("./lib/telegram-buttons.ts");
+    const { modelIntroMarkdown, thinkingEffortMarkdown } =
+      await import("./poller/wizards.ts");
+    const { claudeReasoningLevels } =
+      await import("./lib/claude-cli-status.ts");
 
     const writeFixtureSettings = (patch: Record<string, unknown>) => {
       writeFileSync(join(dataDir, "settings.json"), JSON.stringify(patch));
@@ -245,6 +366,7 @@ async function buildPreviewData(): Promise<PreviewData> {
         markdown: string,
       ) => {
         const classic = classicScreen(markdown);
+        const richMarkdown = blockButtons(markdown);
         screensByLang[lang][id] = {
           id,
           section,
@@ -262,7 +384,8 @@ async function buildPreviewData(): Promise<PreviewData> {
                 ...(btn.style ? { style: btn.style } : {}),
               })),
           ),
-          richMarkdown: blockButtons(markdown),
+          richMarkdown,
+          richHtml: renderRichMarkdownHtml(richMarkdown),
         };
       };
 
@@ -361,38 +484,38 @@ async function buildPreviewData(): Promise<PreviewData> {
       // Restore classic default for leaf renders.
       writeFixtureSettings({ language: lang, menuStyle: "classic" });
 
-      // Model & Thinking wizard handoff previews (handled by index.ts → /model, /think).
+      // Model & Thinking handoff previews use the same markdown builders as /model and /think.
+      const previewModel = "claude-fable-5-2";
       capture(
         "mdl",
         "gm",
-        "Хендофф → /model",
+        "Штатный экран /model",
         "🧠 Выбор модели",
         "🧠 Model wizard",
-        [
-          `# ${tr("🧠 Model", "🧠 Модель")}`,
-          tr(
-            "Hands off to the /model wizard in the same message (provider, model, API key).",
-            "Передаёт управление визарду /model в том же сообщении (провайдер, модель, ключ).",
-          ),
-          menuBackLine({ tr }, "gm"),
-          menuBackLine({ tr }, "r"),
-        ].join("\n\n"),
+        modelIntroMarkdown(
+          {
+            providerLabel: "claude",
+            model: previewModel,
+            effort: "medium",
+            helperModel: "claude-sonnet-5-5",
+          },
+          tr,
+        ),
       );
       capture(
         "thk",
         "gm",
-        "Хендофф → /think",
+        "Штатный экран /think",
         "🤔 Размышления",
         "🤔 Thinking wizard",
-        [
-          `# ${tr("🤔 Thinking", "🤔 Размышления")}`,
-          tr(
-            "Hands off to the /think wizard in the same message (low / medium / high).",
-            "Передаёт управление визарду /think в том же сообщении (low / medium / high).",
-          ),
-          menuBackLine({ tr }, "gm"),
-          menuBackLine({ tr }, "r"),
-        ].join("\n\n"),
+        thinkingEffortMarkdown(
+          {
+            model: previewModel,
+            effort: "medium",
+            efforts: claudeReasoningLevels(previewModel),
+          },
+          tr,
+        ),
       );
 
       capture(
@@ -557,7 +680,8 @@ async function buildPreviewData(): Promise<PreviewData> {
     }
 
     return {
-      generatedFrom: "scripts/lib/menu/* + scripts/lib/telegram-buttons.ts",
+      generatedFrom:
+        "scripts/lib/menu/* + scripts/poller/wizards.ts + scripts/lib/telegram-buttons.ts",
       rootCount: 6,
       legacyCount: 16,
       screens: screensByLang,
@@ -933,7 +1057,7 @@ function renderHtml(data: PreviewData): string {
     <header class="top">
       <div class="brand">
         <h1 id="page-title">Ива /menu — 6 разделов и переключатель «Коллеги»</h1>
-        <p id="page-sub">Превью собрано напрямую из настоящих модулей <code>scripts/lib/menu/*</code> и рендерера <code>scripts/lib/telegram-buttons.ts</code>. Все 16 прежних пунктов доступны внутри шести разделов; опция «🤝 Коллеги» в «Подключениях» выключена по умолчанию.</p>
+        <p id="page-sub">Превью собрано напрямую из настоящих модулей <code>scripts/lib/menu/*</code>, визардов <code>scripts/poller/wizards.ts</code> и рендерера <code>scripts/lib/telegram-buttons.ts</code>. Все 16 прежних пунктов доступны внутри шести разделов; опция «🤝 Коллеги» в «Подключениях» выключена по умолчанию.</p>
       </div>
       <div class="controls">
         <div class="seg" role="group" aria-label="Language">
@@ -1010,47 +1134,10 @@ function renderHtml(data: PreviewData): string {
           .replaceAll(">", "&gt;");
       }
 
-      function renderMarkdownBody(md) {
-        const blocks = md.split(/\\n\\n+/);
-        const html = [];
-        for (const raw of blocks) {
-          const block = raw.trim();
-          if (!block) continue;
-          if (/^<tg-button-row\\b/i.test(block)) {
-            const buttons = [...block.matchAll(/<tg-button([^>]*)>([\\s\\S]*?)<\\/tg-button>/gi)];
-            html.push('<div class="rich-buttons"><div class="tg-row">' + buttons.map((m) => {
-              const attrs = m[1];
-              const label = m[2];
-              const dataMatch = /\\bdata="([^"]*)"/i.exec(attrs);
-              const styleMatch = /\\bstyle="([^"]*)"/i.exec(attrs);
-              const cls = styleMatch ? " style-" + styleMatch[1] : "";
-              const cb = dataMatch ? ' data-cb="' + esc(dataMatch[1]) + '"' : "";
-              return '<button type="button" class="tg-btn' + cls + '"' + cb + '>' + esc(label) + '</button>';
-            }).join("") + '</div></div>');
-            continue;
-          }
-          if (/^#\\s+/.test(block)) {
-            html.push('<div class="tg-title">' + esc(block.replace(/^#+\\s+/, "")) + '</div>');
-            continue;
-          }
-          const lines = block.split("\\n");
-          if (lines.length >= 2 && lines[0].startsWith("|") && lines[1].startsWith("| ---")) {
-            const header = lines[0].slice(1, -1).split("|").map((c) => "<th>" + esc(c.trim()) + "</th>").join("");
-            const rows = lines.slice(2).map((line) => {
-              const cells = line.slice(1, -1).split("|").map((c) => "<td>" + esc(c.trim()) + "</td>").join("");
-              return "<tr>" + cells + "</tr>";
-            }).join("");
-            html.push('<table class="tg-table"><thead><tr>' + header + '</tr></thead><tbody>' + rows + '</tbody></table>');
-            continue;
-          }
-          html.push("<p>" + esc(block.replace(/\\\\([*_#|<])/g, "$1")) + "</p>");
-        }
-        return html.join("");
-      }
 
       function renderTelegramCard(card, interactive) {
         if (style === "rich") {
-          return '<div class="tg-bubble">' + renderMarkdownBody(card.richMarkdown) + '</div>';
+          return '<div class="tg-bubble">' + card.richHtml + '</div>';
         }
         const lines = card.classicText.split("\\n");
         const first = lines[0] || "";

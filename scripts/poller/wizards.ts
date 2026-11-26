@@ -182,9 +182,10 @@ export async function runWizardRequest<T>(
 }
 
 const EFFORT_SET = new Set(EFFORTS);
+type WizardTextPick = (english: string, russian: string) => string;
 // effortLabel — функция (tr на месте вызова): язык не замораживается в module-level const.
-const effortLabel = (v: string | null) =>
-  v && EFFORT_SET.has(v) ? v : tr("not set", "не задан");
+const effortLabel = (v: string | null, pick: WizardTextPick = tr) =>
+  v && EFFORT_SET.has(v) ? v : pick("not set", "не задан");
 
 export function isStaleWizard(
   st: WizardSnapshot | null,
@@ -404,7 +405,12 @@ const refuseInputInGroup = (st: WizardState) =>
 
 // Уровни размышлений — равноправные короткие варианты без пояснений: ряд кнопок на
 // каждый экран плюс «не задавать» и сохранение/выход — кнопкой в ряду.
-function effortLines(ns: string, withKeep: boolean, efforts: string[]) {
+function effortLines(
+  ns: string,
+  withKeep: boolean,
+  efforts: string[],
+  pick: WizardTextPick = tr,
+) {
   const lines: string[] = [];
   for (let i = 0; i < efforts.length; i += 3) {
     lines.push(
@@ -417,13 +423,62 @@ function effortLines(ns: string, withKeep: boolean, efforts: string[]) {
   }
   lines.push(
     buttonRow([
-      button(tr("Don't set", "Не задавать"), `${ns}:eff:unset`),
+      button(pick("Don't set", "Не задавать"), `${ns}:eff:unset`),
       withKeep
-        ? button(tr("Keep", "Оставить"), `${ns}:keep`)
-        : button(tr("Cancel", "Отмена"), "iva_model:cancel", "danger"),
+        ? button(pick("Keep", "Оставить"), `${ns}:keep`)
+        : button(pick("Cancel", "Отмена"), "iva_model:cancel", "danger"),
     ]),
   );
   return lines;
+}
+
+type ModelIntroView = {
+  providerLabel: string;
+  model: string;
+  effort: string | null;
+  helperModel: string;
+};
+
+/** Стартовый экран /model — единый источник для боевого хендоффа и превью меню. */
+export function modelIntroMarkdown(
+  view: ModelIntroView,
+  pick: WizardTextPick = tr,
+): string {
+  return [
+    `# ${pick("🧠 Model", "🧠 Модель")}`,
+    [
+      `| ${pick("Provider", "Провайдер")} | ${pick("Model", "Модель")} | ${pick("Thinking", "Размышления")} |`,
+      "| --- | --- | --- |",
+      `| ${escapeRichText(view.providerLabel)} | ${escapeRichText(view.model)} | ${escapeRichText(effortLabel(view.effort, pick))} |`,
+    ].join("\n"),
+    button(
+      `${pick("Helpers", "Помощники")}: ${escapeRichText(view.helperModel)}`,
+      "iva_model:helper",
+    ),
+    button(pick("Change", "Сменить"), "iva_model:chg"),
+    button(pick("Keep", "Оставить"), "iva_model:keep"),
+  ].join("\n\n");
+}
+
+type ThinkingEffortView = {
+  model: string;
+  effort: string | null;
+  efforts: string[];
+};
+
+/** Экран уровней /think — единый источник для боевого хендоффа и превью меню. */
+export function thinkingEffortMarkdown(
+  view: ThinkingEffortView,
+  pick: WizardTextPick = tr,
+): string {
+  return [
+    `# ${pick("🤔 Thinking", "🤔 Размышления")}`,
+    pick(
+      `Thinking level for ${escapeRichText(view.model)}: ${escapeRichText(effortLabel(view.effort, pick))}.`,
+      `Уровень размышлений для ${escapeRichText(view.model)}: ${escapeRichText(effortLabel(view.effort, pick))}.`,
+    ),
+    ...effortLines("iva_think", true, view.efforts, pick),
+  ].join("\n\n");
 }
 
 // {msgId} (опц.) — хендофф из /menu: визард заменяет flow-слот и рисует в ТО ЖЕ сообщение меню.
@@ -436,20 +491,12 @@ async function handleModelCmd(
   const st = newWizard(chatId, from, "model");
   st.msgId = msgId ?? null;
   st.step = "intro";
-  const text = [
-    `# ${tr("🧠 Model", "🧠 Модель")}`,
-    [
-      `| ${tr("Provider", "Провайдер")} | ${tr("Model", "Модель")} | ${tr("Thinking", "Размышления")} |`,
-      "| --- | --- | --- |",
-      `| ${escapeRichText(providerLabel)} | ${escapeRichText(model)} | ${escapeRichText(effortLabel(effort))} |`,
-    ].join("\n"),
-    button(
-      `${tr("Helpers", "Помощники")}: ${escapeRichText(helperModel)}`,
-      "iva_model:helper",
-    ),
-    button(tr("Change", "Сменить"), "iva_model:chg"),
-    button(tr("Keep", "Оставить"), "iva_model:keep"),
-  ].join("\n\n");
+  const text = modelIntroMarkdown({
+    providerLabel,
+    model,
+    effort,
+    helperModel,
+  });
   return wizScreen(st, text);
 }
 
@@ -526,14 +573,7 @@ async function handleThinkCmd(
   st.step = "effort";
   return wizScreen(
     st,
-    [
-      `# ${tr("🤔 Thinking", "🤔 Размышления")}`,
-      tr(
-        `Thinking level for ${escapeRichText(model)}: ${escapeRichText(effortLabel(effort))}.`,
-        `Уровень размышлений для ${escapeRichText(model)}: ${escapeRichText(effortLabel(effort))}.`,
-      ),
-      ...effortLines("iva_think", true, st.efforts),
-    ].join("\n\n"),
+    thinkingEffortMarkdown({ model, effort, efforts: st.efforts }),
   );
 }
 
