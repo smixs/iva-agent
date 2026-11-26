@@ -26,6 +26,23 @@ type CaptureResult = {
 
 type EnvValues = Record<string, string>;
 
+/**
+ * Child PATH must keep the caller's order when it already carries a Node bin directory.
+ * Stabilization can move that directory from a versioned Cellar path to an `opt` link,
+ * so either one counts: prepending again would push an earlier executable override
+ * behind it and change which command a child actually runs.
+ */
+export function childPath(
+  path: string | undefined,
+  nodeBinDir: string,
+  originalNodeBinDir = nodeBinDir,
+): string {
+  const entries = (path || "").split(":").filter(Boolean);
+  return entries.includes(nodeBinDir) || entries.includes(originalNodeBinDir)
+    ? entries.join(":")
+    : [nodeBinDir, ...entries].join(":");
+}
+
 type RuntimeColors = {
   readonly g: string;
   readonly y: string;
@@ -52,23 +69,22 @@ export function createCliRuntime(root: string) {
   );
   const NODE = stableNodeExecutable(process.execPath);
   const NODE_BIN_DIR = dirname(NODE);
+  const ORIGINAL_NODE_BIN_DIR = dirname(process.execPath);
   const NPM = existsSync(join(NODE_BIN_DIR, "npm"))
     ? join(NODE_BIN_DIR, "npm")
     : "npm";
   // Child processes need the same node/npm the CLI itself runs on, so NODE_BIN_DIR goes
-  // in front — but only when PATH does not already contain it. Prepending it a second
-  // time silently reorders PATH: with a system Node in /usr/bin, /usr/bin jumps ahead of
-  // whatever the caller put first, so a stub placed earlier in PATH stops winning. That
-  // is how `scripts/cli/services-entrypoints.test.ts` reached the real systemctl instead
-  // of its own fake and drove live user units.
-  const pathEntries = (process.env.PATH || "").split(":").filter(Boolean);
+  // in front — but only when PATH carries neither it nor the directory the caller's
+  // executable came from. Prepending it a second time silently reorders PATH: with a
+  // system Node in /usr/bin, /usr/bin jumps ahead of whatever the caller put first, so a
+  // stub placed earlier in PATH stops winning. That is how
+  // `scripts/cli/services-entrypoints.test.ts` reached the real systemctl instead of its
+  // own fake and drove live user units. Homebrew stabilization can rename that directory,
+  // so the original one is just as strong a reason to leave PATH alone.
   const childEnv: NodeJS.ProcessEnv = {
     ...process.env,
     ASSISTANT_DATA_DIR: dataDirAbs(),
-    PATH: (pathEntries.includes(NODE_BIN_DIR)
-      ? pathEntries
-      : [NODE_BIN_DIR, ...pathEntries]
-    ).join(":"),
+    PATH: childPath(process.env.PATH, NODE_BIN_DIR, ORIGINAL_NODE_BIN_DIR),
   };
 
   const SERVICES = ["iva.service", "iva-telegram-poll.service"];

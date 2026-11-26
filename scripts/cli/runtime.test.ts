@@ -8,6 +8,7 @@ import {
   readFileSync,
   realpathSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -15,7 +16,7 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import fc from "fast-check";
-import { createCliRuntime } from "./runtime.ts";
+import { childPath, createCliRuntime } from "./runtime.ts";
 
 const RUNTIME_MODULE = new URL("./runtime.ts", import.meta.url);
 
@@ -316,7 +317,7 @@ test("writeEnvVars deduplicates CRLF input and writes one atomic LF record", asy
   assert.equal(statSync(runtime.ENV_PATH).mode & 0o777, 0o600);
 });
 
-test("childEnv keeps the caller's PATH order when NODE_BIN_DIR is already on it", async (t) => {
+test("childEnv keeps the caller's PATH order when the stable NODE_BIN_DIR is already on it", async (t) => {
   const root = await sandbox(t);
   const originalPath = process.env.PATH;
   t.after(() => {
@@ -334,6 +335,97 @@ test("childEnv keeps the caller's PATH order when NODE_BIN_DIR is already on it"
   // The whole array, not just the head: a dropped or reordered tail entry is
   // the same defect as a stub that stops winning.
   assert.deepEqual(entries, [stubBin, nodeBinDir, tailBin]);
+});
+
+test("childEnv keeps the caller's PATH order when the original Node bin dir is on it", async (t) => {
+  const root = await sandbox(t);
+  const originalPath = process.env.PATH;
+  t.after(() => {
+    process.env.PATH = originalPath;
+  });
+  const originalBin = dirname(process.execPath);
+  // Both fixture entries live under the sandbox, so neither can accidentally
+  // equal originalBin on a machine that keeps node somewhere unusual.
+  const stubBin = join(root, "stub-bin");
+  const tailBin = join(root, "tail-bin");
+  process.env.PATH = `${stubBin}:${originalBin}:${tailBin}`;
+
+  const entries = (createCliRuntime(root).childEnv.PATH ?? "").split(":");
+
+  assert.deepEqual(entries, [stubBin, originalBin, tailBin]);
+});
+
+test("childEnv keeps both Node bin dirs in caller order when both are on PATH", async (t) => {
+  const root = await sandbox(t);
+  const originalPath = process.env.PATH;
+  t.after(() => {
+    process.env.PATH = originalPath;
+  });
+  const stableBin = dirname(stableNodeExecutable(process.execPath));
+  const originalBin = dirname(process.execPath);
+  const stubBin = join(root, "stub-bin");
+  process.env.PATH = `${stubBin}:${stableBin}:${originalBin}`;
+
+  const entries = (createCliRuntime(root).childEnv.PATH ?? "").split(":");
+
+  assert.deepEqual(entries, [stubBin, stableBin, originalBin]);
+});
+
+test("childEnv preserves an earlier executable override when a Node bin dir is present", async (t) => {
+  const root = await sandbox(t);
+  const originalPath = process.env.PATH;
+  t.after(() => {
+    process.env.PATH = originalPath;
+  });
+  const stubBin = join(root, "stub-bin");
+  mkdirSync(stubBin);
+  writeFileSync(join(stubBin, "override-me"), "#!/bin/sh\nprintf 'stub'\n", {
+    mode: 0o755,
+  });
+  process.env.PATH = `${stubBin}:${dirname(process.execPath)}:/usr/bin:/bin`;
+
+  const runtime = createCliRuntime(root);
+
+  assert.equal((runtime.childEnv.PATH ?? "").split(":")[0], stubBin);
+  assert.equal(runtime.cap("override-me", []).out, "stub");
+});
+
+test("childPath keeps Homebrew PATH order with distinct Cellar and opt bin dirs", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "iva-cli-homebrew-path-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const originalNode = join(root, "Cellar/node@24/24.1/bin/node");
+  const stableNode = join(root, "opt/node@24/bin/node");
+  mkdirSync(dirname(originalNode), { recursive: true });
+  mkdirSync(dirname(stableNode), { recursive: true });
+  symlinkSync(process.execPath, originalNode);
+  symlinkSync(originalNode, stableNode);
+
+  const originalBin = dirname(originalNode);
+  const stableBin = dirname(stableNodeExecutable(originalNode, "darwin"));
+  assert.notEqual(originalBin, stableBin);
+  const stubBin = join(root, "stub-bin");
+  const tailBin = join(root, "tail-bin");
+
+  // Only the original directory: no prepend, the earlier override still wins.
+  assert.equal(
+    childPath(`${stubBin}:${originalBin}:${tailBin}`, stableBin, originalBin),
+    `${stubBin}:${originalBin}:${tailBin}`,
+  );
+  // Only the stable directory: also already covered, so leave the order alone.
+  assert.equal(
+    childPath(`${stubBin}:${stableBin}:${tailBin}`, stableBin, originalBin),
+    `${stubBin}:${stableBin}:${tailBin}`,
+  );
+  // Both: keep the caller's order exactly.
+  assert.equal(
+    childPath(`${stableBin}:${originalBin}`, stableBin, originalBin),
+    `${stableBin}:${originalBin}`,
+  );
+  // Neither: prepend the stable directory once.
+  assert.equal(
+    childPath(`${stubBin}:${tailBin}`, stableBin, originalBin),
+    `${stableBin}:${stubBin}:${tailBin}`,
+  );
 });
 
 test("childEnv prepends NODE_BIN_DIR when PATH does not carry it", async (t) => {
@@ -355,13 +447,14 @@ test("childEnv prepends NODE_BIN_DIR when PATH does not carry it", async (t) => 
 // `Property failed after N tests { seed: -1234567, path: "12:3:0", endOnFailure: true }`.
 // Подставь их вторым аргументом — fc.assert(prop, { seed: -1234567, path: "12:3:0" }) —
 // и прогон повторится байт в байт, включая shrink.
-test("property: childEnv stably filters PATH and prepends NODE_BIN_DIR only when absent", async (t) => {
+test("property: childEnv stably filters PATH and prepends the stable bin dir only when neither Node dir is present", async (t) => {
   const root = await sandbox(t);
   const originalPath = process.env.PATH;
   t.after(() => {
     process.env.PATH = originalPath;
   });
   const nodeBinDir = dirname(stableNodeExecutable(process.execPath));
+  const originalBinDir = dirname(process.execPath);
   const otherSegment = fc.oneof(
     fc.constantFrom(
       join(root, "stub-bin"),
@@ -373,22 +466,43 @@ test("property: childEnv stably filters PATH and prepends NODE_BIN_DIR only when
     ),
     fc
       .string({ minLength: 1, maxLength: 40, unit: "grapheme" })
-      .filter((segment) => segment !== nodeBinDir && !segment.includes(":")),
+      .filter(
+        (segment) =>
+          segment !== nodeBinDir &&
+          segment !== originalBinDir &&
+          !segment.includes(":"),
+      ),
   );
   const pathSegments = fc
     .record({
       segments: fc.array(fc.oneof(fc.constant(""), otherSegment), {
         maxLength: 12,
       }),
-      nodePositions: fc.array(fc.nat(), { maxLength: 3 }),
+      nodePosition: fc.nat(),
+      originalPosition: fc.nat(),
+      includeNode: fc.boolean(),
+      includeOriginal: fc.boolean(),
     })
-    .map(({ segments, nodePositions }) => {
-      const withNode = [...segments];
-      for (const nodePosition of nodePositions) {
-        withNode.splice(nodePosition % (withNode.length + 1), 0, nodeBinDir);
-      }
-      return withNode;
-    });
+    .map(
+      ({
+        segments,
+        nodePosition,
+        originalPosition,
+        includeNode,
+        includeOriginal,
+      }) => {
+        const withNode = [...segments];
+        if (includeNode)
+          withNode.splice(nodePosition % (withNode.length + 1), 0, nodeBinDir);
+        if (includeOriginal)
+          withNode.splice(
+            originalPosition % (withNode.length + 1),
+            0,
+            originalBinDir,
+          );
+        return withNode;
+      },
+    );
 
   fc.assert(
     fc.property(pathSegments, (inputSegments) => {
@@ -396,19 +510,12 @@ test("property: childEnv stably filters PATH and prepends NODE_BIN_DIR only when
 
       const result = (createCliRuntime(root).childEnv.PATH ?? "").split(":");
       const filteredInput = inputSegments.filter(Boolean);
-      const inputNodeCount = filteredInput.filter(
-        (segment) => segment === nodeBinDir,
-      ).length;
-
-      assert.equal(
-        result.filter((segment) => segment === nodeBinDir).length,
-        inputNodeCount || 1,
+      const hasNode = filteredInput.some(
+        (segment) => segment === nodeBinDir || segment === originalBinDir,
       );
-      if (inputNodeCount === 0) {
-        assert.deepEqual(result, [nodeBinDir, ...filteredInput]);
-      } else {
-        assert.deepEqual(result, filteredInput);
-      }
+
+      if (hasNode) assert.deepEqual(result, filteredInput);
+      else assert.deepEqual(result, [nodeBinDir, ...filteredInput]);
       assert.ok(result.every(Boolean));
     }),
     { numRuns: 500 },
