@@ -465,7 +465,10 @@ export async function runBotPollLoop({
         // A lost lease is fatal for the whole bridge; a bad or unreachable colleague
         // token must only retry this colleague and must not stop Iva's own polling.
         assertLease();
-        logImpl(`[${label}] offset init:`, errorMessage(error));
+        logImpl(
+          `[${label}] offset init:`,
+          redactBotLogText(errorMessage(error), bot),
+        );
         await sleepImpl(3000);
         continue;
       }
