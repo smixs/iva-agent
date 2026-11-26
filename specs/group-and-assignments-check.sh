@@ -1,8 +1,8 @@
 #!/bin/sh
 # GroupAndAssignments.tla under TLC: verifies group turn serialization across bots,
-# lossless/no-duplicate group and assignment handling across crash-replay, idempotent
-# owner notification in the colleague chat, every mutant catches its invariant, and the
-# witness proves both reply+silence in a group and completed bot-to-bot assignment.
+# lossless/no-duplicate group and batched assignment handling across crash-replay,
+# split claim/send owner notification in both delivery orders, every mutant catches
+# its invariant, and the witness proves reply+silence in a group plus completed assignments.
 set -u
 cd "$(dirname "$0")" || exit 2
 . ./tlc-result.sh || exit 2
@@ -32,5 +32,6 @@ check GroupAndAssignments-duplicate-group NoDuplicateGroupProcessing
 check GroupAndAssignments-duplicate-assignment NoDuplicateAssignment
 check GroupAndAssignments-lost-assignment NoLostAssignment
 check GroupAndAssignments-duplicate-owner-notice AtMostOneOwnerNotice
+check GroupAndAssignments-batch-first-only NoLostAssignment
 check GroupAndAssignments-witness NoSilenceAndAssignmentWitness
 exit "$failed"
