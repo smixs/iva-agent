@@ -20,6 +20,7 @@ import { mkdir } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import type { PluginManifest, PluginReport } from "#lib/plugin-reader.ts";
 import type { PluginEntry, PluginsState } from "#lib/plugin-store.ts";
+import { installCountEnabled } from "../lib/install-count.ts";
 import { parseMarketplaceRequest } from "../lib/marketplace.ts";
 import {
   namespaceTaken,
@@ -62,6 +63,16 @@ type Undo = {
   readonly displaced: string | null;
 };
 
+/**
+ * Счёт одной установки, который ещё не ушёл (ADR-0029): строка владельцу и сам запрос.
+ * Порядок держит вызывающий: сначала владелец читает строку — в терминале или в
+ * Telegram, — потом имя уходит.
+ */
+export type PendingCount = {
+  readonly notice: string;
+  readonly send: () => Promise<void>;
+};
+
 type AddOptions = {
   /** Зовёт `install-proposal` по тапу владельца: гвард `add` не нужен. */
   readonly fromProposal?: boolean;
@@ -98,6 +109,7 @@ export function createPluginInstallCommands(
     now,
     log,
     interactive,
+    countInstall,
     components,
     absolute,
     locked,
@@ -113,7 +125,7 @@ export function createPluginInstallCommands(
     reconcileUnits,
     restartMoved,
   } = trust;
-  const { ok, warn, bad, step, confirm, dataDirAbs } = runtime;
+  const { C, ok, warn, bad, step, confirm, dataDirAbs, readEnv } = runtime;
   const { pluginTreeDigest, readPlugin } = core.reader;
   const {
     findPlugin,
@@ -465,7 +477,15 @@ export function createPluginInstallCommands(
     return options?.fromProposal !== true && !interactive();
   }
 
-  async function add(options?: AddOptions): Promise<void> {
+  /** `iva plugin add` из терминала: строка о счёте печатается, затем имя уходит. */
+  async function addAndCount(): Promise<void> {
+    const count = await add();
+    if (!count) return;
+    log(`${C.d}${count.notice}${C.x}`);
+    await count.send();
+  }
+
+  async function add(options?: AddOptions): Promise<PendingCount | null> {
     const raw = args[0];
     if (!raw)
       throw new Error(
@@ -476,6 +496,7 @@ export function createPluginInstallCommands(
     const request = parseMarketplaceRequest(raw);
     const typed = request ? null : parsePluginSource(raw);
     const data = dataDirAbs();
+    let fromDefault = false;
 
     // Состояние читается и пишется ВНУТРИ лока: прочитать до лока значило бы
     // записать поверх чужого `disable`, который случился, пока шла установка.
@@ -485,9 +506,15 @@ export function createPluginInstallCommands(
         warn(translate(RISK_EN, RISK_RU));
         log();
       }
-      const { source, provenance } = request
+      const hit = request
         ? await marketplace.sourceByName(data, state, request)
-        : { source: typed as PluginSource, provenance: null };
+        : {
+            source: typed as PluginSource,
+            provenance: null,
+            fromDefault: false,
+          };
+      fromDefault = hit.fromDefault;
+      const { source, provenance } = hit;
       step(
         provenance
           ? `Installing ${provenance.expect} from ${provenance.marketplace} (${formatPluginSource(source)})`
@@ -535,7 +562,8 @@ export function createPluginInstallCommands(
     // заканчивается сборкой и рестартом. Сборка не прошла — установки не было: стор и
     // plugins.json возвращаются как были, работающая версия не тронута (ADR-0003).
     let inRunningVersion = false;
-    if (inVersion(report, pluginMode(entry))) {
+    const versioned = inVersion(report, pluginMode(entry));
+    if (versioned) {
       const outcome = await buildCode(entry.name, true);
       if (outcome.failure !== null) {
         await undoInstalls(data, [undo]);
@@ -594,6 +622,68 @@ export function createPluginInstallCommands(
               "тулы его MCP-серверов появятся у агента после сборки версии",
             ),
       );
+    return pendingCount(data, entry.name, {
+      // Запись без источника, которую `add` перекрыл, — плагин уже стоял: не новая установка.
+      fresh: undo.previous === null,
+      // Код, не вошедший в работающую версию, агенту недоступен: такой плагин ещё не стоит.
+      working: !versioned || inRunningVersion,
+      fromDefault,
+      fromProposal: options?.fromProposal === true,
+    });
+  }
+
+  /**
+   * Счёт установок: имя плагина из списка по умолчанию уходит на iva-agent.com, и больше
+   * ничего (ADR-0029). Здесь решается, уходит ли оно; сам запрос делает вызывающий после
+   * того, как владелец прочёл строку. Плагин к этому шагу уже стоит, поэтому отсюда ничего
+   * не бросается: не прочиталась настройка или кэш списка — счёта нет, установка остаётся.
+   */
+  async function pendingCount(
+    data: string,
+    name: string,
+    how: {
+      readonly fresh: boolean;
+      readonly working: boolean;
+      readonly fromDefault: boolean;
+      readonly fromProposal: boolean;
+    },
+  ): Promise<PendingCount | null> {
+    if (!countInstall || !how.fresh || !how.working) return null;
+    try {
+      // Плагин с кодом приходит к тапу папкой: со списком его связывает только имя.
+      const listed =
+        how.fromDefault ||
+        (how.fromProposal &&
+          (await marketplace.listedByDefault(
+            data,
+            await readPluginsState(data),
+            name,
+          )));
+      if (!listed) return null;
+    } catch {
+      return null;
+    }
+    if (!countSwitchedOn()) return null;
+    return {
+      notice: translate(
+        `install count: sending the name ${name} to iva-agent.com, nothing else — IVA_PLUGIN_STATS=off in .env turns this off`,
+        `счёт установок: на iva-agent.com уходит имя ${name}, и больше ничего — выключить: IVA_PLUGIN_STATS=off в .env`,
+      ),
+      // Между строкой и запросом по тапу стоит доставка сообщения в Telegram: выключатель,
+      // поставленный за это время, ещё слышен.
+      send: async () => {
+        if (countSwitchedOn()) await countInstall(name);
+      },
+    };
+  }
+
+  /** Выключатель счёта: из `.env` и из окружения команды; не прочитался — выключено. */
+  function countSwitchedOn(): boolean {
+    try {
+      return installCountEnabled(readEnv()) && installCountEnabled(process.env);
+    } catch {
+      return false;
+    }
   }
 
   async function remove(): Promise<void> {
@@ -939,5 +1029,5 @@ export function createPluginInstallCommands(
     });
   }
 
-  return { add, update, remove, sync };
+  return { add, addAndCount, update, remove, sync };
 }

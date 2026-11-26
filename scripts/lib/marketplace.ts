@@ -3,15 +3,15 @@
  *
  * The file is `.agents/plugins/marketplace.json` in the convention of Codex
  * (ADR-0009): one `name`, then `plugins[]` with `name`, `source` and an optional
- * `description`. A list in a repository is all it is: no central place, no
- * moderation, nobody's approval to publish. Ours by default is `smixs/iva-plugins`;
- * the owner adds his own next to it.
+ * `description`. A list in a repository is all it is: no central place, and anyone
+ * publishes a list of their own. Ours by default is `smixs/iva-plugins`, the one list
+ * that is reviewed (ADR-0029); the owner adds his own next to it.
  *
  * Two rules shape everything here.
  *
- * The file is UNTRUSTED input. It arrives from a repository nobody vetted, so the
- * parser never throws, never trusts a type, and never lets one broken entry take
- * the file down with it: a plugin whose source cannot be used is skipped by name,
+ * The file is UNTRUSTED input. To this parser no list is vetted, the reviewed one
+ * included, so it never throws, never trusts a type, and never lets one broken entry
+ * take the file down with it: a plugin whose source cannot be used is skipped by name,
  * with a diagnostic, and the rest of the list keeps working. Sources we do not
  * install (`npm`) and fields we do not read (`policy`, `interface`, anything new)
  * are ignored the same way - out loud.
@@ -625,6 +625,8 @@ export function resolveMarketplacePlugin(
 ): {
   readonly source: PluginSource;
   readonly marketplace: string;
+  /** Строка источника списка: по ней отличают список по умолчанию (ADR-0029). */
+  readonly recorded: string;
   readonly name: string;
 } {
   // Квалификатор называет список либо именем из файла, либо строкой источника: имя
@@ -693,6 +695,7 @@ export function resolveMarketplacePlugin(
     return {
       source: marketplaceEntrySource(entry, one.repo),
       marketplace: one.label,
+      recorded: one.recorded,
       name: entry.name,
     };
   } catch (error) {

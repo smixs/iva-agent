@@ -33,7 +33,9 @@ A scheduled task (`content: "task"`) is a self-contained instruction for Iva. At
 
 If the task fails or returns no usable text, code sends the original instruction. If `/new` resets the conversation while the task is running, code sends that text with a short note in your language explaining that the reset interrupted execution. An explicit `/stop` addressed to that turn closes it without sending the text.
 
-A row fires once. The transport may retry the same text if Telegram's acceptance answer is lost; a doubled reminder is preferable to a lost one. `delivered` records the transport answer, while `error` preserves any task failure and transport refusal. The list names the last firing with `phase`: `waiting`, `running`, `delivered`, `failed` or `abandoned`. An interrupted child without a known outcome still uses the existing Alert described below.
+A task turn can also end by deciding there is nothing to tell you — a check that found nothing new, for example. It says so explicitly with `<!-- iva:none -->` on the first line of its answer and a one-line outcome after it. Nothing is sent then, not even a silent message; the outcome is written to the journal and to the row, where the list shows it as `quiet_note`. That is not a failure: no `error`, no Alert. An empty answer is different — it stays a failure, and the original instruction is sent as above. A plain reminder you asked to receive is always delivered.
+
+A row fires once. The transport may retry the same text if Telegram's acceptance answer is lost; a doubled reminder is preferable to a lost one. `delivered` records the transport answer, while `error` preserves any task failure and transport refusal. The list names the last firing with `phase`: `waiting`, `running`, `delivered`, `quiet`, `failed` or `abandoned`. An interrupted child without a known outcome still uses the existing Alert described below.
 
 ## Where to see the list
 

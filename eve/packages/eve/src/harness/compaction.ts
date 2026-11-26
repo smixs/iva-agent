@@ -98,6 +98,7 @@ interface CompactionHeuristicInput {
   readonly config: CompactionConfig;
   readonly conversation: readonly ModelMessage[];
   readonly older: readonly ModelMessage[];
+  readonly original: readonly ModelMessage[];
   readonly previousCheckpoint: string | undefined;
   readonly recent: readonly ModelMessage[];
 }
@@ -140,33 +141,25 @@ function toolResultCapHeuristic(input: CompactionHeuristicInput): CompactionHeur
     input.conversation,
   );
 
-  // Evaluate on the same ruler shouldCompact uses (envelope included):
-  // capping can be a near no-op when the older region holds few large
-  // results, and accepting one on a looser ruler would let shouldCompact
-  // re-fire every step without compaction ever making progress.
-  const evaluation = evaluateThreshold(capped, input.config, "should-compact");
-  return evaluation.type === "within-limit"
-    ? { messages: capped, type: "within-limit" }
-    : { type: "insufficient" };
-}
-
-/**
- * Measures a candidate history against the compaction threshold.
- * The "should-compact" ruler includes the fixed prompt-envelope overhead that
- * {@link shouldCompact} adds, so a history accepted on it cannot immediately
- * re-trigger compaction; "estimate" is the bare history size.
- */
-function evaluateThreshold(
-  messages: readonly ModelMessage[],
-  config: CompactionConfig,
-  ruler: "estimate" | "should-compact",
-): { readonly estimatedTokens: number; readonly type: "over-limit" | "within-limit" } {
-  const overhead = ruler === "should-compact" ? COMPACTION_PROMPT_OVERHEAD_TOKENS : 0;
-  const estimatedTokens = estimateTokens(messages) + overhead;
-  return {
-    estimatedTokens,
-    type: estimatedTokens <= config.threshold ? "within-limit" : "over-limit",
-  };
+  // Capping keeps the measured prefix in the same positions. Scale its last
+  // model count by how much of its estimated size remains. shouldCompact
+  // accounts for messages appended after that prefix and for the envelope.
+  const { lastKnownInputTokens: prior, lastKnownPromptMessageCount: priorCount } = input.config;
+  const cappedInputTokens =
+    prior !== undefined &&
+    Number.isFinite(prior) &&
+    prior >= 0 &&
+    priorCount !== undefined &&
+    Number.isInteger(priorCount) &&
+    priorCount >= 0 &&
+    priorCount <= input.original.length
+      ? prior *
+        (estimateTokens(capped.slice(0, priorCount)) /
+          estimateTokens(input.original.slice(0, priorCount)))
+      : undefined;
+  return shouldCompact(capped, { ...input.config, lastKnownInputTokens: cappedInputTokens })
+    ? { type: "insufficient" }
+    : { messages: capped, type: "within-limit" };
 }
 
 /**
@@ -198,7 +191,14 @@ export async function compactMessages(
   }
 
   for (const heuristic of COMPACTION_HEURISTICS) {
-    const outcome = heuristic({ config, conversation, older, previousCheckpoint, recent: tail });
+    const outcome = heuristic({
+      config,
+      conversation,
+      older,
+      original: messages,
+      previousCheckpoint,
+      recent: tail,
+    });
     if (outcome.type === "within-limit") {
       return outcome.messages;
     }
@@ -239,7 +239,7 @@ export async function compactMessages(
   let kept = tail;
   while (true) {
     const verbatim = withResumptionGuard([...summaryHead, ...kept], conversation);
-    if (evaluateThreshold(verbatim, config, "estimate").type === "within-limit") {
+    if (estimateTokens(verbatim) <= config.threshold) {
       return verbatim;
     }
 
@@ -247,7 +247,7 @@ export async function compactMessages(
       [...summaryHead, ...keepNonToolResultMessages(kept)],
       conversation,
     );
-    if (evaluateThreshold(stripped, config, "estimate").type === "within-limit") {
+    if (estimateTokens(stripped) <= config.threshold) {
       return stripped;
     }
 

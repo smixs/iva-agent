@@ -161,6 +161,7 @@ test("the authored tree has only its explicit shared-package edges", () => {
       "agent/lib/job-facts.ts -> ../../packages/secret-redaction/index.ts",
       "agent/lib/model-auth-alert.ts -> ../../packages/alert-state/index.ts",
       "agent/lib/model-auth-alert.ts -> ../../packages/timezone/index.ts",
+      "agent/lib/model-auth-state.ts -> ../../packages/alert-state/index.ts",
       "agent/lib/model-provider.ts -> @iva/opencode-protocol",
       "agent/lib/plugin-reader.ts -> ../../packages/guards/index.ts",
       "agent/lib/plugin-store.ts -> ../../packages/guards/index.ts",

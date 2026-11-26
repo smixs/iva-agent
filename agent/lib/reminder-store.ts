@@ -45,11 +45,12 @@ export type ReminderStatus = "pending" | "fired";
 /**
  * Фаза последнего срабатывания строки — один вывод для тика, `iva doctor` и инструментов
  * (specs/ReminderLifecycle.tla). waiting — ещё не срабатывала; running — взята, ребёнок идёт;
- * delivered — текст дошёл; failed — не дошёл, причина в `error`; abandoned — ребёнка нет и
+ * delivered — текст дошёл; quiet — ход отработал и явно решил ничего не отправлять, итог в
+ * `quietNote`; failed — не дошёл, причина в `error`; abandoned — ребёнка нет и
  * факта нет: текст мог уйти, а мог и нет.
  */
 export type ReminderPhase =
-  "waiting" | "running" | "delivered" | "failed" | "abandoned";
+  "waiting" | "running" | "delivered" | "quiet" | "failed" | "abandoned";
 /** Причина, которую тик пишет брошенному срабатыванию. */
 export const REMINDER_ABANDONED =
   "abandoned: the firing ended without an outcome";
@@ -169,6 +170,12 @@ export interface Reminder {
   /** Причина последнего сбоя — отправки или хода агента. */
   error: string | null;
   /**
+   * Итог хода, который явно решил промолчать (`<!-- iva:none -->`): текст для журнала и
+   * списка, владельцу сообщением он не уходил. null — последнее срабатывание не молчало;
+   * строки, записанные до появления поля, его не несут вовсе.
+   */
+  quietNote?: string | null;
+  /**
    * Сессия идущего хода: её пишет ребёнок перед ходом, читает тик. Убитый ребёнок (SIGKILL)
    * свой `finally` не отработает, и запись чата снимет тик — по этой самой сессии.
    * null — в этом срабатывании хода ещё не было; строки, записанные до появления поля,
@@ -200,6 +207,7 @@ const ROW_KEYS = [
   "firedAt",
   "delivered",
   "error",
+  "quietNote",
   "sessionId",
   "timeout_minutes",
   "running_timeout_minutes",
@@ -400,6 +408,25 @@ function assertSessionId(
   return value ?? null;
 }
 
+/**
+ * Итог промолчавшего хода. Отсутствующего поля не дорисовываем: строка, никогда не
+ * молчавшая, остаётся той же формой, что читала прежняя версия, — ключ появляется только
+ * у факта молчания. Пустой итог допустим: пометка сама — явное решение.
+ */
+function assertQuietNote(
+  file: string,
+  idLabel: string,
+  value: unknown,
+): string | null | undefined {
+  if (value !== null && value !== undefined && typeof value !== "string")
+    badReminder(
+      file,
+      idLabel,
+      `quietNote must be null or a string, got ${JSON.stringify(value)}`,
+    );
+  return value;
+}
+
 const minutes = z.number().int().min(1).max(60).optional();
 const commandTimes = z.object({
   timeout_minutes: minutes,
@@ -457,6 +484,9 @@ function assertReminder(file: string, value: unknown): Reminder {
     firedAt,
     delivered,
     error,
+    ...(value.quietNote === undefined
+      ? {}
+      : { quietNote: assertQuietNote(file, idLabel, value.quietNote) }),
     sessionId: assertSessionId(file, idLabel, value.sessionId),
     ...times.data,
   };
@@ -765,6 +795,7 @@ export async function fireDue(
       row.firedAt = nowMs;
       row.delivered = null;
       row.error = null;
+      delete row.quietNote;
       row.sessionId = null;
       if (row.schedule.kind === "cron") {
         try {
@@ -836,6 +867,8 @@ export async function recordDelivery(
     readonly firedAt: number | null;
     readonly delivered: boolean | null;
     readonly error: string | null;
+    /** Итог промолчавшего хода; не назван — прежнее значение не тронуто. */
+    readonly quietNote?: string;
   },
   options: ReminderRecordOptions = {},
 ): Promise<Reminder> {
@@ -846,6 +879,7 @@ export async function recordDelivery(
     (row) => {
       row.delivered = outcome.delivered;
       if (outcome.error !== null) row.error = outcome.error;
+      if (outcome.quietNote !== undefined) row.quietNote = outcome.quietNote;
     },
   );
 }
@@ -1019,6 +1053,7 @@ export function reminderPhase(
   command = false,
 ): ReminderPhase {
   if (row.firedAt === null) return "waiting";
+  if (row.quietNote !== null && row.quietNote !== undefined) return "quiet";
   if (row.delivered !== null) return row.delivered ? "delivered" : "failed";
   if (row.error !== null) return "abandoned";
   const pulse =

@@ -2,9 +2,10 @@
 // one name → source lookup an install goes through.
 //
 // A Marketplace is a JSON list in a git repository (`.agents/plugins/marketplace.json`, the
-// convention of Codex): name → source. Not a registry - no centre, no moderation (ADR-0009).
-// The file is untrusted input, so everything it can get wrong is a diagnostic here, and the
-// parser that produces them lives in `scripts/lib/marketplace.ts`.
+// convention of Codex): name → source. Not a registry - no centre (ADR-0009). The default
+// list is reviewed by its maintainers (ADR-0029); to this code every list is still untrusted
+// input, so everything a file can get wrong is a diagnostic here, and the parser that
+// produces them lives in `scripts/lib/marketplace.ts`.
 import { rmSync } from "node:fs";
 import type { PluginsState } from "#lib/plugin-store.ts";
 import {
@@ -294,6 +295,8 @@ export function createPluginMarketplaceCommands(context: PluginCliContext) {
   ): Promise<{
     readonly source: PluginSource;
     readonly provenance: Provenance;
+    /** Имя взято из списка по умолчанию: только такая установка считается (ADR-0029). */
+    readonly fromDefault: boolean;
   }> {
     const all = await loadMarketplaces(git, data, state.marketplaces, true);
     for (const one of all) reportMarketplace(one, false);
@@ -301,7 +304,24 @@ export function createPluginMarketplaceCommands(context: PluginCliContext) {
     return {
       source: hit.source,
       provenance: { marketplace: hit.marketplace, expect: hit.name },
+      fromDefault: hit.recorded === DEFAULT_MARKETPLACE,
     };
+  }
+
+  /**
+   * Есть ли имя в списке по умолчанию, каким он лежит в кэше. Спрашивает установка по
+   * тапу: к ней плагин приходит папкой, и имя — всё, что связывает его со списком. В
+   * сеть не идёт; владелец, снявший список по умолчанию, в счёт не попадает.
+   */
+  async function listedByDefault(
+    data: string,
+    state: PluginsState,
+    name: string,
+  ): Promise<boolean> {
+    if (!marketplaceSources(state.marketplaces).includes(DEFAULT_MARKETPLACE))
+      return false;
+    const one = await loadMarketplace(git, data, DEFAULT_MARKETPLACE, false);
+    return one.market.entries.some((entry) => entry.name === name);
   }
 
   return {
@@ -309,5 +329,6 @@ export function createPluginMarketplaceCommands(context: PluginCliContext) {
     /** Нужно `list --available` и установке по имени: та же диагностика, тот же кэш. */
     available,
     sourceByName,
+    listedByDefault,
   };
 }

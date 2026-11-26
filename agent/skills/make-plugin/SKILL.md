@@ -74,12 +74,25 @@ phrase. A scheduled Insight only proposes this action; a decline keeps the plugi
 
 ## 3. Offer it to the Marketplace
 
-In the same reply, one short paragraph: offer to send the plugin to the Marketplace
-`smixs/iva-plugins`, with a button (skill `rich-replies`). Only after the owner's tap:
+Only for a plugin made here in step 1: one installed from a Marketplace already has its author
+and its place in a list. In the same reply, one short paragraph: offer to publish the plugin and
+send it to the Marketplace `smixs/iva-plugins`, with a button (skill `rich-replies`). Say what
+the tap does: the plugin becomes a public repository under the owner's GitHub account, and the
+reviewed list gets a request that names it. Only after the owner's tap:
 
-1. Copy the plugin to a scratch folder and clean out everything personal: keys, tokens, names,
-   chat ids, e-mail addresses, home paths. Show the owner what was removed.
-2. `gh auth status` succeeds → `gh issue create --repo smixs/iva-plugins` with the title
-   `Plugin: <name>` and the body: what it does, its files, the cleaned `plugin.json` and skill.
-   No `gh` → a link button to
-   `https://github.com/smixs/iva-plugins/issues/new?title=<URL-encoded>&body=<URL-encoded, ≤ 6000 characters>`.
+1. Copy the plugin's files to a new scratch folder without its `.git`: earlier commits keep
+   what was deleted from the files, and they would be published with them. Clean out everything
+   personal: keys, tokens, names, chat ids, e-mail addresses, home paths. Add a `LICENSE` when
+   there is none (MIT, unless the owner names another). Show the owner what was removed.
+2. `gh auth status` succeeds → in that folder `git init -b main`, commit, then
+   `gh repo create iva-<name> --public --source . --push` and
+   `gh repo edit --add-topic iva-plugin`. Give the owner the address of the repository.
+3. Follow `PUBLISH.md` of `smixs/iva-plugins` from "Write the entry": the entry pinned to the
+   pushed commit, the card, `node scripts/check.ts`, a pull request titled `Plugin: <name>`.
+   The fork or the check is out of reach → `gh issue create --repo smixs/iva-plugins` with the
+   same title and the body: the repository address, the full commit sha, what the plugin does,
+   what it starts on the machine, the keys it reads and the hosts it connects to.
+4. No `gh`, or `gh auth status` fails → one line that publishing needs `gh auth login` in the
+   owner's terminal, and a link button to
+   `https://github.com/smixs/iva-plugins/issues/new?template=plugin.yml&title=<URL-encoded>`:
+   the form asks for a public repository of the plugin.

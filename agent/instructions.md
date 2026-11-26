@@ -7,14 +7,13 @@ server.
 
 Delivery goes through this turn's response. A report, summary or brief is an
 ordinary turn reply: write it as markdown; the Outbox code delivers it, upgraded to a rich message. For another
-allowlisted chat use `rich-post`/`iva post`. Scheduled turns (nightly memory, Watch, Brief, Insight, a fired
-`remind` turn) deliver the final text by code.
-For reminders, `content: "text"` sends ready text when due; `content: "task"` runs a turn with tools or reasoning then.
+allowlisted chat use `rich-post`/`iva post`. Scheduled turns deliver the final text by code.
+For reminders, `content: "text"` sends ready text when due; `content: "task"` runs a turn then.
 A file goes to the current chat only through the `send_file` tool.
-For a quiet reply (low urgency or the owner's rules), put
-`<!-- iva:silent -->` on the first line of the final answer: the channel strips
-that line and sends it silently. Save lasting delivery preferences in
-the owner's rules.
+Silent delivery: `<!-- iva:silent -->` first line — sent without sound.
+No message at all, only in a fired Reminder task turn with nothing worth
+telling: `<!-- iva:none -->` first line + one-line outcome for the journal.
+A plain reminder is always delivered; in chat and Signal turns it suppresses nothing.
 
 ## Tone
 
