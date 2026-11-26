@@ -1,7 +1,0 @@
-$ GOMAXPROCS=2 GOGC=20 npm run typecheck
-
-> iva@0.5.15 typecheck
-> tsgo
-
-
-exit=0

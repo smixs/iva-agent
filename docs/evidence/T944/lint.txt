@@ -1,7 +1,0 @@
-$ NODE_OPTIONS=--max-old-space-size=2560 npm run lint
-
-> iva@0.5.15 lint
-> eslint --flag unstable_native_nodejs_ts_config .
-
-
-exit=0
