@@ -20,6 +20,6 @@ Synthetic tokens only; no live Telegram API was used.
 ## Repair commits
 
 - A: `b2268c42` classifies permanent managed-token failures and acknowledges them; `f855cfcb` also makes an empty `ok:true` token response terminal.
-- B: `1c701c6e` adds durable hire state, startup filtering and background reconciliation; `f855cfcb` writes durable state before storing the token; `520d42ee` also makes the poll loop itself wait for a complete role/model entry; `48fce863` documents the journal in ADR-0030.
+- B: `1c701c6e` adds durable hire state, startup filtering and background reconciliation; `f855cfcb` writes durable state before storing the token; `520d42ee` also makes the poll loop itself wait for a complete role/model entry; `5502fbaa` rereads the current `.env` during reconciliation so removed tokens do not resurrect from process memory; `48fce863` documents the journal in ADR-0030.
 - C: `e822a17d` redacts known bot tokens from initialization errors; `fc7431e2` drives the regression through a stubbed `deleteWebhook` response.
 - D: `90cf3ed2` models permanent/temporary managed-hire failure and complete-before-polling in `specs/MultiBotPoll.tla`.

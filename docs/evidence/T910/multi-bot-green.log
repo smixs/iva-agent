@@ -1,13 +1,13 @@
-✔ property: colleague token parsing deduplicates by botId and never overrides primary (seed 20261126) (19.857542ms)
-✔ property: botScopedKey and parseBotScopedKey round-trip and are idempotent (seed 20261126) (1.501ms)
-✔ parseColleagueBotTokens ignores malformed entries without dropping valid colleagues (0.33475ms)
-✔ colleague message arrives with its bot tag and isolated inbox/chat keys even with identical chat_id and update_id (218.737917ms)
-✔ lagging or stalled bot does not delay another bot polling in the same process (190.361041ms)
-✔ colleague offset initialization waits for enablement and retries without stopping the loop (0.521292ms)
-✔ lease loss during lazy colleague initialization stops before the first getUpdates (180.544042ms)
-✔ per-bot restart preserves independent offsets under one process lock (199.548458ms)
-✔ deliver forwards colleague bot id in X-Iva-Telegram-Bot-Id header and omits it for primary (0.956209ms)
-✔ outbound security gate redacts standalone colleague tokens from TELEGRAM_COLLEAGUE_BOT_TOKENS (2.541833ms)
+✔ property: colleague token parsing deduplicates by botId and never overrides primary (seed 20261126) (18.411833ms)
+✔ property: botScopedKey and parseBotScopedKey round-trip and are idempotent (seed 20261126) (1.482291ms)
+✔ parseColleagueBotTokens ignores malformed entries without dropping valid colleagues (0.163958ms)
+✔ colleague message arrives with its bot tag and isolated inbox/chat keys even with identical chat_id and update_id (231.141417ms)
+✔ lagging or stalled bot does not delay another bot polling in the same process (207.964541ms)
+✔ colleague offset initialization waits for enablement and retries without stopping the loop (0.487208ms)
+✔ lease loss during lazy colleague initialization stops before the first getUpdates (195.107916ms)
+✔ per-bot restart preserves independent offsets under one process lock (216.275833ms)
+✔ deliver forwards colleague bot id in X-Iva-Telegram-Bot-Id header and omits it for primary (0.841583ms)
+✔ outbound security gate redacts standalone colleague tokens from TELEGRAM_COLLEAGUE_BOT_TOKENS (2.466459ms)
 ℹ tests 10
 ℹ suites 0
 ℹ pass 10
@@ -15,4 +15,4 @@
 ℹ cancelled 0
 ℹ skipped 0
 ℹ todo 0
-ℹ duration_ms 1097.936459
+ℹ duration_ms 1161.144292
