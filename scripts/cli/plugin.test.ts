@@ -3740,6 +3740,7 @@ for (const mode of ["inactive", "error"] as const)
 // Выключатели читаются и из окружения команды, поэтому окружение машины, на которой идут
 // тесты, чистится здесь: иначе `DO_NOT_TRACK=1` разработчика гасил бы счёт в тесте.
 delete process.env.IVA_PLUGIN_STATS;
+delete process.env.IVA_STATS;
 delete process.env.DO_NOT_TRACK;
 
 /**

@@ -3,8 +3,13 @@ import { fileURLToPath } from "node:url";
 import { isEntrypoint, upstreamQuery } from "./lib/version-layout.ts";
 import { noticeLang } from "./lib/notice-policy.ts";
 import { acquireUpdateLock } from "./lib/version-store.ts";
-import { betaChannel, BranchUnavailableError } from "./lib/update-channel.ts";
-import { runRollCall, type Channel } from "./lib/roll-call.ts";
+import {
+  betaChannel,
+  BranchUnavailableError,
+  DEFAULT_UPDATE_BRANCH,
+  UPDATE_BRANCH_CONFIG,
+} from "./lib/update-channel.ts";
+import { runRollCall, type Branch } from "./lib/roll-call.ts";
 import { resolveDataDir } from "../packages/data-dir/index.ts";
 import {
   gitAt,
@@ -205,10 +210,14 @@ async function notifyStable(check: DailyCheck, info: UpdateInfo) {
   return { status: "notified" as const, info };
 }
 
-export async function main(entryUrl = import.meta.url): Promise<void> {
+export async function main(
+  entryUrl = import.meta.url,
+  check: () => ReturnType<typeof runDailyUpdateCheck> = runDailyUpdateCheck,
+  call: () => Promise<void> = () => rollCall(ROOT, process.env),
+): Promise<void> {
   if (!isEntrypoint(entryUrl)) return;
   try {
-    const result = await runDailyUpdateCheck();
+    const result = await check();
     if (result.status === "notified") {
       console.log(`Update notification sent: v${result.info.remoteVersion}`);
     }
@@ -222,36 +231,66 @@ export async function main(entryUrl = import.meta.url): Promise<void> {
   }
   // After the check and whatever it said: the roll call neither waits on the check nor
   // changes how the check ended (ADR-0031).
-  await rollCall(ROOT, process.env);
+  await call();
 }
 
-/** The roll call of this installation; one line in the journal, never an exit code. */
+/**
+ * The roll call of this installation; one line in the journal, never an exit code and never
+ * a throw. It runs under the lock of the update check and of the updater, so two runs at once
+ * (a manual one beside the timer) send one roll call, not two.
+ */
 export async function rollCall(
   root: string,
   env: UpdateEnvironment,
   run: typeof runRollCall = runRollCall,
+  branchOf: (root: string) => Promise<Branch> = updateBranchOf,
 ): Promise<void> {
-  const result = await run({
-    root,
-    storage: dataDir(root, env),
-    channel: await channelOf(root),
-    env,
-  });
-  if (result.status === "sent")
-    console.log(`Roll call: ${JSON.stringify(result.body)}`);
-  else if (result.status === "not-taken")
-    console.error("Roll call: the site did not take it");
-  else if (result.status === "failed")
-    console.error(`Roll call failed: ${result.error}`);
+  try {
+    const storage = dataDir(root, env);
+    const lock = acquireUpdateLock(storage);
+    if (!lock) {
+      console.error("Roll call: an update or another check is running");
+      return;
+    }
+    let result: Awaited<ReturnType<typeof runRollCall>>;
+    try {
+      result = await run({ root, storage, branch: await branchOf(root), env });
+    } finally {
+      lock.release();
+    }
+    if (result.status === "sent")
+      console.log(`Roll call: ${JSON.stringify(result.body)}`);
+    else if (result.status === "not-taken")
+      console.error("Roll call: the site did not take it");
+    else if (result.status === "failed")
+      console.error(`Roll call failed: ${result.error}`);
+  } catch (error) {
+    console.error(
+      `Roll call failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 }
 
-/** The update channel, as the update check reads it; "other" when it cannot be read. */
-async function channelOf(root: string): Promise<Channel> {
+/**
+ * The branch updates come from, as `iva update` reads it: unset is main; a value the git
+ * config holds but Iva has no name for, or a config git cannot read, is "other".
+ */
+export async function updateBranchOf(root: string): Promise<Branch> {
   try {
     const upstream = upstreamQuery(root);
-    return (await betaChannel((...args) => gitAt(upstream.root, args)))
-      ? "beta"
-      : "main";
+    // `--default`: an unset branch answers main with 0, so any other exit - a repository git
+    // cannot read, a git that did not run - is a failure, not a default.
+    const read = await gitAt(upstream.root, [
+      "config",
+      "--local",
+      "--default",
+      DEFAULT_UPDATE_BRANCH,
+      "--get",
+      UPDATE_BRANCH_CONFIG,
+    ]);
+    if (read.code !== 0) return "other";
+    const branch = String(read.stdout ?? "").trim();
+    return branch === "main" || branch === "beta" ? branch : "other";
   } catch {
     return "other";
   }

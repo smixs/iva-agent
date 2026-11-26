@@ -3,20 +3,29 @@
 // отказ сайта не может помешать проверке обновлений. Запрос проверяется на проводе:
 // настоящий HTTP-сервер на loopback принимает ровно то, что отправил бы fetch.
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { createServer, type IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { pathToFileURL } from "node:url";
 import fc from "fast-check";
 import { CATALOG } from "./model-catalog.ts";
+import { acquireUpdateLock } from "./version-store.ts";
 import {
   dayOf,
   gapSince,
   ROLL_CALL_FILE,
   ROLL_CALL_MAX_GAP,
-  ROLL_CALL_SWITCHES,
   ROLL_CALL_TIMEOUT_MS,
   ROLL_CALL_URL,
   rollCallBody,
@@ -29,8 +38,15 @@ import {
 const SEED = Number(process.env.FC_SEED ?? 20_261_126);
 const OFF_WORDS = ["off", "0", "false", "no"] as const;
 const PROVIDERS = Object.keys(CATALOG);
-const KEYS = ["gap", "version", "channel", "os", "arch", "provider", "model"];
-const PUBLIC_MODEL = /^[a-z0-9][a-z0-9._:/-]{0,63}$/;
+const KEYS = ["gap", "version", "branch", "os", "arch", "provider", "model"];
+// Every name Iva's catalog offers, for any provider: the only models a roll call may name.
+const PUBLISHED = new Set(
+  Object.values(CATALOG).flatMap((entry) =>
+    [...entry.models, entry.def, entry.visionDef].filter(
+      (name): name is string => name !== null,
+    ),
+  ),
+);
 
 type Seen = {
   readonly method: string;
@@ -95,41 +111,51 @@ const anyCase = (word: string) =>
       [...word].map((c, i) => (upper[i] ? c.toUpperCase() : c)).join(""),
     );
 const padding = fc.constantFrom("", " ", "  ", "\t");
+// What systemd's EnvironmentFile leaves after the value: Node's --env-file drops it.
+const trailing = fc.constantFrom("", " # no statistics", "\t#", "  # 26.11");
+const quoted = (word: string) =>
+  fc.constantFrom(word, `"${word}"`, `'${word}'`);
 
 test("where the roll call goes, how long it waits and what turns it off are spelled once", () => {
   // The site, the path, the wait and the switches are promises of the documentation.
   assert.equal(ROLL_CALL_URL, "https://iva-agent.com/api/roll-call");
   assert.equal(ROLL_CALL_TIMEOUT_MS, 2500);
   assert.equal(ROLL_CALL_MAX_GAP, 31);
-  assert.deepEqual(ROLL_CALL_SWITCHES, ["IVA_STATS", "DO_NOT_TRACK"]);
-  for (const name of ROLL_CALL_SWITCHES)
-    assert.equal(
-      rollCallEnabled({ [name]: name === "DO_NOT_TRACK" ? "1" : "off" }),
-      false,
-      name,
-    );
+  assert.equal(rollCallEnabled({ IVA_STATS: "off" }), false);
+  assert.equal(rollCallEnabled({ DO_NOT_TRACK: "1" }), false);
+  assert.equal(rollCallEnabled({}), true);
 });
 
 test(`the roll call is on unless IVA_STATS or DO_NOT_TRACK says otherwise (seed ${SEED})`, () => {
   fc.assert(
     fc.property(
-      fc.constantFrom(...OFF_WORDS).chain(anyCase),
+      fc
+        .constantFrom(...OFF_WORDS)
+        .chain(anyCase)
+        .chain(quoted),
       padding,
       padding,
+      trailing,
       fc.option(fc.string({ maxLength: 12 }), { nil: undefined }),
-      (word, before, after, other) => {
+      (word, before, after, comment, other) => {
         assert.equal(
-          rollCallEnabled({ IVA_STATS: `${before}${word}${after}` }),
+          rollCallEnabled({ IVA_STATS: `${before}${word}${after}${comment}` }),
           false,
         );
         assert.equal(
-          rollCallEnabled({ IVA_STATS: other, DO_NOT_TRACK: " 1 " }),
+          rollCallEnabled({ IVA_STATS: other, DO_NOT_TRACK: ` 1${comment}` }),
           false,
         );
-        const off = (OFF_WORDS as readonly string[]).includes(
-          (other ?? "").trim().toLowerCase(),
-        );
+        const spelled = (other ?? "")
+          .replace(/\s+#.*$/s, "")
+          .trim()
+          .replace(/^(["'])(.*)\1$/s, "$2")
+          .trim()
+          .toLowerCase();
+        const off = (OFF_WORDS as readonly string[]).includes(spelled);
         assert.equal(rollCallEnabled({ IVA_STATS: other }), !off);
+        // A word that only starts like a switch is not one.
+        assert.equal(rollCallEnabled({ IVA_STATS: `${word}x` }), true);
         // The plugin count's own switch is not this one.
         assert.equal(rollCallEnabled({ IVA_PLUGIN_STATS: "off" }), true);
       },
@@ -163,6 +189,7 @@ test(`the gap: 0 first, nothing twice a day, days since the last one, at most 31
     "",
     "yesterday",
     "2026-13-45",
+    "2026-02-30",
     "26.11.2026",
   ])
     assert.equal(
@@ -179,10 +206,11 @@ test(`no value of .env leaves the machine except through the closed lists (seed 
       "https://my.internal/v1/model",
       "/srv/models/secret.gguf",
       "My Fine-Tune",
+      "TEAM/Private-Fine-Tune",
+      "owner-machine.local",
+      "203.0.113.7",
       "owner@example.com",
-      "gpt-5.5",
-      "openai/gpt-5.1",
-      "gemma4:31b",
+      ...PUBLISHED,
       "DeepSeek-V4-Pro",
     ),
   );
@@ -211,11 +239,11 @@ test(`no value of .env leaves the machine except through the closed lists (seed 
       fc.constantFrom("main", "beta", "other"),
       fc.string({ maxLength: 10 }),
       fc.string({ maxLength: 10 }),
-      (environment, gap, version, channel, platform, arch) => {
+      (environment, gap, version, branch, platform, arch) => {
         const body = rollCallBody({
           gap,
           version,
-          channel,
+          branch,
           platform,
           arch,
           env: environment,
@@ -225,17 +253,15 @@ test(`no value of .env leaves the machine except through the closed lists (seed 
         assert.ok(
           body.version === "other" || /^\d+\.\d+\.\d+$/.test(body.version),
         );
-        assert.ok(["main", "beta", "other"].includes(body.channel));
+        assert.ok(["main", "beta", "other"].includes(body.branch));
         assert.ok(["linux", "darwin", "other"].includes(body.os));
         assert.ok(["x64", "arm64", "other"].includes(body.arch));
         assert.ok([...PROVIDERS, "other"].includes(body.provider));
+        // The model is one Iva's catalog names, "custom" or "other": nothing the owner typed.
         assert.ok(
-          ["other", "custom"].includes(body.model) ||
-            (PUBLIC_MODEL.test(body.model) && !body.model.includes("://")),
+          ["other", "custom"].includes(body.model) || PUBLISHED.has(body.model),
           body.model,
         );
-        // The custom provider's model and address never leave; neither does anything
-        // that is not a model name.
         if (body.provider === "custom") assert.equal(body.model, "custom");
         const wire = JSON.stringify(body);
         for (const secret of [
@@ -245,7 +271,7 @@ test(`no value of .env leaves the machine except through the closed lists (seed 
           if (
             secret &&
             secret.length > 6 &&
-            !PUBLIC_MODEL.test(secret.toLowerCase())
+            ![...PUBLISHED].some((name) => name.includes(secret))
           )
             assert.ok(!wire.includes(secret), secret);
       },
@@ -254,12 +280,12 @@ test(`no value of .env leaves the machine except through the closed lists (seed 
   );
 });
 
-test("a provider's public model is named, in lower case; the default answers for a blank one", () => {
+test("a model is named only as Iva's catalog names it; the default answers for a blank one", () => {
   const body = (env: Record<string, string>) =>
     rollCallBody({
       gap: 1,
       version: "0.5.16",
-      channel: "main",
+      branch: "main",
       platform: "linux",
       arch: "x64",
       env,
@@ -267,12 +293,26 @@ test("a provider's public model is named, in lower case; the default answers for
   assert.deepEqual(body({ MODEL_PROVIDER: "codex", CODEX_MODEL: "GPT-5.5" }), {
     gap: 1,
     version: "0.5.16",
-    channel: "main",
+    branch: "main",
     os: "linux",
     arch: "x64",
     provider: "codex",
     model: "gpt-5.5",
   });
+  // Names the owner gave on their own leave as "other", however public they look.
+  for (const [provider, variable, own] of [
+    ["openrouter", "OPENROUTER_MODEL", "TEAM/Private-Fine-Tune"],
+    ["openrouter", "OPENROUTER_MODEL", "team/private-fine-tune"],
+    ["ollama", "OLLAMA_MODEL", "owner-machine.local"],
+    ["ollama", "OLLAMA_MODEL", "models/private.gguf"],
+    ["ollama", "OLLAMA_MODEL", "203.0.113.7"],
+    ["opencode", "OPENCODE_MODEL", "acme-internal-7b"],
+  ])
+    assert.equal(
+      body({ MODEL_PROVIDER: provider, [variable]: own }).model,
+      "other",
+      own,
+    );
   assert.equal(
     body({ MODEL_PROVIDER: "openrouter", OPENROUTER_MODEL: "openai/gpt-5.1" })
       .model,
@@ -307,7 +347,7 @@ test("the roll call on the wire: one POST, one JSON body, no headers of its own"
     const body: RollCall = {
       gap: 0,
       version: "0.5.16",
-      channel: "beta",
+      branch: "beta",
       os: "darwin",
       arch: "arm64",
       provider: "claude",
@@ -332,38 +372,45 @@ test("the roll call on the wire: one POST, one JSON body, no headers of its own"
   }
 });
 
-test("a site that refuses, redirects, never answers or is not there takes nothing and throws nothing", async () => {
-  const body = rollCallBody({
-    gap: 1,
-    version: "0.5.16",
-    channel: "main",
-    platform: "linux",
-    arch: "x64",
-    env: {},
-  });
-  const refusing = await site({ status: 500 });
-  const elsewhere = await site({ status: 204 });
-  const redirecting = await site({ status: 302, location: elsewhere.url });
-  const silent = await site("silent");
-  try {
-    assert.equal(await sendRollCall(body, refusing.request), false);
-    assert.equal(await sendRollCall(body, redirecting.request), false);
-    assert.equal(elsewhere.seen.length, 0, "the redirect is not followed");
-    const started = Date.now();
-    assert.equal(await sendRollCall(body, silent.request, 150), false);
-    assert.ok(Date.now() - started < 2000);
-    const offline: typeof fetch = () =>
-      Promise.reject(new TypeError("fetch failed"));
-    assert.equal(await sendRollCall(body, offline), false);
-  } finally {
-    await Promise.all([
-      refusing.close(),
-      elsewhere.close(),
-      redirecting.close(),
-      silent.close(),
-    ]);
-  }
-});
+test(
+  "a site that refuses, redirects, never answers or is not there takes nothing and throws nothing",
+  { timeout: 10_000 },
+  async () => {
+    const body = rollCallBody({
+      gap: 1,
+      version: "0.5.16",
+      branch: "main",
+      platform: "linux",
+      arch: "x64",
+      env: {},
+    });
+    const refusing = await site({ status: 500 });
+    const rejecting = await site({ status: 400 });
+    const elsewhere = await site({ status: 204 });
+    const redirecting = await site({ status: 302, location: elsewhere.url });
+    const silent = await site("silent");
+    try {
+      assert.equal(await sendRollCall(body, refusing.request), false);
+      assert.equal(await sendRollCall(body, rejecting.request), false);
+      assert.equal(await sendRollCall(body, redirecting.request), false);
+      assert.equal(elsewhere.seen.length, 0, "the redirect is not followed");
+      const started = Date.now();
+      assert.equal(await sendRollCall(body, silent.request, 150), false);
+      assert.ok(Date.now() - started < 2000);
+      const offline: typeof fetch = () =>
+        Promise.reject(new TypeError("fetch failed"));
+      assert.equal(await sendRollCall(body, offline), false);
+    } finally {
+      await Promise.all([
+        refusing.close(),
+        rejecting.close(),
+        elsewhere.close(),
+        redirecting.close(),
+        silent.close(),
+      ]);
+    }
+  },
+);
 
 test("one roll call a UTC day: the day is kept only after the site took the call", async () => {
   const at = await site({ status: 204 });
@@ -373,7 +420,7 @@ test("one roll call a UTC day: the day is kept only after the site took the call
     runRollCall({
       root,
       storage,
-      channel: "main",
+      branch: "main",
       env,
       now: new Date(now),
       platform: "linux",
@@ -387,6 +434,10 @@ test("one roll call a UTC day: the day is kept only after the site took the call
     assert.deepEqual(
       JSON.parse(await readFile(join(storage, ROLL_CALL_FILE), "utf8")),
       { day: "2026-11-26" },
+    );
+    assert.equal(
+      (await stat(join(storage, ROLL_CALL_FILE))).mode & 0o777,
+      0o600,
     );
     // A restart, a second daily run, a run just before midnight: the same day sends nothing.
     assert.deepEqual(await run("2026-11-26T23:59:59Z"), {
@@ -418,7 +469,7 @@ test("switched off, nothing is sent and nothing is written; an unreadable record
         await runRollCall({
           root,
           storage,
-          channel: "main",
+          branch: "main",
           env,
           request: at.request,
         }),
@@ -428,14 +479,12 @@ test("switched off, nothing is sent and nothing is written; an unreadable record
     await assert.rejects(readFile(join(storage, ROLL_CALL_FILE)));
 
     await rm(storage, { recursive: true, force: true });
-    await import("node:fs/promises").then(({ mkdir }) =>
-      mkdir(storage, { recursive: true }),
-    );
+    await mkdir(storage, { recursive: true });
     await writeFile(join(storage, ROLL_CALL_FILE), "{not json");
     const result = await runRollCall({
       root,
       storage,
-      channel: "other",
+      branch: "other",
       env: {},
       now: new Date("2026-11-26T10:00:00Z"),
       request: at.request,
@@ -446,6 +495,18 @@ test("switched off, nothing is sent and nothing is written; an unreadable record
       ROLL_CALL_MAX_GAP,
     );
     assert.equal(result.status === "sent" && result.body.version, "other");
+    // A package.json that is not JSON at all names no version either.
+    await writeFile(join(root, "package.json"), "{");
+    await rm(join(storage, ROLL_CALL_FILE));
+    const broken = await runRollCall({
+      root,
+      storage,
+      branch: "main",
+      env: {},
+      now: new Date("2026-11-26T10:00:00Z"),
+      request: at.request,
+    });
+    assert.equal(broken.status === "sent" && broken.body.version, "other");
   } finally {
     await at.close();
     await rm(root, { recursive: true, force: true });
@@ -461,7 +522,7 @@ test("a roll call that cannot keep its day reports a failure instead of throwing
     const result = await runRollCall({
       root,
       storage,
-      channel: "main",
+      branch: "main",
       env: {},
       request: at.request,
     });
@@ -472,7 +533,7 @@ test("a roll call that cannot keep its day reports a failure instead of throwing
   }
 });
 
-test("the daily check hands its data folder and channel to the roll call and logs one line", async (t) => {
+test("the daily check hands its data folder and branch to the roll call and logs one line", async (t) => {
   const { rollCall } = await import("../check-update.ts");
   const { root } = await install();
   const logged = t.mock.method(console, "log", () => {});
@@ -482,20 +543,21 @@ test("the daily check hands its data folder and channel to the roll call and log
     const body = rollCallBody({
       gap: 1,
       version: "0.5.16",
-      channel: "main",
+      branch: "main",
       platform: "linux",
       arch: "x64",
       env: {},
     });
-    const env = { ASSISTANT_DATA_DIR: join(root, "elsewhere") };
+    const storage = join(root, "elsewhere");
+    const env = { ASSISTANT_DATA_DIR: storage };
     await rollCall(root, env, (options) => {
       asked.push(options);
       return Promise.resolve({ status: "sent", body });
     });
     assert.equal(asked.length, 1);
-    assert.equal(asked[0].storage, join(root, "elsewhere"));
+    assert.equal(asked[0].storage, storage);
     assert.equal(asked[0].env, env);
-    assert.ok(["main", "beta", "other"].includes(asked[0].channel));
+    assert.ok(["main", "beta", "other"].includes(asked[0].branch));
     assert.deepEqual(
       logged.mock.calls.map((c) => String(c.arguments[0])),
       [`Roll call: ${JSON.stringify(body)}`],
@@ -510,7 +572,98 @@ test("the daily check hands its data folder and channel to the roll call and log
       "only a taken roll call is logged as sent",
     );
     assert.equal(warned.mock.callCount(), 1);
+
+    // Whatever throws inside stays a line in the journal, never a throw out of the check.
+    await rollCall(
+      root,
+      env,
+      () => Promise.reject(new Error("boom")),
+      () => Promise.resolve("main"),
+    );
+    await rollCall(root, env, runRollCall, () =>
+      Promise.reject(new Error("no git")),
+    );
+    assert.deepEqual(
+      warned.mock.calls.slice(1).map((c) => String(c.arguments[0])),
+      ["Roll call failed: boom", "Roll call failed: no git"],
+    );
+
+    // A second run while the first holds the lock sends nothing.
+    const held = acquireUpdateLock(storage);
+    assert.ok(held);
+    try {
+      await rollCall(root, env, (options) => {
+        asked.push(options);
+        return Promise.resolve({ status: "sent", body });
+      });
+    } finally {
+      held.release();
+    }
+    assert.equal(
+      asked.length,
+      1,
+      "the roll call waits for no lock it cannot take",
+    );
+    assert.equal(
+      String(warned.mock.calls.at(-1)?.arguments[0]),
+      "Roll call: an update or another check is running",
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("the branch is the one iva update reads: unset is main, an unknown one or no repository is other", async () => {
+  const { updateBranchOf } = await import("../check-update.ts");
+  const root = await mkdtemp(join(tmpdir(), "iva-roll-call-branch-"));
+  const git = (...args: string[]) =>
+    execFileSync("git", ["-C", root, ...args], { stdio: "ignore" });
+  try {
+    assert.equal(await updateBranchOf(root), "other", "not a repository");
+    git("init", "-q");
+    assert.equal(await updateBranchOf(root), "main");
+    git("config", "--local", "iva.updateBranch", "beta");
+    assert.equal(await updateBranchOf(root), "beta");
+    git("config", "--local", "iva.updateBranch", "my-feature");
+    assert.equal(await updateBranchOf(root), "other");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("the daily run calls the roll call after the check, whatever the check said, and keeps its exit code", async (t) => {
+  const { main } = await import("../check-update.ts");
+  // The test file is this process's entry point, as check-update.mjs is the service's.
+  const entry = pathToFileURL(process.argv[1]).href;
+  t.mock.method(console, "log", () => {});
+  t.mock.method(console, "error", () => {});
+  const order: string[] = [];
+  const saved = process.exitCode;
+  try {
+    await main(
+      entry,
+      () => {
+        order.push("check");
+        return Promise.resolve({ status: "current" } as never);
+      },
+      () => {
+        order.push("roll call");
+        return Promise.resolve();
+      },
+    );
+    assert.deepEqual(order, ["check", "roll call"]);
+    assert.equal(process.exitCode, saved);
+    await main(
+      entry,
+      () => Promise.reject(new Error("no network")),
+      () => {
+        order.push("after a failed check");
+        return Promise.resolve();
+      },
+    );
+    assert.equal(order.at(-1), "after a failed check");
+    assert.equal(process.exitCode, 1, "the failed check still says so");
+  } finally {
+    process.exitCode = saved;
   }
 });

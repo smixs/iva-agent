@@ -161,6 +161,15 @@ const anyCase = (word: string) =>
         .join(""),
     );
 
+/** A value as the switch reads it: no trailing comment, no quotes, any case. */
+const spelled = (value: string) =>
+  value
+    .replace(/\s+#.*$/s, "")
+    .trim()
+    .replace(/^(["'])(.*)\1$/s, "$2")
+    .trim()
+    .toLowerCase();
+
 test(`IVA_PLUGIN_STATS and IVA_STATS turn the count off in any spelling of "off" (seed ${SEED})`, () => {
   fc.assert(
     fc.property(
@@ -168,9 +177,15 @@ test(`IVA_PLUGIN_STATS and IVA_STATS turn the count off in any spelling of "off"
       fc.constantFrom(...OFF_WORDS).chain(anyCase),
       padding,
       padding,
-      (name, word, before, after) => {
+      // systemd's EnvironmentFile keeps quotes and a trailing comment that --env-file drops.
+      fc.constantFrom("", " # no statistics", "\t#"),
+      fc.boolean(),
+      (name, word, before, after, comment, quote) => {
+        const value = quote ? `"${word}"` : word;
         assert.equal(
-          installCountEnabled({ [name]: `${before}${word}${after}` }),
+          installCountEnabled({
+            [name]: `${before}${value}${after}${comment}`,
+          }),
           false,
         );
       },
@@ -183,10 +198,11 @@ test(`the count is on unless one of the switches says otherwise (seed ${SEED})`,
   const other = fc
     .string({ maxLength: 12 })
     .filter(
-      (value) =>
-        !(OFF_WORDS as readonly string[]).includes(value.trim().toLowerCase()),
+      (value) => !(OFF_WORDS as readonly string[]).includes(spelled(value)),
     );
-  const untracked = fc.string({ maxLength: 6 }).filter((v) => v.trim() !== "1");
+  const untracked = fc
+    .string({ maxLength: 6 })
+    .filter((v) => spelled(v) !== "1");
   fc.assert(
     fc.property(
       fc.option(other, { nil: undefined }),

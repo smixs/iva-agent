@@ -13,7 +13,7 @@ export const INSTALL_COUNT_URL = "https://iva-agent.com/api/plugins/installs";
 export const INSTALL_COUNT_TIMEOUT_MS = 2500;
 
 /**
- * The two settings that turn the count off, by name: whoever starts the installer in an
+ * The settings that turn the count off, by name: whoever starts the installer in an
  * environment of its own (the bridge, for an install after the owner's tap) hands these over.
  */
 export const INSTALL_COUNT_SWITCHES = [
@@ -22,18 +22,37 @@ export const INSTALL_COUNT_SWITCHES = [
   "DO_NOT_TRACK",
 ] as const;
 
+type Env = Readonly<Record<string, string | undefined>>;
+
 const OFF = new Set(["off", "0", "false", "no"]);
 
 /**
- * `IVA_PLUGIN_STATS=off` in `.env` turns the count off; so does `IVA_STATS=off`, the switch
- * of everything Iva reports on its own (the roll call too, ADR-0031), and `DO_NOT_TRACK=1`.
+ * A setting as `.env` spells it, without quotes and without a trailing comment. On Linux the
+ * service reads `.env` through systemd's EnvironmentFile, which keeps `IVA_STATS=off # …`
+ * whole; Node's `--env-file` drops the comment. Both have to mean the same here.
  */
-export function installCountEnabled(
-  env: Readonly<Record<string, string | undefined>>,
-): boolean {
-  if (OFF.has((env.IVA_PLUGIN_STATS ?? "").trim().toLowerCase())) return false;
-  if (OFF.has((env.IVA_STATS ?? "").trim().toLowerCase())) return false;
-  return (env.DO_NOT_TRACK ?? "").trim() !== "1";
+function setting(value: string | undefined): string {
+  return (value ?? "")
+    .replace(/\s+#.*$/s, "")
+    .trim()
+    .replace(/^(["'])(.*)\1$/s, "$2")
+    .trim();
+}
+
+const switchedOff = (value: string | undefined) =>
+  OFF.has(setting(value).toLowerCase());
+
+/**
+ * `IVA_STATS=off` (or `0`, `false`, `no`, any case) or `DO_NOT_TRACK=1`: the switch of
+ * everything Iva reports on its own, the install count and the roll call (ADR-0031).
+ */
+export function statsOff(env: Env): boolean {
+  return switchedOff(env.IVA_STATS) || setting(env.DO_NOT_TRACK) === "1";
+}
+
+/** `IVA_PLUGIN_STATS=off` in `.env` turns the count off; so does everything `statsOff` names. */
+export function installCountEnabled(env: Env): boolean {
+  return !switchedOff(env.IVA_PLUGIN_STATS) && !statsOff(env);
 }
 
 /** Sends the name; `true` when the site took it. Never throws. */
