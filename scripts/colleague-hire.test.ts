@@ -2,6 +2,7 @@
 import "./lib/ts-esm-hooks.ts";
 import assert from "node:assert/strict";
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -1919,6 +1920,337 @@ test("T940 handoff: redelivery after background completion does not complete the
     assert.equal(hiredBots.length, 1, "duplicate colleague startup");
     assert.equal(tokenCalls, 2, "redelivery must not query Bot API again");
   } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("T940 acceptor token refresh: profile-stage 401 makes reconciliation request the managed token again", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "iva-hire-token-refresh-exact-"));
+  const localSettings = join(dir, "settings.json");
+  const localEnvPath = join(dir, ".env");
+  const hireStateDir = join(dir, "colleague-hires.d");
+  writeHireTestEnv(localEnvPath, `iva_main_critic_bot=${HIRED_TOKEN}`);
+  try {
+    let settings = withColleaguesEnabled({}, true);
+    settings = withColleague(settings, {
+      botId: HIRED_BOT_ID,
+      role: "critic",
+      provider: "ollama",
+      model: "critic-model",
+      name: "Критик",
+      username: "iva_main_critic_bot",
+      avatarPhase: "set",
+    });
+    writeFileSync(localSettings, JSON.stringify(settings), { mode: 0o600 });
+    const localEnv: NodeJS.ProcessEnv = {
+      TELEGRAM_BOT_TOKEN: IVA_TOKEN,
+      TELEGRAM_BOT_USERNAME: "iva_main_bot",
+      MODEL_PROVIDER: "ollama",
+    };
+    const update = makeManagedHireUpdate(
+      1250,
+      HIRED_BOT_ID,
+      "iva_main_critic_bot",
+    );
+    let tokenCalls = 0;
+    let oldProfileCalls = 0;
+    const profileTokens: string[] = [];
+    const tgImpl = (
+      method: string,
+      _body: Record<string, unknown>,
+      options?: { token?: string },
+    ) => {
+      if (method === "getManagedBotToken") {
+        tokenCalls += 1;
+        if (tokenCalls === 1) {
+          return Promise.resolve({ ok: true, result: HIRED_TOKEN });
+        }
+        if (tokenCalls <= 3) {
+          return Promise.reject(
+            new DOMException(
+              "The operation was aborted due to timeout",
+              "TimeoutError",
+            ),
+          );
+        }
+        return Promise.resolve({ ok: true, result: ROTATED_HIRED_TOKEN });
+      }
+      if (method.startsWith("setMy")) {
+        const token = options?.token ?? "";
+        profileTokens.push(token);
+        if (token === HIRED_TOKEN) {
+          oldProfileCalls += 1;
+          return Promise.resolve({
+            ok: false,
+            error_code: oldProfileCalls <= 3 ? 503 : 401,
+            description:
+              oldProfileCalls <= 3
+                ? "Bot API temporarily unavailable"
+                : "Unauthorized",
+          });
+        }
+      }
+      return Promise.resolve({ ok: true, result: true });
+    };
+    const deps = {
+      allowedUserIds: new Set(["42"]),
+      primaryBotId: IVA_BOT_ID,
+      primaryBotToken: IVA_TOKEN,
+      envPath: localEnvPath,
+      settingsFile: localSettings,
+      hireStateDir,
+      env: localEnv,
+      now: () => 1_700_000_000_100,
+      tgImpl,
+      applyAvatarImpl: () => Promise.resolve(successfulAvatar),
+      replyImpl: () => Promise.resolve({ message_id: 1 }),
+      lang: () => "ru" as const,
+      logImpl: () => {},
+    };
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await handleManagedBotUpdate(update, deps);
+    }
+    assert.equal(tokenCalls, 3);
+
+    const completed = await reconcilePendingColleagueHires({
+      ...deps,
+      now: () => 1_700_000_601_100,
+    });
+    assert.deepEqual(completed, { attempted: 1, completed: 1 });
+    assert.equal(
+      tokenCalls,
+      4,
+      "reconciliation must refresh the managed token after 401",
+    );
+    assert.ok(
+      profileTokens.some((token) => token === ROTATED_HIRED_TOKEN),
+      `profile write did not use rotated token: ${profileTokens.join(",")}`,
+    );
+    const envAfter = parseEnvText(readFileSync(localEnvPath, "utf8"));
+    assert.ok(
+      envAfter.TELEGRAM_COLLEAGUE_BOT_TOKENS?.includes(ROTATED_HIRED_TOKEN),
+      "rotated token must reach .env",
+    );
+    assert.equal(
+      envAfter.TELEGRAM_COLLEAGUE_BOT_TOKENS?.includes(HIRED_TOKEN),
+      false,
+      "stale token must leave .env",
+    );
+    assert.equal(
+      readFileSync(localSettings, "utf8").includes(HIRED_TOKEN),
+      false,
+      "stale token must not reach settings.json",
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("T940 acceptor live redelivery: handler and reconciliation are serialized per bot", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "iva-hire-live-redelivery-"));
+  const localSettings = join(dir, "settings.json");
+  const localEnvPath = join(dir, ".env");
+  const hireStateDir = join(dir, "colleague-hires.d");
+  writeHireTestEnv(localEnvPath);
+  try {
+    const localEnv: NodeJS.ProcessEnv = {
+      TELEGRAM_BOT_TOKEN: IVA_TOKEN,
+      TELEGRAM_BOT_USERNAME: "iva_main_bot",
+      MODEL_PROVIDER: "ollama",
+    };
+    const update = makeManagedHireUpdate(
+      1260,
+      HIRED_BOT_ID,
+      "iva_main_critic_bot",
+    );
+    let nowValue = 1_700_000_000_100;
+    let tokenCalls = 0;
+    let releaseToken: ((value: { ok: true; result: string }) => void) | null =
+      null;
+    const gatedToken = new Promise<{ ok: true; result: string }>((resolve) => {
+      releaseToken = resolve;
+    });
+    const hiredBots: TelegramBotConfig[] = [];
+    const ownerNotices: string[] = [];
+    const profileCalls: string[] = [];
+    const tgImpl = (
+      method: string,
+      _body: Record<string, unknown>,
+      options?: { token?: string },
+    ) => {
+      if (method === "getManagedBotToken") {
+        tokenCalls += 1;
+        if (tokenCalls === 1) {
+          return Promise.reject(
+            new DOMException(
+              "The operation was aborted due to timeout",
+              "TimeoutError",
+            ),
+          );
+        }
+        if (tokenCalls === 2) return gatedToken;
+        return Promise.resolve({ ok: true, result: HIRED_TOKEN });
+      }
+      if (method.startsWith("setMy")) profileCalls.push(method);
+      return Promise.resolve({ ok: true, result: true });
+    };
+    const deps = {
+      allowedUserIds: new Set(["42"]),
+      primaryBotId: IVA_BOT_ID,
+      primaryBotToken: IVA_TOKEN,
+      envPath: localEnvPath,
+      settingsFile: localSettings,
+      hireStateDir,
+      env: localEnv,
+      now: () => nowValue,
+      tgImpl,
+      applyAvatarImpl: () => Promise.resolve(successfulAvatar),
+      replyImpl: (_chatId: number | string, text: string) => {
+        ownerNotices.push(text);
+        return Promise.resolve({ message_id: 1 });
+      },
+      onColleagueHired: (bot: TelegramBotConfig) => hiredBots.push(bot),
+      lang: () => "ru" as const,
+      logImpl: () => {},
+    };
+
+    const first = await handleManagedBotUpdate(update, deps);
+    assert.equal(first.status, "failed");
+    nowValue += 31_000;
+    const reconciliation = reconcilePendingColleagueHires(deps);
+    while (tokenCalls < 2) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    const redelivery = handleManagedBotUpdate(update, deps);
+    const redeliveryBeforeRelease = await Promise.race([
+      redelivery.then(
+        () => "settled" as const,
+        () => "settled" as const,
+      ),
+      new Promise<"pending">((resolve) => {
+        setTimeout(() => resolve("pending"), 20);
+      }),
+    ]);
+    assert.ok(releaseToken, "test must control reconciliation token response");
+    releaseToken({ ok: true, result: HIRED_TOKEN });
+    const [completed, redelivered] = await Promise.all([
+      reconciliation,
+      redelivery,
+    ]);
+
+    assert.equal(
+      redeliveryBeforeRelease,
+      "pending",
+      "redelivery must wait for the in-flight reconciliation of the same bot",
+    );
+    assert.deepEqual(completed, { attempted: 1, completed: 1 });
+    assert.equal(redelivered.status, "ignored");
+    assert.equal(ownerNotices.length, 1, "duplicate owner notification");
+    assert.equal(hiredBots.length, 1, "duplicate colleague startup");
+    assert.equal(tokenCalls, 2, "redelivery must not query Bot API again");
+    const finalState = JSON.parse(
+      readFileSync(join(hireStateDir, `${HIRED_BOT_ID}.json`), "utf8"),
+    ) as { phase?: string; updateId?: number };
+    assert.equal(finalState.phase, "completed");
+    assert.equal(finalState.updateId, 1260);
+    const profileCallsBeforeRedelivery = profileCalls.length;
+    const again = await handleManagedBotUpdate(update, deps);
+    assert.equal(again.status, "ignored");
+    assert.equal(
+      profileCalls.length,
+      profileCallsBeforeRedelivery,
+      "profile writes must not grow after completed redelivery",
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("T940 arbiter token-stage write failure: reconciliation reuses the token already stored in .env", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "iva-hire-token-write-failure-"));
+  const localSettings = join(dir, "settings.json");
+  const localEnvPath = join(dir, ".env");
+  const hireStateDir = join(dir, "colleague-hires.d");
+  writeHireTestEnv(localEnvPath);
+  mkdirSync(hireStateDir, { recursive: true, mode: 0o700 });
+  try {
+    writeFileSync(
+      join(hireStateDir, `${HIRED_BOT_ID}.json`),
+      JSON.stringify({
+        version: 1,
+        phase: "token",
+        botId: HIRED_BOT_ID,
+        ownerUserId: "42",
+        updateId: 1270,
+        role: "critic",
+        provider: "ollama",
+        model: "critic-model",
+        name: "Критик",
+        username: "iva_main_critic_bot",
+        attempts: 3,
+        nextRetryAt: 0,
+        createdAt: 1,
+        updatedAt: 1,
+      }),
+      { mode: 0o600 },
+    );
+    const localEnv: NodeJS.ProcessEnv = {
+      TELEGRAM_BOT_TOKEN: IVA_TOKEN,
+      TELEGRAM_BOT_USERNAME: "iva_main_bot",
+      MODEL_PROVIDER: "ollama",
+    };
+    let tokenCalls = 0;
+    const ownerNotices: string[] = [];
+    const tgImpl = (method: string) => {
+      if (method === "getManagedBotToken") {
+        tokenCalls += 1;
+        return Promise.resolve({ ok: true, result: HIRED_TOKEN });
+      }
+      return Promise.resolve({ ok: true, result: true });
+    };
+    const deps = {
+      settingsFile: localSettings,
+      envPath: localEnvPath,
+      env: localEnv,
+      hireStateDir,
+      now: () => 1_700_000_601_100,
+      tgImpl,
+      replyImpl: (_chatId: number | string, text: string) => {
+        ownerNotices.push(text);
+        return Promise.resolve({ message_id: 1 });
+      },
+      lang: () => "ru" as const,
+      logImpl: () => {},
+    };
+
+    chmodSync(hireStateDir, 0o500);
+    const failedWrite = await reconcilePendingColleagueHires(deps);
+    assert.deepEqual(failedWrite, { attempted: 1, completed: 0 });
+    assert.equal(tokenCalls, 1);
+    assert.ok(
+      parseEnvText(readFileSync(localEnvPath, "utf8"))
+        .TELEGRAM_COLLEAGUE_BOT_TOKENS?.includes(HIRED_TOKEN),
+      "first reconciliation must leave the fetched token in .env",
+    );
+
+    chmodSync(hireStateDir, 0o700);
+    const completed = await reconcilePendingColleagueHires(deps);
+    assert.deepEqual(completed, { attempted: 1, completed: 1 });
+    assert.equal(
+      tokenCalls,
+      1,
+      "token phase with a configured token must not query getManagedBotToken again",
+    );
+    const finalState = JSON.parse(
+      readFileSync(join(hireStateDir, `${HIRED_BOT_ID}.json`), "utf8"),
+    ) as { phase?: string; role?: string; model?: string; name?: string };
+    assert.equal(finalState.phase, "completed");
+    assert.equal(finalState.role, "critic");
+    assert.equal(finalState.model, "critic-model");
+    assert.equal(finalState.name, "Критик");
+    assert.equal(ownerNotices.length, 1);
+  } finally {
+    chmodSync(hireStateDir, 0o700);
     rmSync(dir, { recursive: true, force: true });
   }
 });
