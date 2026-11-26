@@ -734,7 +734,9 @@ export function withColleagueHireProposal(
 /**
  * Снимает предложение найма при приходе `managed_bot` только по точному нику бота.
  * Ссылка найма уже несёт этот ник, поэтому чужое открытое предложение остаётся ждать
- * своего подтверждения и не может переписать роль нанятого бота.
+ * своего подтверждения и не может переписать роль нанятого бота. Точное предложение
+ * снимается и тогда, когда найм доводится повтором после конца срока; сам срок по-прежнему
+ * решает только, можно ли брать из предложения роль, модель и имя для нового решения.
  */
 export function consumeColleagueHireProposal(
   settings: Record<string, unknown>,
@@ -744,21 +746,30 @@ export function consumeColleagueHireProposal(
   readonly settings: Record<string, unknown>;
   readonly proposal: ColleagueHireProposal | null;
 } {
-  const open = readColleagueHireProposals(settings, now);
-  if (open.length === 0) return { settings, proposal: null };
+  const raw = rawColleagues(settings);
+  const all = Array.isArray(raw.pendingHires)
+    ? raw.pendingHires
+        .map(parseHireProposal)
+        .filter((item): item is ColleagueHireProposal => item !== null)
+    : [];
+  if (all.length === 0) return { settings, proposal: null };
   const targetUsername = match.username
     ?.trim()
     .replace(/^@/u, "")
     .toLowerCase();
   const matchedIndex =
     targetUsername !== undefined && targetUsername.length > 0
-      ? open.findIndex(
+      ? all.findIndex(
           (item) => item.botUsername.toLowerCase() === targetUsername,
         )
       : -1;
   if (matchedIndex < 0) return { settings, proposal: null };
-  const proposal = open[matchedIndex] ?? null;
-  const remaining = open.filter((_, index) => index !== matchedIndex);
+  const matched = all[matchedIndex] ?? null;
+  const proposal =
+    matched !== null && now - matched.createdAt <= PENDING_HIRE_TTL_MS
+      ? matched
+      : null;
+  const remaining = all.filter((_, index) => index !== matchedIndex);
   const current = parseColleaguesConfig(settings, () => {});
   return {
     proposal,

@@ -1323,9 +1323,9 @@ test("T941: repeat after setMyName 503 completes the journaled researcher hire a
     const rawColleagues = rawSettings.colleagues as
       Record<string, unknown> | undefined;
     assert.equal(rawColleagues?.pendingHires, undefined);
-    const lastNameCall = profileCalls.findLast(
-      (call) => call.method === "setMyName",
-    );
+    const lastNameCall = [...profileCalls]
+      .reverse()
+      .find((call) => call.method === "setMyName");
     assert.equal(lastNameCall?.body.name, "Исследователь");
   } finally {
     rmSync(dir, { recursive: true, force: true });

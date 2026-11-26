@@ -998,7 +998,7 @@ async function handleManagedBotEvent(
     if (error !== null) return failedOutcome(error);
   }
 
-  const profileCopy = colleagueProfileCopy(initialRole, lang, initialName);
+  const profileCopy = colleagueProfileCopy(decision.role, lang, decision.name);
   if (working.phase === "profile") {
     const profileResult = await applyProfileCopy({
       botId: event.botId,
