@@ -23,15 +23,27 @@ import { createVersionStore, versionName } from "./lib/version-store.ts";
 const ROOT = fileURLToPath(new URL("../", import.meta.url));
 const REPAIR = join(ROOT, "repair.sh");
 
+/**
+ * git as these tests run it: none of the machine's settings and no cleanup behind the
+ * command's back. A commit of a whole release tree leaves thousands of loose objects, so
+ * git starts `gc --auto` detached, and it repacks the store while the next command reads
+ * it: `hardlink different from source ... tmp_pack_`, `unable to read sha1 file`.
+ */
+const GIT_ENV = {
+  GIT_CONFIG_GLOBAL: "/dev/null",
+  // Чужая среда (агентная сессия) может подменять адреса через GIT_CONFIG_*: счёт заново.
+  GIT_CONFIG_COUNT: "1",
+  GIT_CONFIG_KEY_0: "gc.auto",
+  GIT_CONFIG_VALUE_0: "0",
+};
+
 function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", args, {
     cwd,
     encoding: "utf8",
     env: {
       ...process.env,
-      GIT_CONFIG_GLOBAL: "/dev/null",
-      // Чужая среда (агентная сессия) может подменять адреса через GIT_CONFIG_*.
-      GIT_CONFIG_COUNT: "0",
+      ...GIT_ENV,
       GIT_AUTHOR_NAME: "iva",
       GIT_AUTHOR_EMAIL: "iva@example.invalid",
       GIT_COMMITTER_NAME: "iva",
@@ -90,9 +102,7 @@ function checkout(t: TestContext): {
         encoding: "utf8",
         env: {
           ...process.env,
-          GIT_CONFIG_GLOBAL: "/dev/null",
-          // Чужая среда (агентная сессия) может подменять адреса через GIT_CONFIG_*.
-          GIT_CONFIG_COUNT: "0",
+          ...GIT_ENV,
           PATH: `${fakeBin}:${process.env.PATH ?? ""}`,
           IVA_INSTALL_DIR: install,
           IVA_TEST_HANDOFF: handoff,
@@ -723,8 +733,7 @@ function belowFloorWorld(t: TestContext, from: string) {
   chmodSync(join(fakeBin, "npm"), 0o755);
   const env = {
     ...process.env,
-    GIT_CONFIG_GLOBAL: "/dev/null",
-    GIT_CONFIG_COUNT: "0",
+    ...GIT_ENV,
     HOME: userHome,
     PATH: `${fakeBin}:${process.env.PATH ?? ""}`,
     IVA_INSTALL_DIR: home,
