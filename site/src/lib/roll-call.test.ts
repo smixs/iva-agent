@@ -1,7 +1,10 @@
 // The rules of the roll call against a real SQLite. Run: node --test src/lib/roll-call.test.ts
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
+import { SCHEMA } from "./installs.ts";
 import { memoryDatabase } from "./memory-d1.ts";
+import { textUpTo } from "./request-body.ts";
 import {
   FIELDS,
   installations,
@@ -34,7 +37,7 @@ function random(seed: number) {
 const CALL = {
   gap: 1,
   version: "0.5.16",
-  channel: "main",
+  branch: "main",
   os: "linux",
   arch: "x64",
   provider: "codex",
@@ -45,10 +48,9 @@ const body = (patch: Record<string, unknown> = {}) =>
 
 test("a roll call is exactly seven fields in their shapes; anything else is refused", () => {
   assert.deepEqual(rollCallIn(body()), { ...CALL, gap: "1" });
-  assert.deepEqual(
-    rollCallIn(body({ model: "openai/gpt-5.1", version: "other" }))?.model,
-    "openai/gpt-5.1",
-  );
+  for (const model of ["openai/gpt-5.1", "gemma4:31b", "deepseek-v4.1-flash"])
+    assert.equal(rollCallIn(body({ model }))?.model, model);
+  assert.equal(rollCallIn(body({ version: "other" }))?.version, "other");
   for (const bad of [
     "",
     "null",
@@ -62,6 +64,12 @@ test("a roll call is exactly seven fields in their shapes; anything else is refu
     body({ id: "abc" }),
     body({ version: "0.5.16-beta" }),
     body({ model: "http://box:11434/llama" }),
+    body({ model: "203.0.113.7" }),
+    body({ model: "10.0.0.1:11434" }),
+    body({ model: "192.168.1.5:11434/llama3" }),
+    body({ model: "fe80::1" }),
+    body({ model: "2001:db8:0:1:2:3:4:5" }),
+    body({ branch: "Main" }),
     body({ model: "My Model" }),
     body({ model: "/home/owner/model.gguf" }),
     body({ provider: "Codex" }),
@@ -81,6 +89,7 @@ test(`no body outside the shapes reaches the table (seed ${SEED})`, () => {
     "other",
     "a b",
     "203.0.113.7",
+    "fe80::1",
     "http://x/y",
     "0.5",
     -1,
@@ -89,20 +98,32 @@ test(`no body outside the shapes reaches the table (seed ${SEED})`, () => {
     null,
     true,
   ];
+  let taken = 0;
   for (let run = 0; run < 2000; run++) {
-    const fields: Record<string, unknown> = {};
-    for (const key of [...FIELDS, "id", "ip", "host"])
-      if (int(0, 3) > 0) fields[key] = pick(values);
+    // A real roll call with up to two fields changed, dropped or added: most bodies are near
+    // the valid ones, where a wrong rule would show.
+    const fields: Record<string, unknown> = { ...CALL };
+    for (let change = int(0, 2); change > 0; change--) {
+      const key = pick([...FIELDS, "id", "ip", "host"]);
+      if (int(0, 3) === 0) delete fields[key];
+      else fields[key] = pick(values);
+    }
     const call = rollCallIn(JSON.stringify(fields));
     if (call === null) continue;
+    taken++;
     assert.deepEqual(
       Object.keys(call).sort(),
       [...FIELDS].sort(),
       `seed ${SEED}, run ${run}`,
     );
     assert.ok(Number(call.gap) >= 0 && Number(call.gap) <= MAX_GAP);
-    assert.ok(!Object.values(call).includes("203.0.113.7"));
+    for (const address of ["203.0.113.7", "fe80::1", "http://x/y"])
+      assert.ok(
+        !Object.values(call).includes(address),
+        `seed ${SEED}, run ${run}`,
+      );
   }
+  assert.ok(taken > 200, `seed ${SEED}: only ${taken} bodies taken`);
 });
 
 test("the table keeps one counter per day, field and value, and nothing about the sender", async () => {
@@ -195,4 +216,90 @@ test("one day splits by field, largest first", () => {
     ["claude", 5],
     ["codex", 3],
   ]);
+});
+
+test("the seven counters of a roll call are written together or not at all", async () => {
+  const { db, raw } = memoryDatabase([
+    ...ROLL_CALL_SCHEMA,
+    // D1 failing in the middle of the seven writes: the model is the sixth.
+    "CREATE TRIGGER fail BEFORE INSERT ON roll_call WHEN NEW.field = 'model' BEGIN SELECT RAISE(ABORT, 'D1 is down'); END",
+  ]);
+  await assert.rejects(
+    recordRollCall(db, rollCallIn(body())!, new Date("2026-11-26T10:00:00Z")),
+    /D1 is down/,
+  );
+  assert.deepEqual(raw.prepare("SELECT * FROM roll_call").all(), []);
+});
+
+test("the schema file creates exactly the tables the code expects", () => {
+  const file = readFileSync(
+    new URL("../../d1/installs.sql", import.meta.url),
+    "utf8",
+  )
+    .split("\n")
+    .filter((line) => !line.startsWith("--"))
+    .join("\n")
+    .split(";")
+    .map((statement) => statement.trim())
+    .filter(Boolean);
+  assert.deepEqual(file, [...SCHEMA, ...ROLL_CALL_SCHEMA]);
+});
+
+test("a body is read no further than its limit, whatever Content-Length says", async () => {
+  const post = (body: string, headers: Record<string, string> = {}) =>
+    new Request("https://iva-agent.com/api/roll-call", {
+      method: "POST",
+      body,
+      headers,
+    });
+  const small = body();
+  assert.equal(await textUpTo(post(small), MAX_ROLL_CALL_BODY), small);
+  assert.equal(await textUpTo(post(""), MAX_ROLL_CALL_BODY), "");
+  const large = "x".repeat(1 << 20);
+  // A stream has no Content-Length: only the read can stop it.
+  const streamed = new Request("https://iva-agent.com/api/roll-call", {
+    method: "POST",
+    body: new Blob([large]).stream(),
+    duplex: "half",
+  } as RequestInit);
+  assert.equal(streamed.headers.get("content-length"), null);
+  assert.equal(await textUpTo(streamed, MAX_ROLL_CALL_BODY), null);
+  assert.equal(
+    await textUpTo(
+      post(small, { "content-length": "100000" }),
+      MAX_ROLL_CALL_BODY,
+    ),
+    null,
+  );
+  // Multi-byte text is counted in bytes, as the limit is.
+  const wide = "я".repeat(MAX_ROLL_CALL_BODY / 2 + 1);
+  assert.equal(await textUpTo(post(wide), MAX_ROLL_CALL_BODY), null);
+});
+
+test("the endpoint answers 204 to a roll call, 400 to anything else, 413 to a large body, and has no GET", async () => {
+  const endpoint = await import("../../functions/api/roll-call.ts");
+  assert.equal("onRequestGet" in endpoint, false);
+  assert.equal("onRequest" in endpoint, false);
+  const { db, raw } = memoryDatabase(ROLL_CALL_SCHEMA);
+  const post = (text: string) =>
+    endpoint.onRequestPost({
+      request: new Request("https://iva-agent.com/api/roll-call", {
+        method: "POST",
+        body: text,
+      }),
+      env: { INSTALLS: db },
+    });
+  const taken = await post(body());
+  assert.equal(taken.status, 204);
+  assert.equal(taken.headers.get("cache-control"), "no-store");
+  assert.equal((await post(body({ id: "abc" }))).status, 400);
+  assert.equal((await post("x".repeat(MAX_ROLL_CALL_BODY + 1))).status, 413);
+  // Only the taken one was counted: seven counters, one each.
+  assert.deepEqual(
+    raw
+      .prepare("SELECT SUM(count) AS total FROM roll_call")
+      .all()
+      .map((row) => ({ ...row })),
+    [{ total: 7 }],
+  );
 });

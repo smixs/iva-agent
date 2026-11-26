@@ -2,6 +2,7 @@
 // Iva). The rules are in src/lib/roll-call.ts; this file only reads the request and writes the
 // answer. There is no GET: the numbers are read by the project's owner from the database.
 import type { Database } from "../../src/lib/installs.ts";
+import { textUpTo } from "../../src/lib/request-body.ts";
 import {
   MAX_ROLL_CALL_BODY,
   recordRollCall,
@@ -17,11 +18,9 @@ export async function onRequestPost({
   request,
   env,
 }: Context): Promise<Response> {
-  if (Number(request.headers.get("content-length") ?? 0) > MAX_ROLL_CALL_BODY)
-    return new Response(null, { status: 413, headers: quiet });
-  const call = rollCallIn(
-    (await request.text()).slice(0, MAX_ROLL_CALL_BODY + 1),
-  );
+  const body = await textUpTo(request, MAX_ROLL_CALL_BODY);
+  if (body === null) return new Response(null, { status: 413, headers: quiet });
+  const call = rollCallIn(body);
   if (call === null) return new Response(null, { status: 400, headers: quiet });
   await recordRollCall(env.INSTALLS, call, new Date());
   return new Response(null, { status: 204, headers: quiet });

@@ -1,6 +1,6 @@
 // The roll call of installed Ivas (ADR-0031 in docs/adr of Iva).
 //
-// Once a day an installed Iva posts seven fields: gap, version, channel, os, arch, provider
+// Once a day an installed Iva posts seven fields: gap, version, branch, os, arch, provider
 // and model. The site keeps counters, one per day, field and value, and never a row with all
 // the fields together, so a rare combination cannot single an installation out. Nothing about
 // the sender is kept: no address, no hash of it, no country. The handler in
@@ -26,7 +26,7 @@ export const MAX_GAP = 31;
 export const FIELDS = [
   "gap",
   "version",
-  "channel",
+  "branch",
   "os",
   "arch",
   "provider",
@@ -40,7 +40,7 @@ export type RollCall = Readonly<Record<Field, string>>;
 // and a refused roll call would hide that installation until the site caught up.
 const SHAPES: Record<Exclude<Field, "gap">, RegExp> = {
   version: /^(\d{1,4}\.\d{1,4}\.\d{1,4}|other)$/,
-  channel: /^[a-z]{1,16}$/,
+  branch: /^[a-z]{1,16}$/,
   os: /^[a-z0-9]{1,16}$/,
   arch: /^[a-z0-9]{1,16}$/,
   provider: /^[a-z][a-z0-9-]{0,31}$/,
@@ -77,28 +77,41 @@ export function rollCallIn(body: string): RollCall | null {
   for (const [field, shape] of Object.entries(SHAPES)) {
     const value = fields[field];
     if (typeof value !== "string" || !shape.test(value)) return null;
-    if (field === "model" && value.includes("://")) return null;
+    if (field === "model" && looksLikeAnAddress(value)) return null;
     call[field] = value;
   }
   return call as RollCall;
 }
 
+// Iva sends only the names its model catalog knows; whoever else posts here must not leave an
+// address in the table either. An address has no letter, an IPv4 address anywhere in it
+// (192.168.1.5:11434/llama3), two colons (IPv6) or a scheme; a model's name has a letter and
+// at most one colon (gemma4:31b).
+function looksLikeAnAddress(model: string): boolean {
+  return (
+    !/[a-z]/.test(model) ||
+    /\d{1,3}(\.\d{1,3}){3}/.test(model) ||
+    (model.match(/:/g) ?? []).length > 1 ||
+    model.includes("://")
+  );
+}
+
 export const dayOf = (now: Date): string => now.toISOString().slice(0, 10);
 
-/** One roll call: each of its seven values adds one to its counter for the day. */
+/**
+ * One roll call: each of its seven values adds one to its counter for the day, in one
+ * transaction, so a failure keeps the day's counters agreeing with each other.
+ */
 export async function recordRollCall(
   db: Database,
   call: RollCall,
   now: Date,
 ): Promise<void> {
   const day = dayOf(now);
-  for (const field of FIELDS)
-    await db
-      .prepare(
-        "INSERT INTO roll_call (day, field, value, count) VALUES (?, ?, ?, 1) ON CONFLICT (day, field, value) DO UPDATE SET count = count + 1",
-      )
-      .bind(day, field, call[field])
-      .run();
+  const upsert = db.prepare(
+    "INSERT INTO roll_call (day, field, value, count) VALUES (?, ?, ?, 1) ON CONFLICT (day, field, value) DO UPDATE SET count = count + 1",
+  );
+  await db.batch(FIELDS.map((field) => upsert.bind(day, field, call[field])));
 }
 
 export type Counter = {

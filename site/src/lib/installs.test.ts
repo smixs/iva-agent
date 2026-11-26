@@ -59,6 +59,17 @@ test("every install counts, and nothing about the sender is kept", async () => {
     trace: 2,
     "voice-reply": 1,
   });
+  // What is stored is the row and nothing else: a name and its number.
+  assert.deepEqual(
+    raw
+      .prepare("SELECT * FROM installs ORDER BY name")
+      .all()
+      .map((row) => ({ ...row })),
+    [
+      { name: "trace", count: 2 },
+      { name: "voice-reply", count: 1 },
+    ],
+  );
   // One table, one number per plugin: there is nowhere an address or its hash could go.
   assert.deepEqual(
     raw

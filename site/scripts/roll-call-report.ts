@@ -1,16 +1,16 @@
 // The numbers of the roll call, for the project's owner only (ADR-0031 in docs/adr of Iva):
-// live installations today, over 7 and 30 days, new ones, and how the latest day splits by
-// version, channel, platform, provider and model. Reads the production database through
+// live installations today, over 7 and 30 days, first roll calls, and how the latest day
+// splits by version, update branch, platform, provider and model. Reads the production database through
 // wrangler, so it needs the Cloudflare login the deploy uses.
 //
 //   node scripts/roll-call-report.ts [--preview]
 import { execFileSync } from "node:child_process";
 import {
   dayOf,
+  FIELDS,
   installations,
   split,
   type Counter,
-  type Field,
 } from "../src/lib/roll-call.ts";
 
 const DATABASE = process.argv.includes("--preview")
@@ -21,7 +21,8 @@ const today = dayOf(new Date());
 const daysAgo = (n: number) => dayOf(new Date(Date.parse(today) - n * DAY_MS));
 const since = daysAgo(29);
 
-// The date is ours, built by dayOf: nothing from outside reaches the query text.
+// The dates are ours, built by dayOf: nothing from outside reaches the query text. A day after
+// today can only come from a clock that ran ahead; it is not counted.
 const output = execFileSync(
   "npx",
   [
@@ -33,9 +34,13 @@ const output = execFileSync(
     "--remote",
     "--json",
     "--command",
-    `SELECT day, field, value, count FROM roll_call WHERE day >= '${since}'`,
+    `SELECT day, field, value, count FROM roll_call WHERE day >= '${since}' AND day <= '${today}'`,
   ],
-  { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] },
+  {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "inherit"],
+    maxBuffer: 64 << 20,
+  },
 );
 const counters = (JSON.parse(output) as { results: Counter[] }[]).flatMap(
   (part) => part.results,
@@ -55,17 +60,12 @@ const fresh = counters
     (row) => row.field === "gap" && row.value === "0" && row.day >= daysAgo(6),
   )
   .reduce((sum, row) => sum + row.count, 0);
-console.log(`  new in 7 days    ${fresh}`);
+// gap 0 is an installation's first roll call: a new install, or one that has just updated to
+// a version with the roll call. Not the same as new users.
+console.log(`  first roll call, 7 days  ${fresh}`);
 if (latest) {
   console.log(`\n${latest}, by field:`);
-  for (const field of [
-    "version",
-    "channel",
-    "os",
-    "arch",
-    "provider",
-    "model",
-  ] as Field[])
+  for (const field of FIELDS.filter((name) => name !== "gap"))
     console.log(
       `  ${field.padEnd(9)} ${split(counters, latest, field)
         .map(([value, count]) => `${value} ${count}`)

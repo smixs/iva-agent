@@ -7,14 +7,19 @@
 // rare. The handler in `functions/api/plugins/installs.ts` only reads the request; the rules
 // live here, where a test can run them against a real SQLite.
 
-/** The part of Cloudflare D1 this module uses; `node:sqlite` fits behind it in tests. */
+/** A statement of D1 with its values bound. */
+export type Statement = {
+  run(): Promise<{ meta: { changes?: number } }>;
+  all<Row>(): Promise<{ results: Row[] }>;
+};
+
+/** The part of Cloudflare D1 the counts use; `node:sqlite` fits behind it in tests. */
 export type Database = {
   prepare(sql: string): {
-    bind(...values: (string | number)[]): {
-      run(): Promise<{ meta: { changes?: number } }>;
-      all<Row>(): Promise<{ results: Row[] }>;
-    };
+    bind(...values: (string | number)[]): Statement;
   };
+  /** One transaction: every statement is written, or none is (D1's batch). */
+  batch(statements: Statement[]): Promise<unknown[]>;
 };
 
 export const SCHEMA = [
