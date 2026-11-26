@@ -17,11 +17,13 @@ import {
 } from "../lib/telegram-queue.ts";
 import { alertOnce, alertResolved } from "../lib/notice-policy.ts";
 import { notificationChat } from "../../packages/notification-chat/index.ts";
+import { redactSecretValues } from "../../packages/secret-redaction/index.ts";
 import { tr } from "#lib/i18n.ts";
 import {
   ACCEPTANCE_ROUTE,
   BOTS,
   DATA_DIR,
+  ENV_PATH,
   ROUTE,
   SECRET,
   TOKEN,
@@ -45,6 +47,7 @@ import {
 } from "./process-lock.ts";
 import {
   configuredTelegramBots,
+  liveTelegramEnv,
   tagUpdateWithBot,
   type TelegramBotConfig,
 } from "../../packages/telegram-bots/index.ts";
@@ -117,6 +120,23 @@ export const resetMessageCopy = wizards.resetMessageCopy;
 export const handleAwaitNonText = control.handleAwaitNonText;
 
 const errorMessage = (error: unknown) => (error as ErrorLike).message;
+
+function redactBotLogText(text: unknown, bot: TelegramBotConfig): string {
+  const secrets = new Set(
+    configuredTelegramBots(
+      liveTelegramEnv(
+        process.env,
+        process.env.IVA_ENV_FILE?.trim() || ENV_PATH,
+      ),
+    ).map(
+      (configured) => configured.token,
+    ),
+  );
+  secrets.add(bot.token);
+  const raw = typeof text === "string" ? text : "";
+  return redactSecretValues(raw, [...secrets]);
+}
+
 let ordinaryControlFailure:
   { updateId: number; attempts: number; released: boolean } | undefined;
 
@@ -455,13 +475,19 @@ export async function runBotPollLoop({
         },
       )) as TelegramResponse;
     } catch (error) {
-      logImpl(`[${label}] getUpdates network:`, errorMessage(error));
+      logImpl(
+        `[${label}] getUpdates network:`,
+        redactBotLogText(errorMessage(error), bot),
+      );
       consecutiveConflicts = 0;
       await sleepImpl(3000);
       continue;
     }
     if (!data.ok) {
-      logImpl(`[${label}] getUpdates:`, data.description);
+      logImpl(
+        `[${label}] getUpdates:`,
+        redactBotLogText(data.description, bot),
+      );
       if (/409|conflict|webhook/i.test(String(data.description || ""))) {
         consecutiveConflicts += 1;
         const { sleepMs, shouldAlert } = conflictBackoff(consecutiveConflicts);
@@ -472,7 +498,10 @@ export async function runBotPollLoop({
             logImpl,
           });
         } catch (error) {
-          logImpl(`[${label}] deleteWebhook:`, errorMessage(error));
+          logImpl(
+            `[${label}] deleteWebhook:`,
+            redactBotLogText(errorMessage(error), bot),
+          );
         }
         if (shouldAlert && onConflictAlert) {
           try {
@@ -480,7 +509,7 @@ export async function runBotPollLoop({
           } catch (error) {
             logImpl(
               `[${label}] getUpdates conflict alert:`,
-              errorMessage(error),
+              redactBotLogText(errorMessage(error), bot),
             );
           }
         }

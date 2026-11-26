@@ -731,8 +731,9 @@ export function withColleagueHireProposal(
 }
 
 /**
- * Снимает подходящее предложение найма при приходе `managed_bot`:
- * сначала по точному нику бота, затем по роли из имени/ника, затем самое свежее открытое.
+ * Снимает предложение найма при приходе `managed_bot` только по точному нику бота.
+ * Ссылка найма уже несёт этот ник, поэтому чужое открытое предложение остаётся ждать
+ * своего подтверждения и не может переписать роль нанятого бота.
  */
 export function consumeColleagueHireProposal(
   settings: Record<string, unknown>,
@@ -748,24 +749,13 @@ export function consumeColleagueHireProposal(
     ?.trim()
     .replace(/^@/u, "")
     .toLowerCase();
-  let matchedIndex =
+  const matchedIndex =
     targetUsername !== undefined && targetUsername.length > 0
       ? open.findIndex(
           (item) => item.botUsername.toLowerCase() === targetUsername,
         )
       : -1;
-  if (matchedIndex < 0) {
-    const inferredRole = inferColleagueRoleFromBot(match);
-    if (inferredRole) {
-      for (let i = open.length - 1; i >= 0; i -= 1) {
-        if (open[i].role === inferredRole) {
-          matchedIndex = i;
-          break;
-        }
-      }
-    }
-  }
-  if (matchedIndex < 0) matchedIndex = open.length - 1;
+  if (matchedIndex < 0) return { settings, proposal: null };
   const proposal = open[matchedIndex] ?? null;
   const remaining = open.filter((_, index) => index !== matchedIndex);
   const current = parseColleaguesConfig(settings, () => {});

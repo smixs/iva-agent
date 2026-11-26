@@ -13,8 +13,10 @@ import { join } from "node:path";
 import { isRecord } from "../../packages/guards/index.ts";
 import { redactSecretValues } from "../../packages/secret-redaction/index.ts";
 import {
+  allTelegramBotTokens,
   botIdFromToken,
   configuredTelegramBots,
+  liveTelegramEnv,
   upsertColleagueBotToken,
   validTelegramBotId,
   type TelegramBotConfig,
@@ -79,6 +81,8 @@ export type ManagedBotOutcome =
   | {
       readonly status: "failed";
       readonly reason: string;
+      /** true — событие нельзя подтверждать: вход держит offset и повторит его после восстановления среды/API. */
+      readonly retry: boolean;
     };
 
 export type ManagedBotApiCall = (
@@ -167,6 +171,55 @@ function redactError(error: unknown, secrets: readonly string[]): string {
   return filtered.length > 0 ? redactSecretValues(raw, filtered) : raw;
 }
 
+function failedOutcome(reason: string, retry = true): ManagedBotOutcome {
+  return { status: "failed", reason, retry };
+}
+
+/** Известные токены установки до вызова Bot API: рядом с новым могут лежать уже нанятые коллеги. */
+function knownTelegramSecrets(options: {
+  readonly primaryToken: string;
+  readonly env: NodeJS.ProcessEnv;
+  readonly envPath: string;
+}): string[] {
+  const baseEnv = {
+    ...options.env,
+    TELEGRAM_BOT_TOKEN: options.primaryToken,
+  };
+  const liveEnv = liveTelegramEnv(baseEnv, options.envPath);
+  const tokens = new Set(allTelegramBotTokens(liveEnv));
+  if (options.primaryToken.length > 0) tokens.add(options.primaryToken);
+  return [...tokens].filter((token) => token.length > 0);
+}
+
+const colleagueAvatarInFlight = new Map<
+  string,
+  Promise<ColleagueAvatarOutcome>
+>();
+
+/** Один исполнитель загрузки талисмана на коллегу: повторная сверка ждёт тот же прогон. */
+function applyColleagueAvatarOnce(options: {
+  readonly botId: string;
+  readonly botToken: string;
+  readonly applyAvatar: (
+    botToken: string,
+    deps?: ColleagueAvatarDeps,
+  ) => Promise<ColleagueAvatarOutcome>;
+  readonly avatarDeps?: ColleagueAvatarDeps;
+}): Promise<ColleagueAvatarOutcome> {
+  const running = colleagueAvatarInFlight.get(options.botId);
+  if (running) return running;
+  const task = Promise.resolve().then(() =>
+    options.applyAvatar(options.botToken, options.avatarDeps),
+  );
+  const tracked = task.finally(() => {
+    if (colleagueAvatarInFlight.get(options.botId) === tracked) {
+      colleagueAvatarInFlight.delete(options.botId);
+    }
+  });
+  colleagueAvatarInFlight.set(options.botId, tracked);
+  return tracked;
+}
+
 function extractTokenFromResult(result: unknown): string | null {
   if (typeof result === "string" && result.trim().length > 0) {
     return result.trim();
@@ -181,7 +234,12 @@ function extractTokenFromResult(result: unknown): string | null {
   return null;
 }
 
-async function applyProfileCopyBestEffort(options: {
+/**
+ * Записывает профиль коллеги целиком. Все три вызова идемпотентны, поэтому после
+ * частичного сбоя следующий повтор того же события просто доводит запись до конца.
+ * Возвращает первую замаскированную ошибку либо null, когда все три записи приняты.
+ */
+async function applyProfileCopy(options: {
   readonly botId: string;
   readonly botToken: string;
   readonly copy: {
@@ -192,7 +250,7 @@ async function applyProfileCopyBestEffort(options: {
   readonly tgImpl: ManagedBotApiCall;
   readonly secrets: readonly string[];
   readonly logImpl: (...args: unknown[]) => void;
-}): Promise<void> {
+}): Promise<string | null> {
   const calls: ReadonlyArray<
     readonly [method: string, body: Record<string, unknown>]
   > = [
@@ -203,7 +261,9 @@ async function applyProfileCopyBestEffort(options: {
       { short_description: options.copy.shortDescription },
     ],
   ];
+  let firstError: string | null = null;
   for (const [method, body] of calls) {
+    let failure: string | null = null;
     try {
       const response = (await options.tgImpl(method, body, {
         token: options.botToken,
@@ -213,18 +273,20 @@ async function applyProfileCopyBestEffort(options: {
           typeof response?.description === "string"
             ? response.description
             : "ok:false";
-        options.logImpl(
-          `managed_bot ${options.botId}: ${method} failed:`,
-          redactError(desc, options.secrets),
-        );
+        failure = redactError(desc, options.secrets);
       }
     } catch (error) {
+      failure = redactError(error, options.secrets);
+    }
+    if (failure !== null) {
       options.logImpl(
         `managed_bot ${options.botId}: ${method} failed:`,
-        redactError(error, options.secrets),
+        failure,
       );
+      firstError ??= `${method}: ${failure}`;
     }
   }
+  return firstError;
 }
 
 /**
@@ -270,7 +332,7 @@ export async function handleManagedBotUpdate(
   const settingsFile = deps.settingsFile ?? join(DATA_DIR, "settings.json");
   const now = deps.now ?? Date.now;
   const lang = (deps.lang ?? getLang)();
-  const secrets: string[] = primaryToken ? [primaryToken] : [];
+  const secrets = knownTelegramSecrets({ primaryToken, env, envPath });
 
   let tokenResponse: TelegramApiEnvelope | null;
   try {
@@ -282,7 +344,7 @@ export async function handleManagedBotUpdate(
   } catch (error) {
     const reason = redactError(error, secrets);
     logImpl(`managed_bot ${event.botId}: getManagedBotToken failed:`, reason);
-    return { status: "failed", reason };
+    return failedOutcome(reason);
   }
 
   const token =
@@ -296,7 +358,7 @@ export async function handleManagedBotUpdate(
         : "getManagedBotToken returned no token";
     const reason = redactError(detail, secrets);
     logImpl(`managed_bot ${event.botId}: getManagedBotToken rejected:`, reason);
-    return { status: "failed", reason };
+    return failedOutcome(reason);
   }
   secrets.push(token);
 
@@ -307,7 +369,7 @@ export async function handleManagedBotUpdate(
     logImpl(
       `managed_bot ${event.botId}: returned token failed botId/env validation`,
     );
-    return { status: "failed", reason: "invalid managed bot token" };
+    return failedOutcome("invalid managed bot token", false);
   }
 
   // Сохраняем токен коллеги рядом с токеном Ивы в `.env` (0600, атомарно) и обновляем env процесса.
@@ -332,26 +394,69 @@ export async function handleManagedBotUpdate(
       `managed_bot ${event.botId}: failed to store token in .env:`,
       reason,
     );
-    return { status: "failed", reason };
+    return failedOutcome(reason);
   }
 
-  // Привязываем роль/модель из открытого предложения найма (или выводим по имени/нику) и включаем опцию коллег.
-  let storedColleague: ColleagueEntry | null;
-  try {
-    const currentNow = now();
-    const updated = updateSettings((current) => {
-      const existingEntry = parseColleaguesConfig(current, () => {}).items[
-        event.botId
-      ];
-      const consumed = consumeColleagueHireProposal(
-        current,
+  // До записи профиля настройки не меняем: временный сбой Bot API не оставляет
+  // наполовину нанятого коллегу, а повтор того же апдейта идёт по первоначальному предложению.
+  const settingsBefore = readSettings(settingsFile);
+  const configBefore = parseColleaguesConfig(settingsBefore, () => {});
+  const existingBefore = configBefore.items[event.botId];
+  const currentNow = now();
+  const exactProposal = existingBefore
+    ? null
+    : consumeColleagueHireProposal(
+        settingsBefore,
         { username: event.botUsername, firstName: event.botFirstName },
         currentNow,
-      );
+      ).proposal;
+  const initialRole: ColleagueRole =
+    existingBefore?.role ??
+    exactProposal?.role ??
+    inferColleagueRoleFromBot({
+      firstName: event.botFirstName,
+      username: event.botUsername,
+    }) ??
+    "secretary";
+  const initialName =
+    existingBefore?.name ??
+    exactProposal?.name ??
+    event.botFirstName ??
+    (lang === "en"
+      ? COLLEAGUE_ROLE_SPECS[initialRole].labelEn
+      : COLLEAGUE_ROLE_SPECS[initialRole].labelRu);
+  const profileCopy = colleagueProfileCopy(initialRole, lang, initialName);
+  const profileError = await applyProfileCopy({
+    botId: event.botId,
+    botToken: token,
+    copy: profileCopy,
+    tgImpl,
+    secrets,
+    logImpl,
+  });
+  if (profileError !== null) {
+    return failedOutcome(`profile write failed: ${profileError}`);
+  }
+
+  // Привязываем роль/модель из своего точного предложения найма. Повтор события
+  // (смена токена или владельца) обновляет токен и ник, но сохраняет уже выбранные
+  // роль, модель, имя и положение опции коллег.
+  let storedColleague: ColleagueEntry | null;
+  try {
+    const updated = updateSettings((current) => {
+      const currentConfig = parseColleaguesConfig(current, () => {});
+      const existingEntry = currentConfig.items[event.botId];
+      const consumed = existingEntry
+        ? { settings: current, proposal: null }
+        : consumeColleagueHireProposal(
+            current,
+            { username: event.botUsername, firstName: event.botFirstName },
+            currentNow,
+          );
       const proposal = consumed.proposal;
       const role: ColleagueRole =
-        proposal?.role ??
         existingEntry?.role ??
+        proposal?.role ??
         inferColleagueRoleFromBot({
           firstName: event.botFirstName,
           username: event.botUsername,
@@ -359,16 +464,19 @@ export async function handleManagedBotUpdate(
         "secretary";
       const suggestion = suggestColleagueModel(role, env);
       const provider =
-        proposal?.provider ?? existingEntry?.provider ?? suggestion.provider;
-      const model = proposal?.model ?? existingEntry?.model ?? suggestion.model;
+        existingEntry?.provider ?? proposal?.provider ?? suggestion.provider;
+      const model = existingEntry?.model ?? proposal?.model ?? suggestion.model;
       const displayName =
+        existingEntry?.name ??
         proposal?.name ??
         event.botFirstName ??
-        existingEntry?.name ??
         (lang === "en"
           ? COLLEAGUE_ROLE_SPECS[role].labelEn
           : COLLEAGUE_ROLE_SPECS[role].labelRu);
-      const nextSettings = withColleaguesEnabled(consumed.settings, true);
+      const nextSettings = withColleaguesEnabled(
+        consumed.settings,
+        existingEntry ? currentConfig.enabled : true,
+      );
       return withColleague(nextSettings, {
         botId: event.botId,
         role,
@@ -380,13 +488,21 @@ export async function handleManagedBotUpdate(
           : existingEntry?.username
             ? { username: existingEntry.username }
             : {}),
-        avatarPhase:
-          colleagueAvatarPhase(existingEntry) === "set" ? "set" : "pending",
+        avatarPhase: colleagueAvatarPhase(existingEntry) ?? "pending",
+        ...(existingEntry?.avatarAttempts !== undefined
+          ? { avatarAttempts: existingEntry.avatarAttempts }
+          : {}),
+        ...(existingEntry?.avatarNextRetryAt !== undefined
+          ? { avatarNextRetryAt: existingEntry.avatarNextRetryAt }
+          : {}),
         ...(existingEntry?.avatarLogoId !== undefined
           ? { avatarLogoId: existingEntry.avatarLogoId }
           : {}),
         ...(existingEntry?.avatarName !== undefined
           ? { avatarName: existingEntry.avatarName }
+          : {}),
+        ...(existingEntry?.avatarError !== undefined
+          ? { avatarError: existingEntry.avatarError }
           : {}),
       });
     }, settingsFile);
@@ -395,35 +511,23 @@ export async function handleManagedBotUpdate(
   } catch (error) {
     const reason = redactError(error, secrets);
     logImpl(`managed_bot ${event.botId}: failed to save settings:`, reason);
-    return { status: "failed", reason };
+    return failedOutcome(reason);
   }
 
   if (!storedColleague) {
-    return {
-      status: "failed",
-      reason: "colleague missing after settings update",
-    };
+    return failedOutcome("colleague missing after settings update");
   }
-
-  const profileCopy = colleagueProfileCopy(
-    storedColleague.role,
-    lang,
-    storedColleague.name,
-  );
-  await applyProfileCopyBestEffort({
-    botId: event.botId,
-    botToken: token,
-    copy: profileCopy,
-    tgImpl,
-    secrets,
-    logImpl,
-  });
 
   // Ставим случайный талисман ip-as-logo (JPG 640×640). При сбое — бот без фото, повтор позже.
   let avatarSet = colleagueAvatarPhase(storedColleague) === "set";
   if (!avatarSet) {
     const applyAvatar = deps.applyAvatarImpl ?? applyRandomColleagueAvatar;
-    const avatarOutcome = await applyAvatar(token, deps.avatarDeps);
+    const avatarOutcome = await applyColleagueAvatarOnce({
+      botId: event.botId,
+      botToken: token,
+      applyAvatar,
+      avatarDeps: deps.avatarDeps,
+    });
     const attemptAt = now();
     if (avatarOutcome.ok) {
       avatarSet = true;
@@ -561,7 +665,12 @@ export async function reconcilePendingColleagueAvatars(
     const bot = botsById.get(entry.botId);
     if (!bot) continue;
     attempted += 1;
-    const outcome = await applyAvatar(bot.token, deps.avatarDeps);
+    const outcome = await applyColleagueAvatarOnce({
+      botId: entry.botId,
+      botToken: bot.token,
+      applyAvatar,
+      avatarDeps: deps.avatarDeps,
+    });
     const attemptAt = now();
     if (outcome.ok) {
       succeeded += 1;

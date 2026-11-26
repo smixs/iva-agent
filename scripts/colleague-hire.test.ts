@@ -912,7 +912,8 @@ test("возврат 1: temporary getManagedBotToken failure holds the update an
       HIRED_BOT_ID,
       "iva_main_critic_bot",
     );
-    const savedOffsets: number[] = [];
+    const firstSavedOffsets: number[] = [];
+    const secondSavedOffsets: number[] = [];
     const hiredBots: TelegramBotConfig[] = [];
     const ownerNotices: string[] = [];
     let tokenCalls = 0;
@@ -951,26 +952,26 @@ test("возврат 1: temporary getManagedBotToken failure holds the update an
     const first = await processTelegramUpdate(update, 901, {
       handleControlImpl: controlImpl,
       saveOffsetImpl: (next) => {
-        savedOffsets.push(next);
+        firstSavedOffsets.push(next);
         return Promise.resolve();
       },
       logImpl: () => {},
     });
     assert.deepEqual(first, { offset: 901, ingressBlocked: true });
-    assert.deepEqual(savedOffsets, []);
+    assert.deepEqual(firstSavedOffsets, []);
     assert.equal(hiredBots.length, 0);
     assert.equal(ownerNotices.length, 0);
 
     const second = await processTelegramUpdate(update, 901, {
       handleControlImpl: controlImpl,
       saveOffsetImpl: (next) => {
-        savedOffsets.push(next);
+        secondSavedOffsets.push(next);
         return Promise.resolve();
       },
       logImpl: () => {},
     });
     assert.deepEqual(second, { offset: 902, ingressBlocked: false });
-    assert.deepEqual(savedOffsets, [902]);
+    assert.deepEqual(secondSavedOffsets, [902]);
     assert.equal(tokenCalls, 2);
     assert.equal(hiredBots.length, 1);
     assert.equal(ownerNotices.length, 1);
@@ -1270,6 +1271,7 @@ test("возврат 5: known colleague tokens are redacted from managed_bot and
   const localSettings = join(dir, "settings.json");
   const localEnvPath = join(dir, ".env");
   writeHireTestEnv(localEnvPath, `iva_main_critic_bot=${HIRED_TOKEN}`);
+  const previousEnvFile = process.env.IVA_ENV_FILE;
   try {
     const localEnv: NodeJS.ProcessEnv = {
       TELEGRAM_BOT_TOKEN: IVA_TOKEN,
@@ -1306,11 +1308,12 @@ test("возврат 5: known colleague tokens are redacted from managed_bot and
     const pollLogs: string[] = [];
     const { lease } = await tempLease(t);
     let pollCalls = 0;
+    process.env.IVA_ENV_FILE = localEnvPath;
     await runBotPollLoop({
       bot: {
-        botId: HIRED_BOT_ID,
-        token: HIRED_TOKEN,
-        username: "iva_main_critic_bot",
+        botId: SECOND_BOT_ID,
+        token: SECOND_TOKEN,
+        username: "iva_main_second_bot",
         isPrimary: false,
       },
       initialOffset: 0,
@@ -1333,7 +1336,30 @@ test("возврат 5: known colleague tokens are redacted from managed_bot and
     });
     assert.equal(pollCalls, 1);
     assert.equal(pollLogs.join("\n").includes(HIRED_TOKEN), false);
+
+    const controlLogs: string[] = [];
+    const originalConsoleLog = console.log;
+    console.log = (...args: unknown[]) => {
+      controlLogs.push(args.map(String).join(" "));
+    };
+    try {
+      const controlOutcome = await handleControl(
+        { update_id: 931, managed_bot: {} },
+        {
+          managedBotImpl: () =>
+            Promise.reject(
+              new Error(`fatal managed bot failure with ${HIRED_TOKEN}`),
+            ),
+        },
+      );
+      assert.equal(controlOutcome, "retry");
+    } finally {
+      console.log = originalConsoleLog;
+    }
+    assert.equal(controlLogs.join("\n").includes(HIRED_TOKEN), false);
   } finally {
+    if (previousEnvFile === undefined) delete process.env.IVA_ENV_FILE;
+    else process.env.IVA_ENV_FILE = previousEnvFile;
     rmSync(dir, { recursive: true, force: true });
   }
 });
@@ -1588,20 +1614,21 @@ test("п.4: colleague token is inventoried in outbound-sensitive-keys.json and r
       `TELEGRAM_BOT_TOKEN=${IVA_TOKEN}\nTELEGRAM_BOT_USERNAME=iva_main_bot\n`,
       { mode: 0o600 },
     );
-    const outcome = await handleManagedBotUpdate(
-      {
-        update_id: 999,
-        managed_bot: {
-          user: { id: 42, is_bot: false },
-          bot: {
-            id: 777777777,
-            is_bot: true,
-            first_name: "Критик",
-            username: "leak_test_bot",
-          },
+    const managedUpdate = {
+      update_id: 999,
+      managed_bot: {
+        user: { id: 42, is_bot: false },
+        bot: {
+          id: 777777777,
+          is_bot: true,
+          first_name: "Критик",
+          username: "leak_test_bot",
         },
       },
-      {
+    };
+    let profileCalls = 0;
+    const runHire = () =>
+      handleManagedBotUpdate(managedUpdate, {
         allowedUserIds: new Set(["42"]),
         primaryBotId: IVA_BOT_ID,
         primaryBotToken: IVA_TOKEN,
@@ -1612,10 +1639,20 @@ test("п.4: colleague token is inventoried in outbound-sensitive-keys.json and r
           if (method === "getManagedBotToken") {
             return Promise.resolve({ ok: true, result: customColleagueToken });
           }
-          return Promise.resolve({
-            ok: false,
-            description: `upstream echoed ${customColleagueToken} and ${IVA_TOKEN}`,
-          });
+          if (
+            method === "setMyName" ||
+            method === "setMyDescription" ||
+            method === "setMyShortDescription"
+          ) {
+            profileCalls += 1;
+            if (profileCalls <= 3) {
+              return Promise.resolve({
+                ok: false,
+                description: `upstream echoed ${customColleagueToken} and ${IVA_TOKEN}`,
+              });
+            }
+          }
+          return Promise.resolve({ ok: true, result: true });
         },
         replyImpl: (_chatId, text) => {
           notices.push(text);
@@ -1627,8 +1664,10 @@ test("п.4: colleague token is inventoried in outbound-sensitive-keys.json and r
             error: `avatar failed for https://api.telegram.org/bot${tok}/setMyProfilePhoto`,
           }),
         logImpl: (...args: unknown[]) => logs.push(args.map(String).join(" ")),
-      },
-    );
+      });
+    const firstOutcome = await runHire();
+    assert.equal(firstOutcome.status, "failed");
+    const outcome = await runHire();
     assert.equal(outcome.status, "hired");
     const allLogs = logs.join("\n");
     const allNotices = notices.join("\n");
