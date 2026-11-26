@@ -575,7 +575,11 @@ export async function handleManagedBotUpdate(
         : "getManagedBotToken returned no token";
     const reason = redactError(detail, secrets);
     logImpl(`managed_bot ${event.botId}: getManagedBotToken rejected:`, reason);
-    if (!temporaryTelegramFailure(tokenResponse)) {
+    // ok:true без токена — повреждённый/пустой ответ API, а не временный сетевой сбой.
+    if (
+      tokenResponse?.ok === true ||
+      !temporaryTelegramFailure(tokenResponse)
+    ) {
       return terminalManagedFailure(update, event.botId, reason, logImpl);
     }
     return failedOutcome(reason);
@@ -597,34 +601,9 @@ export async function handleManagedBotUpdate(
     );
   }
 
-  // Сохраняем токен коллеги рядом с токеном Ивы в `.env` (0600, атомарно) и обновляем env процесса.
-  let nextTokensLine: string;
-  try {
-    const existingEnv = await readEnvValues(envPath);
-    const baseTokens =
-      existingEnv.TELEGRAM_COLLEAGUE_BOT_TOKENS ??
-      env.TELEGRAM_COLLEAGUE_BOT_TOKENS;
-    nextTokensLine = upsertColleagueBotToken(
-      baseTokens,
-      { token, username: event.botUsername },
-      primaryBotId,
-    );
-    await upsertEnv(envPath, {
-      TELEGRAM_COLLEAGUE_BOT_TOKENS: nextTokensLine,
-    });
-    env.TELEGRAM_COLLEAGUE_BOT_TOKENS = nextTokensLine;
-  } catch (error) {
-    const reason = redactError(error, secrets);
-    logImpl(
-      `managed_bot ${event.botId}: failed to store token in .env:`,
-      reason,
-    );
-    return failedOutcome(reason);
-  }
-
-  // Решение о найме сохраняется отдельно от settings.json до первого внешнего вызова.
-  // Тогда сбой профиля или настроек не теряет роль/модель даже после перезапуска,
-  // а незавершённый токен в .env не превращается в опрос коллеги без роли.
+  // Решение о найме сохраняется отдельно от settings.json до записи токена и внешних
+  // вызовов Bot API: даже обрыв между `.env` и профилем оставляет восстановимую стадию.
+  // Незавершённый токен в .env не превращается в опрос коллеги без роли.
   const hireStateDir =
     deps.hireStateDir ?? join(DATA_DIR, "colleague-hires.d");
   const settingsBefore = readSettings(settingsFile);
@@ -686,6 +665,31 @@ export async function handleManagedBotUpdate(
     const reason = redactError(error, secrets);
     logImpl(
       `managed_bot ${event.botId}: failed to save durable hire state:`,
+      reason,
+    );
+    return failedOutcome(reason);
+  }
+
+  // Сохраняем токен коллеги рядом с токеном Ивы в `.env` (0600, атомарно) и обновляем env процесса.
+  let nextTokensLine: string;
+  try {
+    const existingEnv = await readEnvValues(envPath);
+    const baseTokens =
+      existingEnv.TELEGRAM_COLLEAGUE_BOT_TOKENS ??
+      env.TELEGRAM_COLLEAGUE_BOT_TOKENS;
+    nextTokensLine = upsertColleagueBotToken(
+      baseTokens,
+      { token, username: event.botUsername },
+      primaryBotId,
+    );
+    await upsertEnv(envPath, {
+      TELEGRAM_COLLEAGUE_BOT_TOKENS: nextTokensLine,
+    });
+    env.TELEGRAM_COLLEAGUE_BOT_TOKENS = nextTokensLine;
+  } catch (error) {
+    const reason = redactError(error, secrets);
+    logImpl(
+      `managed_bot ${event.botId}: failed to store token in .env:`,
       reason,
     );
     return failedOutcome(reason);
