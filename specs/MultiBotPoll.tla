@@ -14,6 +14,7 @@
 \*   SaveOffset(p, b)  scripts/poller/offset.ts: saveOffset в файл бота b (или общий в мутанте)
 \*   ToggleColleagues  владелец включает/выключает опцию colleagues (iva colleague on/off)
 \*   InitColleague(p, b)  scripts/poller/main.ts: lazy init коллеги после включения опции
+\*   ManagedHire*        scripts/poller/managed-bot.ts: durable стадии найма коллеги
 \*
 \* Переключатели (TRUE в рабочей модели; каждый мутант снимает один):
 \*   PerBotOffset        свой файл offset на каждого бота (FALSE -> общий курсор)
@@ -53,11 +54,14 @@ VARIABLES
   overlapBad,     \* два процесса одновременно опрашивали Telegram
   wrongBotBad,    \* апдейт бота потерялся из-за столкновения update_id другого бота
   colleaguesEnabled, \* опция коллег в настройках; по умолчанию FALSE
-  initialized       \* [Procs -> [Bots -> BOOLEAN]] — lazy init бота завершён в этом процессе
+  initialized,      \* [Procs -> [Bots -> BOOLEAN]] — lazy init бота завершён в этом процессе
+  hireStage,        \* durable найм colleague: none/token/profile/settings/complete/terminal;
+                     \* complete — сохраняемая отметка идемпотентности update_id против повторной доставки
+  hireEventBlocked  \* управляющее событие ещё держит acknowledgement ingress
 
 vars == <<lockHolder, procState, tgUpdates, diskOffset, memOffset, pendingSave,
           botSlow, admitted, inboxUntagged, restarts, overlapBad, wrongBotBad,
-          colleaguesEnabled, initialized>>
+          colleaguesEnabled, initialized, hireStage, hireEventBlocked>>
 
 RunningProcs == {p \in Procs : procState[p] = "running"}
 
@@ -76,6 +80,8 @@ Init ==
   /\ wrongBotBad = FALSE
   /\ colleaguesEnabled = FALSE
   /\ initialized = [p \in Procs |-> [b \in Bots |-> b = "iva"]]
+  /\ hireStage = "none"
+  /\ hireEventBlocked = FALSE
 
 StartProc(p) ==
   /\ procState[p] = "idle"
@@ -86,7 +92,8 @@ StartProc(p) ==
   /\ pendingSave' = [pendingSave EXCEPT ![p] = [b \in Bots |-> 0]]
   /\ initialized' = [initialized EXCEPT ![p] = [b \in Bots |-> b = "iva"]]
   /\ UNCHANGED <<tgUpdates, diskOffset, botSlow, admitted, inboxUntagged,
-                 restarts, overlapBad, wrongBotBad, colleaguesEnabled>>
+                 restarts, overlapBad, wrongBotBad, colleaguesEnabled, hireStage,
+                 hireEventBlocked>>
 
 CrashProc(p) ==
   /\ procState[p] = "running"
@@ -98,20 +105,20 @@ CrashProc(p) ==
   /\ pendingSave' = [pendingSave EXCEPT ![p] = [b \in Bots |-> 0]]
   /\ initialized' = [initialized EXCEPT ![p] = [b \in Bots |-> b = "iva"]]
   /\ UNCHANGED <<tgUpdates, diskOffset, botSlow, admitted, inboxUntagged,
-                 overlapBad, wrongBotBad, colleaguesEnabled>>
+                 overlapBad, wrongBotBad, colleaguesEnabled, hireStage, hireEventBlocked>>
 
 TelegramReceive(b) ==
   /\ tgUpdates[b] < MaxUpdates
   /\ tgUpdates' = [tgUpdates EXCEPT ![b] = @ + 1]
   /\ UNCHANGED <<lockHolder, procState, diskOffset, memOffset, pendingSave,
                  botSlow, admitted, inboxUntagged, restarts, overlapBad, wrongBotBad,
-                 colleaguesEnabled, initialized>>
+                 colleaguesEnabled, initialized, hireStage, hireEventBlocked>>
 
 ToggleSlow(b) ==
   /\ botSlow' = [botSlow EXCEPT ![b] = ~@]
   /\ UNCHANGED <<lockHolder, procState, tgUpdates, diskOffset, memOffset,
                  pendingSave, admitted, inboxUntagged, restarts, overlapBad, wrongBotBad,
-                 colleaguesEnabled, initialized>>
+                 colleaguesEnabled, initialized, hireStage, hireEventBlocked>>
 
 \* Владелец переключает опцию colleagues. Цикл коллеги уже существует, но пока опция
 \* выключена он спит до проверки настройки и не трогает Telegram.
@@ -119,7 +126,7 @@ ToggleColleagues ==
   /\ colleaguesEnabled' = ~colleaguesEnabled
   /\ UNCHANGED <<lockHolder, procState, tgUpdates, diskOffset, memOffset,
                  pendingSave, botSlow, admitted, inboxUntagged, restarts,
-                 overlapBad, wrongBotBad, initialized>>
+                 overlapBad, wrongBotBad, initialized, hireStage, hireEventBlocked>>
 
 \* Отложенная инициализация коллеги после включения опции. В рабочей модели она
 \* сохраняет очередь первой активации: отсутствие cursor-файла означает опрос с первого
@@ -131,6 +138,7 @@ InitColleague(p, b) ==
   /\ procState[p] = "running"
   /\ b /= "iva"
   /\ colleaguesEnabled
+  /\ hireStage = "complete"
   /\ ~initialized[p][b]
   /\ EnforceProcessLock => lockHolder = p
   /\ initialized' = [initialized EXCEPT ![p][b] = TRUE]
@@ -143,13 +151,14 @@ InitColleague(p, b) ==
           ELSE [memOffset EXCEPT ![p][b] = IF diskOffset[b] = 1 THEN next ELSE memOffset[p][b]]
   /\ UNCHANGED <<lockHolder, procState, tgUpdates, pendingSave, botSlow,
                  admitted, inboxUntagged, restarts, overlapBad, wrongBotBad,
-                 colleaguesEnabled>>
+                 colleaguesEnabled, hireStage, hireEventBlocked>>
 
 \* Бот b принимает следующий апдейт u = memOffset[p][b] независимо от состояния других ботов.
 Admit(p, b) ==
   /\ procState[p] = "running"
   /\ ~botSlow[b]
   /\ pendingSave[p][b] = 0
+  /\ (b = "iva" => ~hireEventBlocked)
   /\ b = "iva" \/ (colleaguesEnabled /\ initialized[p][b])
   /\ LET u == memOffset[p][b] IN
      /\ u <= tgUpdates[b]
@@ -166,7 +175,7 @@ Admit(p, b) ==
                       /\ UNCHANGED wrongBotBad
      /\ pendingSave' = [pendingSave EXCEPT ![p][b] = u + 1]
   /\ UNCHANGED <<lockHolder, procState, tgUpdates, diskOffset, memOffset, botSlow, restarts,
-                 colleaguesEnabled, initialized>>
+                 colleaguesEnabled, initialized, hireStage, hireEventBlocked>>
 
 \* Сохранение offset на диск после durable admit. В мутанте ~PerBotOffset один общий offset
 \* сдвигает курсоры всех ботов разом.
@@ -182,13 +191,79 @@ SaveOffset(p, b) ==
                     [x \in Bots |-> IF next > memOffset[p][x] THEN next ELSE memOffset[p][x]]]
      /\ pendingSave' = [pendingSave EXCEPT ![p][b] = 0]
   /\ UNCHANGED <<lockHolder, procState, tgUpdates, botSlow, admitted, inboxUntagged,
-                 restarts, overlapBad, wrongBotBad, colleaguesEnabled, initialized>>
+                 restarts, overlapBad, wrongBotBad, colleaguesEnabled, initialized, hireStage, hireEventBlocked>>
+
+
+\* Токен managed-бота временно недоступен: решение найма уже лежит в durable журнале
+\* стадии token. Первые отказы удерживают управляющее событие для повтора Telegram;
+\* после конечного предела ManagedHireDeferEvent подтверждает его, а фоновая сверка
+\* доводит найм без блокировки обычного входа.
+ManagedHireTokenTemporary ==
+  /\ hireStage = "none"
+  /\ hireStage' = "token"
+  /\ hireEventBlocked' = TRUE
+  /\ UNCHANGED <<lockHolder, procState, tgUpdates, diskOffset, memOffset,
+                 pendingSave, botSlow, admitted, inboxUntagged, restarts, overlapBad,
+                 wrongBotBad, colleaguesEnabled, initialized>>
+
+\* Постоянный отказ Telegram (например 400 bot not found) терминален для события:
+\* оно подтверждается без записи токена и не может бесконечно держать обычный вход.
+ManagedHireTokenPermanent ==
+  /\ hireStage = "none"
+  /\ hireStage' = "terminal"
+  /\ hireEventBlocked' = FALSE
+  /\ UNCHANGED <<lockHolder, procState, tgUpdates, diskOffset, memOffset,
+                 pendingSave, botSlow, admitted, inboxUntagged, restarts, overlapBad,
+                 wrongBotBad, colleaguesEnabled, initialized>>
+
+\* Токен получен первичным событием или фоновой сверкой и сохранён рядом с токеном
+\* Ивы, но найм ещё не complete: durable стадия profile переживает перезапуск. Пока
+\* событие не подтверждено на acknowledgement-границе, ingress остаётся удержанным.
+ManagedHireTokenSuccess ==
+  /\ hireStage \in {"none", "token"}
+  /\ hireStage' = "profile"
+  /\ hireEventBlocked' = IF hireStage = "none" THEN TRUE ELSE hireEventBlocked
+  /\ UNCHANGED <<lockHolder, procState, tgUpdates, diskOffset, memOffset,
+                 pendingSave, botSlow, admitted, inboxUntagged, restarts, overlapBad,
+                 wrongBotBad, colleaguesEnabled, initialized>>
+
+\* Профиль Bot API записан; durable стадия переходит к записи settings.json.
+ManagedHireProfileSuccess ==
+  /\ hireStage = "profile"
+  /\ hireStage' = "settings"
+  /\ UNCHANGED <<hireEventBlocked, lockHolder, procState, tgUpdates, diskOffset,
+                 memOffset, pendingSave, botSlow, admitted, inboxUntagged, restarts,
+                 overlapBad, wrongBotBad, colleaguesEnabled, initialized>>
+
+\* После предела повторов управляющего события или постоянного сбоя settings.json
+\* событие подтверждается, но durable стадия остаётся: обычный вход не замирает,
+\* а фоновая сверка доведёт найм после ремонта среды.
+ManagedHireDeferEvent ==
+  /\ hireStage \in {"token", "profile", "settings"}
+  /\ hireEventBlocked
+  /\ hireEventBlocked' = FALSE
+  /\ UNCHANGED <<hireStage, lockHolder, procState, tgUpdates, diskOffset, memOffset,
+                 pendingSave, botSlow, admitted, inboxUntagged, restarts, overlapBad,
+                 wrongBotBad, colleaguesEnabled, initialized>>
+
+\* Фоновая сверка durable журнала найма завершает запись settings.json и оставляет
+\* durable complete-отметку update_id против повторной доставки. Только после этого коллега
+\* допускается к lazy init и опросу: одного токена в .env недостаточно.
+ManagedHireComplete ==
+  /\ hireStage = "settings"
+  /\ hireStage' = "complete"
+  /\ hireEventBlocked' = FALSE
+  /\ UNCHANGED <<lockHolder, procState, tgUpdates, diskOffset, memOffset,
+                 pendingSave, botSlow, admitted, inboxUntagged, restarts, overlapBad,
+                 wrongBotBad, colleaguesEnabled, initialized>>
 
 Next ==
   \/ \E p \in Procs : StartProc(p) \/ CrashProc(p)
   \/ \E b \in Bots : TelegramReceive(b) \/ ToggleSlow(b)
   \/ ToggleColleagues
   \/ \E p \in Procs, b \in Bots : InitColleague(p, b) \/ Admit(p, b) \/ SaveOffset(p, b)
+  \/ ManagedHireTokenTemporary \/ ManagedHireTokenPermanent \/ ManagedHireTokenSuccess
+  \/ ManagedHireProfileSuccess \/ ManagedHireDeferEvent \/ ManagedHireComplete
 
 Spec == Init /\ [][Next]_vars
 
@@ -207,6 +282,8 @@ TypeOK ==
   /\ wrongBotBad \in BOOLEAN
   /\ colleaguesEnabled \in BOOLEAN
   /\ initialized \in [Procs -> [Bots -> BOOLEAN]]
+  /\ hireStage \in {"none", "token", "profile", "settings", "complete", "terminal"}
+  /\ hireEventBlocked \in BOOLEAN
 
 \* (1) В каждый момент не больше одного живого процесса Bridge держит опрос.
 SinglePollerLock == ~overlapBad /\ Cardinality(RunningProcs) <= 1
@@ -223,6 +300,16 @@ ExactBotAttribution == ~wrongBotBad
 MemOffsetAdmitted ==
   \A p \in RunningProcs, b \in Bots, u \in Updates :
     u < memOffset[p][b] => <<b, u>> \in admitted
+
+\* (5) Терминальный отказ токена и завершённый найм не держат acknowledgement ingress.
+HireEventTerminalRelease ==
+  hireStage \in {"complete", "terminal"} => ~hireEventBlocked
+
+\* (6) Опрос коллеги начинается только после complete-стадии durable найма:
+\* токен без роли/модели в settings.json не является работающим коллегой.
+ColleaguePollingRequiresCompleteHire ==
+  \A p \in Procs, b \in Bots :
+    (b /= "iva" /\ initialized[p][b]) => hireStage = "complete"
 
 \* Свидетель независимости (нарочно ложный инвариант в отдельном .cfg):
 \* пока iva медленная (botSlow["iva"] = TRUE), colleague успевает принять и сохранить свой offset.

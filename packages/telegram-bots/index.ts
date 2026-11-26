@@ -1,6 +1,9 @@
 // Общий реестр Telegram-ботов установки (основной бот Ивы + боты коллег, ADR-0030).
 // Один источник правды для Authored tree (`agent/`) и Bridge (`scripts/poller/`), поэтому
 // живёт в `packages/` (RUNTIME_SOURCE_TREES в scripts/lib/custom-layer.ts).
+import { readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
+import { parseEnv } from "node:util";
 
 /** Поле конверта Telegram-апдейта и сообщения, несущее числовой id бота-коллеги. */
 export const TELEGRAM_BOT_ID_FIELD = "iva_bot_id";
@@ -276,4 +279,250 @@ export function tagUpdateWithBot<T extends Record<string, unknown>>(
     };
   }
   return tagged as T;
+}
+
+const MANAGED_BOT_USERNAME_PATTERN = /^[A-Za-z][A-Za-z0-9_]{4,31}$/u;
+const MANAGED_BOT_SUFFIX_PATTERN = /bot$/iu;
+const SAFE_ENV_TOKEN_PATTERN = /^[1-9]\d*:[A-Za-z0-9_-]{8,128}$/u;
+
+/** Проверяет, подходит ли имя пользователя как Telegram-ник бота (5..32, латиница/цифры/_, оканчивается на bot). */
+export function isManagedBotUsername(value: unknown): boolean {
+  if (typeof value !== "string") return false;
+  return (
+    MANAGED_BOT_USERNAME_PATTERN.test(value) &&
+    !value.includes("__") &&
+    !value.endsWith("_") &&
+    MANAGED_BOT_SUFFIX_PATTERN.test(value)
+  );
+}
+
+/**
+ * Нормализует предложенный ник бота-коллеги: снимает `@`, при отсутствии суффикса `bot`
+ * дописывает `_bot` и сверяет правила Telegram. Недопустимая строка → null.
+ */
+export function normalizeManagedBotUsername(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const stripped = raw.trim().replace(/^@/u, "");
+  if (stripped.length === 0) return null;
+  if (isManagedBotUsername(stripped)) return stripped;
+  if (/^[A-Za-z][A-Za-z0-9_]*$/u.test(stripped) && !stripped.includes("__")) {
+    const base = stripped.replace(/_+$/u, "");
+    if (base.length === 0) return null;
+    const candidate = MANAGED_BOT_SUFFIX_PATTERN.test(base)
+      ? base
+      : `${base}_bot`;
+    return isManagedBotUsername(candidate) ? candidate : null;
+  }
+  return null;
+}
+
+/** Собирает валидный ник коллеги по нику основного бота Ивы и короткому ключу роли. */
+export function suggestColleagueBotUsername(
+  managerBotUsername: string,
+  roleSlug: string,
+): string {
+  const cleanManager = managerBotUsername
+    .trim()
+    .replace(/^@/u, "")
+    .replace(/_?bot$/iu, "")
+    .replace(/[^A-Za-z0-9_]/gu, "_")
+    .replace(/__+/gu, "_")
+    .replace(/^[^A-Za-z]+/u, "")
+    .replace(/_+$/u, "");
+  const cleanRole = roleSlug
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/gu, "");
+  const rolePart = cleanRole.length > 0 ? cleanRole : "helper";
+  const suffix = `_${rolePart}_bot`;
+  const maxBase = Math.max(1, 32 - suffix.length);
+  const rawBase = (cleanManager || "iva").slice(0, maxBase).replace(/_+$/u, "");
+  const base =
+    rawBase.length > 0 && /^[A-Za-z]/u.test(rawBase) ? rawBase : "iva";
+  const candidate = `${base}${suffix}`;
+  if (isManagedBotUsername(candidate)) return candidate;
+  const fallback = `iva_${rolePart.slice(0, 20)}_bot`;
+  return isManagedBotUsername(fallback) ? fallback : "iva_colleague_bot";
+}
+
+export interface ManagedBotHireUrlInput {
+  readonly managerBotUsername: string;
+  readonly botUsername: string;
+  readonly displayName: string;
+}
+
+/**
+ * Собирает ссылку найма управляемого бота (Bot API 9.6):
+ * `https://t.me/newbot/<бот Ивы>/<имя>bot?name=…`.
+ */
+export function buildManagedBotHireUrl(input: ManagedBotHireUrlInput): string {
+  const manager = input.managerBotUsername.trim().replace(/^@/u, "");
+  if (!isManagedBotUsername(manager)) {
+    throw new Error(
+      `Invalid manager bot username: ${JSON.stringify(input.managerBotUsername)}`,
+    );
+  }
+  const botUsername = normalizeManagedBotUsername(input.botUsername);
+  if (!botUsername) {
+    throw new Error(
+      `Invalid colleague bot username: ${JSON.stringify(input.botUsername)}`,
+    );
+  }
+  const displayName = input.displayName.trim();
+  if (displayName.length === 0 || displayName.length > 64) {
+    throw new Error("Colleague display name must be 1..64 characters");
+  }
+  return `https://t.me/newbot/${manager}/${botUsername}?name=${encodeURIComponent(displayName)}`;
+}
+
+/** Сериализует список коллег в безопасное для `.env` значение `TELEGRAM_COLLEAGUE_BOT_TOKENS`. */
+export function serializeColleagueBotTokens(
+  bots: readonly Pick<TelegramBotConfig, "botId" | "token" | "username">[],
+  primaryBotId: string | null = null,
+): string {
+  const seen = new Set<string>(primaryBotId ? [primaryBotId] : []);
+  const parts: string[] = [];
+  for (const bot of bots) {
+    const token = bot.token.trim();
+    const botId = bot.botId ?? botIdFromToken(token);
+    if (!botId || seen.has(botId) || !SAFE_ENV_TOKEN_PATTERN.test(token)) {
+      continue;
+    }
+    seen.add(botId);
+    const username = normalizeUsername(bot.username);
+    parts.push(username ? `${username}=${token}` : token);
+  }
+  return parts.join(",");
+}
+
+/** Добавляет или обновляет токен коллеги в строке `TELEGRAM_COLLEAGUE_BOT_TOKENS`. */
+export function upsertColleagueBotToken(
+  raw: string | undefined,
+  bot: { readonly token: string; readonly username?: string },
+  primaryBotId: string | null = null,
+): string {
+  const token = bot.token.trim();
+  const botId = botIdFromToken(token);
+  if (!botId || !SAFE_ENV_TOKEN_PATTERN.test(token)) {
+    throw new Error("Invalid colleague bot token format");
+  }
+  if (primaryBotId && botId === primaryBotId) {
+    throw new Error("Colleague bot token matches primary Iva bot");
+  }
+  const existing = parseColleagueBotTokens(raw, primaryBotId);
+  const username = normalizeUsername(bot.username);
+  const next: TelegramBotConfig[] = [];
+  let replaced = false;
+  for (const entry of existing) {
+    if (entry.botId === botId) {
+      next.push({
+        botId,
+        token,
+        ...((username ?? entry.username)
+          ? { username: username ?? entry.username }
+          : {}),
+        isPrimary: false,
+      });
+      replaced = true;
+    } else {
+      next.push(entry);
+    }
+  }
+  if (!replaced) {
+    next.push({
+      botId,
+      token,
+      ...(username ? { username } : {}),
+      isPrimary: false,
+    });
+  }
+  return serializeColleagueBotTokens(next, primaryBotId);
+}
+
+/** Удаляет токен коллеги по `botId` из строки `TELEGRAM_COLLEAGUE_BOT_TOKENS`. */
+export function removeColleagueBotToken(
+  raw: string | undefined,
+  botId: string,
+  primaryBotId: string | null = null,
+): string {
+  if (!validTelegramBotId(botId)) {
+    return serializeColleagueBotTokens(
+      parseColleagueBotTokens(raw, primaryBotId),
+      primaryBotId,
+    );
+  }
+  const remaining = parseColleagueBotTokens(raw, primaryBotId).filter(
+    (entry) => entry.botId !== botId,
+  );
+  return serializeColleagueBotTokens(remaining, primaryBotId);
+}
+
+type CachedEnvTokens = {
+  readonly path: string;
+  readonly ino: number;
+  readonly mtimeMs: number;
+  readonly size: number;
+  readonly primaryToken: string | undefined;
+  readonly colleagueTokens: string | undefined;
+};
+
+let cachedEnvTokens: CachedEnvTokens | null = null;
+
+function readEnvFileTokensSync(
+  envFile: string,
+): { primaryToken?: string; colleagueTokens?: string } | null {
+  try {
+    const stats = statSync(envFile);
+    if (
+      cachedEnvTokens !== null &&
+      cachedEnvTokens.path === envFile &&
+      cachedEnvTokens.ino === stats.ino &&
+      cachedEnvTokens.mtimeMs === stats.mtimeMs &&
+      cachedEnvTokens.size === stats.size
+    ) {
+      return {
+        primaryToken: cachedEnvTokens.primaryToken,
+        colleagueTokens: cachedEnvTokens.colleagueTokens,
+      };
+    }
+    const parsed = parseEnv(readFileSync(envFile, "utf8"));
+    const primaryToken = parsed.TELEGRAM_BOT_TOKEN?.trim() || undefined;
+    const colleagueTokens =
+      parsed.TELEGRAM_COLLEAGUE_BOT_TOKENS?.trim() || undefined;
+    cachedEnvTokens = {
+      path: envFile,
+      ino: stats.ino,
+      mtimeMs: stats.mtimeMs,
+      size: stats.size,
+      primaryToken,
+      colleagueTokens,
+    };
+    return { primaryToken, colleagueTokens };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Возвращает env-снимок с актуальным `TELEGRAM_COLLEAGUE_BOT_TOKENS` из `.env`,
+ * чтобы процесс eve видел коллегу, нанятого мостом по `managed_bot`, без рестарта.
+ * Читает `.env` только если в нём тот же `TELEGRAM_BOT_TOKEN`, что и у процесса —
+ * изолированные тесты с синтетическими токенами не подхватывают чужой `.env`.
+ */
+export function liveTelegramEnv(
+  baseEnv: NodeJS.ProcessEnv = process.env,
+  envFile: string = baseEnv.IVA_ENV_FILE?.trim() || join(process.cwd(), ".env"),
+): NodeJS.ProcessEnv {
+  const basePrimary = baseEnv.TELEGRAM_BOT_TOKEN?.trim();
+  if (!basePrimary) return baseEnv;
+  const fromFile = readEnvFileTokensSync(envFile);
+  if (!fromFile || fromFile.primaryToken !== basePrimary) return baseEnv;
+  const fileValue = fromFile.colleagueTokens ?? "";
+  if (fileValue === (baseEnv.TELEGRAM_COLLEAGUE_BOT_TOKENS ?? "").trim()) {
+    return baseEnv;
+  }
+  return {
+    ...baseEnv,
+    TELEGRAM_COLLEAGUE_BOT_TOKENS: fileValue,
+  };
 }

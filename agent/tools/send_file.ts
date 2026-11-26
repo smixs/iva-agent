@@ -11,6 +11,7 @@ import {
 } from "../../packages/secret-redaction/index.ts";
 import {
   allTelegramBotTokens,
+  liveTelegramEnv,
   resolveTelegramBot,
   validTelegramBotId,
 } from "../../packages/telegram-bots/index.ts";
@@ -73,9 +74,10 @@ async function secretInFile(
   data: Buffer,
   signal?: AbortSignal,
 ): Promise<string | null> {
+  const liveEnv = liveTelegramEnv(process.env);
   const entries = [
-    ...secretEntriesFromEnv(process.env, secretKeyInventory),
-    ...allTelegramBotTokens(process.env)
+    ...secretEntriesFromEnv(liveEnv, secretKeyInventory),
+    ...allTelegramBotTokens(liveEnv)
       .filter(isSecretValue)
       .map((value) => ({ name: "TELEGRAM_COLLEAGUE_BOT_TOKENS", value })),
   ];
@@ -310,10 +312,11 @@ export async function sendFile(
     return fail(
       "нет чата: ход не из Telegram, а TELEGRAM_DIGEST_CHAT_ID и TELEGRAM_ALLOWED_USER_IDS пусты",
     );
+  const liveEnv = liveTelegramEnv(process.env);
   const bot =
     botId !== undefined && botId !== null
-      ? resolveTelegramBot(botId)
-      : resolveTelegramBot(null);
+      ? resolveTelegramBot(botId, liveEnv)
+      : resolveTelegramBot(null, liveEnv);
   const token =
     bot?.token ?? (botId ? "" : (process.env.TELEGRAM_BOT_TOKEN ?? ""));
   if (!token)

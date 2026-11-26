@@ -25,6 +25,7 @@ import {
   botIdFromUpdate,
   botScopedKey,
   isConfiguredPeerBot,
+  liveTelegramEnv,
   resolveTelegramBot,
   TELEGRAM_BOT_ID_FIELD,
   TELEGRAM_BOT_ID_HEADER,
@@ -200,7 +201,7 @@ export async function preparePeerBotWebhookRequest(
     readonly fetchImpl?: typeof fetch;
   },
 ): Promise<PreparedPeerBotWebhookRequest> {
-  const env = options.env ?? process.env;
+  const env = liveTelegramEnv(options.env ?? process.env);
   const authenticated =
     options.authenticated ?? hasValidWebhookSecret(request, env);
   let body: unknown;

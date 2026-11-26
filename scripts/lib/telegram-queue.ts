@@ -62,6 +62,7 @@ export type TelegramQueueUpdate = {
   message?: TelegramQueueMessage;
   callback_query?: TelegramCallbackQuery;
   stopped_message_generation?: import("#lib/telegram-stop.ts").TelegramDraftStop;
+  managed_bot?: Record<string, unknown>;
   [key: string]: unknown;
 };
 
@@ -155,7 +156,10 @@ export function isTelegramQueueUpdate(
     // Поля «стопа» сверяет handleTelegramDraftStop и непонятный стоп игнорирует. Здесь —
     // только объект: 16.10.2026 живой стоп не прошёл строгую проверку по документации
     // Bot API, и вход стоял, пока апдейт не подтвердили руками.
-    optionalField(value, "stopped_message_generation", isRecord)
+    optionalField(value, "stopped_message_generation", isRecord) &&
+    // Поля `managed_bot` (Bot API 9.6) сверяет handleManagedBotUpdate; неполный объект
+    // не должен стопорить offset всей пачки.
+    optionalField(value, "managed_bot", isRecord)
   );
 }
 
