@@ -262,6 +262,19 @@ void test(
       body.includes(SUMMARY_PROMPT),
     ).length;
     assert.equal(summaries, 0, "вызов пересказа убит барьером — провайдер его не видел");
+    // replies(2) ждёт message.completed, который eve эмитит внутри emitStreamContent
+    // до финализации шага и emitTurnEpilogue (turn.completed → setChatStatus("idle")).
+    // Между этими событиями есть окно ~6–10 мс на обеих ветках Node (24 и 26), поэтому
+    // освобождение чата ждём явно, а не читаем синхронно сразу за replies(2).
+    {
+      const deadline = Date.now() + 30_000;
+      while (
+        status.getChatStatus("1:")?.status !== "idle" &&
+        Date.now() < deadline
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+    }
     assert.equal(status.getChatStatus("1:")?.status, "idle");
 
     const reset = await post(port, bearer, "/eve/v1/telegram/reset", {
