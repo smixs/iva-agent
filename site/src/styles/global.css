@@ -157,14 +157,15 @@ figure {
 h1,
 h2,
 h3 {
-  font-weight: 650;
-  letter-spacing: -0.035em;
+  font-weight: var(--w-strong);
+  letter-spacing: -0.03em;
   text-wrap: balance;
 }
-h1,
-h2 {
-  font-weight: 700;
-  letter-spacing: -0.03em;
+/* Bold in running text is the same strong weight, not the browser's 700. */
+b,
+strong,
+th {
+  font-weight: var(--w-strong);
 }
 h1 {
   font-size: var(--display);
@@ -606,7 +607,7 @@ main {
 .faq-question {
   min-height: 44px;
   font-size: 19px;
-  font-weight: 600;
+  font-weight: var(--w-strong);
   line-height: 1.4;
   letter-spacing: -0.01em;
 }
@@ -691,7 +692,7 @@ section[tabindex="-1"]:focus {
   background: var(--hue);
   color: #fff;
   font-size: 17px;
-  font-weight: 650;
+  font-weight: var(--w-strong);
 }
 .review-bubble {
   min-width: 0;
@@ -703,7 +704,7 @@ section[tabindex="-1"]:focus {
 .review-name {
   color: var(--hue-ink);
   font-size: 15px;
-  font-weight: 650;
+  font-weight: var(--w-strong);
   line-height: 1.35;
 }
 .review blockquote {
@@ -798,15 +799,16 @@ section[tabindex="-1"]:focus {
   gap: 8px;
   flex-wrap: wrap;
 }
-.plugin-page .breadcrumbs a,
+/* One look for every path line: docs, plugins, a plugin page. */
+.breadcrumbs a,
 .plugin-page .back {
   color: var(--muted);
   text-decoration: none;
 }
-.plugin-page .breadcrumbs a[aria-current="page"] {
+.breadcrumbs a[aria-current="page"] {
   color: var(--ink);
 }
-.plugin-page .breadcrumbs a:hover,
+.breadcrumbs a:hover,
 .plugin-page .back:hover {
   color: var(--ink);
   text-decoration: underline;
@@ -828,12 +830,6 @@ section[tabindex="-1"]:focus {
 .plugins {
   padding-top: 55px;
   padding-bottom: 40px;
-}
-.plugins :is(h1, h2),
-.plugin-make h2,
-.plugin-page :is(h1, h2) {
-  font-weight: var(--w-strong);
-  letter-spacing: -0.03em;
 }
 .plugins h1 {
   font-size: 48px;
