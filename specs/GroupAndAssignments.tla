@@ -46,7 +46,7 @@
 \*   ClaimBeforeSendOwnerNotice   отправитель и получатель захватывают слот под замком до sendMessage
 \*   CheckAllBatchAssignments     пачка проверяет каждое поручение (а не только первое)
 \*   ReleaseOwnerNoticeAfterReject подтверждённый отказ Bot API освобождает слот для повтора
-\*   RetryOwnerNoticeAfterReject   подтверждённый отказ ставит повтор по retry_after,
+\*   RetryOwnerNoticeAfterReject   подтверждённый отказ после done сохраняет повтор,
 \*                                пока не исчерпан MaxOwnerNoticeAttempts
 EXTENDS Naturals, FiniteSets
 
@@ -142,8 +142,9 @@ Init ==
   /\ ownerNoticeRetryScheduled = [a \in Assignments |-> FALSE]
   /\ crashes = 0
 
-\* Рабочий старт сетевой попытки строки владельцу: первая попытка либо конечный
-\* повтор после подтверждённого отказа. Мутант без CAS этому правилу не следует.
+\* Первый старт либо повтор после подтверждённого отказа. Время абстрагировано:
+\* выбор шага повтора означает, что срок retry_after наступил. Очередь DM для
+\* таймера не нужна, поэтому её подтверждение не снимает запланированный повтор.
 OwnerNoticeMayBegin(a) ==
   /\ ownerNoticeAttempts[a] < MaxOwnerNoticeAttempts
   /\ (ownerNoticeAttempts[a] = 0 \/ ownerNoticeRetryScheduled[a])
@@ -280,15 +281,17 @@ FinishOwnerNotice(a, actor) ==
                  ownerNoticeClaimed, ownerNoticeUncertain, ownerNoticeAttempts, crashes>>
 
 \* Подтверждённый отказ Bot API (например, 429 с ответом в JSON): строка точно не принята.
-\* В рабочей модели durable CAS-слот освобождается, поэтому следующий проход sender/receiver
-\* может повторить строку; мутант ~ReleaseOwnerNoticeAfterReject оставляет слот занятым навсегда.
+\* В рабочей модели durable CAS-слот освобождается и ставится повтор. Мутант
+\* ~ReleaseOwnerNoticeAfterReject удерживает слот, ~RetryOwnerNoticeAfterReject
+\* освобождает его после done, не поставив повтор.
 RejectOwnerNotice(a, actor) ==
   /\ actor \in ownerNoticeInFlight[a]
   /\ ownerNoticeInFlight' = [ownerNoticeInFlight EXCEPT ![a] = @ \ {actor}]
   /\ IF ReleaseOwnerNoticeAfterReject
        THEN ownerNoticeClaimed' = [ownerNoticeClaimed EXCEPT ![a] = FALSE]
        ELSE UNCHANGED ownerNoticeClaimed
-  /\ IF ReleaseOwnerNoticeAfterReject /\ RetryOwnerNoticeAfterReject /\
+  /\ IF ReleaseOwnerNoticeAfterReject /\
+        (RetryOwnerNoticeAfterReject \/ assignPhase[a] # "done") /\
         ~ownerNotified[a] /\ ownerNoticeAttempts[a] < MaxOwnerNoticeAttempts
        THEN ownerNoticeRetryScheduled' = [ownerNoticeRetryScheduled EXCEPT ![a] = TRUE]
        ELSE ownerNoticeRetryScheduled' = [ownerNoticeRetryScheduled EXCEPT ![a] = FALSE]
@@ -476,7 +479,8 @@ DoneAssignmentNotifiedOwner ==
     assignPhase[a] = "done" =>
       /\ (ownerNotified[a] => ownerNoticeCount[a] = 1)
       /\ (ownerNotified[a] \/ ownerNoticeInFlight[a] /= {} \/ ownerNoticeUncertain[a] \/
-           ownerNoticeRetryScheduled[a] \/ ownerNoticeAttempts[a] >= MaxOwnerNoticeAttempts)
+           ownerNoticeRetryScheduled[a] \/
+           (ownerNoticeAttempts[a] = MaxOwnerNoticeAttempts /\ ~ownerNoticeClaimed[a]))
 
 \* Свидетель достижимости (нарочно ложный инвариант в отдельном .cfg):
 \* доказывает, что достижима трасса, где один ход в группе завершился ответом,
