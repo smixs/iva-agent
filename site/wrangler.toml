@@ -2,8 +2,8 @@ name = "iva-site"
 pages_build_output_dir = "dist"
 compatibility_date = "2026-11-01"
 
-# The install count of the Plugins page (functions/api/plugins/installs.ts). Its salt is the
-# secret INSTALLS_SALT, set with `wrangler pages secret put`; it is not in this file.
+# The install count of the Plugins page (functions/api/plugins/installs.ts) and the roll call of
+# installed Ivas (functions/api/roll-call.ts). Neither keeps an address or a hash of one.
 [[d1_databases]]
 binding = "INSTALLS"
 database_name = "iva-plugin-installs"

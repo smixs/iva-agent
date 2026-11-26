@@ -18,7 +18,7 @@
       receive technical request data necessary to deliver the site.
     </p>
 <p>We also use Cloudflare Web Analytics to count visits without cookies or personal data. Cloudflare processes these anonymous statistics.</p>
-<p>The one exception to the first line: when an installed Iva installs a plugin from the list at <a href="/plugins/">iva-agent.com/plugins</a>, she sends this site the name of that plugin, and nothing else. We keep one number per plugin. To count one server once a day we keep, for one day, a salted hash of its address and the plugin name; the address itself is not stored. <code>IVA_PLUGIN_STATS=off</code> in the <code>.env</code> of an Iva turns this off.</p>
+<p>Two exceptions to the first line, neither with anything that tells one installation from another. When an installed Iva installs a plugin from the list at <a href="/plugins/">iva-agent.com/plugins</a>, she sends this site the name of that plugin; we keep one number per plugin. Once a day, after her update check, she sends a roll call: her version, update channel, operating system, processor architecture, model provider and model, each from a closed list, and the number of days since her previous roll call. We keep, per day, one count for each of these values, so we know how many Ivas are alive and on which models. Neither keeps the address of the server or a hash of it. <code>IVA_STATS=off</code> in the <code>.env</code> of an Iva turns both off; <code>IVA_PLUGIN_STATS=off</code> turns off the plugin count alone.</p>
 <section lang="ru"><h2>По-русски</h2>
     <p>
       Эта страница относится к сайту iva-agent.com, а не к данным вашей
@@ -35,7 +35,7 @@
       запросов для работы сайта.
     </p>
 <p>Мы также используем Cloudflare Web Analytics для подсчёта посещений без cookies и персональных данных. Анонимную статистику обрабатывает Cloudflare.</p>
-<p>Одно исключение из первой строки: когда установленная Ива ставит плагин из списка на <a href="/ru/plugins/">iva-agent.com/ru/plugins</a>, она отправляет сайту имя этого плагина, и больше ничего. Мы храним одно число на плагин. Чтобы один сервер считался один раз в день, сутки хранится хеш его адреса и имени плагина с солью; сам адрес не хранится. Выключается строкой <code>IVA_PLUGIN_STATS=off</code> в <code>.env</code> Ивы.</p></section>
+<p>Два исключения из первой строки, и ни в одном нет ничего, что отличает одну установку от другой. Когда установленная Ива ставит плагин из списка на <a href="/ru/plugins/">iva-agent.com/ru/plugins</a>, она отправляет сайту имя этого плагина; мы храним одно число на плагин. Раз в день, после проверки обновлений, она отвечает на перекличку: версия, канал обновлений, операционная система, архитектура процессора, провайдер и модель, каждое из закрытого списка, и число дней с прошлой переклички. Мы храним по одному счётчику в день на каждое значение и так знаем, сколько Ив живо и на каких моделях. Адрес сервера и его хеш не хранятся. Строка <code>IVA_STATS=off</code> в <code>.env</code> Ивы выключает и то, и другое; <code>IVA_PLUGIN_STATS=off</code> — только счёт плагинов.</p></section>
     <p>
       Website contact / Контакт по сайту:
       <a href="mailto:hello@majento.ai">hello@majento.ai</a>. Updated /

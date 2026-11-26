@@ -1,11 +1,11 @@
-// The install count of Iva's default Marketplace (ADR-0029 in docs/adr of Iva).
+// The install count of Iva's default Marketplace (ADR-0029 in docs/adr of Iva, with ADR-0031).
 //
 // An installed Iva sends one POST with the name of a plugin; this is everything the site
-// does with it. What is kept: one number per plugin, and for one day a hash of the sender's
-// address, the plugin name and that day under a secret salt - so one machine counts once
-// a day and the address itself is never written anywhere. The handler in
-// `functions/api/plugins/installs.ts` only reads the request; the rules live here, where a
-// test can run them against a real SQLite.
+// does with it. What is kept: one number per plugin, and nothing about the sender - neither
+// its address nor a hash of it (ADR-0031 took the daily hash away: while its salt lives, a
+// hash of an address is still the address). An install is a person's act, so repeats are
+// rare. The handler in `functions/api/plugins/installs.ts` only reads the request; the rules
+// live here, where a test can run them against a real SQLite.
 
 /** The part of Cloudflare D1 this module uses; `node:sqlite` fits behind it in tests. */
 export type Database = {
@@ -19,7 +19,8 @@ export type Database = {
 
 export const SCHEMA = [
   "CREATE TABLE IF NOT EXISTS installs (name TEXT PRIMARY KEY, count INTEGER NOT NULL) WITHOUT ROWID",
-  "CREATE TABLE IF NOT EXISTS seen (day TEXT NOT NULL, hash TEXT NOT NULL, PRIMARY KEY (day, hash)) WITHOUT ROWID",
+  // The table of daily hashes the count once kept; a database that still has it loses it.
+  "DROP TABLE IF EXISTS seen",
 ];
 
 /** A body larger than this is not a plugin name: refused before it is parsed. */
@@ -40,58 +41,20 @@ export function nameIn(body: string): string | null {
   return typeof name === "string" ? name : null;
 }
 
-export const dayOf = (now: Date): string => now.toISOString().slice(0, 10);
+export type Outcome = "counted" | "unlisted";
 
-async function sha256(text: string): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(text),
-  );
-  return [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
-}
-
-/**
- * A hash of an address is kept for its day only. There is no timer on this site, so every
- * request to the count, a read of the numbers included, takes the older days away first.
- */
-async function forgetEarlierDays(db: Database, day: string): Promise<void> {
-  await db.prepare("DELETE FROM seen WHERE day < ?").bind(day).run();
-}
-
-export type Outcome = "counted" | "repeat" | "unlisted";
-
-/**
- * One install. `unlisted` - the name is not on the published list, nothing is written.
- * `repeat` - this address already installed this plugin today. `counted` - the number went up.
- */
+/** One install. `unlisted` - the name is not on the published list, nothing is written. */
 export async function recordInstall(
   db: Database,
-  request: {
-    readonly name: string;
-    readonly address: string;
-    readonly now: Date;
-    readonly salt: string;
-  },
+  name: string,
   listed: ReadonlySet<string>,
 ): Promise<Outcome> {
-  const day = dayOf(request.now);
-  await forgetEarlierDays(db, day);
-  if (!listed.has(request.name)) return "unlisted";
-  const hash = await sha256(
-    [request.salt, day, request.address, request.name].join("\n"),
-  );
-  const first = await db
-    .prepare("INSERT OR IGNORE INTO seen (day, hash) VALUES (?, ?)")
-    .bind(day, hash)
-    .run();
-  if (first.meta.changes !== 1) return "repeat";
+  if (!listed.has(name)) return "unlisted";
   await db
     .prepare(
       "INSERT INTO installs (name, count) VALUES (?, 1) ON CONFLICT (name) DO UPDATE SET count = count + 1",
     )
-    .bind(request.name)
+    .bind(name)
     .run();
   return "counted";
 }
@@ -100,9 +63,7 @@ export async function recordInstall(
 export async function installCounts(
   db: Database,
   listed: ReadonlySet<string>,
-  now: Date,
 ): Promise<Record<string, number>> {
-  await forgetEarlierDays(db, dayOf(now));
   const { results } = await db
     .prepare("SELECT name, count FROM installs WHERE count > ?")
     .bind(0)
