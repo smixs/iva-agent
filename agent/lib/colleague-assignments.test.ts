@@ -729,7 +729,9 @@ test("confirmed 429 owner-notice rejection releases the claim and a receiver pas
     assert.equal(ownerNoticeAttempts, 1);
     assert.notEqual(dmText, "");
 
-    const firstClaim = await claimInboundPeerAssignment({
+    const retryAt = sent.assignment.ownerNoticeRetryAt;
+    assert.ok(retryAt);
+    const inbound = {
       fromBotId: IVA_BOT_ID,
       toBotId: CRITIC_BOT_ID,
       messageId: 1001,
@@ -738,18 +740,17 @@ test("confirmed 429 owner-notice rejection releases the claim and a receiver pas
       settingsFile,
       storeFile,
       fetchImpl,
+    };
+    const firstClaim = await claimInboundPeerAssignment({
+      ...inbound,
+      now: () => retryAt - 1,
     });
     assert.equal(firstClaim.duplicate, false);
+    assert.equal(ownerNoticeAttempts, 1, "receiver must wait for retry_after");
     await completeInboundPeerAssignment(firstClaim.assignmentId, { storeFile });
     const secondClaim = await claimInboundPeerAssignment({
-      fromBotId: IVA_BOT_ID,
-      toBotId: CRITIC_BOT_ID,
-      messageId: 1001,
-      text: dmText,
-      env,
-      settingsFile,
-      storeFile,
-      fetchImpl,
+      ...inbound,
+      now: () => retryAt,
     });
 
     assert.equal(secondClaim.duplicate, true);
@@ -759,6 +760,78 @@ test("confirmed 429 owner-notice rejection releases the claim and a receiver pas
     assert.equal(rows.length, 1);
     assert.equal(rows[0]?.ownerNotified, true);
     assert.equal(rows[0]?.ownerNoticeClaimed, true);
+  } finally {
+    cleanup();
+  }
+});
+
+test("confirmed owner-notice rejections stop after the finite retry budget", async () => {
+  const { settingsFile, storeFile, cleanup } = makeTempFiles();
+  try {
+    const env = makeTestEnv();
+    let ownerNoticeAttempts = 0;
+    const fetchImpl: typeof fetch = async (input, init) => {
+      await Promise.resolve();
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.href
+            : input.url;
+      const match = /\/bot([^/]+)\/([A-Za-z0-9_]+)$/u.exec(url);
+      assert.ok(match, `unexpected Bot API URL: ${url}`);
+      const token = match[1];
+      const body = JSON.parse(
+        typeof init?.body === "string" ? init.body : "{}",
+      ) as Record<string, unknown>;
+      const chatId =
+        typeof body.chat_id === "string" || typeof body.chat_id === "number"
+          ? String(body.chat_id)
+          : "";
+      if (token === IVA_TOKEN && chatId === CRITIC_BOT_ID) {
+        return new Response(
+          JSON.stringify({ ok: true, result: { message_id: 1151 } }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      assert.equal(token, CRITIC_TOKEN);
+      assert.equal(chatId, "42");
+      ownerNoticeAttempts += 1;
+      return new Response(
+        JSON.stringify({
+          ok: false,
+          description: "Too Many Requests: retry after 0",
+          parameters: { retry_after: 0 },
+        }),
+        { status: 429, headers: { "content-type": "application/json" } },
+      );
+    };
+
+    const sent = await sendColleagueAssignment({
+      fromBotId: IVA_BOT_ID,
+      toBotId: CRITIC_BOT_ID,
+      task: "Проверь конечность повторов строки владельцу",
+      env,
+      settingsFile,
+      storeFile,
+      fetchImpl,
+    });
+    assert.equal(sent.ok, true);
+    await completeInboundPeerAssignment(sent.assignment.id, { storeFile });
+
+    const deadline = Date.now() + 1_000;
+    while (ownerNoticeAttempts < 3 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    assert.equal(ownerNoticeAttempts, 3);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(ownerNoticeAttempts, 3);
+    const row = (await listColleagueAssignments(storeFile))[0];
+    assert.equal(row?.phase, "done");
+    assert.equal(row?.ownerNotified, false);
+    assert.equal(row?.ownerNoticeAttempts, 3);
+    assert.equal(row?.ownerNoticeClaimed, false);
+    assert.equal(row?.ownerNoticeRetryAt, undefined);
   } finally {
     cleanup();
   }
@@ -830,6 +903,106 @@ test("uncertain owner-notice failure keeps the claim and receiver pass does not 
     assert.equal(ownerNoticeAttempts, 1);
     assert.equal(firstClaim.record.ownerNotified, false);
     assert.equal(firstClaim.record.ownerNoticeClaimed, true);
+  } finally {
+    cleanup();
+  }
+});
+
+test("uncertain owner-notice failure after done does not retry or emit a second line", async () => {
+  const { settingsFile, storeFile, cleanup } = makeTempFiles();
+  try {
+    const env = makeTestEnv();
+    let dmText = "";
+    let ownerNoticeAttempts = 0;
+    let rejectOwnerNotice: (error: unknown) => void = () => undefined;
+    const ownerNoticeResponse = new Promise<Response>((_resolve, reject) => {
+      rejectOwnerNotice = reject;
+    });
+    const fetchImpl: typeof fetch = async (input, init) => {
+      await Promise.resolve();
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.href
+            : input.url;
+      const match = /\/bot([^/]+)\/([A-Za-z0-9_]+)$/u.exec(url);
+      assert.ok(match, `unexpected Bot API URL: ${url}`);
+      const token = match[1];
+      const body = JSON.parse(
+        typeof init?.body === "string" ? init.body : "{}",
+      ) as Record<string, unknown>;
+      const chatId =
+        typeof body.chat_id === "string" || typeof body.chat_id === "number"
+          ? String(body.chat_id)
+          : "";
+      const text = typeof body.text === "string" ? body.text : "";
+      if (token === IVA_TOKEN && chatId === CRITIC_BOT_ID) {
+        dmText = text;
+        return new Response(
+          JSON.stringify({ ok: true, result: { message_id: 1201 } }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      assert.equal(token, CRITIC_TOKEN);
+      assert.equal(chatId, "42");
+      ownerNoticeAttempts += 1;
+      return ownerNoticeResponse;
+    };
+
+    const sentPromise = sendColleagueAssignment({
+      fromBotId: IVA_BOT_ID,
+      toBotId: CRITIC_BOT_ID,
+      task: "Проверь, что обрыв после done не ставит повтор строки владельцу",
+      env,
+      settingsFile,
+      storeFile,
+      fetchImpl,
+    });
+    const startDeadline = Date.now() + 500;
+    while (ownerNoticeAttempts === 0 && Date.now() < startDeadline) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    assert.equal(ownerNoticeAttempts, 1);
+    assert.notEqual(dmText, "");
+
+    const firstClaim = await claimInboundPeerAssignment({
+      fromBotId: IVA_BOT_ID,
+      toBotId: CRITIC_BOT_ID,
+      messageId: 1201,
+      text: dmText,
+      env,
+      settingsFile,
+      storeFile,
+      fetchImpl,
+    });
+    assert.equal(firstClaim.duplicate, false);
+    await completeInboundPeerAssignment(firstClaim.assignmentId, { storeFile });
+    assert.equal((await listColleagueAssignments(storeFile))[0]?.phase, "done");
+
+    rejectOwnerNotice(new TypeError("socket hang up"));
+    const sent = await sentPromise;
+    assert.equal(sent.ok, true);
+    assert.equal(ownerNoticeAttempts, 1);
+
+    await new Promise((resolve) => setTimeout(resolve, 1_100));
+    const secondClaim = await claimInboundPeerAssignment({
+      fromBotId: IVA_BOT_ID,
+      toBotId: CRITIC_BOT_ID,
+      messageId: 1201,
+      text: dmText,
+      env,
+      settingsFile,
+      storeFile,
+      fetchImpl,
+    });
+
+    assert.equal(secondClaim.duplicate, true);
+    assert.equal(ownerNoticeAttempts, 1);
+    const row = (await listColleagueAssignments(storeFile))[0];
+    assert.equal(row?.ownerNotified, false);
+    assert.equal(row?.ownerNoticeClaimed, true);
+    assert.equal(row?.ownerNoticeRetryAt, undefined);
   } finally {
     cleanup();
   }

@@ -71,7 +71,7 @@ const botApiServer = createServer((req, res) => {
       }
       const call = { token: match[1], method: match[2], body };
       botApiCalls.push(call);
-      let controlled: StubBotApiControlResult | null = null;
+      let controlled: StubBotApiControlResult | null;
       try {
         controlled = (await botApiControl?.(call)) ?? null;
       } catch (error) {
@@ -730,6 +730,8 @@ test("приёмка T911: confirmed 429 owner notice after done is retried by r
 
   let ownerNoticeAttempts = 0;
   let acceptedOwnerNotices = 0;
+  let rejectedAt = 0;
+  let retriedAt = 0;
   let markFirstOwnerNoticeSeen: () => void = () => undefined;
   let releaseFirstOwnerNotice: () => void = () => undefined;
   const firstOwnerNoticeSeen = new Promise<void>((resolve) => {
@@ -748,18 +750,22 @@ test("приёмка T911: confirmed 429 owner notice after done is retried by r
     }
     ownerNoticeAttempts += 1;
     if (ownerNoticeAttempts > 1) {
+      retriedAt = performance.now();
       acceptedOwnerNotices += 1;
       return null;
     }
     markFirstOwnerNoticeSeen();
-    return firstOwnerNoticeRelease.then(() => ({
-      status: 429,
-      payload: {
-        ok: false,
-        description: "Too Many Requests: retry after 1",
-        parameters: { retry_after: 1 },
-      },
-    }));
+    return firstOwnerNoticeRelease.then(() => {
+      rejectedAt = performance.now();
+      return {
+        status: 429,
+        payload: {
+          ok: false,
+          description: "Too Many Requests: retry after 1",
+          parameters: { retry_after: 1 },
+        },
+      };
+    });
   };
 
   const delegatedPromise = colleagueExecuteAsync(
@@ -865,8 +871,14 @@ test("приёмка T911: confirmed 429 owner notice after done is retried by r
     assert.equal(delegated.ok, true);
 
     const deadline = Date.now() + 2_200;
-    while (acceptedOwnerNotices === 0 && Date.now() < deadline) {
+    let row = (await listColleagueAssignments()).find(
+      (entry) => entry.id === assignmentId,
+    );
+    while (row?.ownerNotified !== true && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 25));
+      row = (await listColleagueAssignments()).find(
+        (entry) => entry.id === assignmentId,
+      );
     }
 
     assert.equal(
@@ -875,9 +887,7 @@ test("приёмка T911: confirmed 429 owner notice after done is retried by r
       "confirmed 429 after done must be retried once by retry_after",
     );
     assert.equal(ownerNoticeAttempts, 2);
-    const row = (await listColleagueAssignments()).find(
-      (entry) => entry.id === assignmentId,
-    );
+    assert.ok(retriedAt - rejectedAt >= 1_000, "retry_after is a minimum wait");
     assert.equal(row?.ownerNotified, true);
   } finally {
     releaseFirstOwnerNotice();

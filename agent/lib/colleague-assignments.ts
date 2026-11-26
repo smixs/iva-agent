@@ -50,6 +50,10 @@ export interface ColleagueAssignmentRecord {
   readonly ownerNotified: boolean;
   /** Durable CAS-слот захвата отправки строки владельцу под замком до сети (specs/GroupAndAssignments.tla). */
   readonly ownerNoticeClaimed?: boolean;
+  /** Число начатых сетевых попыток строки владельцу; повтор после подтверждённого отказа конечен. */
+  readonly ownerNoticeAttempts?: number;
+  /** Момент запланированного повтора строки владельцу после подтверждённого отказа Bot API. */
+  readonly ownerNoticeRetryAt?: number;
   readonly dmMessageId?: number;
   readonly ownerMessageId?: number;
   readonly error?: string;
@@ -66,6 +70,9 @@ const LEDGER_VERSION = 1 as const;
 const MAX_LEDGER_RECORDS = 500;
 const MAX_TASK_LENGTH = 3_500;
 const OWNER_PREVIEW_LIMIT = 400;
+const OWNER_NOTICE_MAX_ATTEMPTS = 3;
+const OWNER_NOTICE_DEFAULT_RETRY_SECONDS = 1;
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
 const ASSIGNMENT_ID_PATTERN = /\[(?<id>asg_[a-f0-9]{12})\]/u;
 const VALID_PHASE_SET = new Set<string>(COLLEAGUE_ASSIGNMENT_PHASES);
 const DEFAULT_API_BASE_URL = "https://api.telegram.org";
@@ -104,6 +111,23 @@ function assertConsistentRecord(record: ColleagueAssignmentRecord): void {
       "inconsistent assignment row: ownerNotified must be boolean",
     );
   }
+  if (
+    record.ownerNoticeAttempts !== undefined &&
+    (!Number.isSafeInteger(record.ownerNoticeAttempts) ||
+      record.ownerNoticeAttempts < 0)
+  ) {
+    throw new Error(
+      "inconsistent assignment row: ownerNoticeAttempts must be a non-negative integer",
+    );
+  }
+  if (
+    record.ownerNoticeRetryAt !== undefined &&
+    !Number.isFinite(record.ownerNoticeRetryAt)
+  ) {
+    throw new Error(
+      "inconsistent assignment row: ownerNoticeRetryAt must be finite",
+    );
+  }
 }
 
 function parseAssignmentRecord(
@@ -133,6 +157,15 @@ function parseAssignmentRecord(
     ownerNotified: value.ownerNotified,
     ...(typeof value.ownerNoticeClaimed === "boolean"
       ? { ownerNoticeClaimed: value.ownerNoticeClaimed }
+      : {}),
+    ...(typeof value.ownerNoticeAttempts === "number" &&
+    Number.isSafeInteger(value.ownerNoticeAttempts) &&
+    value.ownerNoticeAttempts >= 0
+      ? { ownerNoticeAttempts: value.ownerNoticeAttempts }
+      : {}),
+    ...(typeof value.ownerNoticeRetryAt === "number" &&
+    Number.isFinite(value.ownerNoticeRetryAt)
+      ? { ownerNoticeRetryAt: value.ownerNoticeRetryAt }
       : {}),
     ...(typeof value.dmMessageId === "number"
       ? { dmMessageId: value.dmMessageId }
@@ -273,6 +306,8 @@ type TelegramSendResult =
       readonly error: string;
       /** true только при подтверждённом ответе Bot API об отказе; обрыв сети остаётся неопределённым. */
       readonly confirmed: boolean;
+      /** Секунды до повтора из parameters.retry_after Bot API, если они пришли. */
+      readonly retryAfterSeconds?: number;
     };
 
 async function postBotMessage(
@@ -303,6 +338,7 @@ async function postBotMessage(
       ok?: unknown;
       description?: unknown;
       result?: { message_id?: unknown };
+      parameters?: unknown;
     } | null;
     if (response.ok && body?.ok === true) {
       const id = body.result?.message_id;
@@ -314,7 +350,19 @@ async function postBotMessage(
       typeof body?.description === "string"
         ? body.description
         : `HTTP ${response.status}`;
-    return { ok: false, error: reason, confirmed: body?.ok === false };
+    const retryAfter =
+      isRecord(body?.parameters) &&
+      typeof body.parameters.retry_after === "number" &&
+      Number.isSafeInteger(body.parameters.retry_after * 1000) &&
+      body.parameters.retry_after >= 0
+        ? body.parameters.retry_after
+        : undefined;
+    return {
+      ok: false,
+      error: reason,
+      confirmed: body?.ok === false,
+      ...(retryAfter === undefined ? {} : { retryAfterSeconds: retryAfter }),
+    };
   } catch (error) {
     const rawMessage = error instanceof Error ? error.message : String(error);
     return {
@@ -325,11 +373,49 @@ async function postBotMessage(
   }
 }
 
-/** Освобождает CAS-слот строки владельцу после подтверждённого отказа Bot API. */
+type OwnerNoticeRetryInput = {
+  readonly assignmentId: string;
+  readonly storeFile: string;
+  readonly settingsFile: string;
+  readonly bot: TelegramBotConfig;
+  readonly ownerChatId: string;
+  readonly noticeText: string;
+  readonly apiBaseUrl: string;
+  readonly fetchImpl: typeof fetch;
+  readonly now: () => number;
+};
+
+/** Захватывает слот под замком перед первой попыткой или после наступления срока повтора. */
+function beginOwnerNotice(
+  record: ColleagueAssignmentRecord,
+  timestamp: number,
+): ColleagueAssignmentRecord | null {
+  const attempts = record.ownerNoticeAttempts ?? 0;
+  if (
+    record.ownerNotified ||
+    record.ownerNoticeClaimed === true ||
+    attempts >= OWNER_NOTICE_MAX_ATTEMPTS ||
+    (attempts > 0 &&
+      (record.ownerNoticeRetryAt === undefined ||
+        record.ownerNoticeRetryAt > timestamp))
+  ) {
+    return null;
+  }
+  return {
+    ...record,
+    ownerNoticeClaimed: true,
+    ownerNoticeAttempts: attempts + 1,
+    ownerNoticeRetryAt: undefined,
+    updatedAt: timestamp,
+  };
+}
+
+/** Освобождает CAS-слот строки владельцу после подтверждённого отказа Bot API и при оставшихся попытках ставит конечный повтор. */
 async function releaseOwnerNoticeClaim(
   storeFile: string,
   assignmentId: string,
   now: () => number,
+  retryDelayMs: number,
 ): Promise<ColleagueAssignmentRecord | null> {
   let releasedRecord: ColleagueAssignmentRecord | null = null;
   await withLedger(storeFile, async (ledger, save) => {
@@ -339,10 +425,16 @@ async function releaseOwnerNoticeClaim(
       releasedRecord = current;
       return;
     }
+    const attempts = current.ownerNoticeAttempts ?? 0;
+    const timestamp = now();
     const released: ColleagueAssignmentRecord = {
       ...current,
       ownerNoticeClaimed: false,
-      updatedAt: now(),
+      ownerNoticeRetryAt:
+        attempts < OWNER_NOTICE_MAX_ATTEMPTS
+          ? timestamp + retryDelayMs
+          : undefined,
+      updatedAt: timestamp,
     };
     await save({
       version: LEDGER_VERSION,
@@ -351,6 +443,119 @@ async function releaseOwnerNoticeClaim(
     releasedRecord = released;
   });
   return releasedRecord;
+}
+
+async function commitOwnerNoticeSuccess(
+  storeFile: string,
+  assignmentId: string,
+  messageId: number | undefined,
+  now: () => number,
+  fallback: ColleagueAssignmentRecord,
+): Promise<ColleagueAssignmentRecord> {
+  let committedRecord = fallback;
+  await withLedger(storeFile, async (ledger, save) => {
+    const current = ledger.records[assignmentId] ?? fallback;
+    const notified: ColleagueAssignmentRecord = {
+      ...current,
+      ownerNotified: true,
+      ownerNoticeClaimed: true,
+      ownerNoticeRetryAt: undefined,
+      ...(messageId === undefined
+        ? {}
+        : { ownerMessageId: current.ownerMessageId ?? messageId }),
+      updatedAt: now(),
+    };
+    await save({
+      version: LEDGER_VERSION,
+      records: { ...ledger.records, [assignmentId]: notified },
+    });
+    committedRecord = notified;
+  });
+  return committedRecord;
+}
+
+function scheduleOwnerNoticeRetry(
+  input: OwnerNoticeRetryInput,
+  retryAt: number,
+): void {
+  // Node turns out-of-range delays into 1 ms. Recheck the stored deadline when the timer fires.
+  const delayMs = Math.min(
+    MAX_TIMER_DELAY_MS,
+    Math.max(0, retryAt - input.now()),
+  );
+  setTimeout(() => {
+    void retryOwnerNotice(input, retryAt).catch((error: unknown) => {
+      console.error(
+        `[colleagues] повтор строки о поручении ${input.assignmentId} владельцу не запустился:`,
+        error,
+      );
+    });
+  }, delayMs).unref();
+}
+
+async function deliverOwnerNotice(
+  input: OwnerNoticeRetryInput,
+  claimed: ColleagueAssignmentRecord,
+): Promise<ColleagueAssignmentRecord> {
+  const sent = await postBotMessage(
+    input.bot,
+    input.ownerChatId,
+    input.noticeText,
+    {
+      apiBaseUrl: input.apiBaseUrl,
+      fetchImpl: input.fetchImpl,
+    },
+  );
+  if (sent.ok) {
+    return commitOwnerNoticeSuccess(
+      input.storeFile,
+      input.assignmentId,
+      sent.messageId,
+      input.now,
+      claimed,
+    );
+  }
+
+  console.error(
+    `[colleagues] не смог отправить строку о поручении ${input.assignmentId} владельцу: ${sent.error}`,
+  );
+  if (!sent.confirmed) return claimed;
+  const retrySeconds =
+    sent.retryAfterSeconds ?? OWNER_NOTICE_DEFAULT_RETRY_SECONDS;
+  const released = await releaseOwnerNoticeClaim(
+    input.storeFile,
+    input.assignmentId,
+    input.now,
+    retrySeconds * 1000,
+  );
+  if (released?.ownerNoticeRetryAt !== undefined) {
+    scheduleOwnerNoticeRetry(input, released.ownerNoticeRetryAt);
+  }
+  return released ?? claimed;
+}
+
+async function retryOwnerNotice(
+  input: OwnerNoticeRetryInput,
+  retryAt: number,
+): Promise<void> {
+  if (!isColleaguesEnabled(input.settingsFile)) return;
+  const claimed = await withLedger(input.storeFile, async (ledger, save) => {
+    const current = ledger.records[input.assignmentId];
+    if (!current || current.ownerNoticeRetryAt !== retryAt) return null;
+    const timestamp = input.now();
+    if (timestamp < retryAt) {
+      scheduleOwnerNoticeRetry(input, retryAt);
+      return null;
+    }
+    const claimed = beginOwnerNotice(current, timestamp);
+    if (!claimed) return null;
+    await save({
+      version: LEDGER_VERSION,
+      records: { ...ledger.records, [input.assignmentId]: claimed },
+    });
+    return claimed;
+  });
+  if (claimed) await deliverOwnerNotice(input, claimed);
 }
 
 /** Чей чат с владельцем показывает строку о поручении: всегда чат коллеги. */
@@ -504,63 +709,40 @@ export async function sendColleagueAssignment(
   let shouldSendNotice = false;
   await withLedger(storeFile, async (ledger, save) => {
     const existing = ledger.records[id];
-    const alreadyClaimedOrSent =
-      existing?.ownerNotified === true ||
-      existing?.ownerNoticeClaimed === true;
-    shouldSendNotice = ownerChatId !== null && !alreadyClaimedOrSent;
+    const timestamp = now();
     const merged: ColleagueAssignmentRecord = {
       ...(existing ?? initialRecord),
       phase: existing?.phase === "done" ? "done" : "delivered",
       ...(dmSent.messageId === undefined
         ? {}
         : { dmMessageId: existing?.dmMessageId ?? dmSent.messageId }),
-      ownerNotified: existing?.ownerNotified === true,
-      ...(alreadyClaimedOrSent || shouldSendNotice
-        ? { ownerNoticeClaimed: true }
-        : {}),
-      updatedAt: now(),
+      ...(existing?.ownerNotified === true ? { ownerNoticeClaimed: true } : {}),
+      updatedAt: timestamp,
     };
+    const claimed = ownerChatId ? beginOwnerNotice(merged, timestamp) : null;
+    shouldSendNotice = claimed !== null;
+    deliveredRecord = claimed ?? merged;
     await save({
       version: LEDGER_VERSION,
-      records: { ...ledger.records, [id]: merged },
+      records: { ...ledger.records, [id]: deliveredRecord },
     });
-    deliveredRecord = merged;
   });
 
   if (shouldSendNotice && ownerChatId) {
-    const noticeBot = ownerNoticeBotFor(fromBot, toBot);
-    const noticeText = formatOwnerAssignmentNotice(fromLabel, toLabel, task);
-    const noticeSent = await postBotMessage(noticeBot, ownerChatId, noticeText, {
-      apiBaseUrl,
-      fetchImpl,
-    });
-    if (noticeSent.ok) {
-      await withLedger(storeFile, async (ledger, save) => {
-        const current = ledger.records[id] ?? deliveredRecord;
-        const notified: ColleagueAssignmentRecord = {
-          ...current,
-          ownerNotified: true,
-          ownerNoticeClaimed: true,
-          ...(noticeSent.messageId === undefined
-            ? {}
-            : { ownerMessageId: current.ownerMessageId ?? noticeSent.messageId }),
-          updatedAt: now(),
-        };
-        await save({
-          version: LEDGER_VERSION,
-          records: { ...ledger.records, [id]: notified },
-        });
-        deliveredRecord = notified;
-      });
-    } else {
-      console.error(
-        `[colleagues] не смог отправить строку о поручении ${id} владельцу: ${noticeSent.error}`,
-      );
-      if (noticeSent.confirmed) {
-        deliveredRecord =
-          (await releaseOwnerNoticeClaim(storeFile, id, now)) ?? deliveredRecord;
-      }
-    }
+    deliveredRecord = await deliverOwnerNotice(
+      {
+        assignmentId: id,
+        storeFile,
+        settingsFile,
+        bot: ownerNoticeBotFor(fromBot, toBot),
+        ownerChatId,
+        noticeText: formatOwnerAssignmentNotice(fromLabel, toLabel, task),
+        apiBaseUrl,
+        fetchImpl,
+        now,
+      },
+      deliveredRecord,
+    );
   }
 
   return { ok: true, assignment: deliveredRecord };
@@ -621,12 +803,11 @@ export async function claimInboundPeerAssignment(
   let shouldSendNotice = false;
 
   // Шаг 1 (под замком, без сети): проверяем дубль и захватываем CAS-слот ownerNoticeClaimed.
-  // Дубль не запускает исполнение повторно, но всё ещё может доказать строку владельцу,
-  // если прежняя отправка получила подтверждённый отказ и слот уже освобождён.
+  // Дубль может отправить строку владельцу после подтверждённого отказа, когда срок повтора наступил.
   await withLedger(storeFile, async (ledger, save) => {
     const existing = ledger.records[assignmentId];
     const timestamp = now();
-    let record: ColleagueAssignmentRecord = existing ?? {
+    const record: ColleagueAssignmentRecord = existing ?? {
       id: assignmentId,
       fromBotId: input.fromBotId,
       toBotId: input.toBotId,
@@ -636,70 +817,42 @@ export async function claimInboundPeerAssignment(
       createdAt: timestamp,
       updatedAt: timestamp,
     };
-    isDuplicate = existing !== undefined && assignmentPhase(existing) === "done";
-    const alreadyClaimedOrSent =
-      record.ownerNotified === true || record.ownerNoticeClaimed === true;
-    shouldSendNotice =
-      !alreadyClaimedOrSent &&
-      ownerChatId !== null &&
-      fromBot !== null &&
-      toBot !== null;
-    if (shouldSendNotice) {
-      record = {
-        ...record,
-        ownerNoticeClaimed: true,
-        updatedAt: now(),
-      };
-    }
+    isDuplicate =
+      existing !== undefined && assignmentPhase(existing) === "done";
+    const claimed =
+      ownerChatId && fromBot && toBot
+        ? beginOwnerNotice(record, timestamp)
+        : null;
+    shouldSendNotice = claimed !== null;
+    claimedRecord = claimed ?? record;
     await save({
       version: LEDGER_VERSION,
-      records: { ...ledger.records, [assignmentId]: record },
+      records: { ...ledger.records, [assignmentId]: claimedRecord },
     });
-    claimedRecord = record;
   });
 
   // Шаг 2 (вне замка, сеть) + Шаг 3 (под замком, запись ownerNotified=true).
   if (shouldSendNotice && ownerChatId && fromBot && toBot) {
     const fromLabel = botDisplayLabel(input.fromBotId, env, settingsFile);
     const toLabel = botDisplayLabel(input.toBotId, env, settingsFile);
-    const noticeBot = ownerNoticeBotFor(fromBot, toBot);
-    const noticeText = formatOwnerAssignmentNotice(
-      fromLabel,
-      toLabel,
-      claimedRecord.task,
+    claimedRecord = await deliverOwnerNotice(
+      {
+        assignmentId,
+        storeFile,
+        settingsFile,
+        bot: ownerNoticeBotFor(fromBot, toBot),
+        ownerChatId,
+        noticeText: formatOwnerAssignmentNotice(
+          fromLabel,
+          toLabel,
+          claimedRecord.task,
+        ),
+        apiBaseUrl,
+        fetchImpl,
+        now,
+      },
+      claimedRecord,
     );
-    const sent = await postBotMessage(noticeBot, ownerChatId, noticeText, {
-      apiBaseUrl,
-      fetchImpl,
-    });
-    if (sent.ok) {
-      await withLedger(storeFile, async (ledger, save) => {
-        const current = ledger.records[assignmentId] ?? claimedRecord;
-        const notified: ColleagueAssignmentRecord = {
-          ...current,
-          ownerNotified: true,
-          ownerNoticeClaimed: true,
-          ...(sent.messageId === undefined
-            ? {}
-            : { ownerMessageId: current.ownerMessageId ?? sent.messageId }),
-          updatedAt: now(),
-        };
-        await save({
-          version: LEDGER_VERSION,
-          records: { ...ledger.records, [assignmentId]: notified },
-        });
-        claimedRecord = notified;
-      });
-    } else {
-      console.error(
-        `[colleagues] не смог отправить строку о поручении ${assignmentId} владельцу: ${sent.error}`,
-      );
-      if (sent.confirmed) {
-        claimedRecord =
-          (await releaseOwnerNoticeClaim(storeFile, assignmentId, now)) ??
-          claimedRecord;
-      }
-    }
   }
 
   return { duplicate: isDuplicate, assignmentId, record: claimedRecord };
