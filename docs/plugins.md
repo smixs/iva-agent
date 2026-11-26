@@ -138,7 +138,7 @@ restarted onto the new code right there, so a plugin that only carries services 
 ## Marketplace
 
 A Marketplace is a list of plugins in a git repository — `name` to source, nothing more. No
-central place, no moderation, nobody's approval to publish. Iva reads
+central place, and a list of your own needs nobody's approval. Iva reads
 `.agents/plugins/marketplace.json`, the convention of Codex, so the same list works for its
 users too.
 
@@ -149,11 +149,42 @@ iva plugin marketplace list
 iva plugin marketplace remove your-plugins
 ```
 
-The default list is `smixs/iva-plugins`, and it stays in place when you add your own. Lists
-are cached under `data/marketplace-cache/`; offline, the cache is used and marked as possibly
-stale. A name offered by two lists is refused with an `add <name>@<list>` hint, and an entry
-whose manifest calls the plugin something else is refused before anything is installed — the
-list is a file nobody vetted.
+The default list is `smixs/iva-plugins`, and it stays in place when you add your own. It is
+the one list that is reviewed: an entry gets there by a pull request, after a maintainer has
+read the commit it names — what starts on the machine, which keys are read, where the plugin
+connects (ADR-0029). The same plugins, with their authors and repositories, are at
+[iva-agent.com/plugins](https://iva-agent.com/plugins). Being listed means that commit was
+read; it does not make a plugin safe for every machine, so [What you risk](#what-you-risk)
+still applies. To get your own plugin listed, follow
+[PUBLISH.md](https://github.com/smixs/iva-plugins/blob/main/PUBLISH.md).
+
+Lists are cached under `data/marketplace-cache/`; offline, the cache is used and marked as
+possibly stale. A name offered by two lists is refused with an `add <name>@<list>` hint, and
+an entry whose manifest calls the plugin something else is refused before anything is
+installed — to the code every list is an untrusted file, the reviewed one included.
+
+### Install count
+
+After a plugin from the default list is installed, Iva sends its name to iva-agent.com, and
+the site shows how many times each plugin was installed. This is the only thing Iva sends
+that you did not ask for, so here is all of it:
+
+```
+POST https://iva-agent.com/api/plugins/installs
+{"name":"trace"}
+```
+
+No identifier of the installation, no version, no model, no keys. The site sees the address
+of your server, as any site does; it keeps a salted hash of it for a day, so that one machine
+is not counted twice, and never the address itself. The command prints a line before it
+sends; after a tap in Telegram that line is in the message that says the plugin is installed,
+and the name leaves after the message. A plugin from your own list, from a repository or from
+a folder you install in the terminal is never counted, and neither are updates. A plugin
+installed by a tap arrives as a folder, so it is counted by its name - when the default list
+has that name.
+
+`IVA_PLUGIN_STATS=off` in `.env` turns it off; so does `DO_NOT_TRACK=1` in the environment.
+The request is the last thing an install does, gives up after 2.5 seconds and cannot fail it.
 
 ## Write your own
 

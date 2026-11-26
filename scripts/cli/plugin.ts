@@ -66,6 +66,12 @@ type PluginDependencies = {
   readonly interactive?: () => boolean;
   /** Telegram sends of `propose` and `install-proposal`. */
   readonly sends?: ProposalSends;
+  /**
+   * Tells iva-agent.com the name of a plugin installed from the default Marketplace
+   * (ADR-0029). Absent, nothing is sent: only the real CLI passes it, so a test or a
+   * script that builds these commands never reaches the site.
+   */
+  readonly countInstall?: (name: string) => Promise<boolean>;
 };
 
 /** Режим плагина словами владельца: два тумблера, как он их и переключает. */
@@ -89,7 +95,7 @@ export function createPluginCommands(
   const log =
     dependencies.log ?? ((...args: unknown[]) => console.log(...args));
   // `GIT_TERMINAL_PROMPT=0` только здесь, для плагинов и Marketplace: приватный или
-  // отсутствующий репозиторий (а дефолтного `smixs/iva-plugins` ещё нет) иначе
+  // отсутствующий репозиторий иначе
   // спросит логин в терминале и будет ждать — держа при этом лок апдейта. Ответ
   // «репозиторий недоступен» приходит сразу, и команда объясняет его фразой.
   // `iva update` этой правкой не тронут: там приглашение как раз уместно.
@@ -140,6 +146,9 @@ ${C.b}iva plugin${C.x} — ${translate("install and manage plugins", "устан
       log,
       interactive,
       ...(buildVersion ? { buildVersion } : {}),
+      ...(dependencies.countInstall
+        ? { countInstall: dependencies.countInstall }
+        : {}),
     });
     const marketplace = createPluginMarketplaceCommands(context);
     const trust = createPluginTrustCommands(context);
@@ -214,7 +223,7 @@ ${C.b}iva plugin${C.x} — ${translate("install and manage plugins", "устан
 
     switch (sub) {
       case "add":
-        return install.add();
+        return install.addAndCount();
       case "list":
         return list();
       case "remove":

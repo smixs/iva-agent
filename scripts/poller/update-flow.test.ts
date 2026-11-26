@@ -280,12 +280,29 @@ test("the /update button leaves the lock to the update it launches", async (t) =
       rmSync(path, { recursive: true, force: true });
   });
 
+  // The switches of the machine the tests run on are put aside: this test sets its own.
+  const before = {
+    stats: process.env.IVA_PLUGIN_STATS,
+    track: process.env.DO_NOT_TRACK,
+  };
+  delete process.env.IVA_PLUGIN_STATS;
+  process.env.DO_NOT_TRACK = "1";
+  t.after(() => {
+    delete process.env.DO_NOT_TRACK;
+    if (before.stats !== undefined) process.env.IVA_PLUGIN_STATS = before.stats;
+    if (before.track !== undefined) process.env.DO_NOT_TRACK = before.track;
+  });
+
   const first = await press(bin);
 
   assert.match(first.at(-1) ?? "", /Starting the update/u);
   const command = readFileSync(launched, "utf8");
   assert.match(command, /update --telegram-job [0-9a-f]/u);
   assert.match(command, new RegExp(`--setenv=ASSISTANT_DATA_DIR=${dataDir}`));
+  // A transient unit starts with none of the bridge's environment, so the switches of the
+  // install count are handed over by name: the one that is set, and not the one that is not.
+  assert.match(command, /--setenv=DO_NOT_TRACK=1( |$)/mu);
+  assert.doesNotMatch(command, /IVA_PLUGIN_STATS/u);
   assert.equal(
     readdirSync(jobs).length,
     1,

@@ -84,6 +84,8 @@ type PluginCliOptions = {
   readonly buildVersion?: (options: {
     readonly requirePlugins: boolean;
   }) => Promise<PluginVersionBuild>;
+  /** Отправка имени в счёт установок (ADR-0029). Нет её — наружу не уходит ничего. */
+  readonly countInstall?: (name: string) => Promise<boolean>;
 };
 
 export function createPluginCliContext(options: PluginCliOptions) {
@@ -98,6 +100,7 @@ export function createPluginCliContext(options: PluginCliOptions) {
     log,
     interactive,
     buildVersion,
+    countInstall,
   } = options;
   const { warn, step } = runtime;
   const { findPlugin, pluginsDir } = core.store;
@@ -269,6 +272,7 @@ export function createPluginCliContext(options: PluginCliOptions) {
     cwd,
     log,
     interactive,
+    countInstall,
     components,
     absolute,
     locked,
