@@ -1,0 +1,51 @@
+$ node --test agent/lib/colleague-assignments.test.ts
+[security] outbound leak redacted: api_key:telegram_bot
+✔ property: groupCoordKeyOf aligns all bots in the same group and ignores private chats (seed 20261126) (2.417166ms)
+✔ property: parseTelegramQuiet matches only leading <!-- iva:none --> markers (seed 20261126) (4.226167ms)
+✔ isConfiguredPeerBot accepts configured peer bots and rejects self and unknown bots (0.337709ms)
+✔ sendColleagueAssignment sends Bot API DM and visible owner line in colleague chat, redacting secrets (65.081042ms)
+✔ sendColleagueAssignment rejects self-assignment, disabled option, unknown bot, and records DM failure (31.803584ms)
+✔ colleagueExecuteAsync delegate works in Telegram turns and blocks Helper turns; team markdown lists roster (33.08175ms)
+✔ sendColleagueAssignment + claimInboundPeerAssignment send at most one owner notice in both delivery orders (78.860167ms)
+✔ owner notice uses the owner's private chat instead of digest chat, including receiver-first delivery (50.189625ms)
+[colleagues] не смог отправить строку о поручении asg_bf38db10f4d2 владельцу: Too Many Requests: retry after 1
+✔ confirmed 429 owner-notice rejection releases the claim and a receiver pass retries it exactly once (67.640667ms)
+[colleagues] не смог отправить строку о поручении asg_6e82a7086087 владельцу: Too Many Requests: retry after 0
+[colleagues] не смог отправить строку о поручении asg_6e82a7086087 владельцу: Too Many Requests: retry after 0
+[colleagues] не смог отправить строку о поручении asg_6e82a7086087 владельцу: Too Many Requests: retry after 0
+✔ confirmed owner-notice rejections stop after the finite retry budget (180.902542ms)
+[colleagues] не смог отправить строку о поручении asg_3ecc3f671728 владельцу: socket hang up
+✔ uncertain owner-notice failure keeps the claim and receiver pass does not duplicate the line (43.300333ms)
+[colleagues] не смог отправить строку о поручении asg_e1b8eb56ee91 владельцу: socket hang up
+✔ uncertain owner-notice failure after done does not retry or emit a second line (1162.405917ms)
+✔ colleagueExecuteAsync delegate defaults owner notice to the configured owner chat, not digest or group user id (37.1315ms)
+ℹ tests 13
+ℹ suites 0
+ℹ pass 13
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2011.735792
+exit=0
+
+$ node --test scripts/colleague-group-and-assignments.test.ts
+{"event":"telegram_turn_latency","ingressToTurnMs":29,"ingressToFirstOutputMs":null,"ingressToDeliveryMs":58}
+{"event":"telegram_turn_latency","ingressToTurnMs":null,"ingressToFirstOutputMs":null,"ingressToDeliveryMs":null}
+✔ п.2: group without @ lets each bot decide reply vs silence (iva:none sends nothing), with no round limit (302.608084ms)
+✔ п.3: bot-to-bot assignment goes via Bot API DM and posts one visible owner line in colleague chat, deduplicated on replay (112.705917ms)
+[colleagues] не смог отправить строку о поручении asg_c7a502280494 владельцу: Too Many Requests: retry after 1
+2026-11-26T11:38:29.743Z queued update 5201: group busy: another bot
+✔ приёмка T911: confirmed 429 owner notice after done is retried by retry_after exactly once (1103.868334ms)
+✔ п.4: bots added by owner to a group accept its messages and serialize turns per group without blocking private chats (39.09225ms)
+✔ п.2 (длинный ход с инструментом): group turn >60s with tool-calls ending in iva:none sends zero messages and zero deletes (104.114625ms)
+✔ п.3 (пачка с повтором и новым поручением): promoteReadyInbox delivers fresh 8203 alongside replayed 8201 (276.699042ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2212.498625
+exit=0

@@ -1,0 +1,31 @@
+[colleagues] не смог отправить строку о поручении asg_f7b51cbaf5b7 владельцу: Too Many Requests: retry after 1
+✖ confirmed 429 owner-notice rejection releases the claim and a receiver pass retries it exactly once (61.736833ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 307.343041
+
+✖ failing tests:
+
+test at agent/lib/colleague-assignments.test.ts:660:1
+✖ confirmed 429 owner-notice rejection releases the claim and a receiver pass retries it exactly once (61.736833ms)
+  AssertionError [ERR_ASSERTION]: receiver must wait for retry_after
+
+  2 !== 1
+
+      at TestContext.<anonymous> (file:///Users/majento/dev/factory-work/iva-T944/agent/lib/colleague-assignments.test.ts:749:12)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 2,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+exit=1

@@ -1,0 +1,11 @@
+$ npm run build (git archive 8e569f5dc186b75e795e476060443cc6766b402a; isolated source, empty data and vault)
+> iva@0.5.15 build
+> node --env-file-if-exists=.env scripts/build.ts
+> iva@0.5.15 build:core
+> eve build
+[nitro] ✔ Generated public .eve/builds/mwxhepe1-49ed4fa2-5282-472f-849b-c18552a98d0a/output/public
+[nitro] ℹ Building server (builder: rolldown, preset: node-server, compatibility date: 2026-11-26)
+Σ Total size: 18.8 MB (5.02 MB gzip)
+[BUILD] built output at /private/var/folders/g6/4cl0_dqx76x16042p9vfnvj00000gn/T/iva-t944-build-85kvsw98/source/.iva-build/staging-nc41i9/.output
+exit=0
+test -s .output/server/index.mjs exit=0

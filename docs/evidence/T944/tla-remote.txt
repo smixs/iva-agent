@@ -1,0 +1,63 @@
+$ REMOTE_TEST_HOSTS="zenbook ovh1" TLC_TIMEOUT=240 ~/dev/dark-factory/ops/tlc.sh --no-deadlock --batch specs/GroupAndAssignments.tla specs/GroupAndAssignments.cfg specs/GroupAndAssignments-*.cfg
+Model commit: ba12cfa1
+tlc: specs/GroupAndAssignments.tla → zenbook, таймаут 240 с
+Model checking completed. No error has been found.
+13023413 states generated, 1952201 distinct states found, 0 states left on queue.
+tlc: case-result=GroupAndAssignments.cfg exit=0
+Error: Invariant NoLostAssignment is violated.
+9821 states generated, 3899 distinct states found, 2760 states left on queue.
+tlc: case-result=GroupAndAssignments-batch-first-only.cfg exit=12
+Error: Invariant SingleActiveGroupBot is violated.
+106 states generated, 70 distinct states found, 49 states left on queue.
+tlc: case-result=GroupAndAssignments-concurrent-group.cfg exit=12
+Error: Invariant DoneAssignmentNotifiedOwner is violated.
+77 states generated, 52 distinct states found, 36 states left on queue.
+tlc: case-result=GroupAndAssignments-done-no-retry.cfg exit=12
+Error: Invariant NoLostGroupMessage is violated.
+25 states generated, 20 distinct states found, 13 states left on queue.
+tlc: case-result=GroupAndAssignments-drop-busy-group.cfg exit=12
+Error: Invariant NoDuplicateAssignment is violated.
+312 states generated, 167 distinct states found, 111 states left on queue.
+tlc: case-result=GroupAndAssignments-duplicate-assignment.cfg exit=12
+Error: Invariant NoDuplicateGroupProcessing is violated.
+418 states generated, 219 distinct states found, 141 states left on queue.
+tlc: case-result=GroupAndAssignments-duplicate-group.cfg exit=12
+Error: Invariant AtMostOneOwnerNotice is violated.
+1116 states generated, 483 distinct states found, 321 states left on queue.
+tlc: case-result=GroupAndAssignments-duplicate-owner-notice.cfg exit=12
+Error: Invariant NoLostAssignment is violated.
+19 states generated, 16 distinct states found, 11 states left on queue.
+tlc: case-result=GroupAndAssignments-lost-assignment.cfg exit=12
+Error: Invariant DoneAssignmentNotifiedOwner is violated.
+113 states generated, 78 distinct states found, 60 states left on queue.
+tlc: case-result=GroupAndAssignments-stuck-owner-notice.cfg exit=12
+Error: Invariant NoSilenceAndAssignmentWitness is violated.
+281662 states generated, 66462 distinct states found, 28114 states left on queue.
+tlc: case-result=GroupAndAssignments-witness.cfg exit=12
+runner exit=0
+
+New mutant, last two states (selected fields)
+/\ ownerNoticeClaimed = <<FALSE>>
+/\ assignPhase = <<"delivered">>
+State 3: <ExecuteAssignmentBatch line 322, col 3 to line 369, col 95 of module GroupAndAssignments>
+/\ ownerNoticeRetryScheduled = <<FALSE>>
+/\ ownerNoticeInFlight = <<{"receiver"}>>
+/\ assignPendingAck = {1}
+/\ ownerNoticeCount = <<0>>
+/\ assignQueued = <<TRUE>>
+/\ ownerNoticeUncertain = <<FALSE>>
+/\ ownerNoticeAttempts = <<1>>
+/\ ownerNotified = <<FALSE>>
+/\ ownerNoticeClaimed = <<TRUE>>
+/\ assignPhase = <<"done">>
+State 4: <RejectOwnerNotice line 288, col 3 to line 302, col 47 of module GroupAndAssignments>
+/\ ownerNoticeRetryScheduled = <<FALSE>>
+/\ ownerNoticeInFlight = <<{}>>
+/\ assignPendingAck = {1}
+/\ ownerNoticeCount = <<0>>
+/\ assignQueued = <<TRUE>>
+/\ ownerNoticeUncertain = <<FALSE>>
+/\ ownerNoticeAttempts = <<1>>
+/\ ownerNotified = <<FALSE>>
+/\ ownerNoticeClaimed = <<FALSE>>
+/\ assignPhase = <<"done">>

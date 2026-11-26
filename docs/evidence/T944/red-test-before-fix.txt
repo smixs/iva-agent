@@ -14,9 +14,9 @@
 test at scripts/colleague-group-and-assignments.test.ts:726:1
 ✖ приёмка T911: confirmed 429 owner notice after done is retried by retry_after exactly once (2337.733416ms)
   AssertionError [ERR_ASSERTION]: confirmed 429 after done must be retried once by retry_after
-  
+
   0 !== 1
-  
+
       at TestContext.<anonymous> (file:///Users/majento/dev/factory-work/iva-T944/scripts/colleague-group-and-assignments.test.ts:872:12)
       at async Test.run (node:internal/test_runner/test:1409:7)
       at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
