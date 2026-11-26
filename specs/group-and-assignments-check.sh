@@ -33,6 +33,7 @@ check GroupAndAssignments-duplicate-assignment NoDuplicateAssignment
 check GroupAndAssignments-lost-assignment NoLostAssignment
 check GroupAndAssignments-duplicate-owner-notice AtMostOneOwnerNotice
 check GroupAndAssignments-stuck-owner-notice DoneAssignmentNotifiedOwner
+check GroupAndAssignments-done-no-retry DoneAssignmentNotifiedOwner
 check GroupAndAssignments-batch-first-only NoLostAssignment
 check GroupAndAssignments-witness NoSilenceAndAssignmentWitness
 exit "$failed"
