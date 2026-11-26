@@ -6,10 +6,9 @@ import { acquireUpdateLock } from "./lib/version-store.ts";
 import {
   betaChannel,
   BranchUnavailableError,
-  DEFAULT_UPDATE_BRANCH,
   UPDATE_BRANCH_CONFIG,
 } from "./lib/update-channel.ts";
-import { runRollCall, type Branch } from "./lib/roll-call.ts";
+import { rollCallEnabled, runRollCall, type Branch } from "./lib/roll-call.ts";
 import { resolveDataDir } from "../packages/data-dir/index.ts";
 import {
   gitAt,
@@ -246,7 +245,13 @@ export async function rollCall(
   branchOf: (root: string) => Promise<Branch> = updateBranchOf,
 ): Promise<void> {
   try {
+    // Switched off, nothing runs: no lock, no git.
+    if (!rollCallEnabled(env)) return;
     const storage = dataDir(root, env);
+    // Read before the lock: git runs without a time limit, and a git that hangs must not hold
+    // the lock `iva update` waits for. Under the lock only the roll call itself runs, and its
+    // one call outside the machine waits at most ROLL_CALL_TIMEOUT_MS.
+    const branch = await branchOf(root);
     const lock = acquireUpdateLock(storage);
     if (!lock) {
       console.error("Roll call: an update or another check is running");
@@ -254,7 +259,7 @@ export async function rollCall(
     }
     let result: Awaited<ReturnType<typeof runRollCall>>;
     try {
-      result = await run({ root, storage, branch: await branchOf(root), env });
+      result = await run({ root, storage, branch, env });
     } finally {
       lock.release();
     }
@@ -278,18 +283,18 @@ export async function rollCall(
 export async function updateBranchOf(root: string): Promise<Branch> {
   try {
     const upstream = upstreamQuery(root);
-    // `--default`: an unset branch answers main with 0, so any other exit - a repository git
-    // cannot read, a git that did not run - is a failure, not a default.
-    const read = await gitAt(upstream.root, [
-      "config",
-      "--local",
-      "--default",
-      DEFAULT_UPDATE_BRANCH,
-      "--get",
-      UPDATE_BRANCH_CONFIG,
-    ]);
+    // The whole local config, not `--get`: `--get` says "not set" and "git failed" with the
+    // same 1, and its `--default` needs git 2.18. Any exit but 0 here is a failure.
+    const read = await gitAt(upstream.root, ["config", "--local", "--list"]);
     if (read.code !== 0) return "other";
-    const branch = String(read.stdout ?? "").trim();
+    // `--list` lowers the key and keeps the value; the last line wins, as with `--get`.
+    const key = `${UPDATE_BRANCH_CONFIG.toLowerCase()}=`;
+    const line = String(read.stdout ?? "")
+      .split("\n")
+      .reverse()
+      .find((entry) => entry.toLowerCase().startsWith(key));
+    if (line === undefined) return "main";
+    const branch = line.slice(key.length).trim();
     return branch === "main" || branch === "beta" ? branch : "other";
   } catch {
     return "other";

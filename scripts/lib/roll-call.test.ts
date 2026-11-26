@@ -36,6 +36,7 @@ import {
 } from "./roll-call.ts";
 
 const SEED = Number(process.env.FC_SEED ?? 20_261_126);
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const OFF_WORDS = ["off", "0", "false", "no"] as const;
 const PROVIDERS = Object.keys(CATALOG);
 const KEYS = ["gap", "version", "branch", "os", "arch", "provider", "model"];
@@ -112,7 +113,13 @@ const anyCase = (word: string) =>
     );
 const padding = fc.constantFrom("", " ", "  ", "\t");
 // What systemd's EnvironmentFile leaves after the value: Node's --env-file drops it.
-const trailing = fc.constantFrom("", " # no statistics", "\t#", "  # 26.11");
+const trailing = fc.constantFrom(
+  "",
+  " # no statistics",
+  "\t#",
+  "  # 26.11",
+  "#no-statistics",
+);
 const quoted = (word: string) =>
   fc.constantFrom(word, `"${word}"`, `'${word}'`);
 
@@ -147,7 +154,7 @@ test(`the roll call is on unless IVA_STATS or DO_NOT_TRACK says otherwise (seed 
           false,
         );
         const spelled = (other ?? "")
-          .replace(/\s+#.*$/s, "")
+          .replace(/#.*$/s, "")
           .trim()
           .replace(/^(["'])(.*)\1$/s, "$2")
           .trim()
@@ -588,6 +595,37 @@ test("the daily check hands its data folder and branch to the roll call and logs
       ["Roll call failed: boom", "Roll call failed: no git"],
     );
 
+    // The branch is read before the lock is taken: a git that hangs holds no lock.
+    await rollCall(
+      root,
+      env,
+      () => Promise.resolve({ status: "off" }),
+      () => {
+        const free = acquireUpdateLock(storage);
+        assert.ok(free, "the lock is free while git runs");
+        free.release();
+        return Promise.resolve("beta");
+      },
+    );
+
+    // Switched off, nothing runs at all: no git, no lock, not even the data folder.
+    const quiet = join(root, "switched-off");
+    let ran = 0;
+    await rollCall(
+      root,
+      { ASSISTANT_DATA_DIR: quiet, IVA_STATS: "off" },
+      () => {
+        ran++;
+        return Promise.resolve({ status: "off" });
+      },
+      () => {
+        ran++;
+        return Promise.resolve("main");
+      },
+    );
+    assert.equal(ran, 0);
+    await assert.rejects(stat(quiet));
+
     // A second run while the first holds the lock sends nothing.
     const held = acquireUpdateLock(storage);
     assert.ok(held);
@@ -665,5 +703,41 @@ test("the daily run calls the roll call after the check, whatever the check said
     assert.equal(process.exitCode, 1, "the failed check still says so");
   } finally {
     process.exitCode = saved;
+  }
+});
+
+test("the service's own run sends the roll call through the real chain", async (t) => {
+  const { main } = await import("../check-update.ts");
+  const entry = pathToFileURL(process.argv[1]).href;
+  t.mock.method(console, "log", () => {});
+  t.mock.method(console, "error", () => {});
+  const storage = await mkdtemp(join(tmpdir(), "iva-roll-call-main-"));
+  const saved = { ...process.env };
+  const posted: string[] = [];
+  t.mock.method(globalThis, "fetch", (input: string | URL | Request) => {
+    posted.push(String(input instanceof Request ? input.url : input));
+    return Promise.resolve(new Response(null, { status: 204 }));
+  });
+  try {
+    process.env.ASSISTANT_DATA_DIR = storage;
+    delete process.env.IVA_STATS;
+    delete process.env.DO_NOT_TRACK;
+    // Only the check is replaced; the roll call is the one the service runs.
+    await main(entry, () => Promise.resolve({ status: "current" } as never));
+    assert.deepEqual(posted, [ROLL_CALL_URL]);
+    assert.ok(
+      DAY.test(
+        (
+          JSON.parse(await readFile(join(storage, ROLL_CALL_FILE), "utf8")) as {
+            day: string;
+          }
+        ).day,
+      ),
+    );
+  } finally {
+    for (const key of ["ASSISTANT_DATA_DIR", "IVA_STATS", "DO_NOT_TRACK"])
+      if (saved[key] === undefined) delete process.env[key];
+      else process.env[key] = saved[key];
+    await rm(storage, { recursive: true, force: true });
   }
 });

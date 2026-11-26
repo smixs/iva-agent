@@ -164,7 +164,7 @@ const anyCase = (word: string) =>
 /** A value as the switch reads it: no trailing comment, no quotes, any case. */
 const spelled = (value: string) =>
   value
-    .replace(/\s+#.*$/s, "")
+    .replace(/#.*$/s, "")
     .trim()
     .replace(/^(["'])(.*)\1$/s, "$2")
     .trim()
@@ -178,7 +178,7 @@ test(`IVA_PLUGIN_STATS and IVA_STATS turn the count off in any spelling of "off"
       padding,
       padding,
       // systemd's EnvironmentFile keeps quotes and a trailing comment that --env-file drops.
-      fc.constantFrom("", " # no statistics", "\t#"),
+      fc.constantFrom("", " # no statistics", "\t#", "#no-statistics"),
       fc.boolean(),
       (name, word, before, after, comment, quote) => {
         const value = quote ? `"${word}"` : word;

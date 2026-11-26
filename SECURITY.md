@@ -92,6 +92,6 @@ installation from another. After you install a plugin from the default Marketpla
 name of that plugin goes to iva-agent.com ([Install count](docs/plugins.md#install-count)).
 Once a day, after the update check, the roll call tells iva-agent.com that an Iva is alive:
 its version, update branch, OS, architecture, provider and model, each from a closed list
-(the model only as Iva's catalog names it), and the days since its last roll call (`IVA_STATS` in [configuration.md](docs/configuration.md),
+(the version only in the form 1.2.3, the model only as Iva's model list names it), and the days since its last roll call (`IVA_STATS` in [configuration.md](docs/configuration.md),
 ADR-0031). The site keeps counts, not addresses. Nothing else about you or your use of Iva
 is collected.

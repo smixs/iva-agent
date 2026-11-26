@@ -28,12 +28,14 @@ const OFF = new Set(["off", "0", "false", "no"]);
 
 /**
  * A setting as `.env` spells it, without quotes and without a trailing comment. On Linux the
- * service reads `.env` through systemd's EnvironmentFile, which keeps `IVA_STATS=off # …`
- * whole; Node's `--env-file` drops the comment. Both have to mean the same here.
+ * service reads `.env` through systemd's EnvironmentFile, which keeps `IVA_STATS=off # …` and
+ * `IVA_STATS=off#…` whole; Node's `--env-file` drops the comment in both. Both have to mean
+ * the same here, so everything from the first `#` is a comment: no value of these switches
+ * has one.
  */
 function setting(value: string | undefined): string {
   return (value ?? "")
-    .replace(/\s+#.*$/s, "")
+    .replace(/#.*$/s, "")
     .trim()
     .replace(/^(["'])(.*)\1$/s, "$2")
     .trim();
