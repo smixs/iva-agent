@@ -954,12 +954,9 @@ export async function reconcilePendingColleagueHires(
   }
   if (names.length === 0) return { attempted: 0, completed: 0 };
 
-  let envForBots: NodeJS.ProcessEnv = baseEnv;
-  try {
-    envForBots = { ...baseEnv, ...(await readEnvValues(envPath)) };
-  } catch {
-    // `.env` могли ещё не создать: тогда токена нет и состояние просто подождёт.
-  }
+  // liveTelegramEnv заменяет и удаляет коллегские токены по текущему `.env`:
+  // удалённый владельцем токен не должен воскресать из памяти процесса.
+  const envForBots = liveTelegramEnv(baseEnv, envPath);
   const botsById = new Map(
     configuredTelegramBots(envForBots)
       .filter((bot) => !bot.isPrimary)
