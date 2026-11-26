@@ -193,12 +193,15 @@ SaveOffset(p, b) ==
                  restarts, overlapBad, wrongBotBad, colleaguesEnabled, initialized, hireStage, hireEventBlocked>>
 
 
-\* Токен managed-бота временно недоступен: управляющее событие не подтверждается,
-\* Telegram redelivery сохраняет порядок ingress, а обычные апдейты Ивы ждут за ним.
+\* Токен managed-бота временно недоступен: решение найма уже лежит в durable журнале
+\* стадии token. Первые отказы удерживают управляющее событие для повтора Telegram;
+\* после конечного предела ManagedHireDeferEvent подтверждает его, а фоновая сверка
+\* доводит найм без блокировки обычного входа.
 ManagedHireTokenTemporary ==
   /\ hireStage = "none"
+  /\ hireStage' = "token"
   /\ hireEventBlocked' = TRUE
-  /\ UNCHANGED <<hireStage, lockHolder, procState, tgUpdates, diskOffset, memOffset,
+  /\ UNCHANGED <<lockHolder, procState, tgUpdates, diskOffset, memOffset,
                  pendingSave, botSlow, admitted, inboxUntagged, restarts, overlapBad,
                  wrongBotBad, colleaguesEnabled, initialized>>
 
@@ -212,13 +215,13 @@ ManagedHireTokenPermanent ==
                  pendingSave, botSlow, admitted, inboxUntagged, restarts, overlapBad,
                  wrongBotBad, colleaguesEnabled, initialized>>
 
-\* Токен получен и сохранён рядом с токеном Ивы, но найм ещё не complete:
-\* durable стадия profile переживает перезапуск. Пока событие не обработано до
-\* acknowledgement-границы, ingress остаётся удержанным.
+\* Токен получен первичным событием или фоновой сверкой и сохранён рядом с токеном
+\* Ивы, но найм ещё не complete: durable стадия profile переживает перезапуск. Пока
+\* событие не подтверждено на acknowledgement-границе, ingress остаётся удержанным.
 ManagedHireTokenSuccess ==
-  /\ hireStage = "none"
+  /\ hireStage \in {"none", "token"}
   /\ hireStage' = "profile"
-  /\ hireEventBlocked' = TRUE
+  /\ hireEventBlocked' = IF hireStage = "none" THEN TRUE ELSE hireEventBlocked
   /\ UNCHANGED <<lockHolder, procState, tgUpdates, diskOffset, memOffset,
                  pendingSave, botSlow, admitted, inboxUntagged, restarts, overlapBad,
                  wrongBotBad, colleaguesEnabled, initialized>>
@@ -235,7 +238,7 @@ ManagedHireProfileSuccess ==
 \* событие подтверждается, но durable стадия остаётся: обычный вход не замирает,
 \* а фоновая сверка доведёт найм после ремонта среды.
 ManagedHireDeferEvent ==
-  /\ hireStage \in {"profile", "settings"}
+  /\ hireStage \in {"token", "profile", "settings"}
   /\ hireEventBlocked
   /\ hireEventBlocked' = FALSE
   /\ UNCHANGED <<hireStage, lockHolder, procState, tgUpdates, diskOffset, memOffset,
@@ -277,7 +280,7 @@ TypeOK ==
   /\ wrongBotBad \in BOOLEAN
   /\ colleaguesEnabled \in BOOLEAN
   /\ initialized \in [Procs -> [Bots -> BOOLEAN]]
-  /\ hireStage \in {"none", "profile", "settings", "complete", "terminal"}
+  /\ hireStage \in {"none", "token", "profile", "settings", "complete", "terminal"}
   /\ hireEventBlocked \in BOOLEAN
 
 \* (1) В каждый момент не больше одного живого процесса Bridge держит опрос.

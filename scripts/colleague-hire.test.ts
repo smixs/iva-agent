@@ -1489,7 +1489,7 @@ test("T940: persistent temporary getManagedBotToken failure is bounded, releases
       envPath: localEnvPath,
       env: localEnv,
       hireStateDir,
-      now: () => 1_700_000_060_100,
+      now: () => 1_700_000_600_200,
       tgImpl,
       replyImpl: (_chatId, text) => {
         ownerNotices.push(text);

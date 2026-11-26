@@ -275,7 +275,7 @@ type ColleagueHireDecision = {
 
 type ColleagueHireState = ColleagueHireDecision & {
   readonly version: 1;
-  readonly phase: "profile" | "settings";
+  readonly phase: "token" | "profile" | "settings";
   readonly botId: string;
   readonly ownerUserId: string;
   readonly updateId?: number;
@@ -312,7 +312,9 @@ function parseHireState(raw: unknown): ColleagueHireState | null {
   if (
     typeof raw.botId !== "string" ||
     typeof raw.ownerUserId !== "string" ||
-    (raw.phase !== "profile" && raw.phase !== "settings") ||
+    (raw.phase !== "token" &&
+      raw.phase !== "profile" &&
+      raw.phase !== "settings") ||
     typeof raw.role !== "string" ||
     typeof raw.provider !== "string" ||
     typeof raw.model !== "string" ||
@@ -367,6 +369,59 @@ function deferredManagedHire(
     reason,
   );
   return failedOutcome(reason, false);
+}
+
+function recordManagedEventFailure(options: {
+  readonly update: TelegramQueueUpdate;
+  readonly botId: string;
+  readonly hireStateDir: string;
+  readonly state: ColleagueHireState;
+  readonly reason: string;
+  readonly now: () => number;
+  readonly logImpl: (...args: unknown[]) => void;
+}): ManagedBotOutcome {
+  const attempts = options.state.attempts + 1;
+  const failedState: ColleagueHireState = {
+    ...options.state,
+    attempts,
+    nextRetryAt: options.now() + colleagueHireRetryDelayMs(attempts),
+    updatedAt: options.now(),
+    lastError: options.reason,
+  };
+  try {
+    writeHireState(options.hireStateDir, failedState);
+  } catch (error) {
+    const stateReason = redactError(error, []);
+    options.logImpl(
+      `managed_bot ${options.botId}: failed to update durable hire state:`,
+      stateReason,
+    );
+    return failedOutcome(stateReason);
+  }
+  if (attempts < COLLEAGUE_HIRE_EVENT_RETRY_LIMIT) {
+    return failedOutcome(options.reason);
+  }
+  return deferredManagedHire(
+    options.update,
+    options.botId,
+    options.reason,
+    options.logImpl,
+  );
+}
+
+function clearTerminalHireState(
+  hireStateDir: string,
+  botId: string,
+  logImpl: (...args: unknown[]) => void,
+): void {
+  try {
+    deleteHireState(hireStateDir, botId);
+  } catch (error) {
+    logImpl(
+      `managed_bot ${botId}: failed to clear terminal durable hire state:`,
+      redactError(error, []),
+    );
+  }
 }
 
 function buildHiredColleagueSettings(options: {
@@ -551,56 +606,6 @@ export async function handleManagedBotUpdate(
   const lang = (deps.lang ?? getLang)();
   const secrets = knownTelegramSecrets({ primaryToken, env, envPath });
 
-  let tokenResponse: TelegramApiEnvelope | null;
-  try {
-    tokenResponse = (await tgImpl(
-      "getManagedBotToken",
-      { user_id: event.botNumericId },
-      primaryToken ? { token: primaryToken } : undefined,
-    )) as TelegramApiEnvelope | null;
-  } catch (error) {
-    const reason = redactError(error, secrets);
-    logImpl(`managed_bot ${event.botId}: getManagedBotToken failed:`, reason);
-    return failedOutcome(reason);
-  }
-
-  const token =
-    tokenResponse?.ok === true
-      ? extractTokenFromResult(tokenResponse.result)
-      : null;
-  if (!token) {
-    const detail =
-      typeof tokenResponse?.description === "string"
-        ? tokenResponse.description
-        : "getManagedBotToken returned no token";
-    const reason = redactError(detail, secrets);
-    logImpl(`managed_bot ${event.botId}: getManagedBotToken rejected:`, reason);
-    // ok:true без токена — повреждённый/пустой ответ API, а не временный сетевой сбой.
-    if (
-      tokenResponse?.ok === true ||
-      !temporaryTelegramFailure(tokenResponse)
-    ) {
-      return terminalManagedFailure(update, event.botId, reason, logImpl);
-    }
-    return failedOutcome(reason);
-  }
-  secrets.push(token);
-
-  if (
-    botIdFromToken(token) !== event.botId ||
-    envValueRejection(token) !== null
-  ) {
-    logImpl(
-      `managed_bot ${event.botId}: returned token failed botId/env validation`,
-    );
-    return terminalManagedFailure(
-      update,
-      event.botId,
-      "invalid managed bot token",
-      logImpl,
-    );
-  }
-
   // Решение о найме сохраняется отдельно от settings.json до записи токена и внешних
   // вызовов Bot API: даже обрыв между `.env` и профилем оставляет восстановимую стадию.
   // Незавершённый токен в .env не превращается в опрос коллеги без роли.
@@ -633,23 +638,36 @@ export async function handleManagedBotUpdate(
       ? COLLEAGUE_ROLE_SPECS[initialRole].labelEn
       : COLLEAGUE_ROLE_SPECS[initialRole].labelRu);
   const initialSuggestion = suggestColleagueModel(initialRole, env);
-  const decision: ColleagueHireDecision = {
-    role: initialRole,
-    provider:
-      existingBefore?.provider ??
-      exactProposal?.provider ??
-      initialSuggestion.provider,
-    model:
-      existingBefore?.model ?? exactProposal?.model ?? initialSuggestion.model,
-    name: initialName,
-    ...(event.botUsername ? { username: event.botUsername } : {}),
-    ...(event.botFirstName ? { firstName: event.botFirstName } : {}),
-  };
   const priorState = readHireState(hireStateDir, event.botId);
+  // Журнал найма старше повторной доставки: после первой записи решение не переигрывается
+  // по эвристике или по уже изменившемуся proposal, а доводится в первоначальном виде.
+  const decision: ColleagueHireDecision = priorState
+    ? {
+        role: priorState.role,
+        provider: priorState.provider,
+        model: priorState.model,
+        name: priorState.name,
+        ...(priorState.username ? { username: priorState.username } : {}),
+        ...(priorState.firstName ? { firstName: priorState.firstName } : {}),
+      }
+    : {
+        role: initialRole,
+        provider:
+          existingBefore?.provider ??
+          exactProposal?.provider ??
+          initialSuggestion.provider,
+        model:
+          existingBefore?.model ??
+          exactProposal?.model ??
+          initialSuggestion.model,
+        name: initialName,
+        ...(event.botUsername ? { username: event.botUsername } : {}),
+        ...(event.botFirstName ? { firstName: event.botFirstName } : {}),
+      };
   const baseAttempts = priorState?.attempts ?? 0;
   const baseState: ColleagueHireState = {
     version: 1,
-    phase: "profile",
+    phase: priorState?.phase ?? "token",
     botId: event.botId,
     ownerUserId: event.ownerUserId,
     updateId: update.update_id,
@@ -658,6 +676,7 @@ export async function handleManagedBotUpdate(
     nextRetryAt: currentNow + colleagueHireRetryDelayMs(baseAttempts + 1),
     createdAt: priorState?.createdAt ?? currentNow,
     updatedAt: currentNow,
+    ...(priorState?.lastError ? { lastError: priorState.lastError } : {}),
   };
   try {
     writeHireState(hireStateDir, baseState);
@@ -668,6 +687,74 @@ export async function handleManagedBotUpdate(
       reason,
     );
     return failedOutcome(reason);
+  }
+
+  let tokenResponse: TelegramApiEnvelope | null;
+  try {
+    tokenResponse = (await tgImpl(
+      "getManagedBotToken",
+      { user_id: event.botNumericId },
+      primaryToken ? { token: primaryToken } : undefined,
+    )) as TelegramApiEnvelope | null;
+  } catch (error) {
+    const reason = redactError(error, secrets);
+    logImpl(`managed_bot ${event.botId}: getManagedBotToken failed:`, reason);
+    return recordManagedEventFailure({
+      update,
+      botId: event.botId,
+      hireStateDir,
+      state: baseState,
+      reason,
+      now,
+      logImpl,
+    });
+  }
+
+  const token =
+    tokenResponse?.ok === true
+      ? extractTokenFromResult(tokenResponse.result)
+      : null;
+  if (!token) {
+    const detail =
+      typeof tokenResponse?.description === "string"
+        ? tokenResponse.description
+        : "getManagedBotToken returned no token";
+    const reason = redactError(detail, secrets);
+    logImpl(`managed_bot ${event.botId}: getManagedBotToken rejected:`, reason);
+    // ok:true без токена — повреждённый/пустой ответ API, а не временный сетевой сбой.
+    if (
+      tokenResponse?.ok === true ||
+      !temporaryTelegramFailure(tokenResponse)
+    ) {
+      clearTerminalHireState(hireStateDir, event.botId, logImpl);
+      return terminalManagedFailure(update, event.botId, reason, logImpl);
+    }
+    return recordManagedEventFailure({
+      update,
+      botId: event.botId,
+      hireStateDir,
+      state: baseState,
+      reason,
+      now,
+      logImpl,
+    });
+  }
+  secrets.push(token);
+
+  if (
+    botIdFromToken(token) !== event.botId ||
+    envValueRejection(token) !== null
+  ) {
+    logImpl(
+      `managed_bot ${event.botId}: returned token failed botId/env validation`,
+    );
+    clearTerminalHireState(hireStateDir, event.botId, logImpl);
+    return terminalManagedFailure(
+      update,
+      event.botId,
+      "invalid managed bot token",
+      logImpl,
+    );
   }
 
   // Сохраняем токен коллеги рядом с токеном Ивы в `.env` (0600, атомарно) и обновляем env процесса.
@@ -692,7 +779,15 @@ export async function handleManagedBotUpdate(
       `managed_bot ${event.botId}: failed to store token in .env:`,
       reason,
     );
-    return failedOutcome(reason);
+    return recordManagedEventFailure({
+      update,
+      botId: event.botId,
+      hireStateDir,
+      state: baseState,
+      reason,
+      now,
+      logImpl,
+    });
   }
 
   const profileCopy = colleagueProfileCopy(initialRole, lang, initialName);
@@ -956,7 +1051,7 @@ export async function reconcilePendingColleagueHires(
 
   // liveTelegramEnv заменяет и удаляет коллегские токены по текущему `.env`:
   // удалённый владельцем токен не должен воскресать из памяти процесса.
-  const envForBots = liveTelegramEnv(baseEnv, envPath);
+  let envForBots = liveTelegramEnv(baseEnv, envPath);
   const botsById = new Map(
     configuredTelegramBots(envForBots)
       .filter((bot) => !bot.isPrimary)
@@ -980,21 +1075,145 @@ export async function reconcilePendingColleagueHires(
       continue;
     }
     if (!state || state.nextRetryAt > currentNow) continue;
-    const configuredBot = botsById.get(state.botId);
+    attempted += 1;
+    const primaryToken = baseEnv.TELEGRAM_BOT_TOKEN ?? TOKEN ?? "";
+    const secrets = knownTelegramSecrets({
+      primaryToken,
+      env: envForBots,
+      envPath,
+    });
+    let working = state;
+    let configuredBot = botsById.get(state.botId);
+
+    if (working.phase === "token") {
+      if (!configuredBot) {
+        let tokenResponse: TelegramApiEnvelope | null;
+        let tokenError: string | null = null;
+        try {
+          tokenResponse = (await tgImpl(
+            "getManagedBotToken",
+            { user_id: Number(working.botId) },
+            primaryToken ? { token: primaryToken } : undefined,
+          )) as TelegramApiEnvelope | null;
+        } catch (error) {
+          tokenResponse = null;
+          tokenError = redactError(error, secrets);
+        }
+        const token =
+          tokenResponse?.ok === true
+            ? extractTokenFromResult(tokenResponse.result)
+            : null;
+        if (tokenError !== null || !token) {
+          const reason =
+            tokenError ??
+            redactError(
+              typeof tokenResponse?.description === "string"
+                ? tokenResponse.description
+                : "getManagedBotToken returned no token",
+              secrets,
+            );
+          logImpl(
+            `managed_bot ${working.botId}: durable hire getManagedBotToken failed:`,
+            reason,
+          );
+          const terminal =
+            tokenError === null &&
+            (tokenResponse?.ok === true ||
+              !temporaryTelegramFailure(tokenResponse));
+          if (terminal) {
+            deleteHireState(hireStateDir, working.botId);
+          } else {
+            try {
+              retryHireState(hireStateDir, working, reason, now);
+            } catch (error) {
+              logImpl(
+                `managed_bot ${working.botId}: failed to update durable hire state:`,
+                redactError(error, secrets),
+              );
+            }
+          }
+          continue;
+        }
+        secrets.push(token);
+        if (
+          botIdFromToken(token) !== working.botId ||
+          envValueRejection(token) !== null
+        ) {
+          logImpl(
+            `managed_bot ${working.botId}: durable hire token failed botId/env validation`,
+          );
+          deleteHireState(hireStateDir, working.botId);
+          continue;
+        }
+        let nextTokensLine: string;
+        try {
+          const existingEnv = await readEnvValues(envPath);
+          const baseTokens =
+            existingEnv.TELEGRAM_COLLEAGUE_BOT_TOKENS ??
+            baseEnv.TELEGRAM_COLLEAGUE_BOT_TOKENS;
+          nextTokensLine = upsertColleagueBotToken(
+            baseTokens,
+            {
+              token,
+              ...(working.username ? { username: working.username } : {}),
+            },
+            botIdFromToken(primaryToken) ?? BOT_USER_ID,
+          );
+          await upsertEnv(envPath, {
+            TELEGRAM_COLLEAGUE_BOT_TOKENS: nextTokensLine,
+          });
+          baseEnv.TELEGRAM_COLLEAGUE_BOT_TOKENS = nextTokensLine;
+          envForBots = {
+            ...envForBots,
+            TELEGRAM_COLLEAGUE_BOT_TOKENS: nextTokensLine,
+          };
+        } catch (error) {
+          const reason = redactError(error, secrets);
+          logImpl(
+            `managed_bot ${working.botId}: durable hire failed to store token in .env:`,
+            reason,
+          );
+          try {
+            retryHireState(hireStateDir, working, reason, now);
+          } catch (stateError) {
+            logImpl(
+              `managed_bot ${working.botId}: failed to update durable hire state:`,
+              redactError(stateError, secrets),
+            );
+          }
+          continue;
+        }
+        configuredBot = {
+          botId: working.botId,
+          token,
+          ...(working.username ? { username: working.username } : {}),
+          isPrimary: false,
+        };
+        botsById.set(working.botId, configuredBot);
+      }
+      if (!configuredBot) continue;
+      working = {
+        ...working,
+        phase: "profile",
+        updatedAt: now(),
+      };
+      try {
+        writeHireState(hireStateDir, working);
+      } catch (error) {
+        logImpl(
+          `managed_bot ${working.botId}: failed to advance durable hire state:`,
+          redactError(error, secrets),
+        );
+        continue;
+      }
+    }
+
     if (!configuredBot) {
       // Удалённый коллега не должен воскресать из старого журнала найма.
       deleteHireState(hireStateDir, state.botId);
       continue;
     }
-
-    attempted += 1;
-    const secrets = knownTelegramSecrets({
-      primaryToken: baseEnv.TELEGRAM_BOT_TOKEN ?? TOKEN ?? "",
-      env: envForBots,
-      envPath,
-    });
     secrets.push(configuredBot.token);
-    let working = state;
 
     if (working.phase === "profile") {
       const copy = colleagueProfileCopy(
