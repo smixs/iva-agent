@@ -45,6 +45,11 @@ import {
 } from "./lib/colleague-avatar.ts";
 import { parseEnvText } from "./lib/env-file.ts";
 import {
+  acquireFileLockSync,
+  releaseFileLock,
+  type FileLock,
+} from "../agent/lib/fs-atomic.ts";
+import {
   enqueueQueueFile,
   isTelegramQueueUpdate,
   parseTelegramUpdates,
@@ -65,6 +70,7 @@ const IVA_BOT_ID = "111111111";
 const IVA_TOKEN = `${IVA_BOT_ID}:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA`;
 const HIRED_BOT_ID = "555555555";
 const HIRED_TOKEN = `${HIRED_BOT_ID}:EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE`;
+const ROTATED_HIRED_TOKEN = `${HIRED_BOT_ID}:GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG`;
 const SECOND_BOT_ID = "666666666";
 const SECOND_TOKEN = `${SECOND_BOT_ID}:FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF`;
 const WEBHOOK_SECRET = "colleague-hire-webhook-secret";
@@ -1372,7 +1378,6 @@ test("возврат 5: known colleague tokens are redacted from managed_bot and
   }
 });
 
-
 test("T940: persistent temporary getManagedBotToken failure is bounded, releases ingress, and background reconciliation completes the hire", async () => {
   const dir = mkdtempSync(join(tmpdir(), "iva-hire-token-defer-"));
   const localSettings = join(dir, "settings.json");
@@ -1613,6 +1618,301 @@ test("последний круг A: permanent getManagedBotToken failure is ack
   }
 });
 
+test("T940 avatar-settings write failure releases ingress and keeps avatar retry available", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "iva-hire-avatar-settings-"));
+  const localSettings = join(dir, "settings.json");
+  const localEnvPath = join(dir, ".env");
+  const hireStateDir = join(dir, "colleague-hires.d");
+  writeHireTestEnv(localEnvPath);
+  let avatarSettingsLock: FileLock | null = null;
+  try {
+    const localEnv: NodeJS.ProcessEnv = {
+      TELEGRAM_BOT_TOKEN: IVA_TOKEN,
+      TELEGRAM_BOT_USERNAME: "iva_main_bot",
+      MODEL_PROVIDER: "ollama",
+    };
+    const managed = makeManagedHireUpdate(
+      1010,
+      HIRED_BOT_ID,
+      "iva_main_critic_bot",
+    );
+    const ordinary = {
+      update_id: 1011,
+      message: {
+        message_id: 11,
+        date: 1,
+        text: "hello",
+        from: { id: 42, is_bot: false, first_name: "Sergei" },
+        chat: { id: 42, type: "private" },
+      },
+    } as TelegramQueueUpdate;
+    const admitted: number[] = [];
+    const controlImpl = (u: TelegramQueueUpdate) => {
+      if (!u.managed_bot) return Promise.resolve(false);
+      return handleControl(u, {
+        managedBotImpl: (managedUpdate) =>
+          handleManagedBotUpdate(managedUpdate, {
+            allowedUserIds: new Set(["42"]),
+            primaryBotId: IVA_BOT_ID,
+            primaryBotToken: IVA_TOKEN,
+            envPath: localEnvPath,
+            settingsFile: localSettings,
+            hireStateDir,
+            env: localEnv,
+            now: () => 1_700_000_000_100,
+            tgImpl: () => Promise.resolve({ ok: true, result: HIRED_TOKEN }),
+            applyAvatarImpl: () => {
+              avatarSettingsLock = acquireFileLockSync(
+                `${localSettings}.lock`,
+                { mode: 0o600 },
+              );
+              assert.ok(avatarSettingsLock, "test must hold settings lock");
+              return Promise.resolve(successfulAvatar);
+            },
+            logImpl: () => {},
+          }),
+      });
+    };
+    const processImpl = (u: TelegramQueueUpdate, current: number) =>
+      processTelegramUpdate(u, current, {
+        handleControlImpl: controlImpl,
+        admitImpl: (candidate) => {
+          admitted.push(candidate.update_id);
+          return Promise.resolve("owned");
+        },
+        saveOffsetImpl: () => Promise.resolve(),
+        logImpl: () => {},
+      });
+
+    const batch = await processTelegramBatch(
+      [{ update: managed }, { update: ordinary }],
+      1010,
+      {
+        processImpl,
+        saveOffsetImpl: () => Promise.resolve(),
+        logImpl: () => {},
+      },
+    );
+
+    assert.deepEqual(batch, { offset: 1012, ingressBlocked: false });
+    assert.deepEqual(admitted, [1011]);
+    const beforeRetry = parseColleaguesConfig(
+      JSON.parse(readFileSync(localSettings, "utf8")) as unknown,
+      () => {},
+    ).items[HIRED_BOT_ID];
+    assert.ok(
+      beforeRetry,
+      "colleague settings must survive avatar state failure",
+    );
+    assert.equal(colleagueAvatarPhase(beforeRetry), "pending");
+
+    if (avatarSettingsLock) {
+      releaseFileLock(avatarSettingsLock);
+      avatarSettingsLock = null;
+    }
+    const avatars = await reconcilePendingColleagueAvatars({
+      settingsFile: localSettings,
+      envPath: localEnvPath,
+      env: localEnv,
+      applyAvatarImpl: () => Promise.resolve(successfulAvatar),
+      now: () => 1_700_000_060_100,
+      logImpl: () => {},
+    });
+    assert.deepEqual(avatars, { attempted: 1, succeeded: 1 });
+    const afterRetry = parseColleaguesConfig(
+      JSON.parse(readFileSync(localSettings, "utf8")) as unknown,
+      () => {},
+    ).items[HIRED_BOT_ID];
+    assert.equal(colleagueAvatarPhase(afterRetry), "set");
+  } finally {
+    if (avatarSettingsLock) releaseFileLock(avatarSettingsLock);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("T940 token rotation: reconciliation refreshes the managed token of an already configured colleague", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "iva-hire-token-rotation-"));
+  const localSettings = join(dir, "settings.json");
+  const localEnvPath = join(dir, ".env");
+  const hireStateDir = join(dir, "colleague-hires.d");
+  writeHireTestEnv(localEnvPath, `iva_main_critic_bot=${HIRED_TOKEN}`);
+  try {
+    let settings = withColleaguesEnabled({}, true);
+    settings = withColleague(settings, {
+      botId: HIRED_BOT_ID,
+      role: "critic",
+      provider: "ollama",
+      model: "critic-model",
+      name: "Критик",
+      username: "iva_main_critic_bot",
+      avatarPhase: "set",
+    });
+    writeFileSync(localSettings, JSON.stringify(settings), { mode: 0o600 });
+    const localEnv: NodeJS.ProcessEnv = {
+      TELEGRAM_BOT_TOKEN: IVA_TOKEN,
+      TELEGRAM_BOT_USERNAME: "iva_main_bot",
+      MODEL_PROVIDER: "ollama",
+    };
+    const update = makeManagedHireUpdate(
+      1150,
+      HIRED_BOT_ID,
+      "iva_main_critic_bot",
+    );
+    let tokenCalls = 0;
+    let tokenAvailable = false;
+    const profileTokens: string[] = [];
+    const tgImpl = (
+      method: string,
+      _body: Record<string, unknown>,
+      options?: { token?: string },
+    ) => {
+      if (method === "getManagedBotToken") {
+        tokenCalls += 1;
+        if (!tokenAvailable) {
+          return Promise.reject(
+            new DOMException(
+              "The operation was aborted due to timeout",
+              "TimeoutError",
+            ),
+          );
+        }
+        return Promise.resolve({ ok: true, result: ROTATED_HIRED_TOKEN });
+      }
+      if (method.startsWith("setMy")) {
+        const token = options?.token ?? "";
+        profileTokens.push(token);
+        if (token === HIRED_TOKEN) {
+          return Promise.resolve({
+            ok: false,
+            error_code: 401,
+            description: "Unauthorized",
+          });
+        }
+      }
+      return Promise.resolve({ ok: true, result: true });
+    };
+    const deps = {
+      allowedUserIds: new Set(["42"]),
+      primaryBotId: IVA_BOT_ID,
+      primaryBotToken: IVA_TOKEN,
+      envPath: localEnvPath,
+      settingsFile: localSettings,
+      hireStateDir,
+      env: localEnv,
+      now: () => 1_700_000_000_100,
+      tgImpl,
+      applyAvatarImpl: () => Promise.resolve(successfulAvatar),
+      replyImpl: () => Promise.resolve({ message_id: 1 }),
+      lang: () => "ru" as const,
+      logImpl: () => {},
+    };
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await handleManagedBotUpdate(update, deps);
+    }
+    assert.equal(tokenCalls, 3);
+    assert.equal(existsSync(join(hireStateDir, `${HIRED_BOT_ID}.json`)), true);
+
+    tokenAvailable = true;
+    const completed = await reconcilePendingColleagueHires({
+      ...deps,
+      now: () => 1_700_000_601_100,
+    });
+    assert.deepEqual(completed, { attempted: 1, completed: 1 });
+    assert.equal(tokenCalls, 4, "reconciliation must refresh the event token");
+    assert.ok(profileTokens.length > 0);
+    assert.ok(
+      profileTokens.every((token) => token === ROTATED_HIRED_TOKEN),
+      `profile write used stale token: ${profileTokens.join(",")}`,
+    );
+    const envAfter = parseEnvText(readFileSync(localEnvPath, "utf8"));
+    assert.ok(
+      envAfter.TELEGRAM_COLLEAGUE_BOT_TOKENS?.includes(ROTATED_HIRED_TOKEN),
+      "rotated token must replace the stale token in .env",
+    );
+    assert.equal(
+      envAfter.TELEGRAM_COLLEAGUE_BOT_TOKENS?.includes(HIRED_TOKEN),
+      false,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("T940 handoff: redelivery after background completion does not complete the hire twice", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "iva-hire-handoff-"));
+  const localSettings = join(dir, "settings.json");
+  const localEnvPath = join(dir, ".env");
+  const hireStateDir = join(dir, "colleague-hires.d");
+  writeHireTestEnv(localEnvPath);
+  try {
+    const localEnv: NodeJS.ProcessEnv = {
+      TELEGRAM_BOT_TOKEN: IVA_TOKEN,
+      TELEGRAM_BOT_USERNAME: "iva_main_bot",
+      MODEL_PROVIDER: "ollama",
+    };
+    const update = makeManagedHireUpdate(
+      1200,
+      HIRED_BOT_ID,
+      "iva_main_critic_bot",
+    );
+    let nowValue = 1_700_000_000_100;
+    let tokenCalls = 0;
+    const hiredBots: TelegramBotConfig[] = [];
+    const ownerNotices: string[] = [];
+    const tgImpl = (method: string) => {
+      if (method === "getManagedBotToken") {
+        tokenCalls += 1;
+        if (tokenCalls === 1) {
+          return Promise.reject(
+            new DOMException(
+              "The operation was aborted due to timeout",
+              "TimeoutError",
+            ),
+          );
+        }
+        return Promise.resolve({ ok: true, result: HIRED_TOKEN });
+      }
+      return Promise.resolve({ ok: true, result: true });
+    };
+    const deps = {
+      allowedUserIds: new Set(["42"]),
+      primaryBotId: IVA_BOT_ID,
+      primaryBotToken: IVA_TOKEN,
+      envPath: localEnvPath,
+      settingsFile: localSettings,
+      hireStateDir,
+      env: localEnv,
+      now: () => nowValue,
+      tgImpl,
+      applyAvatarImpl: () => Promise.resolve(successfulAvatar),
+      replyImpl: (_chatId: number | string, text: string) => {
+        ownerNotices.push(text);
+        return Promise.resolve({ message_id: 1 });
+      },
+      onColleagueHired: (bot: TelegramBotConfig) => hiredBots.push(bot),
+      lang: () => "ru" as const,
+      logImpl: () => {},
+    };
+
+    const first = await handleManagedBotUpdate(update, deps);
+    assert.equal(first.status, "failed");
+    if (first.status === "failed") assert.equal(first.retry, true);
+    nowValue += 31_000;
+    const completed = await reconcilePendingColleagueHires(deps);
+    assert.deepEqual(completed, { attempted: 1, completed: 1 });
+    assert.equal(ownerNotices.length, 1);
+    assert.equal(hiredBots.length, 1);
+
+    const redelivered = await handleManagedBotUpdate(update, deps);
+    assert.equal(redelivered.status, "ignored");
+    assert.equal(ownerNotices.length, 1, "duplicate owner notification");
+    assert.equal(hiredBots.length, 1, "duplicate colleague startup");
+    assert.equal(tokenCalls, 2, "redelivery must not query Bot API again");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("последний круг A: successful token response without a token is terminal", async () => {
   const dir = mkdtempSync(join(tmpdir(), "iva-hire-empty-token-"));
   const localSettings = join(dir, "settings.json");
@@ -1633,8 +1933,7 @@ test("последний круг A: successful token response without a token i
           TELEGRAM_BOT_USERNAME: "iva_main_bot",
         },
         tgImpl: () => Promise.resolve({ ok: true, result: {} }),
-        logImpl: (...args: unknown[]) =>
-          logs.push(args.map(String).join(" ")),
+        logImpl: (...args: unknown[]) => logs.push(args.map(String).join(" ")),
       },
     );
     assert.equal(outcome.status, "failed");
@@ -1719,20 +2018,22 @@ test("последний круг B1: incomplete hire does not start polling aft
 
     // Перезапуск: токен уже в .env, а записи роли ещё нет. Стартовый выбор ботов
     // обязан отложить такой незавершённый найм, а не начать опрос по одному токену.
-    const envLine = parseEnvText(readFileSync(localEnvPath, "utf8"))
-      .TELEGRAM_COLLEAGUE_BOT_TOKENS;
+    const envLine = parseEnvText(
+      readFileSync(localEnvPath, "utf8"),
+    ).TELEGRAM_COLLEAGUE_BOT_TOKENS;
     assert.ok(envLine?.includes(HIRED_TOKEN));
     const restartedEnv = {
       ...localEnv,
       TELEGRAM_COLLEAGUE_BOT_TOKENS: envLine,
     };
     const configured = configuredTelegramBots(restartedEnv);
-    const mainModule = (await import("./poller/main.ts")) as typeof import("./poller/main.ts") & {
-      selectStartupColleagueBots?: (
-        bots: TelegramBotConfig[],
-        settingsFile?: string,
-      ) => TelegramBotConfig[];
-    };
+    const mainModule =
+      (await import("./poller/main.ts")) as typeof import("./poller/main.ts") & {
+        selectStartupColleagueBots?: (
+          bots: TelegramBotConfig[],
+          settingsFile?: string,
+        ) => TelegramBotConfig[];
+      };
     assert.equal(typeof mainModule.selectStartupColleagueBots, "function");
     const startupColleagues = mainModule.selectStartupColleagueBots?.(
       configured,
@@ -1764,12 +2065,15 @@ test("последний круг B1: incomplete hire does not start polling aft
     });
     assert.equal(prematurePolls, 0);
 
-    const managedModule = (await import("./poller/managed-bot.ts")) as typeof import("./poller/managed-bot.ts") & {
-      reconcilePendingColleagueHires?: (deps?: Record<string, unknown>) => Promise<{
-        attempted: number;
-        completed: number;
-      }>;
-    };
+    const managedModule =
+      (await import("./poller/managed-bot.ts")) as typeof import("./poller/managed-bot.ts") & {
+        reconcilePendingColleagueHires?: (
+          deps?: Record<string, unknown>,
+        ) => Promise<{
+          attempted: number;
+          completed: number;
+        }>;
+      };
     assert.equal(
       typeof managedModule.reconcilePendingColleagueHires,
       "function",
@@ -1809,8 +2113,7 @@ test("последний круг B1: incomplete hire does not start polling aft
     assert.equal(hiredBots.length, 1);
     assert.equal(ownerNotices.length, 1);
     assert.equal(
-      mainModule.selectStartupColleagueBots?.(configured, localSettings)
-        .length,
+      mainModule.selectStartupColleagueBots?.(configured, localSettings).length,
       1,
     );
   } finally {
@@ -1882,12 +2185,15 @@ test("последний круг B2: settings failure is consumed without losin
     // Владелец чинит settings.json явно. Фоновая сверка доводит найм по durable
     // состоянию, но повтор не включёт опцию, которую владелец держал выключенной.
     writeFileSync(localSettings, validSettings, { mode: 0o600 });
-    const managedModule = (await import("./poller/managed-bot.ts")) as typeof import("./poller/managed-bot.ts") & {
-      reconcilePendingColleagueHires?: (deps?: Record<string, unknown>) => Promise<{
-        attempted: number;
-        completed: number;
-      }>;
-    };
+    const managedModule =
+      (await import("./poller/managed-bot.ts")) as typeof import("./poller/managed-bot.ts") & {
+        reconcilePendingColleagueHires?: (
+          deps?: Record<string, unknown>,
+        ) => Promise<{
+          attempted: number;
+          completed: number;
+        }>;
+      };
     assert.equal(
       typeof managedModule.reconcilePendingColleagueHires,
       "function",
@@ -1961,8 +2267,7 @@ test("последний круг C: colleague token is redacted from polling in
       tgImpl: tgStub,
       sleepImpl: () => Promise.resolve(),
       shouldContinue: () => initCalls < 1,
-      logImpl: (...args: unknown[]) =>
-        logs.push(args.map(String).join(" ")),
+      logImpl: (...args: unknown[]) => logs.push(args.map(String).join(" ")),
     });
     assert.equal(initCalls, 1);
     assert.equal(
