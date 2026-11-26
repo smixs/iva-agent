@@ -1460,6 +1460,42 @@ test("последний круг A: permanent getManagedBotToken failure is ack
   }
 });
 
+test("последний круг A: successful token response without a token is terminal", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "iva-hire-empty-token-"));
+  const localSettings = join(dir, "settings.json");
+  const localEnvPath = join(dir, ".env");
+  writeHireTestEnv(localEnvPath);
+  try {
+    const logs: string[] = [];
+    const outcome = await handleManagedBotUpdate(
+      makeManagedHireUpdate(1040, HIRED_BOT_ID, "iva_main_critic_bot"),
+      {
+        allowedUserIds: new Set(["42"]),
+        primaryBotId: IVA_BOT_ID,
+        primaryBotToken: IVA_TOKEN,
+        envPath: localEnvPath,
+        settingsFile: localSettings,
+        env: {
+          TELEGRAM_BOT_TOKEN: IVA_TOKEN,
+          TELEGRAM_BOT_USERNAME: "iva_main_bot",
+        },
+        tgImpl: () => Promise.resolve({ ok: true, result: {} }),
+        logImpl: (...args: unknown[]) =>
+          logs.push(args.map(String).join(" ")),
+      },
+    );
+    assert.equal(outcome.status, "failed");
+    if (outcome.status === "failed") assert.equal(outcome.retry, false);
+    assert.ok(
+      logs.some(
+        (line) => line.includes("update_id=1040") && line.includes("terminal"),
+      ),
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("последний круг B1: incomplete hire does not start polling after restart and is completed without a repeated event", async () => {
   const dir = mkdtempSync(join(tmpdir(), "iva-hire-durable-profile-"));
   const localSettings = join(dir, "settings.json");
