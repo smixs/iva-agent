@@ -1,3 +1,4 @@
+import { stableNodeExecutable } from "./node-executable.ts";
 /* eslint-disable @typescript-eslint/no-floating-promises -- Node's test runner owns registration promises */
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -53,7 +54,14 @@ function installation(t: { after(fn: () => void): void }): string {
 test("a shim without `current` runs the version the installation settled on", (t) => {
   const home = installation(t);
   const shim = join(home, "iva");
-  writeFileSync(shim, shimScript(home, process.execPath, join(home, "data")));
+  writeFileSync(
+    shim,
+    shimScript(
+      home,
+      stableNodeExecutable(process.execPath),
+      join(home, "data"),
+    ),
+  );
   chmodSync(shim, 0o755);
   const run = (): string => execFileSync(shim, { encoding: "utf8" });
 
@@ -84,12 +92,20 @@ test("a shim reads active state from the canonical custom data directory", (t) =
     `${JSON.stringify({ schema: "iva-active/v2", version: "0.3.9-bbbbbbbbbbbb", settledAt: "2026-08-16T00:00:00.000Z" })}\n`,
   );
   const shim = join(home, "iva");
-  writeFileSync(shim, shimScript(home, process.execPath, dataDir));
+  writeFileSync(
+    shim,
+    shimScript(home, stableNodeExecutable(process.execPath), dataDir),
+  );
   chmodSync(shim, 0o755);
 
   assert.equal(execFileSync(shim, { encoding: "utf8" }), "0.3.9-bbbbbbbbbbbb");
   assert.throws(
-    () => shimScript(home, process.execPath, `${dataDir}\nbroken`),
+    () =>
+      shimScript(
+        home,
+        stableNodeExecutable(process.execPath),
+        `${dataDir}\nbroken`,
+      ),
     /NUL or a newline/u,
   );
 });
@@ -227,7 +243,7 @@ test("an owned shim refreshes its data snapshot without replacing a foreign comm
   assert.equal(refreshOwnedShim(shim, home, process.execPath, nextData), true);
   assert.equal(
     readFileSync(shim, "utf8"),
-    shimScript(home, process.execPath, nextData),
+    shimScript(home, stableNodeExecutable(process.execPath), nextData),
   );
 
   const previousDirect = `#!/usr/bin/env bash\nexec "${process.execPath}" "${home}/bin/iva.mjs" "$@"\n`;
@@ -235,7 +251,7 @@ test("an owned shim refreshes its data snapshot without replacing a foreign comm
   assert.equal(refreshOwnedShim(shim, home, process.execPath, nextData), true);
   assert.equal(
     readFileSync(shim, "utf8"),
-    shimScript(home, process.execPath, nextData),
+    shimScript(home, stableNodeExecutable(process.execPath), nextData),
   );
 
   // Наш же шим, написанный под другой node: он ведёт в эту установку, и переписать его
@@ -246,7 +262,7 @@ test("an owned shim refreshes its data snapshot without replacing a foreign comm
   assert.equal(refreshOwnedShim(shim, home, process.execPath, firstData), true);
   assert.equal(
     readFileSync(shim, "utf8"),
-    shimScript(home, process.execPath, firstData),
+    shimScript(home, stableNodeExecutable(process.execPath), firstData),
   );
 
   const otherNodeCurrent = shimScript(home, "/opt/node/bin/node", firstData);
@@ -254,7 +270,7 @@ test("an owned shim refreshes its data snapshot without replacing a foreign comm
   assert.equal(refreshOwnedShim(shim, home, process.execPath, nextData), true);
   assert.equal(
     readFileSync(shim, "utf8"),
-    shimScript(home, process.execPath, nextData),
+    shimScript(home, stableNodeExecutable(process.execPath), nextData),
   );
 
   // Чужая установка - чужой файл: шим, ведущий не в этот home, не наш ни при каком node.
@@ -289,14 +305,18 @@ test("an owned shim refreshes its data snapshot without replacing a foreign comm
   assert.equal(readFileSync(victim, "utf8"), previousDirect);
   rmSync(shim);
 
-  const previousOwned = shimScript(home, process.execPath, join(home, "data"))
+  const previousOwned = shimScript(
+    home,
+    stableNodeExecutable(process.execPath),
+    join(home, "data"),
+  )
     .replace(`IVA_DATA="${join(home, "data")}"\n`, "")
     .replace("$IVA_DATA/active.json", "$IVA_ROOT/data/active.json");
   writeFileSync(shim, previousOwned);
   assert.equal(refreshOwnedShim(shim, home, process.execPath, nextData), true);
   assert.equal(
     readFileSync(shim, "utf8"),
-    shimScript(home, process.execPath, nextData),
+    shimScript(home, stableNodeExecutable(process.execPath), nextData),
   );
 
   writeFileSync(shim, "#!/bin/sh\necho foreign\n");
@@ -307,10 +327,11 @@ test("an owned shim refreshes its data snapshot without replacing a foreign comm
   assert.equal(readFileSync(shim, "utf8"), "#!/bin/sh\necho foreign\n");
 
   const substitution = Buffer.from(
-    shimScript(home, process.execPath, join(home, "state/$(foreign)")).replace(
-      "\\$(foreign)",
-      "$(foreign)",
-    ),
+    shimScript(
+      home,
+      stableNodeExecutable(process.execPath),
+      join(home, "state/$(foreign)"),
+    ).replace("\\$(foreign)", "$(foreign)"),
   );
   writeFileSync(shim, substitution);
   assert.equal(
@@ -435,7 +456,7 @@ const {refreshOwnedShim,shimScript}=await import("./scripts/lib/version-layout.t
 const close=fs.closeSync; let injected=false; fs.closeSync=(fd)=>{if(!injected){injected=true;throw new Error("close boom");}return close(fd);}; syncBuiltinESMExports();
 let error="",result=false; try {result=refreshOwnedShim(shim,home,process.execPath,data);} catch(cause){error=String(cause);}
 fs.closeSync=close; syncBuiltinESMExports();
-console.log(JSON.stringify({error,result,complete:fs.readFileSync(shim,"utf8")===shimScript(home,process.execPath,data),entries:fs.readdirSync(dir)}));
+console.log(JSON.stringify({error,result,complete:fs.readFileSync(shim,"utf8")===shimScript(home,${JSON.stringify(stableNodeExecutable(process.execPath))},data),entries:fs.readdirSync(dir)}));
 } finally {fs.rmSync(dir,{recursive:true,force:true});}`,
     ],
     { cwd: ROOT, encoding: "utf8" },
@@ -530,7 +551,11 @@ test("property: the layout and `.iva-dev` decide the route, git and the shim nev
   git(home, "commit", "-m", "release");
   const version = join(home, "versions", "0.4.2-abcdefabcdef");
   mkdirSync(version, { recursive: true });
-  const ours = shimScript(home, process.execPath, join(home, "data"));
+  const ours = shimScript(
+    home,
+    stableNodeExecutable(process.execPath),
+    join(home, "data"),
+  );
   const shim = join(dir, "iva-shim");
   const marker = join(home, DEV_MARKER);
 
@@ -610,7 +635,7 @@ test("install.sh creates and refreshes only its own shim", (t) => {
   );
   assert.equal(
     readFileSync(target, "utf8"),
-    shimScript(home, process.execPath, dataDir),
+    shimScript(home, stableNodeExecutable(process.execPath), dataDir),
   );
 
   writeFileSync(join(home, ".env"), "ASSISTANT_DATA_DIR=next state\n");
@@ -621,7 +646,7 @@ test("install.sh creates and refreshes only its own shim", (t) => {
   );
   assert.equal(
     readFileSync(target, "utf8"),
-    shimScript(home, process.execPath, nextDataDir),
+    shimScript(home, stableNodeExecutable(process.execPath), nextDataDir),
   );
 
   const foreign = Buffer.from("#!/bin/sh\necho foreign\n");

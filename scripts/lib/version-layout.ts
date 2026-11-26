@@ -1,3 +1,4 @@
+import { stableNodeExecutable } from "./node-executable.ts";
 import { randomUUID } from "node:crypto";
 import {
   closeSync,
@@ -544,7 +545,7 @@ export function refreshOwnedShim(
   node: string,
   dataDir: string,
 ): boolean {
-  const desired = shimScript(home, node, dataDir);
+  const desired = shimScript(home, stableNodeExecutable(node), dataDir);
   // Заявки, оставшиеся от оборванных обновлений, убираем до всего остального: иначе
   // они копятся в ~/.local/bin навсегда.
   sweepStaleShimClaims(dirname(shimPath), shimPath);

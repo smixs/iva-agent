@@ -616,6 +616,7 @@ function createWorld(t: TestContext, options: { env?: boolean } = {}): World {
   for (const name of [
     "env-file.ts",
     "link-target.ts",
+    "node-executable.ts",
     "process-command.ts",
     "version-layout.ts",
     "version-store.ts",
