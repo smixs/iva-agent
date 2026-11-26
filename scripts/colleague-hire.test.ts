@@ -1750,6 +1750,15 @@ test("последний круг C: colleague token is redacted from polling in
     const { lease } = await tempLease(t);
     const logs: string[] = [];
     let initCalls = 0;
+    const tgStub = (method: string) => {
+      if (method === "deleteWebhook") {
+        return Promise.resolve({
+          ok: false,
+          description: `deleteWebhook failed upstream echoed ${HIRED_TOKEN}`,
+        });
+      }
+      return Promise.resolve({ ok: true, result: true });
+    };
     await runBotPollLoop({
       bot: {
         botId: HIRED_BOT_ID,
@@ -1762,13 +1771,16 @@ test("последний круг C: colleague token is redacted from polling in
       colleaguesEnabledImpl: () => true,
       initializeOffsetImpl: async () => {
         initCalls += 1;
-        const response = (await Promise.resolve({
-          ok: false,
-          description: `deleteWebhook failed upstream echoed ${HIRED_TOKEN}`,
-        })) as { ok: boolean; description: string };
-        throw new Error(`deleteWebhook failed: ${response.description}`);
+        const response = (await tgStub("deleteWebhook")) as {
+          ok: boolean;
+          description?: string;
+        };
+        if (!response.ok) {
+          throw new Error(`deleteWebhook failed: ${response.description}`);
+        }
+        return 0;
       },
-      tgImpl: () => Promise.resolve({ ok: true, result: true }),
+      tgImpl: tgStub,
       sleepImpl: () => Promise.resolve(),
       shouldContinue: () => initCalls < 1,
       logImpl: (...args: unknown[]) =>
