@@ -53,11 +53,21 @@ const IDENTITY = {
   GIT_COMMITTER_NAME: "iva",
   GIT_COMMITTER_EMAIL: "iva@example.invalid",
 };
+// Fixture repositories run git without background gc or maintenance: under load an
+// automatic gc repacked the source while `git clone --bare` copied its objects, and the
+// clone failed with «failed to copy file» (26.11.2026; the same fix as repair-shell.test.ts).
+const QUIET_GIT = {
+  GIT_CONFIG_COUNT: "2",
+  GIT_CONFIG_KEY_0: "maintenance.auto",
+  GIT_CONFIG_VALUE_0: "false",
+  GIT_CONFIG_KEY_1: "gc.auto",
+  GIT_CONFIG_VALUE_1: "0",
+};
 function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", args, {
     cwd,
     encoding: "utf8",
-    env: { ...process.env, ...IDENTITY },
+    env: { ...process.env, ...IDENTITY, ...QUIET_GIT },
   }).trim();
 }
 function workspace(t: TestContext): string {
