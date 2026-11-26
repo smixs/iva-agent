@@ -159,7 +159,7 @@ const [
   import("../agent/instructions/25-persona.ts"),
   import("../agent/hooks/transcript.ts"),
   import("../agent/channels/telegram.ts"),
-  import("#lib/telegram-acceptance.ts"),
+  import("#lib/telegram-acceptance-wire.ts"),
   import("../agent/tools/write_card.ts"),
   import("../agent/tools/memory_search.ts"),
   import("../agent/tools/remind.ts"),
