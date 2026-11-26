@@ -198,7 +198,17 @@ Iva carries eve 0.51.1 sources from vercel/eve in `eve/`, with our changes under
 ## What's New
 
 <details>
-<summary><b>v0.5.14 · 17.11.2026 — expand the latest releases</b></summary>
+<summary><b>v0.5.15 · 26.11.2026 — expand the latest releases</b></summary>
+
+### 26.11.2026
+
+#### v0.5.15
+
+- 🧩 **Plugins on the site, and an install count**: the default list `smixs/iva-plugins` is reviewed, and its plugins with authors and repositories are at [iva-agent.com/plugins](https://iva-agent.com/plugins). Installing a plugin from it sends the plugin's name to the site and nothing else; `IVA_PLUGIN_STATS=off` in `.env` turns that off.
+- 🖼️ **Pictures arrive as photos, not files**: `send_file` sends JPG, PNG and WebP up to 10 MB as a photo; when Telegram refuses or the file is larger, it goes as a document.
+- 🤫 **A scheduled task can stay quiet**: a task reminder that ran and found nothing new ends with `<!-- iva:none -->` and a one-line outcome; nothing is sent, and the outcome stays in the journal and the schedule list.
+- 🧠 **A long conversation in Russian is compacted to fit**: capped tool results are judged by the model's own token count, so Cyrillic text fits the threshold after compaction.
+- 💾 **The nightly vault backup repeats its push on a network failure**: after a transient remote error Brain pushes again in 30 seconds and once more in 2 minutes.
 
 ### 17.11.2026
 
@@ -244,22 +254,6 @@ Iva carries eve 0.51.1 sources from vercel/eve in `eve/`, with our changes under
 - 🔌 **A failed plugin build undoes only its own switch**: undoing `iva plugin enable` or `trust` no longer restores trust or enablement removed during the build.
 - 🩹 **A turn no longer takes Iva down when the Claude CLI exits early**: it is now the failure of one turn, not of the process.
 - 🧹 **The eve copy without tests and docs**: the eve sources inside Iva drop what Iva never loads; a plugin importing a removed eve entry point stops building.
-
-### 10.11.2026
-
-#### v0.5.12
-
-- 🧩 **Widget code stays hidden in live drafts**: Iva no longer shows raw widget code in the reply draft while it is being typed.
-
-#### v0.5.11
-
-- 📊 **Lighter, more exact widgets**: Iva starts from Telegram's native unstyled card: a heading, a list, a table and buttons look like ordinary messages and weigh under a kilobyte. New patterns: a helper's steps with marks, rings, sparklines and receipts; a card fills the bubble to the edge, and a log grows upward.
-- 🔧 **Widgets go through the main Bot API address**: Bot API 10.4 is out, and Iva no longer uses the beta address.
-
-#### v0.5.10
-
-- 🧠 **Fable 5.2 on the Claude model screen**: the first button in `/model` → Claude and in setup is now Fable 5.2, and it is the default Claude model. It needs Claude Code CLI 2.1.290 or newer; Fable 5.1 stays available through `CLAUDE_MODEL=claude-fable-5-1` in `.env`.
-- 📊 **Widgets in replies**: Iva draws a live card right in the message instead of lines of text wherever there is something to show: a calendar by day, week and month, the weather, a countdown while you wait, task and reminder lists, a chart with tabs, progress, a checklist. Turn them off in /menu → 💬 Rich replies.
 
 </details>
 

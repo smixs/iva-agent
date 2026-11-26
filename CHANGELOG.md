@@ -2,9 +2,13 @@
 
 ## [Unreleased]
 
+## [0.5.15] - 2026-11-26
+
 - 🧩 **Плагины на сайте и счёт установок**: список `smixs/iva-plugins` теперь проверяется — запись попадает в него pull request'ом после чтения кода, а плагины с авторами и репозиториями собраны на [iva-agent.com/plugins](https://iva-agent.com/plugins). После установки плагина из этого списка Ива отправляет на сайт его имя, и больше ничего: ни идентификатора установки, ни версии, ни ключей. Перед отправкой владелец читает строку о ней: в терминале или, после тапа, в сообщении Telegram об установке; плагин по тапу считается по имени. Выключить — `IVA_PLUGIN_STATS=off` в `.env` или `DO_NOT_TRACK=1`. Скилл `make-plugin` доводит свой плагин до публичного репозитория и заявки в список. The default Marketplace is reviewed and shown at iva-agent.com/plugins; installing from it sends the plugin name alone, and `IVA_PLUGIN_STATS=off` turns that off.
 - 🤫 **Ход по расписанию умеет промолчать**: задание-напоминание (`content: "task"`), которое отработало и не нашло ничего нового, кончается пометкой `<!-- iva:none -->` с однострочным итогом — в чат не уходит ничего, итог остаётся в журнале и в списке расписаний (`phase: quiet`, `quiet_note`). Пустой ответ и упавший ход по-прежнему приходят текстом задания с «Не выполнено», обычное напоминание доставляется всегда, а Signal молчать не вправе. A fired reminder task can now end with `<!-- iva:none -->`: nothing is sent, and its one-line outcome stays in the journal and the schedule list (`phase: quiet`).
 - 🖼️ **Картинки приходят фото, а не файлом**: `send_file` отправляет JPG, PNG и WebP до 10 МБ через `sendPhoto` — картинка сразу видна в чате и в «Медиа». Если Telegram отказал (размеры, соотношение сторон) или файл больше 10 МБ, он уходит документом. `as: "document"` отправляет картинку без сжатия. `send_file` sends images as photos and falls back to a document when Telegram rejects the photo.
+- 🧠 **Длинный разговор на русском сжимается с запасом**: обрезка старых результатов инструментов сверяется со счётчиком токенов модели, а не с оценкой по символам, и кириллица после сжатия укладывается в порог. Capped tool results are judged by the model's measured token count, so a long Cyrillic conversation fits the threshold after compaction.
+- 💾 **Ночной бэкап vault повторяет отправку при сбое сети**: если `git push` vault упал на временной ошибке удалённой стороны (обрыв соединения, таймаут, 5xx), Brain повторяет его через 30 секунд и ещё раз через 2 минуты; отказ по существу (нет репозитория, нет прав, отвергнутая ветка) не повторяется. The nightly vault backup repeats `git push` twice, after 30 seconds and 2 minutes, on a transient remote error; a permanent refusal is not repeated.
 
 ## [0.5.14] - 2026-11-17
 
