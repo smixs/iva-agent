@@ -44,10 +44,15 @@ import {
   type TelegramProcessLease,
 } from "./process-lock.ts";
 import {
+  configuredTelegramBots,
   tagUpdateWithBot,
   type TelegramBotConfig,
 } from "../../packages/telegram-bots/index.ts";
 import { prepareTelegramStartup } from "./startup-state.ts";
+import {
+  handleManagedBotUpdate,
+  reconcilePendingColleagueAvatars,
+} from "./managed-bot.ts";
 import * as queue from "./queue.ts";
 import * as routing from "./routing.ts";
 import * as updateFlow from "./update-flow.ts";
@@ -321,10 +326,15 @@ async function deleteWebhookOrThrow(
   logImpl("deleteWebhook:", `ok (drop_pending=${dropPendingUpdates})`);
 }
 
-const ALLOWED_UPDATES = [
+const COLLEAGUE_ALLOWED_UPDATES = [
   "message",
   "callback_query",
   "stopped_message_generation",
+] as const;
+
+const PRIMARY_ALLOWED_UPDATES = [
+  ...COLLEAGUE_ALLOWED_UPDATES,
+  "managed_bot",
 ] as const;
 
 export type BotPollLoopOptions = {
@@ -341,6 +351,7 @@ export type BotPollLoopOptions = {
     update: TelegramQueueUpdate,
     offset: number,
   ) => Promise<{ offset: number; ingressBlocked: boolean }>;
+  readonly handleControlImpl?: typeof handleControl;
   readonly saveOffsetImpl?: (offset: number) => Promise<void>;
   readonly sleepImpl?: (ms: number) => Promise<void>;
   readonly onUpdates?: () => void;
@@ -365,6 +376,7 @@ export async function runBotPollLoop({
   tgImpl = tg,
   pollTimeoutSeconds = () => 30,
   processUpdateImpl,
+  handleControlImpl = handleControl,
   saveOffsetImpl,
   sleepImpl = sleep,
   onUpdates,
@@ -387,7 +399,7 @@ export async function runBotPollLoop({
       const tagged = tagUpdateWithBot(update, bot);
       return processTelegramUpdate(tagged, currentOffset, {
         handleControlImpl: bot.isPrimary
-          ? handleControl
+          ? handleControlImpl
           : () => Promise.resolve(false),
         admitImpl: (candidate) =>
           admitTelegramUpdate(candidate, { bot, colleaguesEnabledImpl }),
@@ -433,7 +445,9 @@ export async function runBotPollLoop({
         {
           offset,
           timeout: pollSeconds,
-          allowed_updates: ALLOWED_UPDATES,
+          allowed_updates: bot.isPrimary
+            ? PRIMARY_ALLOWED_UPDATES
+            : COLLEAGUE_ALLOWED_UPDATES,
         },
         {
           timeoutMs: pollSeconds > 1 ? 40_000 : 10_000,
@@ -637,67 +651,100 @@ export async function main({
   // Configured colleague loops exist even while the option is off: their poll loop
   // sleeps before touching Telegram and wakes up on `iva colleague on` without a
   // bridge restart. Offset/webhook initialization is lazy for the same reason.
-  const bots = BOTS;
-  const multiBot = bots.length > 1;
+  // Primary and colleague bots share one dynamic poll launcher so a newly hired
+  // colleague from `managed_bot` starts polling immediately in the same process.
+  const initialBots = configuredTelegramBots(process.env);
+  const bots = initialBots.length > 0 ? initialBots : BOTS;
+  const primaryBot = bots[0];
   const wakeSignal = createWakeSignal();
   const fatalBotState: { error: Error | null } = { error: null };
+  const activeColleagueTokens = new Map<string, string>();
+  let pendingInboxCount = 0;
+  let pendingQueueCount = 0;
 
-  if (multiBot) {
-    const botStates: Array<{
-      bot: TelegramBotConfig;
-      offset: number;
-      initializeOffset?: () => Promise<number>;
-    }> = [{ bot: bots[0], offset }];
-    for (const colleague of bots.slice(1)) {
-      botStates.push({
-        bot: colleague,
-        offset: 0,
-        initializeOffset: () => initColleagueBotOffset(colleague, processLease),
-      });
-    }
-    log(
-      `multi-bot polling active: ${botStates.map(({ bot }) => (bot.isPrimary ? "iva" : `bot:${bot.botId}`)).join(", ")}`,
+  const launchBotLoop = (
+    bot: TelegramBotConfig,
+    initialBotOffset: number,
+    initializeOffset?: () => Promise<number>,
+    primaryControlImpl?: typeof handleControl,
+    shouldContinue?: () => boolean,
+  ) => {
+    const conflictKey = bot.isPrimary
+      ? "getupdates-conflict"
+      : `getupdates-conflict:${bot.botId}`;
+    void runBotPollLoop({
+      bot,
+      initialOffset: initialBotOffset,
+      initializeOffsetImpl: initializeOffset,
+      handleControlImpl: primaryControlImpl,
+      shouldContinue,
+      pollTimeoutSeconds: () =>
+        pollTimeout(pendingQueueCount, pendingInboxCount),
+      assertLease: () => assertTelegramProcessLease(processLease),
+      onUpdates: () => wakeSignal.wake(),
+      onConflictAlert: async () => {
+        const outcome = await alertOnce(
+          DATA_DIR,
+          conflictKey,
+          "telegram getUpdates conflict",
+          async () => {
+            const chat = notificationChat();
+            if (!chat) return false;
+            const res = (await tg("sendMessage", {
+              chat_id: chat,
+              text: tr(
+                "Receiving messages has stopped: another bot instance is holding this token. Stop the other instance.",
+                "Приём сообщений остановлен: другой инстанс бота держит этот токен — останови его.",
+              ),
+            })) as TelegramResponse;
+            return Boolean(res.ok);
+          },
+        );
+        return outcome === "sent";
+      },
+      alertResolvedImpl: () => alertResolved(DATA_DIR, conflictKey),
+    }).catch((error: unknown) => {
+      fatalBotState.error =
+        error instanceof Error ? error : new Error(String(error));
+      wakeSignal.wake();
+    });
+  };
+
+  const ensureColleaguePollLoop = (colleague: TelegramBotConfig) => {
+    if (colleague.isPrimary || !colleague.botId) return;
+    if (activeColleagueTokens.get(colleague.botId) === colleague.token) return;
+    activeColleagueTokens.set(colleague.botId, colleague.token);
+    log(`starting colleague poll loop: bot:${colleague.botId}`);
+    launchBotLoop(
+      colleague,
+      0,
+      () => initColleagueBotOffset(colleague, processLease),
+      undefined,
+      () => activeColleagueTokens.get(colleague.botId!) === colleague.token,
     );
-    for (const entry of botStates) {
-      const conflictKey = entry.bot.isPrimary
-        ? "getupdates-conflict"
-        : `getupdates-conflict:${entry.bot.botId}`;
-      void runBotPollLoop({
-        bot: entry.bot,
-        initialOffset: entry.offset,
-        initializeOffsetImpl: entry.initializeOffset,
-        assertLease: () => assertTelegramProcessLease(processLease),
-        onUpdates: () => wakeSignal.wake(),
-        onConflictAlert: async () => {
-          const outcome = await alertOnce(
-            DATA_DIR,
-            conflictKey,
-            "telegram getUpdates conflict",
-            async () => {
-              const chat = notificationChat();
-              if (!chat) return false;
-              const res = (await tg("sendMessage", {
-                chat_id: chat,
-                text: tr(
-                  "Receiving messages has stopped: another bot instance is holding this token. Stop the other instance.",
-                  "Приём сообщений остановлен: другой инстанс бота держит этот токен — останови его.",
-                ),
-              })) as TelegramResponse;
-              return Boolean(res.ok);
-            },
-          );
-          return outcome === "sent";
-        },
-        alertResolvedImpl: () => alertResolved(DATA_DIR, conflictKey),
-      }).catch((error: unknown) => {
-        fatalBotState.error =
-          error instanceof Error ? error : new Error(String(error));
-        wakeSignal.wake();
-      });
-    }
+  };
+
+  const primaryControl: typeof handleControl = (update, deps) =>
+    handleControl(update, {
+      ...deps,
+      managedBotImpl:
+        deps?.managedBotImpl ??
+        ((managedUpdate) =>
+          handleManagedBotUpdate(managedUpdate, {
+            onColleagueHired: ensureColleaguePollLoop,
+          })),
+    });
+
+  launchBotLoop(primaryBot, offset, undefined, primaryControl);
+  for (const colleague of bots.slice(1)) {
+    ensureColleaguePollLoop(colleague);
+  }
+  if (bots.length > 1) {
+    log(
+      `multi-bot polling active: ${bots.map((bot) => (bot.isPrimary ? "iva" : `bot:${bot.botId}`)).join(", ")}`,
+    );
   }
 
-  let consecutiveConflicts = 0;
   for (;;) {
     assertTelegramProcessLease(processLease);
     if (fatalBotState.error !== null) throw fatalBotState.error;
@@ -731,89 +778,15 @@ export async function main({
         log,
       });
     });
-    const pendingInboxCount = await promoteReadyInbox({
+    scheduleBridgeTask("colleague-avatars", async () => {
+      await reconcilePendingColleagueAvatars();
+    });
+    pendingInboxCount = await promoteReadyInbox({
       collectorOptions: { quietMs: configuredCollectQuietMs },
     });
-    const pendingQueueCount = await drainReadyQueueHeads();
+    pendingQueueCount = await drainReadyQueueHeads();
     const pollSeconds = pollTimeout(pendingQueueCount, pendingInboxCount);
-    if (multiBot) {
-      await wakeSignal.wait(pollSeconds * 1_000);
-      continue;
-    }
-    let data: TelegramResponse;
-    try {
-      data = (await tg(
-        "getUpdates",
-        {
-          offset,
-          timeout: pollSeconds,
-          allowed_updates: [
-            "message",
-            "callback_query",
-            "stopped_message_generation",
-          ],
-        },
-        { timeoutMs: pollSeconds > 1 ? 40_000 : 10_000 },
-      )) as TelegramResponse;
-    } catch (error) {
-      log("getUpdates network:", errorMessage(error));
-      consecutiveConflicts = 0;
-      await sleep(3000);
-      continue;
-    }
-    if (!data.ok) {
-      log("getUpdates:", data.description);
-      // 409/conflict — a webhook is left somewhere; remove it and try again.
-      if (/409|conflict|webhook/i.test(String(data.description || ""))) {
-        consecutiveConflicts += 1;
-        const { sleepMs, shouldAlert } = conflictBackoff(consecutiveConflicts);
-        await deleteWebhookOrThrow(false);
-        if (shouldAlert) {
-          try {
-            await alertOnce(
-              DATA_DIR,
-              "getupdates-conflict",
-              "telegram getUpdates conflict",
-              async () => {
-                const chat = notificationChat();
-                if (!chat) return false;
-                const res = (await tg("sendMessage", {
-                  chat_id: chat,
-                  text: tr(
-                    "Receiving messages has stopped: another bot instance is holding this token. Stop the other instance.",
-                    "Приём сообщений остановлен: другой инстанс бота держит этот токен — останови его.",
-                  ),
-                })) as TelegramResponse;
-                return Boolean(res.ok);
-              },
-            );
-          } catch (error) {
-            log("getUpdates conflict alert:", errorMessage(error));
-          }
-        }
-        await sleep(sleepMs);
-        continue;
-      }
-      consecutiveConflicts = 0;
-      await sleep(3000);
-      continue;
-    }
-    if (consecutiveConflicts > 0) {
-      consecutiveConflicts = 0;
-      alertResolved(DATA_DIR, "getupdates-conflict");
-    }
-    const items = parseTelegramUpdates(data.result);
-    if (items === null) {
-      log(
-        "getUpdates: invalid result",
-        JSON.stringify(invalidTelegramUpdatesDiagnostic(data.result)),
-      );
-      await sleep(3000);
-      continue;
-    }
-    const batch = await processTelegramBatch(items, offset);
-    offset = batch.offset;
-    if (batch.ingressBlocked) await sleep(3000);
+    await wakeSignal.wait(pollSeconds * 1_000);
   }
 }
 

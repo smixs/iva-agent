@@ -6,7 +6,13 @@
 // `colleagues` или битое значение держат опцию выключенной (fail-closed).
 import { join } from "node:path";
 import { isRecord } from "../../packages/guards/index.ts";
-import { validTelegramBotId } from "../../packages/telegram-bots/index.ts";
+import {
+  buildManagedBotHireUrl,
+  isManagedBotUsername,
+  normalizeManagedBotUsername,
+  suggestColleagueBotUsername,
+  validTelegramBotId,
+} from "../../packages/telegram-bots/index.ts";
 import { dataDir } from "./data-dir.ts";
 import {
   MODEL_PROVIDERS,
@@ -162,6 +168,11 @@ const ROLE_ALIASES: Readonly<Record<string, ColleagueRole>> = Object.freeze({
   секретарь: "secretary",
 });
 
+/** Фаза установки случайного талисмана-аватарки коллеги (явная машина состояний, philosophy.md §10). */
+export const COLLEAGUE_AVATAR_PHASES = ["pending", "set", "retry"] as const;
+
+export type ColleagueAvatarPhase = (typeof COLLEAGUE_AVATAR_PHASES)[number];
+
 export interface ColleagueEntry {
   readonly botId: string;
   readonly role: ColleagueRole;
@@ -169,6 +180,36 @@ export interface ColleagueEntry {
   readonly model: string;
   readonly name?: string;
   readonly username?: string;
+  readonly avatarPhase?: ColleagueAvatarPhase;
+  readonly avatarAttempts?: number;
+  readonly avatarNextRetryAt?: number;
+  readonly avatarLogoId?: number;
+  readonly avatarName?: string;
+  readonly avatarError?: string;
+}
+
+export interface ColleagueHireProposal {
+  readonly phase: "proposed";
+  readonly botUsername: string;
+  readonly role: ColleagueRole;
+  readonly provider: ModelProviderName;
+  readonly model: string;
+  readonly name: string;
+  readonly createdAt: number;
+}
+
+export interface ColleagueHireLink {
+  readonly url: string;
+  readonly managerUsername: string;
+  readonly botUsername: string;
+  readonly displayName: string;
+  readonly role: ColleagueRole;
+}
+
+export interface ColleagueProfileCopy {
+  readonly name: string;
+  readonly description: string;
+  readonly shortDescription: string;
 }
 
 export interface ColleaguesConfig {
@@ -191,7 +232,41 @@ export interface SuggestedColleagueModel {
 const VALID_PROVIDER_SET = new Set<string>(MODEL_PROVIDER_NAMES);
 const MAX_MODEL_LENGTH = 200;
 const MAX_NAME_LENGTH = 80;
+const MAX_AVATAR_ERROR_LENGTH = 200;
 const VALID_USERNAME = /^[A-Za-z0-9_]{5,32}$/u;
+const PENDING_HIRE_TTL_MS = 24 * 60 * 60 * 1000;
+const AVATAR_RETRY_DELAYS_MS = [
+  5 * 60 * 1000,
+  15 * 60 * 1000,
+  60 * 60 * 1000,
+  6 * 60 * 60 * 1000,
+] as const;
+
+function isColleagueAvatarPhase(value: unknown): value is ColleagueAvatarPhase {
+  return (
+    typeof value === "string" &&
+    (COLLEAGUE_AVATAR_PHASES as readonly string[]).includes(value)
+  );
+}
+
+/** Единственная функция фазы аватарки по записи коллеги (null для legacy-записей без найма). */
+export function colleagueAvatarPhase(
+  entry: Pick<ColleagueEntry, "avatarPhase"> | null | undefined,
+): ColleagueAvatarPhase | null {
+  return isColleagueAvatarPhase(entry?.avatarPhase) ? entry.avatarPhase : null;
+}
+
+/** Задержка до следующей попытки поставить случайный талисман после сбоя библиотеки/сети. */
+export function colleagueAvatarRetryDelayMs(attempts: number): number {
+  const index = Math.max(
+    0,
+    Math.min(
+      AVATAR_RETRY_DELAYS_MS.length - 1,
+      Math.floor(Math.max(1, attempts)) - 1,
+    ),
+  );
+  return AVATAR_RETRY_DELAYS_MS[index];
+}
 
 function hasControlChar(value: string): boolean {
   for (let i = 0; i < value.length; i += 1) {
@@ -252,6 +327,19 @@ function normalizeOptionalUsername(value: unknown): string | undefined {
   return VALID_USERNAME.test(cleaned) ? cleaned : undefined;
 }
 
+function normalizeOptionalPositiveInt(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+    ? value
+    : undefined;
+}
+
+function normalizeOptionalAvatarError(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  if (trimmed.length === 0 || hasControlChar(trimmed)) return undefined;
+  return trimmed.slice(0, MAX_AVATAR_ERROR_LENGTH);
+}
+
 function rawColleagues(settings: unknown): Record<string, unknown> {
   if (!isRecord(settings)) return {};
   return isRecord(settings.colleagues) ? settings.colleagues : {};
@@ -275,6 +363,16 @@ function parseEntry(
   }
   const name = normalizeOptionalName(value.name);
   const username = normalizeOptionalUsername(value.username);
+  const avatarPhase = isColleagueAvatarPhase(value.avatarPhase)
+    ? value.avatarPhase
+    : undefined;
+  const avatarAttempts = normalizeOptionalPositiveInt(value.avatarAttempts);
+  const avatarNextRetryAt = normalizeOptionalPositiveInt(
+    value.avatarNextRetryAt,
+  );
+  const avatarLogoId = normalizeOptionalPositiveInt(value.avatarLogoId);
+  const avatarName = normalizeOptionalName(value.avatarName);
+  const avatarError = normalizeOptionalAvatarError(value.avatarError);
   return {
     botId,
     role,
@@ -282,6 +380,12 @@ function parseEntry(
     model,
     ...(name === undefined ? {} : { name }),
     ...(username === undefined ? {} : { username }),
+    ...(avatarPhase === undefined ? {} : { avatarPhase }),
+    ...(avatarAttempts === undefined ? {} : { avatarAttempts }),
+    ...(avatarNextRetryAt === undefined ? {} : { avatarNextRetryAt }),
+    ...(avatarLogoId === undefined ? {} : { avatarLogoId }),
+    ...(avatarName === undefined ? {} : { avatarName }),
+    ...(avatarError === undefined ? {} : { avatarError }),
   };
 }
 
@@ -431,6 +535,253 @@ export function suggestColleagueModel(
   };
 }
 
+function parseHireProposal(value: unknown): ColleagueHireProposal | null {
+  if (!isRecord(value) || value.phase !== "proposed") return null;
+  const botUsername = normalizeManagedBotUsername(value.botUsername);
+  const role = isColleagueRole(value.role) ? value.role : null;
+  const provider = isModelProviderName(value.provider) ? value.provider : null;
+  const model = validColleagueModelName(value.model) ? value.model : null;
+  const name = normalizeOptionalName(value.name);
+  const createdAt = normalizeOptionalPositiveInt(value.createdAt);
+  if (!botUsername || !role || !provider || !model || !name || !createdAt) {
+    return null;
+  }
+  return {
+    phase: "proposed",
+    botUsername,
+    role,
+    provider,
+    model,
+    name,
+    createdAt,
+  };
+}
+
+/** Читает открытые предложения найма коллег (срок жизни — 24 часа). */
+export function readColleagueHireProposals(
+  settings: unknown,
+  now = Date.now(),
+): ColleagueHireProposal[] {
+  const raw = rawColleagues(settings);
+  if (!Array.isArray(raw.pendingHires)) return [];
+  return raw.pendingHires
+    .map(parseHireProposal)
+    .filter(
+      (item): item is ColleagueHireProposal =>
+        item !== null && now - item.createdAt <= PENDING_HIRE_TTL_MS,
+    );
+}
+
+function preservedPendingHires(settings: Record<string, unknown>): {
+  pendingHires?: ColleagueHireProposal[];
+} {
+  const raw = rawColleagues(settings);
+  if (!Array.isArray(raw.pendingHires)) return {};
+  const valid = raw.pendingHires
+    .map(parseHireProposal)
+    .filter((item): item is ColleagueHireProposal => item !== null);
+  return valid.length > 0 ? { pendingHires: valid } : {};
+}
+
+/** Имя и описание профиля коллеги для Bot API (`setMyName`, `setMyDescription`, `setMyShortDescription`). */
+export function colleagueProfileCopy(
+  role: ColleagueRole,
+  lang: "ru" | "en" = "ru",
+  customName?: string,
+): ColleagueProfileCopy {
+  const spec = COLLEAGUE_ROLE_SPECS[role];
+  const fallbackName = lang === "en" ? spec.labelEn : spec.labelRu;
+  const rawName = normalizeOptionalName(customName) ?? fallbackName;
+  const name = rawName.slice(0, 64);
+  const summary = lang === "en" ? spec.summaryEn : spec.summaryRu;
+  const shortDescription = (
+    lang === "en"
+      ? `Iva's ${spec.labelEn} colleague. ${summary}`
+      : `Коллега Ивы (${spec.labelRu}). ${summary}`
+  ).slice(0, 120);
+  const description = (
+    lang === "en"
+      ? `${name} — Iva's ${spec.labelEn} colleague. ${summary} Shares your Vault and works with its own conversation history.`
+      : `${name} — коллега Ивы в роли «${spec.labelRu}». ${summary} Общий Vault, своя переписка.`
+  ).slice(0, 512);
+  return { name, description, shortDescription };
+}
+
+/**
+ * Собирает ссылку найма коллеги для подтверждения владельцем (Bot API 9.6):
+ * `https://t.me/newbot/<бот Ивы>/<имя>bot?name=…`.
+ */
+export function buildColleagueHireLink(options: {
+  readonly managerBotUsername: string;
+  readonly role: ColleagueRole;
+  readonly username?: string;
+  readonly name?: string;
+  readonly lang?: "ru" | "en";
+}): ColleagueHireLink {
+  const managerUsername = options.managerBotUsername.trim().replace(/^@/u, "");
+  if (!isManagedBotUsername(managerUsername)) {
+    throw new Error(
+      `TELEGRAM_BOT_USERNAME is missing or invalid for managed bot hiring: ${JSON.stringify(options.managerBotUsername)}`,
+    );
+  }
+  const botUsername =
+    options.username !== undefined && options.username.trim().length > 0
+      ? normalizeManagedBotUsername(options.username)
+      : suggestColleagueBotUsername(managerUsername, options.role);
+  if (!botUsername) {
+    throw new Error(
+      `Invalid colleague bot username ${JSON.stringify(options.username)}; must be 5..32 ASCII letters/digits/_ ending with "bot"`,
+    );
+  }
+  const { name: displayName } = colleagueProfileCopy(
+    options.role,
+    options.lang ?? "ru",
+    options.name,
+  );
+  const url = buildManagedBotHireUrl({
+    managerBotUsername: managerUsername,
+    botUsername,
+    displayName,
+  });
+  return {
+    url,
+    managerUsername,
+    botUsername,
+    displayName,
+    role: options.role,
+  };
+}
+
+/** Угадывает роль коллеги по имени или нику бота (если найм пришёл без сохранённого предложения). */
+export function inferColleagueRoleFromBot(bot: {
+  readonly firstName?: string;
+  readonly username?: string;
+}): ColleagueRole | null {
+  if (bot.firstName) {
+    const direct = parseColleagueRole(bot.firstName);
+    if (direct) return direct;
+    for (const token of bot.firstName.split(/[\s\-_,.:;()]+/u)) {
+      const parsed = parseColleagueRole(token);
+      if (parsed) return parsed;
+    }
+  }
+  if (bot.username) {
+    const lower = bot.username.toLowerCase();
+    for (const role of COLLEAGUE_ROLES) {
+      if (lower.includes(role)) return role;
+    }
+    if (lower.includes("coder") || lower.includes("dev")) return "programmer";
+  }
+  return null;
+}
+
+/** Записывает открытое предложение найма в settings.json (перезаписывая дубликат по нику). */
+export function withColleagueHireProposal(
+  settings: Record<string, unknown>,
+  proposal: Omit<ColleagueHireProposal, "phase" | "createdAt"> & {
+    readonly createdAt?: number;
+  },
+  now = Date.now(),
+): Record<string, unknown> {
+  const botUsername = normalizeManagedBotUsername(proposal.botUsername);
+  if (!botUsername) {
+    throw new Error(
+      `Invalid proposal botUsername: ${JSON.stringify(proposal.botUsername)}`,
+    );
+  }
+  if (!isColleagueRole(proposal.role)) {
+    throw new Error(`Invalid proposal role: ${JSON.stringify(proposal.role)}`);
+  }
+  if (!isModelProviderName(proposal.provider)) {
+    throw new Error(
+      `Invalid proposal provider: ${JSON.stringify(proposal.provider)}`,
+    );
+  }
+  const model = proposal.model.trim();
+  if (!validColleagueModelName(model)) {
+    throw new Error(
+      `Invalid proposal model: ${JSON.stringify(proposal.model)}`,
+    );
+  }
+  const name = normalizeOptionalName(proposal.name);
+  if (!name) {
+    throw new Error(`Invalid proposal name: ${JSON.stringify(proposal.name)}`);
+  }
+  const current = parseColleaguesConfig(settings, () => {});
+  const fresh = readColleagueHireProposals(settings, now).filter(
+    (item) => item.botUsername.toLowerCase() !== botUsername.toLowerCase(),
+  );
+  const nextProposal: ColleagueHireProposal = {
+    phase: "proposed",
+    botUsername,
+    role: proposal.role,
+    provider: proposal.provider,
+    model,
+    name,
+    createdAt: proposal.createdAt ?? now,
+  };
+  return {
+    ...settings,
+    colleagues: {
+      enabled: current.enabled,
+      items: { ...current.items },
+      pendingHires: [...fresh, nextProposal],
+    },
+  };
+}
+
+/**
+ * Снимает подходящее предложение найма при приходе `managed_bot`:
+ * сначала по точному нику бота, затем по роли из имени/ника, затем самое свежее открытое.
+ */
+export function consumeColleagueHireProposal(
+  settings: Record<string, unknown>,
+  match: { readonly username?: string; readonly firstName?: string },
+  now = Date.now(),
+): {
+  readonly settings: Record<string, unknown>;
+  readonly proposal: ColleagueHireProposal | null;
+} {
+  const open = readColleagueHireProposals(settings, now);
+  if (open.length === 0) return { settings, proposal: null };
+  const targetUsername = match.username
+    ?.trim()
+    .replace(/^@/u, "")
+    .toLowerCase();
+  let matchedIndex =
+    targetUsername !== undefined && targetUsername.length > 0
+      ? open.findIndex(
+          (item) => item.botUsername.toLowerCase() === targetUsername,
+        )
+      : -1;
+  if (matchedIndex < 0) {
+    const inferredRole = inferColleagueRoleFromBot(match);
+    if (inferredRole) {
+      for (let i = open.length - 1; i >= 0; i -= 1) {
+        if (open[i].role === inferredRole) {
+          matchedIndex = i;
+          break;
+        }
+      }
+    }
+  }
+  if (matchedIndex < 0) matchedIndex = open.length - 1;
+  const proposal = open[matchedIndex] ?? null;
+  const remaining = open.filter((_, index) => index !== matchedIndex);
+  const current = parseColleaguesConfig(settings, () => {});
+  return {
+    proposal,
+    settings: {
+      ...settings,
+      colleagues: {
+        enabled: current.enabled,
+        items: { ...current.items },
+        ...(remaining.length > 0 ? { pendingHires: remaining } : {}),
+      },
+    },
+  };
+}
+
 /** Включает или выключает опцию коллег в объекте настроек, сохраняя записи и соседей. */
 export function withColleaguesEnabled(
   settings: Record<string, unknown>,
@@ -442,6 +793,7 @@ export function withColleaguesEnabled(
     colleagues: {
       enabled,
       items: { ...current.items },
+      ...preservedPendingHires(settings),
     },
   };
 }
@@ -470,6 +822,16 @@ export function withColleague(
   }
   const name = normalizeOptionalName(entry.name);
   const username = normalizeOptionalUsername(entry.username);
+  const avatarPhase = isColleagueAvatarPhase(entry.avatarPhase)
+    ? entry.avatarPhase
+    : undefined;
+  const avatarAttempts = normalizeOptionalPositiveInt(entry.avatarAttempts);
+  const avatarNextRetryAt = normalizeOptionalPositiveInt(
+    entry.avatarNextRetryAt,
+  );
+  const avatarLogoId = normalizeOptionalPositiveInt(entry.avatarLogoId);
+  const avatarName = normalizeOptionalName(entry.avatarName);
+  const avatarError = normalizeOptionalAvatarError(entry.avatarError);
   const normalized: ColleagueEntry = {
     botId: entry.botId,
     role: entry.role,
@@ -477,6 +839,12 @@ export function withColleague(
     model,
     ...(name === undefined ? {} : { name }),
     ...(username === undefined ? {} : { username }),
+    ...(avatarPhase === undefined ? {} : { avatarPhase }),
+    ...(avatarAttempts === undefined ? {} : { avatarAttempts }),
+    ...(avatarNextRetryAt === undefined ? {} : { avatarNextRetryAt }),
+    ...(avatarLogoId === undefined ? {} : { avatarLogoId }),
+    ...(avatarName === undefined ? {} : { avatarName }),
+    ...(avatarError === undefined ? {} : { avatarError }),
   };
   const current = parseColleaguesConfig(settings, () => {});
   return {
@@ -487,8 +855,60 @@ export function withColleague(
         ...current.items,
         [entry.botId]: normalized,
       },
+      ...preservedPendingHires(settings),
     },
   };
+}
+
+/** Обновляет фазу установки случайного талисмана у существующего коллеги. */
+export function withColleagueAvatarState(
+  settings: Record<string, unknown>,
+  botId: string,
+  state:
+    | {
+        readonly phase: "set";
+        readonly logoId?: number;
+        readonly logoName?: string;
+      }
+    | {
+        readonly phase: "retry";
+        readonly attempts: number;
+        readonly nextRetryAt: number;
+        readonly error?: string;
+      }
+    | { readonly phase: "pending" },
+): Record<string, unknown> {
+  const current = parseColleaguesConfig(settings, () => {});
+  const existing = current.items[botId];
+  if (!existing) {
+    throw new Error(`Colleague ${botId} is not configured`);
+  }
+  const base: ColleagueEntry = {
+    botId: existing.botId,
+    role: existing.role,
+    provider: existing.provider,
+    model: existing.model,
+    ...(existing.name === undefined ? {} : { name: existing.name }),
+    ...(existing.username === undefined ? {} : { username: existing.username }),
+  };
+  if (state.phase === "set") {
+    return withColleague(settings, {
+      ...base,
+      avatarPhase: "set",
+      ...(state.logoId === undefined ? {} : { avatarLogoId: state.logoId }),
+      ...(state.logoName === undefined ? {} : { avatarName: state.logoName }),
+    });
+  }
+  if (state.phase === "retry") {
+    return withColleague(settings, {
+      ...base,
+      avatarPhase: "retry",
+      avatarAttempts: state.attempts,
+      avatarNextRetryAt: state.nextRetryAt,
+      ...(state.error === undefined ? {} : { avatarError: state.error }),
+    });
+  }
+  return withColleague(settings, { ...base, avatarPhase: "pending" });
 }
 
 /** Меняет провайдера и модель существующего коллеги. */
@@ -526,6 +946,7 @@ export function withoutColleague(
     colleagues: {
       enabled: current.enabled,
       items: nextItems,
+      ...preservedPendingHires(settings),
     },
   };
 }

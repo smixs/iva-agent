@@ -1,9 +1,11 @@
 import { z } from "zod";
 import {
   configuredTelegramBots,
+  liveTelegramEnv,
   validTelegramBotId,
 } from "../../packages/telegram-bots/index.ts";
 import {
+  buildColleagueHireLink,
   COLLEAGUE_ROLES,
   COLLEAGUE_ROLE_SPECS,
   currentSettingsFile,
@@ -14,6 +16,7 @@ import {
   suggestColleagueModel,
   validColleagueModelName,
   withColleague,
+  withColleagueHireProposal,
   withColleagueModel,
   type ColleagueEntry,
   type SuggestedColleagueModel,
@@ -40,9 +43,9 @@ export type ColleagueToolContext = {
 // Плоский object на проводе — без oneOf/anyOf/allOf в корне (scripts/tool-wire-schema.test.ts).
 export const colleagueInputSchema = z.object({
   action: z
-    .enum(["list", "suggest_model", "configure", "set_model"])
+    .enum(["list", "suggest_model", "hire", "configure", "set_model"])
     .describe(
-      "list — показать опцию и коллег; suggest_model — предложить модель под роль; configure — задать роль и модель коллеги; set_model — сменить провайдера и модель коллеги",
+      "list — показать опцию и коллег; suggest_model — предложить модель под роль; hire — собрать ссылку найма t.me/newbot/... для подтверждения владельцем; configure — задать роль и модель коллеги; set_model — сменить провайдера и модель коллеги",
     ),
   bot_id: z
     .string()
@@ -56,12 +59,29 @@ export const colleagueInputSchema = z.object({
     .string()
     .optional()
     .describe("Отображаемое имя коллеги (необязательно)"),
+  username: z
+    .string()
+    .optional()
+    .describe(
+      "Желаемый Telegram-ник нового бота-коллеги (для hire, оканчивается на bot, необязательно)",
+    ),
   provider: z
     .enum(MODEL_PROVIDER_NAMES)
     .optional()
     .describe("Провайдер модели из MODEL_PROVIDER_NAMES"),
   model: z.string().optional().describe("Имя модели у выбранного провайдера"),
 });
+
+export interface ColleagueHireOffer {
+  readonly url: string;
+  readonly manager_username: string;
+  readonly bot_username: string;
+  readonly display_name: string;
+  readonly role: string;
+  readonly provider: string;
+  readonly model: string;
+  readonly reason: string;
+}
 
 export type ColleagueToolResult =
   | {
@@ -79,6 +99,7 @@ export type ColleagueToolResult =
       }[];
       readonly suggestion?: SuggestedColleagueModel;
       readonly colleague?: ColleagueEntry;
+      readonly hire?: ColleagueHireOffer;
     }
   | { readonly ok: false; readonly error: string };
 
@@ -109,7 +130,7 @@ export function colleagueExecute(
   if (!parsed.success) {
     return { ok: false, error: parsed.error.message };
   }
-  const env = deps.env ?? process.env;
+  const env = deps.env ?? liveTelegramEnv(process.env);
   const settingsFile = deps.settingsFile ?? currentSettingsFile();
   const data = parsed.data;
 
@@ -156,6 +177,70 @@ export function colleagueExecute(
         ok: false,
         error:
           "Changing colleague configuration is allowed only in the owner's private chat.",
+      };
+    }
+
+    if (data.action === "hire") {
+      if (!isColleagueRole(data.role)) {
+        return {
+          ok: false,
+          error: `hire requires role: one of ${COLLEAGUE_ROLES.join(", ")}`,
+        };
+      }
+      const managerBotUsername = env.TELEGRAM_BOT_USERNAME?.trim() ?? "";
+      const lang =
+        (env.AGENT_LANGUAGE ?? "ru").trim().toLowerCase() === "en"
+          ? "en"
+          : "ru";
+      const link = buildColleagueHireLink({
+        managerBotUsername,
+        role: data.role,
+        username: data.username,
+        name: data.name,
+        lang,
+      });
+      const suggestion = suggestColleagueModel(data.role, env);
+      const provider = data.provider ?? suggestion.provider;
+      if (!isModelProviderName(provider)) {
+        return {
+          ok: false,
+          error: `Invalid provider; expected one of: ${MODEL_PROVIDER_NAMES.join(", ")}`,
+        };
+      }
+      const model =
+        data.model?.trim() ||
+        recommendedModelForProvider(data.role, provider, env) ||
+        "";
+      if (!validColleagueModelName(model)) {
+        return {
+          ok: false,
+          error: `hire requires model for provider ${provider}`,
+        };
+      }
+      updateSettings(
+        (current) =>
+          withColleagueHireProposal(current, {
+            botUsername: link.botUsername,
+            role: data.role!,
+            provider,
+            model,
+            name: link.displayName,
+          }),
+        settingsFile,
+      );
+      return {
+        ok: true,
+        suggestion,
+        hire: {
+          url: link.url,
+          manager_username: link.managerUsername,
+          bot_username: link.botUsername,
+          display_name: link.displayName,
+          role: data.role,
+          provider,
+          model,
+          reason: suggestion.reason,
+        },
       };
     }
 

@@ -1,0 +1,1262 @@
+/* eslint-disable @typescript-eslint/no-floating-promises -- Node's test runner owns registrations. */
+import "./lib/ts-esm-hooks.ts";
+import assert from "node:assert/strict";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import test, { type TestContext } from "node:test";
+import { deflateSync } from "node:zlib";
+import fc from "fast-check";
+import type { RouteHandlerArgs, Session } from "eve/channels";
+import type { TelegramChannelState } from "eve/channels/telegram";
+import secretKeyInventory from "../agent/skills/security-defense/outbound-sensitive-keys.json" with { type: "json" };
+import {
+  redact,
+  secretValuesFromEnv,
+} from "../packages/secret-redaction/index.ts";
+import {
+  buildManagedBotHireUrl,
+  isManagedBotUsername,
+  liveTelegramEnv,
+  normalizeManagedBotUsername,
+  parseColleagueBotTokens,
+  removeColleagueBotToken,
+  suggestColleagueBotUsername,
+  TELEGRAM_BOT_ID_HEADER,
+  upsertColleagueBotToken,
+  type TelegramBotConfig,
+} from "../packages/telegram-bots/index.ts";
+import { createColleagueCommand } from "./cli/colleagues.ts";
+import { createCliRuntime } from "./cli/runtime.ts";
+import {
+  applyRandomColleagueAvatar,
+  COLLEAGUE_AVATAR_SIZE,
+  convertPngToJpeg640,
+  jpegDimensions,
+} from "./lib/colleague-avatar.ts";
+import { parseEnvText } from "./lib/env-file.ts";
+import {
+  enqueueQueueFile,
+  isTelegramQueueUpdate,
+  parseTelegramUpdates,
+  type TelegramQueueUpdate,
+} from "./lib/telegram-queue.ts";
+
+const SEED = Number(process.env.FC_SEED ?? 20_261_126);
+
+// Isolated runtime dirs before importing authored modules.
+const root = mkdtempSync(join(tmpdir(), "iva-colleague-hire-"));
+const dataPath = join(root, "data");
+const vaultPath = join(root, "vault");
+const envPath = join(root, ".env");
+mkdirSync(dataPath, { recursive: true });
+mkdirSync(vaultPath, { recursive: true });
+
+const IVA_BOT_ID = "111111111";
+const IVA_TOKEN = `${IVA_BOT_ID}:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA`;
+const HIRED_BOT_ID = "555555555";
+const HIRED_TOKEN = `${HIRED_BOT_ID}:EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE`;
+const SECOND_BOT_ID = "666666666";
+const SECOND_TOKEN = `${SECOND_BOT_ID}:FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF`;
+const WEBHOOK_SECRET = "colleague-hire-webhook-secret";
+
+writeFileSync(
+  envPath,
+  [
+    "# Iva test secrets",
+    `TELEGRAM_BOT_TOKEN=${IVA_TOKEN}`,
+    "TELEGRAM_BOT_USERNAME=iva_main_bot",
+    `TELEGRAM_WEBHOOK_SECRET_TOKEN=${WEBHOOK_SECRET}`,
+    "TELEGRAM_ALLOWED_USER_IDS=42",
+    "",
+  ].join("\n"),
+  { mode: 0o600 },
+);
+
+process.env.ASSISTANT_DATA_DIR = dataPath;
+process.env.ASSISTANT_VAULT_DIR = vaultPath;
+process.env.ASSISTANT_TIMEZONE = "UTC";
+process.env.AGENT_LANGUAGE = "ru";
+process.env.TELEGRAM_BOT_TOKEN = IVA_TOKEN;
+process.env.TELEGRAM_BOT_USERNAME = "iva_main_bot";
+process.env.TELEGRAM_WEBHOOK_SECRET_TOKEN = WEBHOOK_SECRET;
+process.env.TELEGRAM_ALLOWED_USER_IDS = "42";
+process.env.IVA_ENV_FILE = envPath;
+process.env.MODEL_PROVIDER = "ollama";
+process.env.OLLAMA_MODEL = "iva-primary-model";
+delete process.env.TELEGRAM_COLLEAGUE_BOT_TOKENS;
+
+process.on("exit", () => rmSync(root, { recursive: true, force: true }));
+
+const [
+  {
+    buildColleagueHireLink,
+    COLLEAGUE_ROLES,
+    colleagueAvatarPhase,
+    colleagueProfileCopy,
+    parseColleaguesConfig,
+    readColleagueHireProposals,
+    withColleaguesEnabled,
+  },
+  { colleagueExecute },
+  { createTelegramChannel },
+  { TELEGRAM_ACCEPTANCE_ROUTE },
+  { scanOutbound },
+  { redactNotice },
+  {
+    handleManagedBotUpdate,
+    parseManagedBotUpdate,
+    reconcilePendingColleagueAvatars,
+  },
+  { handleControl },
+  { runBotPollLoop },
+  { acquireTelegramProcessLock, assertTelegramProcessLease },
+] = await Promise.all([
+  import("#lib/colleagues.ts"),
+  import("#lib/colleague-tool.ts"),
+  import("../agent/channels/telegram.ts"),
+  import("#lib/telegram-acceptance.ts"),
+  import("#lib/security-gate.ts"),
+  import("#lib/outbox.ts"),
+  import("./poller/managed-bot.ts"),
+  import("./poller/control.ts"),
+  import("./poller/main.ts"),
+  import("./poller/process-lock.ts"),
+]);
+
+// Minimal valid RGB PNG generator (pure Node zlib, zero external fixtures) for real PNG -> 640x640 JPG conversion.
+function crc32(buf: Buffer): number {
+  let crc = 0xffffffff;
+  for (let i = 0; i < buf.length; i += 1) {
+    crc ^= buf[i];
+    for (let j = 0; j < 8; j += 1) {
+      crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function pngChunk(type: string, data: Buffer): Buffer {
+  const len = Buffer.alloc(4);
+  len.writeUInt32BE(data.length, 0);
+  const tag = Buffer.from(type, "ascii");
+  const crcBuf = Buffer.alloc(4);
+  crcBuf.writeUInt32BE(crc32(Buffer.concat([tag, data])), 0);
+  return Buffer.concat([len, tag, data, crcBuf]);
+}
+
+function makeSolidPng(width: number, height: number): Buffer {
+  const signature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8; // bit depth
+  ihdr[9] = 2; // RGB
+  ihdr[10] = 0;
+  ihdr[11] = 0;
+  ihdr[12] = 0;
+  const rowSize = 1 + width * 3;
+  const raw = Buffer.alloc(rowSize * height);
+  for (let y = 0; y < height; y += 1) {
+    const off = y * rowSize;
+    raw[off] = 0; // filter None
+    for (let x = 0; x < width; x += 1) {
+      raw[off + 1 + x * 3] = 54;
+      raw[off + 2 + x * 3] = 138;
+      raw[off + 3 + x * 3] = 210;
+    }
+  }
+  const idat = deflateSync(raw);
+  return Buffer.concat([
+    signature,
+    pngChunk("IHDR", ihdr),
+    pngChunk("IDAT", idat),
+    pngChunk("IEND", Buffer.alloc(0)),
+  ]);
+}
+
+const SAMPLE_PNG = makeSolidPng(128, 128);
+
+function makeOwnerPrivateCtx() {
+  const principal = {
+    authenticator: "telegram-webhook",
+    principalType: "user",
+    attributes: { chat_type: "private", chat_id: "42", user_id: "42" },
+  };
+  return { session: { auth: { initiator: principal, current: principal } } };
+}
+
+function makeGroupCtx() {
+  const principal = {
+    authenticator: "telegram-webhook",
+    principalType: "user",
+    attributes: { chat_type: "supergroup", chat_id: "-1001", user_id: "42" },
+  };
+  return { session: { auth: { initiator: principal, current: principal } } };
+}
+
+function createIpAsLogoStubFetch(options: {
+  readonly available: boolean;
+  readonly logos?: Array<{
+    id: number;
+    slug: string;
+    name: string;
+    category: string;
+    image_url: string;
+  }>;
+  readonly onRpcBody?: (body: Record<string, unknown>) => void;
+  readonly onPhotoUpload?: (info: {
+    token: string;
+    photoMeta: Record<string, unknown>;
+    avatarBytes: Buffer;
+  }) => void;
+}): typeof fetch {
+  const logos = options.logos ?? [
+    {
+      id: 777,
+      slug: "pixel-otter",
+      name: "Pixel Otter",
+      category: "animals",
+      image_url: "https://cdn.ipaslogo.com/logos/pixel-otter.png",
+    },
+    {
+      id: 888,
+      slug: "cosmic-fox",
+      name: "Cosmic Fox",
+      category: "animals",
+      image_url: "https://cdn.ipaslogo.com/logos/cosmic-fox.png",
+    },
+  ];
+  return async (input, init) => {
+    const url = input instanceof Request ? input.url : String(input);
+    if (url.includes("visualskills.dev/ip-as-logo-app/")) {
+      if (!options.available) {
+        return new Response("Service Unavailable", { status: 503 });
+      }
+      if (url.endsWith(".js")) {
+        return new Response('const k = "sb_publishable_StubKey_1234567890";', {
+          status: 200,
+          headers: { "content-type": "application/javascript" },
+        });
+      }
+      return new Response(
+        '<html><script src="assets/index-AbC123_xY.js"></script></html>',
+        { status: 200, headers: { "content-type": "text/html" } },
+      );
+    }
+    if (url.includes("/rest/v1/rpc/get_logos")) {
+      if (!options.available) {
+        return new Response("Unavailable", { status: 503 });
+      }
+      const body =
+        typeof init?.body === "string"
+          ? (JSON.parse(init.body) as Record<string, unknown>)
+          : {};
+      options.onRpcBody?.(body);
+      return new Response(JSON.stringify(logos), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    if (url.startsWith("https://cdn.ipaslogo.com/logos/")) {
+      if (!options.available) {
+        return new Response("Not Found", { status: 404 });
+      }
+      return new Response(new Uint8Array(SAMPLE_PNG), {
+        status: 200,
+        headers: { "content-type": "image/png" },
+      });
+    }
+    const tgMatch = /\/bot([^/]+)\/setMyProfilePhoto$/u.exec(url);
+    if (tgMatch) {
+      const token = tgMatch[1];
+      assert.ok(
+        init?.body instanceof FormData,
+        "setMyProfilePhoto must use multipart FormData",
+      );
+      const rawPhoto = init.body.get("photo");
+      assert.equal(typeof rawPhoto, "string");
+      const photoMeta = JSON.parse(rawPhoto as string) as Record<
+        string,
+        unknown
+      >;
+      const rawAttach =
+        typeof photoMeta.photo === "string" ? photoMeta.photo : "";
+      const attachField = rawAttach.replace(/^attach:\/\//u, "");
+      const filePart = init.body.get(attachField);
+      assert.ok(filePart instanceof Blob, "missing attached avatar file part");
+      const avatarBytes = Buffer.from(await filePart.arrayBuffer());
+      options.onPhotoUpload?.({ token, photoMeta, avatarBytes });
+      return new Response(JSON.stringify({ ok: true, result: true }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    throw new Error(`unexpected fetch URL in stub: ${url}`);
+  };
+}
+
+let leaseSeq = 0;
+async function tempLease(t: TestContext) {
+  const dir = mkdtempSync(join(tmpdir(), "iva-hire-lease-"));
+  const lease = await acquireTelegramProcessLock({
+    testGuard: {
+      identity: `hire-${process.pid}-${++leaseSeq}`,
+      directory: join(dir, ".guard"),
+    },
+  });
+  t.after(async () => {
+    await lease.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+  return { dir, lease };
+}
+
+// --- Пункт 1: Ива предлагает коллегу ссылкой вида t.me/newbot/<бот Ивы>/<имя>bot?name=… ---
+test("п.1: buildColleagueHireLink, colleague tool action=hire, and CLI build valid t.me/newbot links", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "iva-hire-link-"));
+  const settingsFile = join(dir, "settings.json");
+  try {
+    // 1. Default link per role.
+    for (const role of COLLEAGUE_ROLES) {
+      const link = buildColleagueHireLink({
+        managerBotUsername: "@iva_main_bot",
+        role,
+        lang: "ru",
+      });
+      const parsed = new URL(link.url);
+      assert.equal(parsed.origin, "https://t.me");
+      assert.equal(
+        parsed.pathname,
+        `/newbot/iva_main_bot/iva_main_${role}_bot`,
+      );
+      assert.ok(isManagedBotUsername(link.botUsername));
+      assert.equal(
+        parsed.searchParams.get("name"),
+        colleagueProfileCopy(role, "ru").name,
+      );
+    }
+
+    // 2. Custom username normalization (appends _bot if omitted) and custom display name.
+    const custom = buildColleagueHireLink({
+      managerBotUsername: "iva_main_bot",
+      role: "critic",
+      username: "@my_sharp_critic",
+      name: "Злой Критик & Ко",
+    });
+    assert.equal(custom.botUsername, "my_sharp_critic_bot");
+    assert.equal(
+      custom.url,
+      "https://t.me/newbot/iva_main_bot/my_sharp_critic_bot?name=%D0%97%D0%BB%D0%BE%D0%B9%20%D0%9A%D1%80%D0%B8%D1%82%D0%B8%D0%BA%20%26%20%D0%9A%D0%BE",
+    );
+    assert.equal(
+      new URL(custom.url).searchParams.get("name"),
+      "Злой Критик & Ко",
+    );
+
+    // 3. Invalid inputs fail closed.
+    assert.throws(
+      () =>
+        buildColleagueHireLink({
+          managerBotUsername: "not_a_bot_name",
+          role: "critic",
+        }),
+      /TELEGRAM_BOT_USERNAME/u,
+    );
+    assert.throws(
+      () =>
+        buildColleagueHireLink({
+          managerBotUsername: "iva_main_bot",
+          role: "critic",
+          username: "../evil_bot",
+        }),
+      /Invalid colleague bot username/u,
+    );
+    assert.equal(normalizeManagedBotUsername("bad__double_bot"), null);
+    assert.equal(normalizeManagedBotUsername("123digit_bot"), null);
+
+    // 4. Tool action=hire works only in owner's private chat and saves a pending proposal.
+    const groupDenied = colleagueExecute(
+      { action: "hire", role: "critic" },
+      makeGroupCtx(),
+      {
+        settingsFile,
+        env: {
+          TELEGRAM_BOT_USERNAME: "iva_main_bot",
+          MODEL_PROVIDER: "ollama",
+        },
+      },
+    );
+    assert.equal(groupDenied.ok, false);
+    assert.match(groupDenied.error, /private chat/u);
+
+    const hiredOffer = colleagueExecute(
+      {
+        action: "hire",
+        role: "programmer",
+        name: "Кодер",
+        username: "iva_dev_bot",
+        provider: "codex",
+        model: "gpt-5.5",
+      },
+      makeOwnerPrivateCtx(),
+      {
+        settingsFile,
+        env: {
+          TELEGRAM_BOT_USERNAME: "iva_main_bot",
+          MODEL_PROVIDER: "ollama",
+          AGENT_LANGUAGE: "ru",
+        },
+      },
+    );
+    assert.equal(hiredOffer.ok, true);
+    assert.equal(
+      hiredOffer.hire?.url,
+      "https://t.me/newbot/iva_main_bot/iva_dev_bot?name=%D0%9A%D0%BE%D0%B4%D0%B5%D1%80",
+    );
+    assert.equal(hiredOffer.hire?.provider, "codex");
+    assert.equal(hiredOffer.hire?.model, "gpt-5.5");
+
+    const proposals = readColleagueHireProposals(
+      JSON.parse(readFileSync(settingsFile, "utf8")) as unknown,
+    );
+    assert.equal(proposals.length, 1);
+    assert.equal(proposals[0]?.botUsername, "iva_dev_bot");
+    assert.equal(proposals[0]?.role, "programmer");
+    assert.equal(proposals[0]?.phase, "proposed");
+
+    // 5. CLI `iva colleague hire` outputs the link and records a pending proposal.
+    const cliRoot = join(dir, "cli-root");
+    const cliData = join(cliRoot, "data");
+    mkdirSync(cliData, { recursive: true });
+    writeFileSync(
+      join(cliRoot, ".env"),
+      "TELEGRAM_BOT_USERNAME=iva_cli_bot\nMODEL_PROVIDER=ollama\n",
+      { mode: 0o600 },
+    );
+    const runtime = createCliRuntime(cliRoot);
+    const printed: string[] = [];
+    const origLog = console.log;
+    console.log = (...args: unknown[]) => printed.push(args.join(" "));
+    try {
+      const cmd = createColleagueCommand(runtime);
+      await cmd(["hire", "researcher"]);
+    } finally {
+      console.log = origLog;
+    }
+    assert.ok(
+      printed.some((line) =>
+        line.startsWith(
+          "https://t.me/newbot/iva_cli_bot/iva_cli_researcher_bot?name=",
+        ),
+      ),
+      `CLI did not print hire URL: ${JSON.stringify(printed)}`,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test(`property: buildManagedBotHireUrl always produces valid t.me/newbot URLs with round-tripping name (seed ${SEED})`, () => {
+  const managerBaseArb = fc.stringMatching(/^[A-Za-z][A-Za-z0-9]{2,14}$/);
+  const roleArb = fc.constantFrom(...COLLEAGUE_ROLES);
+  const nameArb = fc.string({ minLength: 1, maxLength: 40 }).filter(
+    (s) =>
+      s.trim().length > 0 &&
+      [...s].every((ch) => {
+        const code = ch.charCodeAt(0);
+        return code >= 0x20 && code !== 0x7f;
+      }),
+  );
+
+  fc.assert(
+    fc.property(managerBaseArb, roleArb, nameArb, (managerBase, role, name) => {
+      const managerUsername = `${managerBase}_bot`;
+      const botUsername = suggestColleagueBotUsername(managerUsername, role);
+      assert.equal(isManagedBotUsername(botUsername), true);
+      const url = buildManagedBotHireUrl({
+        managerBotUsername: managerUsername,
+        botUsername,
+        displayName: name,
+      });
+      const parsed = new URL(url);
+      assert.equal(parsed.origin, "https://t.me");
+      assert.equal(
+        parsed.pathname,
+        `/newbot/${managerUsername}/${botUsername}`,
+      );
+      assert.equal(parsed.searchParams.get("name"), name.trim());
+    }),
+    { seed: SEED, numRuns: 200 },
+  );
+});
+
+// --- Пункт 2: По событию managed_bot Ива берёт токен (getManagedBotToken), кладёт в .env,
+//     ставит имя и описание роли, коллега начинает принимать сообщения ---
+test("п.2: managed_bot fetches token, stores it in .env beside TELEGRAM_BOT_TOKEN, sets profile, and colleague immediately accepts messages", async (t) => {
+  const settingsFile = join(dataPath, "settings.json");
+  rmSync(settingsFile, { force: true });
+  // Reset clean .env without colleague tokens.
+  writeFileSync(
+    envPath,
+    [
+      "# Existing comment survives",
+      `TELEGRAM_BOT_TOKEN=${IVA_TOKEN}`,
+      "TELEGRAM_BOT_USERNAME=iva_main_bot",
+      `TELEGRAM_WEBHOOK_SECRET_TOKEN=${WEBHOOK_SECRET}`,
+      "TELEGRAM_ALLOWED_USER_IDS=42",
+      "",
+    ].join("\n"),
+    { mode: 0o600 },
+  );
+  const localEnv: NodeJS.ProcessEnv = {
+    TELEGRAM_BOT_TOKEN: IVA_TOKEN,
+    TELEGRAM_BOT_USERNAME: "iva_main_bot",
+    MODEL_PROVIDER: "ollama",
+    OLLAMA_MODEL: "iva-primary-model",
+    AGENT_LANGUAGE: "ru",
+  };
+
+  // Step 1: Iva proposes hiring Critic with custom model.
+  const offer = colleagueExecute(
+    {
+      action: "hire",
+      role: "critic",
+      name: "Критик",
+      username: "iva_main_critic_bot",
+      provider: "openrouter",
+      model: "anthropic/claude-opus-4.5",
+    },
+    makeOwnerPrivateCtx(),
+    { settingsFile, env: localEnv },
+  );
+  assert.equal(offer.ok, true);
+
+  // Step 2: Telegram sends `managed_bot` update to Iva.
+  const managedUpdate: TelegramQueueUpdate = {
+    update_id: 901,
+    managed_bot: {
+      user: { id: 42, is_bot: false, first_name: "Sergei" },
+      bot: {
+        id: Number(HIRED_BOT_ID),
+        is_bot: true,
+        first_name: "Критик",
+        username: "iva_main_critic_bot",
+      },
+    },
+  };
+  assert.equal(isTelegramQueueUpdate(managedUpdate), true);
+  assert.ok(parseManagedBotUpdate(managedUpdate));
+  const parsedBatch = parseTelegramUpdates([managedUpdate]);
+  assert.ok(
+    parsedBatch && parsedBatch.length === 1 && "update" in parsedBatch[0],
+  );
+
+  const botApiCalls: Array<{
+    readonly method: string;
+    readonly token: string | undefined;
+    readonly body: Record<string, unknown>;
+  }> = [];
+  const ownerReplies: Array<{ chatId: number | string; text: string }> = [];
+  const hiredBots: TelegramBotConfig[] = [];
+  let uploadedPhotoBytes: Buffer | null = null;
+  let uploadedPhotoMeta: Record<string, unknown> | null = null;
+
+  const avatarFetch = createIpAsLogoStubFetch({
+    available: true,
+    onPhotoUpload: ({ token, photoMeta, avatarBytes }) => {
+      assert.equal(token, HIRED_TOKEN);
+      uploadedPhotoBytes = avatarBytes;
+      uploadedPhotoMeta = photoMeta;
+    },
+  });
+
+  // Unauthorized user must be ignored completely before any Bot API call.
+  const unauthorized = await handleManagedBotUpdate(
+    {
+      update_id: 900,
+      managed_bot: {
+        user: { id: 99999, is_bot: false, first_name: "Stranger" },
+        bot: {
+          id: Number(HIRED_BOT_ID),
+          is_bot: true,
+          first_name: "Evil",
+          username: "evil_bot",
+        },
+      },
+    },
+    {
+      allowedUserIds: new Set(["42"]),
+      primaryBotId: IVA_BOT_ID,
+      primaryBotToken: IVA_TOKEN,
+      envPath,
+      settingsFile,
+      env: localEnv,
+      tgImpl: () => {
+        throw new Error("must not call Bot API for unauthorized managed_bot");
+      },
+      logImpl: () => {},
+    },
+  );
+  assert.equal(unauthorized.status, "ignored");
+
+  // Authorized owner confirmation flows through handleControl -> handleManagedBotUpdate.
+  const controlOutcomes: Array<
+    Awaited<ReturnType<typeof handleManagedBotUpdate>>
+  > = [];
+  const handled = await handleControl(managedUpdate, {
+    managedBotImpl: async (u) => {
+      const result = await handleManagedBotUpdate(u, {
+        allowedUserIds: new Set(["42"]),
+        primaryBotId: IVA_BOT_ID,
+        primaryBotToken: IVA_TOKEN,
+        envPath,
+        settingsFile,
+        env: localEnv,
+        tgImpl: (method, body, options) => {
+          botApiCalls.push({ method, token: options?.token, body });
+          if (method === "getManagedBotToken") {
+            return Promise.resolve({ ok: true, result: HIRED_TOKEN });
+          }
+          return Promise.resolve({ ok: true, result: true });
+        },
+        replyImpl: (chatId, text) => {
+          ownerReplies.push({ chatId, text });
+          return Promise.resolve({ message_id: 1 });
+        },
+        avatarDeps: { fetchImpl: avatarFetch, random: () => 0.1 },
+        onColleagueHired: (bot) => hiredBots.push(bot),
+        lang: () => "ru",
+        logImpl: () => {},
+      });
+      controlOutcomes.push(result);
+      return result;
+    },
+  });
+  assert.equal(handled, true);
+  assert.equal(controlOutcomes.length, 1);
+  const controlOutcome = controlOutcomes[0];
+  assert.equal(controlOutcome.status, "hired");
+  assert.equal(controlOutcome.avatarSet, true);
+
+  // Verify getManagedBotToken was called with primary Iva token and managed bot's user_id.
+  const tokenCall = botApiCalls.find((c) => c.method === "getManagedBotToken");
+  assert.ok(tokenCall);
+  assert.equal(tokenCall.token, IVA_TOKEN);
+  assert.deepEqual(tokenCall.body, { user_id: Number(HIRED_BOT_ID) });
+
+  // Verify setMyName, setMyDescription, setMyShortDescription called with colleague's token.
+  const nameCall = botApiCalls.find((c) => c.method === "setMyName");
+  const descCall = botApiCalls.find((c) => c.method === "setMyDescription");
+  const shortDescCall = botApiCalls.find(
+    (c) => c.method === "setMyShortDescription",
+  );
+  assert.equal(nameCall?.token, HIRED_TOKEN);
+  assert.equal(nameCall?.body.name, "Критик");
+  assert.equal(descCall?.token, HIRED_TOKEN);
+  assert.match(String(descCall?.body.description), /Критик/u);
+  assert.equal(shortDescCall?.token, HIRED_TOKEN);
+  assert.match(String(shortDescCall?.body.short_description), /Критик/u);
+
+  // Verify avatar was uploaded as 640x640 JPG via setMyProfilePhoto.
+  assert.deepEqual(uploadedPhotoMeta, {
+    type: "static",
+    photo: "attach://avatar",
+  });
+  assert.ok(uploadedPhotoBytes !== null);
+  assert.deepEqual(jpegDimensions(uploadedPhotoBytes), {
+    width: COLLEAGUE_AVATAR_SIZE,
+    height: COLLEAGUE_AVATAR_SIZE,
+  });
+
+  // Verify token is stored in .env (0600) right next to TELEGRAM_BOT_TOKEN, preserving comments.
+  const envRaw = readFileSync(envPath, "utf8");
+  assert.equal(statSync(envPath).mode & 0o777, 0o600);
+  assert.ok(envRaw.includes("# Existing comment survives"));
+  const parsedEnv = parseEnvText(envRaw);
+  assert.equal(parsedEnv.TELEGRAM_BOT_TOKEN, IVA_TOKEN);
+  const parsedColleagues = parseColleagueBotTokens(
+    parsedEnv.TELEGRAM_COLLEAGUE_BOT_TOKENS,
+    IVA_BOT_ID,
+  );
+  assert.equal(parsedColleagues.length, 1);
+  assert.equal(parsedColleagues[0]?.botId, HIRED_BOT_ID);
+  assert.equal(parsedColleagues[0]?.token, HIRED_TOKEN);
+  assert.equal(parsedColleagues[0]?.username, "iva_main_critic_bot");
+
+  // Verify settings.json has colleague configured, option enabled, avatarPhase="set", proposal consumed.
+  const rawSettings = JSON.parse(readFileSync(settingsFile, "utf8")) as Record<
+    string,
+    unknown
+  >;
+  const cfg = parseColleaguesConfig(rawSettings, () => {});
+  assert.equal(cfg.enabled, true);
+  assert.equal(cfg.items[HIRED_BOT_ID]?.role, "critic");
+  assert.equal(cfg.items[HIRED_BOT_ID]?.provider, "openrouter");
+  assert.equal(cfg.items[HIRED_BOT_ID]?.model, "anthropic/claude-opus-4.5");
+  assert.equal(colleagueAvatarPhase(cfg.items[HIRED_BOT_ID]), "set");
+  assert.equal(readColleagueHireProposals(rawSettings).length, 0);
+
+  // Verify owner received confirmation without token.
+  assert.equal(ownerReplies.length, 1);
+  assert.equal(ownerReplies[0]?.chatId, "42");
+  assert.equal(ownerReplies[0]?.text.includes(HIRED_TOKEN), false);
+
+  // Step 3: Newly hired colleague immediately receives messages in Bridge poll loop AND Eve Channel
+  // picks up the new token from .env via liveTelegramEnv without restarting Eve!
+  assert.equal(hiredBots.length, 1);
+  const hiredBot = hiredBots[0];
+  const { dir: leaseDir, lease } = await tempLease(t);
+  const admittedUpdates: TelegramQueueUpdate[] = [];
+  let pollCalls = 0;
+  await runBotPollLoop({
+    bot: hiredBot,
+    initialOffset: 0,
+    assertLease: () => assertTelegramProcessLease(lease),
+    colleaguesEnabledImpl: () =>
+      parseColleaguesConfig(
+        JSON.parse(readFileSync(settingsFile, "utf8")) as unknown,
+        () => {},
+      ).enabled,
+    tgImpl: (method, body, opts) => {
+      assert.equal(opts?.token, HIRED_TOKEN);
+      assert.equal(method, "getUpdates");
+      assert.ok(
+        Array.isArray((body as { allowed_updates?: unknown }).allowed_updates),
+      );
+      pollCalls += 1;
+      if (pollCalls === 1) {
+        return Promise.resolve({
+          ok: true,
+          result: [
+            {
+              update_id: 1001,
+              message: {
+                message_id: 55,
+                date: 1_700_000_000,
+                chat: { id: 42, type: "private" },
+                from: { id: 42, is_bot: false, first_name: "Sergei" },
+                text: "Привет, новый Критик!",
+              },
+            },
+          ],
+        });
+      }
+      return Promise.resolve({ ok: true, result: [] });
+    },
+    processUpdateImpl: (u) => {
+      admittedUpdates.push(u);
+      return Promise.resolve({
+        offset: u.update_id + 1,
+        ingressBlocked: false,
+      });
+    },
+    saveOffsetImpl: () => Promise.resolve(),
+    sleepImpl: () => Promise.resolve(),
+    shouldContinue: () => pollCalls < 1,
+    logImpl: () => {},
+  });
+  assert.equal(admittedUpdates.length, 1);
+  assert.equal(admittedUpdates[0]?.message?.text, "Привет, новый Критик!");
+
+  // Even though process.env.TELEGRAM_COLLEAGUE_BOT_TOKENS was NEVER set in Eve's process,
+  // liveTelegramEnv reads the newly written .env and Channel accepts + routes the colleague update!
+  assert.equal(process.env.TELEGRAM_COLLEAGUE_BOT_TOKENS, undefined);
+  const channelCalls: Array<{ token: string; method: string }> = [];
+  const channel = createTelegramChannel({
+    api: {
+      fetch: (input) => {
+        const url = input instanceof Request ? input.url : String(input);
+        const match = /\/bot([^/]+)\/([^/?]+)/u.exec(url);
+        assert.ok(match);
+        channelCalls.push({ token: match[1], method: match[2] });
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({ ok: true, result: { message_id: 77 } }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          ),
+        );
+      },
+    },
+  });
+  const acceptanceRoute = channel.routes.find(
+    (r) => r.transport !== "websocket" && r.path === TELEGRAM_ACCEPTANCE_ROUTE,
+  );
+  assert.ok(acceptanceRoute && acceptanceRoute.transport !== "websocket");
+  const sentToEve: Array<{
+    address: string;
+    state: TelegramChannelState | undefined;
+  }> = [];
+  const routeArgs = {
+    from: (address: string) => ({
+      send: (_msg: unknown, opts?: { state?: TelegramChannelState }) => {
+        sentToEve.push({ address, state: opts?.state });
+        return Promise.resolve({ id: "sess-hired-1" } as unknown as Session);
+      },
+      respond: () => Promise.reject(new Error("unexpected")),
+      cancel: () => Promise.resolve({ status: "no_active_turn" as const }),
+      clear: () => Promise.resolve({ status: "cleared" as const }),
+      compact: () => Promise.resolve({ status: "compacted" as const }),
+      reset: () => Promise.resolve({ status: "reset" as const }),
+    }),
+    resolveSession: () => Promise.resolve(undefined),
+    attachSession: (id: string) => ({ id }) as unknown as Session,
+    waitUntil: () => {},
+  } as unknown as RouteHandlerArgs<TelegramChannelState>;
+
+  const webhookReq = new Request(
+    `http://127.0.0.1:8723${TELEGRAM_ACCEPTANCE_ROUTE}`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-telegram-bot-api-secret-token": WEBHOOK_SECRET,
+        [TELEGRAM_BOT_ID_HEADER]: HIRED_BOT_ID,
+      },
+      body: JSON.stringify(admittedUpdates[0]),
+    },
+  );
+  const webhookRes = await acceptanceRoute.handler(webhookReq, routeArgs);
+  assert.equal(webhookRes.status, 204);
+  assert.equal(sentToEve.length, 1);
+  assert.ok(sentToEve[0]?.address.startsWith(`bot:${HIRED_BOT_ID}:`));
+  assert.equal(
+    (sentToEve[0]?.state as { botId?: string } | undefined)?.botId,
+    HIRED_BOT_ID,
+  );
+  // Typing/early action used the colleague's token, not Iva's!
+  assert.ok(channelCalls.every((c) => c.token === HIRED_TOKEN));
+  assert.ok(existsSync(leaseDir));
+
+  // Verify `iva colleague remove` also removes the token from .env (arbiter T909 D1393 п.B).
+  const cliCmd = createColleagueCommand({
+    ok: () => {},
+    dataDirAbs: () => dataPath,
+    readEnv: () => parseEnvText(readFileSync(envPath, "utf8")),
+    ENV_PATH: envPath,
+  });
+  await cliCmd(["remove", HIRED_BOT_ID]);
+  const envAfterRemove = parseEnvText(readFileSync(envPath, "utf8"));
+  assert.equal(envAfterRemove.TELEGRAM_COLLEAGUE_BOT_TOKENS, undefined);
+});
+
+// --- Пункт 3: Аватарка — случайный талисман ip-as-logo, JPG 640×640;
+//     библиотека недоступна — бот без фото и повтор позже ---
+test("п.3a: random ip-as-logo talisman converts to 640x640 JPG without role filter and uploads via setMyProfilePhoto", async () => {
+  const rpcBodies: Record<string, unknown>[] = [];
+  let uploadedBytes: Buffer | null = null;
+  let uploadedMeta: Record<string, unknown> | null = null;
+
+  const stubFetch = createIpAsLogoStubFetch({
+    available: true,
+    onRpcBody: (body) => rpcBodies.push(body),
+    onPhotoUpload: ({ photoMeta, avatarBytes }) => {
+      uploadedMeta = photoMeta;
+      uploadedBytes = avatarBytes;
+    },
+  });
+
+  const outcome = await applyRandomColleagueAvatar(SECOND_TOKEN, {
+    fetchImpl: stubFetch,
+    random: () => 0.75,
+  });
+  assert.equal(outcome.ok, true);
+  assert.equal(outcome.logo.id, 888);
+  assert.equal(outcome.logo.name, "Cosmic Fox");
+  // Strictly random: empty p_search and p_sort="random" (no role coupling!).
+  assert.equal(rpcBodies.length, 1);
+  assert.equal(rpcBodies[0]?.p_search, "");
+  assert.equal(rpcBodies[0]?.p_category, "all");
+  assert.equal(rpcBodies[0]?.p_sort, "random");
+  // Uploaded image is genuine 640x640 JPEG.
+  assert.deepEqual(uploadedMeta, { type: "static", photo: "attach://avatar" });
+  assert.ok(uploadedBytes !== null);
+  assert.equal(uploadedBytes[0], 0xff);
+  assert.equal(uploadedBytes[1], 0xd8);
+  assert.deepEqual(jpegDimensions(uploadedBytes), {
+    width: 640,
+    height: 640,
+  });
+
+  // Also test converter failure falls back cleanly across local converters.
+  await assert.rejects(
+    () =>
+      convertPngToJpeg640(SAMPLE_PNG, {
+        runConverter: () => Promise.reject(new Error("missing binary")),
+      }),
+    /no image converter produced 640x640 JPEG/u,
+  );
+});
+
+test("п.3b: when ip-as-logo is unavailable, colleague is hired without photo and later retry sets the avatar", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "iva-avatar-retry-"));
+  const localSettings = join(dir, "settings.json");
+  const localEnvPath = join(dir, ".env");
+  writeFileSync(
+    localEnvPath,
+    `TELEGRAM_BOT_TOKEN=${IVA_TOKEN}\nTELEGRAM_BOT_USERNAME=iva_main_bot\n`,
+    { mode: 0o600 },
+  );
+  const localEnv: NodeJS.ProcessEnv = {
+    TELEGRAM_BOT_TOKEN: IVA_TOKEN,
+    TELEGRAM_BOT_USERNAME: "iva_main_bot",
+    MODEL_PROVIDER: "ollama",
+  };
+  let clock = 1_700_000_000_000;
+  let libraryUp = false;
+  let uploadedCount = 0;
+
+  const toggleableFetch: typeof fetch = (input, init) =>
+    createIpAsLogoStubFetch({
+      available: libraryUp,
+      onPhotoUpload: ({ avatarBytes }) => {
+        uploadedCount += 1;
+        assert.deepEqual(jpegDimensions(avatarBytes), {
+          width: 640,
+          height: 640,
+        });
+      },
+    })(input, init);
+
+  try {
+    const ownerNotices: string[] = [];
+    const hired = await handleManagedBotUpdate(
+      {
+        update_id: 950,
+        managed_bot: {
+          user: { id: 42, is_bot: false },
+          bot: {
+            id: Number(SECOND_BOT_ID),
+            is_bot: true,
+            first_name: "Секретарь",
+            username: "iva_sec_bot",
+          },
+        },
+      },
+      {
+        allowedUserIds: new Set(["42"]),
+        primaryBotId: IVA_BOT_ID,
+        primaryBotToken: IVA_TOKEN,
+        envPath: localEnvPath,
+        settingsFile: localSettings,
+        env: localEnv,
+        tgImpl: (method) =>
+          Promise.resolve(
+            method === "getManagedBotToken"
+              ? { ok: true, result: SECOND_TOKEN }
+              : { ok: true, result: true },
+          ),
+        replyImpl: (_chatId, text) => {
+          ownerNotices.push(text);
+          return Promise.resolve({ message_id: 1 });
+        },
+        avatarDeps: { fetchImpl: toggleableFetch, random: () => 0.2 },
+        now: () => clock,
+        lang: () => "ru",
+        logImpl: () => {},
+      },
+    );
+
+    // Bot is hired and usable even though ip-as-logo returned 503!
+    assert.equal(hired.status, "hired");
+    assert.equal(hired.avatarSet, false);
+    assert.equal(uploadedCount, 0);
+    assert.match(ownerNotices[0] ?? "", /без фото/u);
+
+    const beforeRetry = parseColleaguesConfig(
+      JSON.parse(readFileSync(localSettings, "utf8")) as unknown,
+      () => {},
+    ).items[SECOND_BOT_ID];
+    assert.equal(colleagueAvatarPhase(beforeRetry), "retry");
+    assert.equal(beforeRetry?.avatarAttempts, 1);
+    const dueAt = beforeRetry?.avatarNextRetryAt ?? 0;
+    assert.ok(dueAt > clock);
+
+    // Before backoff expires -> retry loop does nothing.
+    const tooEarly = await reconcilePendingColleagueAvatars({
+      settingsFile: localSettings,
+      envPath: localEnvPath,
+      env: localEnv,
+      avatarDeps: { fetchImpl: toggleableFetch, random: () => 0.2 },
+      now: () => dueAt - 1,
+      logImpl: () => {},
+    });
+    assert.deepEqual(tooEarly, { attempted: 0, succeeded: 0 });
+
+    // Library recovers and backoff expires -> retry sets avatar and moves phase to "set".
+    libraryUp = true;
+    clock = dueAt + 1000;
+    const retried = await reconcilePendingColleagueAvatars({
+      settingsFile: localSettings,
+      envPath: localEnvPath,
+      env: localEnv,
+      avatarDeps: { fetchImpl: toggleableFetch, random: () => 0.2 },
+      now: () => clock,
+      logImpl: () => {},
+    });
+    assert.deepEqual(retried, { attempted: 1, succeeded: 1 });
+    assert.equal(uploadedCount, 1);
+
+    const afterRetry = parseColleaguesConfig(
+      JSON.parse(readFileSync(localSettings, "utf8")) as unknown,
+      () => {},
+    ).items[SECOND_BOT_ID];
+    assert.equal(colleagueAvatarPhase(afterRetry), "set");
+    assert.equal(afterRetry?.avatarLogoId, 777);
+
+    // Subsequent reconcile pass skips already-set colleague.
+    const settled = await reconcilePendingColleagueAvatars({
+      settingsFile: localSettings,
+      envPath: localEnvPath,
+      env: localEnv,
+      avatarDeps: { fetchImpl: toggleableFetch, random: () => 0.2 },
+      now: () => clock + 3_600_000,
+      logImpl: () => {},
+    });
+    assert.deepEqual(settled, { attempted: 0, succeeded: 0 });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --- Пункт 4: Токен коллеги не попадает в журналы и исходящие сообщения ---
+test("п.4: colleague token is inventoried in outbound-sensitive-keys.json and redacted from logs, errors, and outbound messages", async () => {
+  // 1. Key is in outbound-sensitive-keys.json.
+  assert.ok(
+    secretKeyInventory.includes("TELEGRAM_COLLEAGUE_BOT_TOKENS"),
+    "TELEGRAM_COLLEAGUE_BOT_TOKENS must be in outbound-sensitive-keys.json",
+  );
+
+  // 2. Write a colleague token (including a non-standard short-tail secret that generic regex wouldn't catch!)
+  //    into .env and verify scanOutbound, redactNotice, and secretValuesFromEnv all catch it.
+  const customColleagueToken = "777777777:ShortColleagueSecret123";
+  const dir = mkdtempSync(join(tmpdir(), "iva-token-leak-"));
+  const leakEnvPath = join(dir, ".env");
+  const leakSettings = join(dir, "settings.json");
+  const prevEnvFile = process.env.IVA_ENV_FILE;
+  try {
+    writeFileSync(
+      leakEnvPath,
+      [
+        `TELEGRAM_BOT_TOKEN=${IVA_TOKEN}`,
+        `TELEGRAM_COLLEAGUE_BOT_TOKENS=sec_bot=${customColleagueToken},other_bot=${SECOND_TOKEN}`,
+        "",
+      ].join("\n"),
+      { mode: 0o600 },
+    );
+    process.env.IVA_ENV_FILE = leakEnvPath;
+
+    const live = liveTelegramEnv(process.env, leakEnvPath);
+    assert.ok(
+      live.TELEGRAM_COLLEAGUE_BOT_TOKENS?.includes(customColleagueToken),
+    );
+
+    for (const carrier of [
+      `token=${customColleagueToken}`,
+      `https://api.telegram.org/bot${customColleagueToken}/sendMessage`,
+      `TELEGRAM_COLLEAGUE_BOT_TOKENS=sec_bot=${customColleagueToken}`,
+      encodeURIComponent(customColleagueToken),
+      Buffer.from(customColleagueToken).toString("base64"),
+      `plain ${SECOND_TOKEN}`,
+    ]) {
+      const gated = scanOutbound(carrier);
+      assert.equal(gated.clean, false, `outbound gate missed: ${carrier}`);
+      assert.equal(gated.text.includes(customColleagueToken), false);
+      assert.equal(gated.text.includes(SECOND_TOKEN), false);
+
+      const noticeGated = redactNotice(carrier);
+      assert.equal(noticeGated.includes(customColleagueToken), false);
+      assert.equal(noticeGated.includes(SECOND_TOKEN), false);
+
+      const envSecrets = secretValuesFromEnv({
+        TELEGRAM_COLLEAGUE_BOT_TOKENS: `sec_bot=${customColleagueToken},other_bot=${SECOND_TOKEN}`,
+      });
+      const logRedacted = redact(carrier, envSecrets);
+      assert.equal(logRedacted.includes(customColleagueToken), false);
+      assert.equal(logRedacted.includes(SECOND_TOKEN), false);
+    }
+
+    // 3. Even when Telegram API / avatar errors echo the colleague token back verbatim,
+    //    handleManagedBotUpdate never logs it, never stores it in settings.json, and never sends it to owner!
+    const logs: string[] = [];
+    const notices: string[] = [];
+    const localEnv: NodeJS.ProcessEnv = {
+      TELEGRAM_BOT_TOKEN: IVA_TOKEN,
+      TELEGRAM_BOT_USERNAME: "iva_main_bot",
+      MODEL_PROVIDER: "ollama",
+    };
+    writeFileSync(
+      leakEnvPath,
+      `TELEGRAM_BOT_TOKEN=${IVA_TOKEN}\nTELEGRAM_BOT_USERNAME=iva_main_bot\n`,
+      { mode: 0o600 },
+    );
+    const outcome = await handleManagedBotUpdate(
+      {
+        update_id: 999,
+        managed_bot: {
+          user: { id: 42, is_bot: false },
+          bot: {
+            id: 777777777,
+            is_bot: true,
+            first_name: "Критик",
+            username: "leak_test_bot",
+          },
+        },
+      },
+      {
+        allowedUserIds: new Set(["42"]),
+        primaryBotId: IVA_BOT_ID,
+        primaryBotToken: IVA_TOKEN,
+        envPath: leakEnvPath,
+        settingsFile: leakSettings,
+        env: localEnv,
+        tgImpl: (method) => {
+          if (method === "getManagedBotToken") {
+            return Promise.resolve({ ok: true, result: customColleagueToken });
+          }
+          return Promise.resolve({
+            ok: false,
+            description: `upstream echoed ${customColleagueToken} and ${IVA_TOKEN}`,
+          });
+        },
+        replyImpl: (_chatId, text) => {
+          notices.push(text);
+          return Promise.resolve({ message_id: 1 });
+        },
+        applyAvatarImpl: (tok) =>
+          Promise.resolve({
+            ok: false,
+            error: `avatar failed for https://api.telegram.org/bot${tok}/setMyProfilePhoto`,
+          }),
+        logImpl: (...args: unknown[]) => logs.push(args.map(String).join(" ")),
+      },
+    );
+    assert.equal(outcome.status, "hired");
+    const allLogs = logs.join("\n");
+    const allNotices = notices.join("\n");
+    const settingsText = readFileSync(leakSettings, "utf8");
+    assert.equal(
+      allLogs.includes(customColleagueToken),
+      false,
+      "token leaked into logs",
+    );
+    assert.equal(
+      allLogs.includes(IVA_TOKEN),
+      false,
+      "primary token leaked into logs",
+    );
+    assert.equal(
+      allNotices.includes(customColleagueToken),
+      false,
+      "token leaked into reply",
+    );
+    assert.equal(
+      settingsText.includes(customColleagueToken),
+      false,
+      "token leaked into settings.json",
+    );
+  } finally {
+    if (prevEnvFile === undefined) delete process.env.IVA_ENV_FILE;
+    else process.env.IVA_ENV_FILE = prevEnvFile;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Pure token upsert/remove helper round-trip checks.
+test("upsertColleagueBotToken and removeColleagueBotToken maintain clean .env lists", () => {
+  const a = upsertColleagueBotToken(
+    undefined,
+    { token: HIRED_TOKEN, username: "critic_bot" },
+    IVA_BOT_ID,
+  );
+  assert.equal(a, `critic_bot=${HIRED_TOKEN}`);
+  const b = upsertColleagueBotToken(
+    a,
+    { token: SECOND_TOKEN, username: "sec_bot" },
+    IVA_BOT_ID,
+  );
+  assert.equal(b, `critic_bot=${HIRED_TOKEN},sec_bot=${SECOND_TOKEN}`);
+  // Replacing token for existing botId updates in place without duplicates.
+  const rotated = `${HIRED_BOT_ID}:ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ`;
+  const c = upsertColleagueBotToken(b, { token: rotated }, IVA_BOT_ID);
+  assert.equal(c, `critic_bot=${rotated},sec_bot=${SECOND_TOKEN}`);
+  const d = removeColleagueBotToken(c, HIRED_BOT_ID, IVA_BOT_ID);
+  assert.equal(d, `sec_bot=${SECOND_TOKEN}`);
+  assert.throws(
+    () => upsertColleagueBotToken(d, { token: IVA_TOKEN }, IVA_BOT_ID),
+    /matches primary/u,
+  );
+});
+
+// Verify primary poll loop passes "managed_bot" in allowed_updates.
+test("primary runBotPollLoop subscribes to managed_bot in allowed_updates", async (t) => {
+  const { lease } = await tempLease(t);
+  const seenAllowed: unknown[] = [];
+  const primaryBot: TelegramBotConfig = {
+    botId: IVA_BOT_ID,
+    token: IVA_TOKEN,
+    username: "iva_main_bot",
+    isPrimary: true,
+  };
+  let calls = 0;
+  await runBotPollLoop({
+    bot: primaryBot,
+    initialOffset: 10,
+    assertLease: () => assertTelegramProcessLease(lease),
+    tgImpl: (method, body) => {
+      if (method === "getUpdates") {
+        seenAllowed.push(
+          (body as { allowed_updates?: unknown }).allowed_updates,
+        );
+        calls += 1;
+      }
+      return Promise.resolve({ ok: true, result: [] });
+    },
+    sleepImpl: () => Promise.resolve(),
+    shouldContinue: () => calls < 1,
+    logImpl: () => {},
+  });
+  assert.equal(seenAllowed.length, 1);
+  assert.ok(
+    Array.isArray(seenAllowed[0]) && seenAllowed[0].includes("managed_bot"),
+    `primary getUpdates missing managed_bot: ${JSON.stringify(seenAllowed[0])}`,
+  );
+
+  // Check enqueueQueueFile still accepts regular updates cleanly after schema update.
+  const dir = mkdtempSync(join(tmpdir(), "iva-hire-q-"));
+  try {
+    const qFile = join(dir, "q.json");
+    await enqueueQueueFile(
+      qFile,
+      "42:",
+      {
+        update_id: 1,
+        message: {
+          message_id: 1,
+          date: 1_700_000_000,
+          chat: { id: 42, type: "private" },
+          from: { id: 42, is_bot: false },
+          text: "ping",
+        },
+      },
+      { strict: true },
+    );
+    assert.ok(existsSync(qFile));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("colleague config stays disabled by default even after hiring proposals exist", () => {
+  const proposed = withColleaguesEnabled({}, false);
+  const cfg = parseColleaguesConfig(proposed, () => {});
+  assert.equal(cfg.enabled, false);
+});

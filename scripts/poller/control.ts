@@ -89,6 +89,10 @@ import {
   type PluginTap,
   type PluginTapOutcome,
 } from "./plugin-proposal-tap.ts";
+import {
+  handleManagedBotUpdate,
+  type ManagedBotOutcome,
+} from "./managed-bot.ts";
 
 type ControlCallbackQuery = TelegramCallbackQuery & { data: string };
 type PendingFlow = {
@@ -151,6 +155,8 @@ export type ControlDeps = {
     messageId: number,
     edit: TapEdit,
   ) => Promise<boolean>;
+  // Событие Bot API 9.6 `managed_bot` (найм коллеги по ссылке с подтверждением владельца).
+  managedBotImpl?: (update: TelegramUpdate) => Promise<ManagedBotOutcome>;
 };
 
 const controlTg = tg as unknown as ControlTransport;
@@ -629,6 +635,7 @@ const DEFAULT_CONTROL_IO: Omit<ControlIo, "cancelImpl"> = {
   pluginTapImpl: (tap) => handlePluginProposalTap(tap),
   deleteImpl: deleteGotItMessage,
   editTapImpl: editTappedMessage,
+  managedBotImpl: (update) => handleManagedBotUpdate(update),
 };
 
 // Переданный undefined значит «по умолчанию» — как у деструктуризации с дефолтами.
@@ -692,6 +699,13 @@ async function handleControl(
       secret: SECRET,
       cancelImpl: io.cancelImpl,
       logImpl: log,
+    });
+    return true;
+  }
+  if (update.managed_bot) {
+    await settleLogged(io.managedBotImpl(update), "managed_bot error:", {
+      status: "failed",
+      reason: "unhandled managed_bot error",
     });
     return true;
   }

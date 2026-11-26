@@ -86,6 +86,28 @@
      `scripts/reminders/fire.ts` запускает ход с заголовком `X-Iva-Telegram-Bot-Id` (на модели
      и роли этого коллеги) и доставляет результат в его чат токеном его бота.
 
+8. **Найм коллеги по ссылке с подтверждением владельца и случайным талисманом (шаг 3/6).**
+   - Ива предлагает нанять коллегу через инструмент `colleague` (`action: "hire"`) или CLI
+     `iva colleague hire <role>`, собирая ссылку Bot API 9.6
+     `https://t.me/newbot/<бот Ивы>/<имя>bot?name=…` и сохраняя открытое предложение найма
+     (`colleagues.pendingHires` в `data/settings.json`, TTL 24 ч). Бота Ива сама не создаёт —
+     подтверждение всегда за владельцем в Telegram.
+   - Основной цикл Bridge запрашивает `"managed_bot"` в `allowed_updates`. По приходе
+     `managed_bot` (`scripts/poller/managed-bot.ts`) проверяет Allowlist владельца, получает
+     токен через `getManagedBotToken`, атомарно записывает его в `.env`
+     (`TELEGRAM_COLLEAGUE_BOT_TOKENS`, права `0600`), сохраняет роль/модель/имя в
+     `data/settings.json`, ставит имя и описание роли (`setMyName`, `setMyDescription`,
+     `setMyShortDescription`) и сразу запускает опрос нового коллеги в том же процессе Bridge.
+     Канал Eve, `send_file` и outbound-Gate читают актуальный `TELEGRAM_COLLEAGUE_BOT_TOKENS`
+     через `liveTelegramEnv` (`packages/telegram-bots/index.ts`), поэтому новый коллега
+     принимает и отвечает без перезапуска сервисов.
+   - Аватарка коллеги — случайный талисман библиотеки `ip-as-logo` без связи с ролью,
+     сконвертированный в JPG 640×640 (`scripts/lib/colleague-avatar.ts`) и загруженный через
+     `setMyProfilePhoto`. Состояние аватарки — явная машина фаз `avatarPhase`
+     (`"pending" | "set" | "retry"`): при недоступности `ip-as-logo` или сбое загрузки бот
+     сразу работает без фото (`avatarPhase: "retry"`), а Bridge повторяет попытку с
+     экспоненциальной паузой (`reconcilePendingColleagueAvatars`).
+
 ## Что отвергнуто
 
 - **Отдельный процесс / отдельный systemd-юнит на каждого коллегу.** Противоречит решению

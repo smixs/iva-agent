@@ -25,6 +25,7 @@ import { isRecord } from "../../packages/guards/index.ts";
 import {
   botIdFromUpdate,
   botScopedKey,
+  liveTelegramEnv,
   resolveTelegramBot,
   TELEGRAM_BOT_ID_HEADER,
   validTelegramBotId,
@@ -329,7 +330,10 @@ export async function handleAcceptedTelegramWebhook<TState>(
     updateId,
   } = await metadataFromRequest(request);
   const authenticated = hasValidWebhookSecret(request);
-  const resolvedBot = resolveTelegramBot(requestedBotId);
+  const resolvedBot = resolveTelegramBot(
+    requestedBotId,
+    liveTelegramEnv(process.env),
+  );
   if (requestedBotId !== null && authenticated && resolvedBot === null) {
     return new Response(`unknown Telegram bot ${requestedBotId}`, {
       status: 404,
