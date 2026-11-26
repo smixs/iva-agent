@@ -2072,11 +2072,7 @@ test("T940 acceptor live redelivery: handler and reconciliation are serialized p
     const hiredBots: TelegramBotConfig[] = [];
     const ownerNotices: string[] = [];
     const profileCalls: string[] = [];
-    const tgImpl = (
-      method: string,
-      _body: Record<string, unknown>,
-      options?: { token?: string },
-    ) => {
+    const tgImpl = (method: string) => {
       if (method === "getManagedBotToken") {
         tokenCalls += 1;
         if (tokenCalls === 1) {
@@ -2276,27 +2272,28 @@ test("T940 profile 401: a failed refresh is retried before the next profile writ
       lang: () => "ru" as const,
       logImpl: () => {},
       replyImpl: () => Promise.resolve({ message_id: 1 }),
-      tgImpl: async (
+      tgImpl: (
         method: string,
         _body: Record<string, unknown>,
         options?: { token?: string },
       ) => {
         if (method === "getManagedBotToken") {
           tokenCalls += 1;
-          if (tokenCalls === 2) return { ok: false, error_code: 503 };
-          return {
+          if (tokenCalls === 2)
+            return Promise.resolve({ ok: false, error_code: 503 });
+          return Promise.resolve({
             ok: true,
             result: tokenCalls === 1 ? HIRED_TOKEN : ROTATED_HIRED_TOKEN,
-          };
+          });
         }
         if (method.startsWith("setMy") && options?.token === HIRED_TOKEN) {
           oldProfileCalls += 1;
-          return {
+          return Promise.resolve({
             ok: false,
             error_code: at === 1_700_000_000_100 ? 503 : 401,
-          };
+          });
         }
-        return { ok: true };
+        return Promise.resolve({ ok: true });
       },
     };
     const first = await handleManagedBotUpdate(
@@ -2365,24 +2362,26 @@ test("T940 rotated token survives a lost phase write and is reused from disk", a
       now: () => at,
       lang: () => "ru" as const,
       logImpl: () => {},
-      tgImpl: async (
+      tgImpl: (
         method: string,
         _body: Record<string, unknown>,
         options?: { token?: string },
       ) => {
         if (method === "getManagedBotToken") {
           tokenCalls += 1;
-          return available
-            ? { ok: true, result: ROTATED_HIRED_TOKEN }
-            : { ok: false, error_code: 503 };
+          return Promise.resolve(
+            available
+              ? { ok: true, result: ROTATED_HIRED_TOKEN }
+              : { ok: false, error_code: 503 },
+          );
         }
         if (
           method.startsWith("setMy") &&
           options?.token !== ROTATED_HIRED_TOKEN
         ) {
-          return { ok: false, error_code: 401 };
+          return Promise.resolve({ ok: false, error_code: 401 });
         }
-        return { ok: true };
+        return Promise.resolve({ ok: true });
       },
       replyImpl: () => Promise.resolve({ message_id: 1 }),
     };
@@ -2422,10 +2421,10 @@ test("T940 rotated token survives a lost phase write and is reused from disk", a
       2,
       "a fresh environment must reuse the rotated token",
     );
-    assert.equal(
-      JSON.parse(readFileSync(stateFile, "utf8")).phase,
-      "completed",
-    );
+    const finalState = JSON.parse(readFileSync(stateFile, "utf8")) as {
+      phase?: string;
+    };
+    assert.equal(finalState.phase, "completed");
   } finally {
     chmodSync(hireStateDir, 0o700);
     rmSync(dir, { recursive: true, force: true });
