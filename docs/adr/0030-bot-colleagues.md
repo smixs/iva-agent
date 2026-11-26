@@ -121,6 +121,7 @@
 - `agent/lib/job-facts.test.ts`
 - `agent/lib/model-auth-dispatch.test.ts`
 - `agent/lib/open-failures.test.ts`
+- `agent/lib/telegram-bot-context.test.ts`
 - `agent/lib/telegram-inbound-chaos.property.test.ts`
 - `agent/lib/telegram-inbound.test.ts`
 - `agent/lib/telegram-media-chaos.property.test.ts`
