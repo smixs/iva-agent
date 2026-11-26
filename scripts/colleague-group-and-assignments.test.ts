@@ -14,7 +14,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import test, { after } from "node:test";
+import test, { after, afterEach } from "node:test";
 import type { RouteHandlerArgs, Session } from "eve/channels";
 import type { TelegramChannelState } from "eve/channels/telegram";
 import {
@@ -44,7 +44,15 @@ interface StubBotApiCall {
   readonly method: string;
   readonly body: Record<string, unknown>;
 }
+interface StubBotApiControlResult {
+  readonly status?: number;
+  readonly payload?: Record<string, unknown>;
+}
+type StubBotApiControl = (
+  call: StubBotApiCall,
+) => StubBotApiControlResult | null | Promise<StubBotApiControlResult | null>;
 const botApiCalls: StubBotApiCall[] = [];
+let botApiControl: StubBotApiControl | null = null;
 let stubMessageId = 500;
 
 const botApiServer = createServer((req, res) => {
@@ -53,29 +61,49 @@ const botApiServer = createServer((req, res) => {
     raw += chunk.toString("utf8");
   });
   req.on("end", () => {
-    const match = /^\/bot([^/]+)\/([A-Za-z0-9_]+)$/u.exec(req.url ?? "");
-    const body = JSON.parse(raw || "{}") as Record<string, unknown>;
-    if (!match) {
-      res.writeHead(404, { "content-type": "application/json" });
-      res.end(JSON.stringify({ ok: false, description: "not found" }));
-      return;
-    }
-    botApiCalls.push({ token: match[1], method: match[2], body });
-    stubMessageId += 1;
-    res.writeHead(200, { "content-type": "application/json" });
-    res.end(
-      JSON.stringify({
-        ok: true,
-        result: {
-          message_id: stubMessageId,
-          chat: {
-            id: body.chat_id ?? OWNER_ID,
-            type: Number(body.chat_id) < 0 ? "supergroup" : "private",
+    void (async () => {
+      const match = /^\/bot([^/]+)\/([A-Za-z0-9_]+)$/u.exec(req.url ?? "");
+      const body = JSON.parse(raw || "{}") as Record<string, unknown>;
+      if (!match) {
+        res.writeHead(404, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: false, description: "not found" }));
+        return;
+      }
+      const call = { token: match[1], method: match[2], body };
+      botApiCalls.push(call);
+      let controlled: StubBotApiControlResult | null = null;
+      try {
+        controlled = (await botApiControl?.(call)) ?? null;
+      } catch (error) {
+        res.writeHead(500, { "content-type": "application/json" });
+        res.end(
+          JSON.stringify({
+            ok: false,
+            description: error instanceof Error ? error.message : String(error),
+          }),
+        );
+        return;
+      }
+      stubMessageId += 1;
+      res.writeHead(controlled?.status ?? 200, {
+        "content-type": "application/json",
+      });
+      res.end(
+        JSON.stringify(
+          controlled?.payload ?? {
+            ok: true,
+            result: {
+              message_id: stubMessageId,
+              chat: {
+                id: body.chat_id ?? OWNER_ID,
+                type: Number(body.chat_id) < 0 ? "supergroup" : "private",
+              },
+              text: body.text ?? "",
+            },
           },
-          text: body.text ?? "",
-        },
-      }),
-    );
+        ),
+      );
+    })();
   });
 });
 await new Promise<void>((resolve) =>
@@ -84,6 +112,9 @@ await new Promise<void>((resolve) =>
 botApiServer.unref();
 after(() => {
   botApiServer.close();
+});
+afterEach(() => {
+  botApiControl = null;
 });
 const botApiPort = (botApiServer.address() as AddressInfo).port;
 const botApiBaseUrl = `http://127.0.0.1:${botApiPort}`;
@@ -692,6 +723,167 @@ test("п.3: bot-to-bot assignment goes via Bot API DM and posts one visible owne
   assert.equal(ledger.find((r) => r.id === assignment.id)?.phase, "done");
 });
 
+test("приёмка T911: confirmed 429 owner notice after done is retried by retry_after exactly once", async () => {
+  writeTeamSettings(true);
+  botApiCalls.length = 0;
+  const harness = makeHarness();
+
+  let ownerNoticeAttempts = 0;
+  let acceptedOwnerNotices = 0;
+  let markFirstOwnerNoticeSeen: () => void = () => undefined;
+  let releaseFirstOwnerNotice: () => void = () => undefined;
+  const firstOwnerNoticeSeen = new Promise<void>((resolve) => {
+    markFirstOwnerNoticeSeen = resolve;
+  });
+  const firstOwnerNoticeRelease = new Promise<void>((resolve) => {
+    releaseFirstOwnerNotice = resolve;
+  });
+  botApiControl = (call) => {
+    if (
+      call.token !== CRITIC_TOKEN ||
+      call.method !== "sendMessage" ||
+      String(call.body.chat_id) !== String(OWNER_ID)
+    ) {
+      return null;
+    }
+    ownerNoticeAttempts += 1;
+    if (ownerNoticeAttempts > 1) {
+      acceptedOwnerNotices += 1;
+      return null;
+    }
+    markFirstOwnerNoticeSeen();
+    return firstOwnerNoticeRelease.then(() => ({
+      status: 429,
+      payload: {
+        ok: false,
+        description: "Too Many Requests: retry after 1",
+        parameters: { retry_after: 1 },
+      },
+    }));
+  };
+
+  const delegatedPromise = colleagueExecuteAsync(
+    {
+      action: "delegate",
+      bot_id: CRITIC_BOT_ID,
+      task: "Проверь повтор строки владельцу после 429 за done",
+    },
+    {
+      session: {
+        auth: {
+          initiator: {
+            authenticator: "telegram-webhook",
+            principalType: "user",
+            attributes: { chat_type: "private", user_id: String(OWNER_ID) },
+          },
+          current: {
+            authenticator: "telegram-webhook",
+            principalType: "user",
+            attributes: { chat_type: "private", user_id: String(OWNER_ID) },
+          },
+        },
+      },
+    },
+    { apiBaseUrl: botApiBaseUrl },
+  );
+
+  try {
+    await firstOwnerNoticeSeen;
+    const dmCall = botApiCalls.find(
+      (call) =>
+        call.token === IVA_TOKEN &&
+        call.method === "sendMessage" &&
+        call.body.chat_id === Number(CRITIC_BOT_ID),
+    );
+    assert.ok(dmCall, "stub Bot API must accept the bot-to-bot DM first");
+    const dmText = String(dmCall.body.text);
+    const assignmentId = /\[(asg_[a-f0-9]{12})\]/u.exec(dmText)?.[1];
+    assert.ok(assignmentId, `assignment id must be present in DM: ${dmText}`);
+
+    const dmUpdate = {
+      update_id: 9101,
+      iva_bot_id: CRITIC_BOT_ID,
+      message: {
+        message_id: 9101,
+        date: 1700009101,
+        chat: { id: Number(IVA_BOT_ID), type: "private" },
+        from: {
+          id: Number(IVA_BOT_ID),
+          is_bot: true,
+          username: "iva_main_bot",
+        },
+        text: dmText,
+        iva_bot_id: CRITIC_BOT_ID,
+      },
+    };
+    const key = inboxKeyFor(dmUpdate);
+    assert.ok(key);
+    let inboxDoc = emptyQueueDocument();
+    inboxDoc = enqueueItem(
+      inboxDoc,
+      key,
+      createQueueItem(dmUpdate, 1_000),
+    ).document;
+    const ackedBatches: number[][] = [];
+    const remaining = await promoteReadyInbox({
+      now: () => 5_000,
+      loadImpl: () => Promise.resolve(inboxDoc),
+      acknowledgeImpl: (ackKey, ids) => {
+        ackedBatches.push([...ids]);
+        inboxDoc = removeQueueItems(inboxDoc, ackKey, ids).document;
+        return Promise.resolve();
+      },
+      routeImpl: (candidate) =>
+        routeMessageUpdate(candidate, {
+          loadQueueImpl: () => emptyQueueDocument(),
+          runningImpl: () => false,
+          colleaguesEnabledImpl: () => true,
+          deliverImpl: async (deliveredUpdate) => {
+            const res = await harness.postUpdate(
+              deliveredUpdate,
+              CRITIC_BOT_ID,
+            );
+            const kind = res.headers.get("x-iva-telegram-acceptance");
+            if (res.status !== 204) return false;
+            return kind === "handled" ? "handled" : true;
+          },
+        }),
+    });
+
+    assert.equal(remaining, 0);
+    assert.deepEqual(ackedBatches, [[9101]]);
+    assert.equal(harness.sentTurns.length, 1);
+    assert.equal(
+      (await listColleagueAssignments()).find((row) => row.id === assignmentId)
+        ?.phase,
+      "done",
+    );
+    assert.equal(ownerNoticeAttempts, 1);
+
+    releaseFirstOwnerNotice();
+    const delegated = await delegatedPromise;
+    assert.equal(delegated.ok, true);
+
+    const deadline = Date.now() + 2_200;
+    while (acceptedOwnerNotices === 0 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+
+    assert.equal(
+      acceptedOwnerNotices,
+      1,
+      "confirmed 429 after done must be retried once by retry_after",
+    );
+    assert.equal(ownerNoticeAttempts, 2);
+    const row = (await listColleagueAssignments()).find(
+      (entry) => entry.id === assignmentId,
+    );
+    assert.equal(row?.ownerNotified, true);
+  } finally {
+    releaseFirstOwnerNotice();
+  }
+});
+
 // --- Пункт 4: боты, добавленные владельцем в группу, принимают её сообщения и соблюдают очерёдность ---
 test("п.4: bots added by owner to a group accept its messages and serialize turns per group without blocking private chats", async () => {
   writeTeamSettings(true);
@@ -935,7 +1127,11 @@ test("п.3 (пачка с повтором и новым поручением): 
   botApiCalls.length = 0;
   const harness = makeHarness();
 
-  const makeDmUpdate = (updateId: number, assignmentId: string, body: string) => ({
+  const makeDmUpdate = (
+    updateId: number,
+    assignmentId: string,
+    body: string,
+  ) => ({
     update_id: updateId,
     iva_bot_id: CRITIC_BOT_ID,
     message: {
@@ -955,7 +1151,11 @@ test("п.3 (пачка с повтором и новым поручением): 
   const firstId = "asg_820100000001";
   const secondId = "asg_820300000002";
   const firstUpdate = makeDmUpdate(8201, firstId, "Первое поручение 8201");
-  const secondUpdate = makeDmUpdate(8203, secondId, "Второе новое поручение 8203");
+  const secondUpdate = makeDmUpdate(
+    8203,
+    secondId,
+    "Второе новое поручение 8203",
+  );
 
   // 1. First assignment 8201 is accepted and marked done.
   const firstRes = await harness.postUpdate(firstUpdate, CRITIC_BOT_ID);
@@ -967,8 +1167,16 @@ test("п.3 (пачка с повтором и новым поручением): 
   const key = inboxKeyFor(firstUpdate);
   assert.ok(key);
   let inboxDoc = emptyQueueDocument();
-  inboxDoc = enqueueItem(inboxDoc, key, createQueueItem(firstUpdate, 1_000)).document;
-  inboxDoc = enqueueItem(inboxDoc, key, createQueueItem(secondUpdate, 1_100)).document;
+  inboxDoc = enqueueItem(
+    inboxDoc,
+    key,
+    createQueueItem(firstUpdate, 1_000),
+  ).document;
+  inboxDoc = enqueueItem(
+    inboxDoc,
+    key,
+    createQueueItem(secondUpdate, 1_100),
+  ).document;
   const ackedBatches: number[][] = [];
   const acceptanceKinds: Array<string | null> = [];
 
@@ -1067,6 +1275,9 @@ test("п.3 (пачка с повтором и новым поручением): 
 
   const replayedTwoRes = await harness.postUpdate(twoFreshBatch, CRITIC_BOT_ID);
   assert.equal(replayedTwoRes.status, 204);
-  assert.equal(replayedTwoRes.headers.get("x-iva-telegram-acceptance"), "handled");
+  assert.equal(
+    replayedTwoRes.headers.get("x-iva-telegram-acceptance"),
+    "handled",
+  );
   assert.equal(harness.sentTurns.length, 4);
 });
