@@ -1,5 +1,5 @@
 import fallback from "../data/stats.json";
-// Stars for the header counter; the only number the site shows.
+// Stars for the header counter. Plugin install numbers come separately, from src/lib/installs.ts.
 export async function getStats() {
   try {
     if (process.env.SITE_OFFLINE === "1") throw new Error("offline build");
