@@ -207,6 +207,7 @@ void test("colleague message arrives with its bot tag and isolated inbox/chat ke
   const r2 = await admitTelegramUpdate(colleagueUpdate, {
     allowedUserIds: allowed,
     bot: COLLEAGUE_BOT,
+    colleaguesEnabledImpl: () => true,
     enqueueImpl: (key, candidate) =>
       enqueueQueueFile(inboxFile, key, candidate, { strict: true }),
     logImpl: () => {},
@@ -293,6 +294,7 @@ void test("lagging or stalled bot does not delay another bot polling in the same
     assertLease: () => {
       assert.ok(lease);
     },
+    colleaguesEnabledImpl: () => true,
     shouldContinue: () => keepRunningColleague,
     tgImpl: (_method, body, options) => {
       assert.equal(options?.token, COLLEAGUE_BOT.token);

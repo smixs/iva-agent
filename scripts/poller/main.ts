@@ -3,7 +3,9 @@ import { chatHeld, chatState, listChatStatuses } from "#lib/run-status.ts";
 import { launchIvaCommand } from "./update-flow.ts";
 import { real } from "../lib/version-layout.ts";
 import { createHelperOutcomeScan } from "./helper-outcomes.ts";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isColleaguesEnabled } from "#lib/colleagues.ts";
 
 import { COLLECT_QUIET_MS } from "../lib/telegram-collect.ts";
 import {
@@ -345,6 +347,7 @@ export type BotPollLoopOptions = {
   readonly onUpdates?: () => void;
   readonly onConflictAlert?: (bot: TelegramBotConfig) => Promise<boolean>;
   readonly alertResolvedImpl?: (bot: TelegramBotConfig) => void;
+  readonly colleaguesEnabledImpl?: () => boolean;
   readonly shouldContinue?: () => boolean;
   readonly logImpl?: (...args: unknown[]) => void;
 };
@@ -366,6 +369,8 @@ export async function runBotPollLoop({
   onUpdates,
   onConflictAlert,
   alertResolvedImpl,
+  colleaguesEnabledImpl = () =>
+    isColleaguesEnabled(join(DATA_DIR, "settings.json")),
   shouldContinue = () => true,
   logImpl = log,
 }: BotPollLoopOptions): Promise<{ offset: number }> {
@@ -382,7 +387,8 @@ export async function runBotPollLoop({
         handleControlImpl: bot.isPrimary
           ? handleControl
           : () => Promise.resolve(false),
-        admitImpl: (candidate) => admitTelegramUpdate(candidate, { bot }),
+        admitImpl: (candidate) =>
+          admitTelegramUpdate(candidate, { bot, colleaguesEnabledImpl }),
         saveOffsetImpl: persistOffset,
         logImpl,
       });
@@ -393,6 +399,10 @@ export async function runBotPollLoop({
 
   while (shouldContinue()) {
     assertLease();
+    if (!bot.isPrimary && !colleaguesEnabledImpl()) {
+      await sleepImpl(3000);
+      continue;
+    }
     const pollSeconds = pollTimeoutSeconds();
     let data: TelegramResponse;
     try {
@@ -598,7 +608,12 @@ export async function main({
   }
 
   const scanHelperOutcomes = createHelperOutcomeScan();
-  const bots = BOTS;
+  const colleaguesEnabledAtStart = isColleaguesEnabled(
+    join(DATA_DIR, "settings.json"),
+  );
+  const bots = colleaguesEnabledAtStart
+    ? BOTS
+    : BOTS.filter((candidate) => candidate.isPrimary);
   const multiBot = bots.length > 1;
   const wakeSignal = createWakeSignal();
   const fatalBotState: { error: Error | null } = { error: null };

@@ -30,6 +30,7 @@ import {
   validTelegramBotId,
 } from "../../packages/telegram-bots/index.ts";
 import { colleagueBotIdOf, withTelegramBot } from "./telegram-bot-context.ts";
+import { isColleaguesEnabled } from "./colleagues.ts";
 
 export const TELEGRAM_ACCEPTANCE_ROUTE = "/eve/v1/telegram/accepted";
 export const TELEGRAM_ACCEPTANCE_KIND_HEADER = "x-iva-telegram-acceptance";
@@ -335,6 +336,12 @@ export async function handleAcceptedTelegramWebhook<TState>(
     });
   }
   const colleagueId = colleagueBotIdOf(resolvedBot);
+  if (colleagueId !== null && !isColleaguesEnabled()) {
+    return new Response(null, {
+      status: 204,
+      headers: { [TELEGRAM_ACCEPTANCE_KIND_HEADER]: "handled" },
+    });
+  }
   const botId = resolvedBot?.botId ?? configuredBotId();
   const completedFile =
     options.completedUpdatesFile ??

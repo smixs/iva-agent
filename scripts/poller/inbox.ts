@@ -20,8 +20,10 @@ import {
   createCollector,
 } from "../lib/telegram-collect.ts";
 import { traceBridgeAdmission } from "#lib/trace.ts";
+import { isColleaguesEnabled } from "#lib/colleagues.ts";
 import { ALLOWED, BOT_USERNAME, DATA_DIR, log } from "./config.ts";
 import {
+  botIdFromUpdate,
   tagUpdateWithBot,
   type TelegramBotConfig,
 } from "../../packages/telegram-bots/index.ts";
@@ -215,6 +217,8 @@ export async function admitTelegramUpdate(
     botUsername = BOT_USERNAME,
     bot,
     trustedLocal = false,
+    colleaguesEnabledImpl = () =>
+      isColleaguesEnabled(join(DATA_DIR, "settings.json")),
     enqueueImpl = (key: string, candidate: TelegramQueueUpdate) =>
       enqueueQueueFile(TELEGRAM_INBOX_FILE, key, candidate, {
         strict: true,
@@ -228,6 +232,8 @@ export async function admitTelegramUpdate(
     bot?: Pick<TelegramBotConfig, "botId" | "username" | "isPrimary">;
     /** Already-authorized local payload; bypasses external sender/group policy, never key validation. */
     trustedLocal?: boolean;
+    /** Проверка, включена ли опция коллег в настройках Ивы (по умолчанию выключена). */
+    colleaguesEnabledImpl?: () => boolean;
     enqueueImpl?: (
       key: string,
       candidate: TelegramQueueUpdate,
@@ -236,6 +242,12 @@ export async function admitTelegramUpdate(
   } = {},
 ): Promise<InboxAdmissionResult> {
   const tagged = bot ? tagUpdateWithBot(update, bot) : update;
+  const isColleagueUpdate =
+    (bot !== undefined && !bot.isPrimary) || botIdFromUpdate(tagged) !== null;
+  if (!trustedLocal && isColleagueUpdate && !colleaguesEnabledImpl()) {
+    traceBridgeAdmission(tagged, "terminal-drop");
+    return "terminal-drop";
+  }
   const effectiveBotUsername = bot?.username ?? botUsername;
   const trustedKey = trustedLocal ? inboxKeyFor(tagged) : null;
   const decision = trustedLocal

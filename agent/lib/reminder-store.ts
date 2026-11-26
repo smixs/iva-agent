@@ -32,6 +32,7 @@ import { nextCronRunMs } from "./reminder-time.ts";
 import { listChatStatuses, RUN_STALE_MS } from "./run-status.ts";
 import { isRecord, isSafeInteger } from "../../packages/guards/index.ts";
 import { alertDue, alertResolved } from "../../packages/alert-state/index.ts";
+import { validTelegramBotId } from "../../packages/telegram-bots/index.ts";
 
 export const REMINDER_SCHEMA_VERSION = 2;
 /** Сколько держим сработавшую разовую строку: столько владелец видит факт в remind list. */
@@ -57,10 +58,12 @@ export const REMINDER_ABANDONED =
 /** `at` — один точный срок; `cron` — повторяющееся расписание (cron-выражение пользователя). */
 export type ReminderSchedule =
   { kind: "at"; atMs: number } | { kind: "cron"; expr: string; tz: string };
-/** Куда возвращается напоминание: чат и тема, где его попросили. */
+/** Куда возвращается напоминание: чат, тема и (для коллеги) числовой botId. */
 export interface ReminderChat {
   id: string;
   threadId: string | null;
+  /** Числовой id бота-коллеги; отсутствует у основного бота Ивы и прежних строк. */
+  botId?: string;
 }
 
 /** Content decides whether the text is sent directly or executed as a task. */
@@ -301,7 +304,7 @@ export function normalizeSchedule(input: unknown): ReminderSchedule {
 }
 
 /** Одна проверка формы строки и для add, и для загрузки файла. */
-/** Чат строки: null или {id, threadId}; чужая форма - ошибка строки, не тихий null. */
+/** Чат строки: null или {id, threadId, botId?}; чужая форма - ошибка строки, не тихий null. */
 function assertChat(
   file: string,
   idLabel: string,
@@ -312,14 +315,22 @@ function assertChat(
     !isRecord(value) ||
     typeof value.id !== "string" ||
     value.id.trim() === "" ||
-    (value.threadId !== null && typeof value.threadId !== "string")
+    (value.threadId !== null && typeof value.threadId !== "string") ||
+    (value.botId !== undefined && !validTelegramBotId(value.botId)) ||
+    Object.keys(value).some(
+      (key) => key !== "id" && key !== "threadId" && key !== "botId",
+    )
   )
     badReminder(
       file,
       idLabel,
-      `chat must be null or {id, threadId}, got ${JSON.stringify(value)}`,
+      `chat must be null or {id, threadId, botId?}, got ${JSON.stringify(value)}`,
     );
-  return { id: value.id, threadId: value.threadId };
+  return {
+    id: value.id,
+    threadId: value.threadId,
+    ...(value.botId === undefined ? {} : { botId: value.botId }),
+  };
 }
 
 /** id строки: без него строка не адресуется и не находится в remind list. */

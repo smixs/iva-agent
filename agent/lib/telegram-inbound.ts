@@ -508,15 +508,18 @@ function carrierTextEntries(
   text: string,
   label: string | null,
   raw: TelegramRawMessage,
+  recordDaily = true,
 ): CarrierTextEntries {
   const userText = text.trim();
   if (!userText) return { entries: [], flagged: false };
   const labelled = label === null ? userText : `${label}\n${userText}`;
   const dailyText = dailyMessageText(userText, raw);
-  const dailyPath = appendDaily(
-    "[text]",
-    label === null ? dailyText : `${label}\n${dailyText}`,
-  );
+  const dailyPath = recordDaily
+    ? appendDaily(
+        "[text]",
+        label === null ? dailyText : `${label}\n${dailyText}`,
+      )
+    : undefined;
   const sanitized = sanitizeInbound(labelled);
   const flagged = logInboundFindings(sanitized);
   return {
@@ -584,9 +587,10 @@ export async function runTelegramInbound(
   const carrierReading =
     singleReading ??
     readTelegramMessageText(raw, message.text, message.caption);
+  const recordDaily = effects.botId === undefined;
   const singleLocationContext =
     partsRaw.length === 1 ? telegramLocationContext(raw) : null;
-  appendNonFileParts(partsRaw);
+  if (recordDaily) appendNonFileParts(partsRaw);
 
   // The allowlist and dispatch decision are complete. Publish the one working
   // status before reply sanitization, media I/O, security scans or providers.
@@ -656,9 +660,9 @@ export async function runTelegramInbound(
     const rawItems = rawBuffered.filter(
       (s: unknown): s is string => typeof s === "string" && s.trim().length > 0,
     );
-    const dailyPath = rawItems
-      .map((text) => appendDaily("[queued]", text))
-      .at(-1);
+    const dailyPath = recordDaily
+      ? rawItems.map((text) => appendDaily("[queued]", text)).at(-1)
+      : undefined;
     const items = rawItems.map((text) => {
       const sanitized = sanitizeInbound(text);
       // Порядок и состав — как у свежей реплики (gatedTextEntries): предупреждение,
@@ -726,7 +730,7 @@ export async function runTelegramInbound(
     const cmd = cmdText.split(/\s+/)[0].replace(/@\w+$/, "").toLowerCase();
     const rest = cmdText.slice(cmdText.split(/\s+/)[0].length).trim();
     if (cmd === "/task") {
-      appendDaily("[text]", dailyMessageText(cmdText, raw));
+      if (recordDaily) appendDaily("[text]", dailyMessageText(cmdText, raw));
       await effects.startTyping();
       return withPre({
         auth: auth(),
@@ -741,7 +745,7 @@ export async function runTelegramInbound(
       });
     }
     if (cmd === "/tasks") {
-      appendDaily("[text]", dailyMessageText(cmdText, raw));
+      if (recordDaily) appendDaily("[text]", dailyMessageText(cmdText, raw));
       await effects.startTyping();
       return withPre({
         auth: auth(),
@@ -754,7 +758,7 @@ export async function runTelegramInbound(
       });
     }
     if (cmd === "/digest") {
-      appendDaily("[text]", dailyMessageText(cmdText, raw));
+      if (recordDaily) appendDaily("[text]", dailyMessageText(cmdText, raw));
       await effects.startTyping();
       return withPre({
         auth: auth(),
@@ -772,6 +776,7 @@ export async function runTelegramInbound(
       singleReading.text,
       forwardLabel(raw),
       raw,
+      recordDaily,
     );
     return withPre({
       auth: auth(),
@@ -805,7 +810,12 @@ export async function runTelegramInbound(
   // 3. Текст → daily (у тапа — короткая цитата) + полный inbound security-гейт.
   if (partsRaw.length === 1) {
     const label = forwardLabel(raw);
-    const carrier = carrierTextEntries(singleReading?.text ?? "", label, raw);
+    const carrier = carrierTextEntries(
+      singleReading?.text ?? "",
+      label,
+      raw,
+      recordDaily,
+    );
 
     await effects.startTyping();
 
@@ -824,7 +834,10 @@ export async function runTelegramInbound(
     const reading = readings[partIndex];
     const label = forwardLabel(partRaw);
     if (reading.rich) {
-      context.push(...carrierTextEntries(reading.text, label, partRaw).entries);
+      context.push(
+        ...carrierTextEntries(reading.text, label, partRaw, recordDaily)
+          .entries,
+      );
       context.push(...(await richMediaEntries(effects, reading.rich)));
       continue;
     }
@@ -846,7 +859,7 @@ export async function runTelegramInbound(
       await unreadableNote(message, effects, [partRaw], [reading]); // как у одиночного
       continue;
     }
-    const carrier = carrierTextEntries(userText, label, partRaw);
+    const carrier = carrierTextEntries(userText, label, partRaw, recordDaily);
     const carrierText = carrierReading.text.trim();
     // Пересланная часть не «чистый носитель»: eve донесёт её текст без метки,
     // поэтому помеченную запись отдаём контекстом даже на нулевой части.

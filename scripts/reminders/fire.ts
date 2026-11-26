@@ -28,6 +28,8 @@ import { stepLimitNotice } from "#lib/model-response.ts";
 // 2 — вызов без id, с чужим режимом или неизвестный id.
 import { isEntrypoint } from "../lib/version-layout.ts";
 import { notificationChat } from "../../packages/notification-chat/index.ts";
+import { resolveTelegramBot } from "../../packages/telegram-bots/index.ts";
+import { isColleaguesEnabled } from "#lib/colleagues.ts";
 import {
   RUN_STALE_MS,
   chatKeyOf,
@@ -78,6 +80,7 @@ export type ReminderFireDependencies = {
   readonly runTurn?: typeof runReminderTurn;
   readonly recordSession?: typeof recordTurnSession;
   readonly chat?: (env: NodeJS.ProcessEnv) => string | null;
+  readonly colleaguesEnabled?: () => boolean;
   readonly translator?: typeof noticeTranslator;
   readonly log?: (...args: unknown[]) => void;
 };
@@ -92,6 +95,7 @@ const DEFAULTS: Wiring = {
   runTurn: runReminderTurn,
   recordSession: recordTurnSession,
   chat: notificationChat,
+  colleaguesEnabled: () => isColleaguesEnabled(),
   translator: noticeTranslator,
   log: (...args: unknown[]) => console.log(...args),
 };
@@ -101,6 +105,7 @@ type Target = {
   readonly token: string;
   readonly chat: string;
   readonly threadId: string | null;
+  readonly botId: string | null;
 };
 
 /** Либо адресат, либо причина, по которой отправить некуда. */
@@ -212,14 +217,14 @@ async function stampSession(
   }
 }
 
-/** Присмотр чата за ходом срабатывания: чат и тема — из строки. */
+/** Присмотр чата за ходом срабатывания: чат, тема и (для коллеги) botId — из строки. */
 function chatWatch(
   row: Reminder,
   target: Target,
   deps: Wiring,
   onRelease: (ownerStopped: boolean) => void,
 ): TurnWatch {
-  const chatKey = chatKeyOf(target.chat, target.threadId);
+  const chatKey = chatKeyOf(target.chat, target.threadId, target.botId);
   return {
     claim: async (sessionId) => {
       await stampSession(row, sessionId, deps);
@@ -253,8 +258,28 @@ function chatOf(row: Reminder, deps: Wiring): ReminderChat | null {
 }
 
 function route(row: Reminder, deps: Wiring): Route {
-  const token = botToken(deps.env);
   const chat = chatOf(row, deps);
+  const colleagueBotId = chat?.botId ?? null;
+  if (colleagueBotId !== null) {
+    if (!deps.colleaguesEnabled()) {
+      return { reason: "colleagues option is disabled" };
+    }
+    const bot = resolveTelegramBot(colleagueBotId, deps.env);
+    if (bot === null) {
+      return {
+        reason: `colleague bot ${colleagueBotId} token is missing in TELEGRAM_COLLEAGUE_BOT_TOKENS`,
+      };
+    }
+    return {
+      target: {
+        token: bot.token,
+        chat: chat!.id,
+        threadId: chat!.threadId,
+        botId: colleagueBotId,
+      },
+    };
+  }
+  const token = botToken(deps.env);
   if (token === "")
     return { reason: "TELEGRAM_BOT_TOKEN is missing - run: iva config" };
   if (chat === null)
@@ -262,7 +287,14 @@ function route(row: Reminder, deps: Wiring): Route {
       reason:
         "no owner chat: set TELEGRAM_DIGEST_CHAT_ID or TELEGRAM_ALLOWED_USER_IDS",
     };
-  return { target: { token, chat: chat.id, threadId: chat.threadId } };
+  return {
+    target: {
+      token,
+      chat: chat.id,
+      threadId: chat.threadId,
+      botId: null,
+    },
+  };
 }
 
 /** Начало текста строки одной строкой: задание-промпт владельцу целиком не уходит. */
@@ -373,9 +405,11 @@ function replyOf(
   return textOrFallback(turn.message, fallback, allowQuiet);
 }
 
-/** Клиент хода строки: Signal называет себя своим видом, остальное — Reminder. */
+/** Клиент хода строки: Signal называет себя своим видом, остальное — Reminder; для коллеги несёт botId. */
 const clientFor = (row: Reminder, env: NodeJS.ProcessEnv) =>
-  reminderClientOptions(env, isSignal(row) ? "signal" : "reminder");
+  reminderClientOptions(env, isSignal(row) ? "signal" : "reminder", {
+    botId: row.chat?.botId ?? null,
+  });
 
 /** Один ход агента по тексту напоминания. Любой его провал отдаётся текстом строки. */
 async function agentOutcome(

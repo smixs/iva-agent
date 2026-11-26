@@ -28,6 +28,7 @@ import {
   colleagueBotIdOf,
   withTelegramBot,
 } from "../lib/telegram-bot-context.ts";
+import { isColleaguesEnabled } from "../lib/colleagues.ts";
 import {
   flushSettledTelegramQuestions,
   postTelegramQuestion,
@@ -933,6 +934,9 @@ export function createTelegramChannel(
     onMessage: wrapTelegramQueueOnMessage((ctx, message) => {
       const bot = activeTelegramBot(getEnv());
       const colleagueId = colleagueBotIdOf(bot);
+      if (colleagueId !== null && !isColleaguesEnabled()) {
+        return null;
+      }
       const tg = bot ? wrapTelegramHandle(ctx.telegram, bot) : ctx.telegram;
       const chatKey = chatKeyOf(
         message.chat.id,
@@ -1042,6 +1046,9 @@ export function createTelegramChannel(
       return new Response(`unknown Telegram bot ${requestedBotId}`, {
         status: 404,
       });
+    }
+    if (colleagueBotIdOf(bot) !== null && !isColleaguesEnabled()) {
+      return new Response(null, { status: 204 });
     }
     const scopedArgs = scopeWebhookArgs(args, bot);
     return bot
