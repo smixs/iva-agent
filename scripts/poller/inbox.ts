@@ -24,6 +24,8 @@ import { isColleaguesEnabled } from "#lib/colleagues.ts";
 import { ALLOWED, BOT_USERNAME, DATA_DIR, log } from "./config.ts";
 import {
   botIdFromUpdate,
+  configuredTelegramBotIds,
+  resolveTelegramBot,
   tagUpdateWithBot,
   type TelegramBotConfig,
 } from "../../packages/telegram-bots/index.ts";
@@ -111,18 +113,45 @@ export function terminalDropLine(update: TelegramQueueUpdate): string {
 function senderPolicy(
   sender: InboxSender | undefined,
   allowedUserIds: ReadonlySet<string>,
+  {
+    colleaguesEnabled = false,
+    peerBotIds,
+    receiverBotId,
+  }: {
+    readonly colleaguesEnabled?: boolean;
+    readonly peerBotIds?: ReadonlySet<string>;
+    readonly receiverBotId?: string | null;
+  } = {},
 ): "allowed" | "terminal-drop" | "unownable" {
   if (sender?.id === undefined) return "unownable";
-  if (allowedUserIds.size === 0 || sender.is_bot === true) {
+  const senderId = String(sender.id);
+  if (sender.is_bot === true) {
+    if (
+      colleaguesEnabled &&
+      senderId !== receiverBotId &&
+      peerBotIds?.has(senderId) === true
+    ) {
+      return "allowed";
+    }
     return "terminal-drop";
   }
-  return allowedUserIds.has(String(sender.id)) ? "allowed" : "terminal-drop";
+  if (allowedUserIds.size === 0) return "terminal-drop";
+  return allowedUserIds.has(senderId) ? "allowed" : "terminal-drop";
 }
 
 function admissionPolicy(
   update: TelegramQueueUpdate,
   allowedUserIds: ReadonlySet<string>,
   botUsername: unknown,
+  {
+    colleaguesEnabled = false,
+    peerBotIds,
+    receiverBotId,
+  }: {
+    readonly colleaguesEnabled?: boolean;
+    readonly peerBotIds?: ReadonlySet<string>;
+    readonly receiverBotId?: string | null;
+  } = {},
 ): { action: "own"; key: string } | { action: "terminal-drop" | "unownable" } {
   const hasMessage = update.message !== undefined;
   const hasCallback = update.callback_query !== undefined;
@@ -138,14 +167,24 @@ function admissionPolicy(
   const sender = hasMessage
     ? update.message?.from
     : update.callback_query?.from;
-  const senderDecision = senderPolicy(sender, allowedUserIds);
+  const senderDecision = senderPolicy(sender, allowedUserIds, {
+    colleaguesEnabled: hasMessage && colleaguesEnabled,
+    peerBotIds,
+    receiverBotId,
+  });
   if (senderDecision !== "allowed") return { action: senderDecision };
 
   const key = inboxKeyFor(update);
   if (key === null) return { action: "unownable" };
   if (
     hasMessage &&
-    !shouldQueueBusyUpdate(update, { allowedUserIds, botUsername })
+    !shouldQueueBusyUpdate(update, {
+      allowedUserIds,
+      botUsername,
+      colleaguesEnabled,
+      peerBotIds,
+      receiverBotId,
+    })
   ) {
     return { action: "terminal-drop" };
   }
@@ -219,6 +258,7 @@ export async function admitTelegramUpdate(
     trustedLocal = false,
     colleaguesEnabledImpl = () =>
       isColleaguesEnabled(join(DATA_DIR, "settings.json")),
+    peerBotIdsImpl = () => configuredTelegramBotIds(),
     enqueueImpl = (key: string, candidate: TelegramQueueUpdate) =>
       enqueueQueueFile(TELEGRAM_INBOX_FILE, key, candidate, {
         strict: true,
@@ -234,6 +274,8 @@ export async function admitTelegramUpdate(
     trustedLocal?: boolean;
     /** Проверка, включена ли опция коллег в настройках Ивы (по умолчанию выключена). */
     colleaguesEnabledImpl?: () => boolean;
+    /** Известные боты этой установки для допуска межоботовых сообщений (can_communicate_with_bots). */
+    peerBotIdsImpl?: () => ReadonlySet<string>;
     enqueueImpl?: (
       key: string,
       candidate: TelegramQueueUpdate,
@@ -242,19 +284,30 @@ export async function admitTelegramUpdate(
   } = {},
 ): Promise<InboxAdmissionResult> {
   const tagged = bot ? tagUpdateWithBot(update, bot) : update;
+  const colleaguesEnabled = colleaguesEnabledImpl();
   const isColleagueUpdate =
     (bot !== undefined && !bot.isPrimary) || botIdFromUpdate(tagged) !== null;
-  if (!trustedLocal && isColleagueUpdate && !colleaguesEnabledImpl()) {
+  if (!trustedLocal && isColleagueUpdate && !colleaguesEnabled) {
     traceBridgeAdmission(tagged, "terminal-drop");
     return "terminal-drop";
   }
   const effectiveBotUsername = bot?.username ?? botUsername;
+  const receiverBotId =
+    bot?.botId ??
+    botIdFromUpdate(tagged) ??
+    resolveTelegramBot(null)?.botId ??
+    null;
+  const peerBotIds = colleaguesEnabled ? peerBotIdsImpl() : undefined;
   const trustedKey = trustedLocal ? inboxKeyFor(tagged) : null;
   const decision = trustedLocal
     ? trustedKey === null
       ? { action: "unownable" as const }
       : { action: "own" as const, key: trustedKey }
-    : admissionPolicy(tagged, allowedUserIds, effectiveBotUsername);
+    : admissionPolicy(tagged, allowedUserIds, effectiveBotUsername, {
+        colleaguesEnabled,
+        peerBotIds,
+        receiverBotId,
+      });
   // Trace: мост принял апдейт или отбросил его своей политикой — первое звено цепочки
   // хода, и пишется оно из ПРОЦЕССА МОСТА в тот же дневной файл (ADR-0010).
   if (decision.action !== "own") {

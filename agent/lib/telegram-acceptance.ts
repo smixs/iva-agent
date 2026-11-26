@@ -25,10 +25,17 @@ import { isRecord } from "../../packages/guards/index.ts";
 import {
   botIdFromUpdate,
   botScopedKey,
+  isConfiguredPeerBot,
   resolveTelegramBot,
   TELEGRAM_BOT_ID_HEADER,
+  TELEGRAM_PEER_BOT_FROM_FIELD,
   validTelegramBotId,
+  type TelegramBotConfig,
 } from "../../packages/telegram-bots/index.ts";
+import {
+  claimInboundPeerAssignment,
+  completeInboundPeerAssignment,
+} from "./colleague-assignments.ts";
 import { colleagueBotIdOf, withTelegramBot } from "./telegram-bot-context.ts";
 import { isColleaguesEnabled } from "./colleagues.ts";
 
@@ -40,7 +47,14 @@ export const TELEGRAM_CLOSED_SESSION_KIND = "closed-session";
 
 type ReceiptContext = { receipt: string | null; handled: boolean };
 type CompletedLedger = { botId: string; updates: number[] };
-type AcceptedWebhookOptions = { completedUpdatesFile?: string };
+type AcceptedWebhookOptions = {
+  completedUpdatesFile?: string;
+  assignmentsFile?: string;
+  settingsFile?: string;
+  env?: NodeJS.ProcessEnv;
+  apiBaseUrl?: string;
+  fetchImpl?: typeof fetch;
+};
 type AcceptedWebhookHandler<TState> = (
   request: Request,
   args: RouteHandlerArgs<TState>,
@@ -100,8 +114,11 @@ function telegramReroute(body: unknown): TelegramReroute | null {
   };
 }
 
-function hasValidWebhookSecret(request: Request): boolean {
-  const expected = process.env.TELEGRAM_WEBHOOK_SECRET_TOKEN;
+function hasValidWebhookSecret(
+  request: Request,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const expected = env.TELEGRAM_WEBHOOK_SECRET_TOKEN;
   if (!expected) {
     if (!missingWebhookSecretReported) {
       console.error(
@@ -116,6 +133,196 @@ function hasValidWebhookSecret(request: Request): boolean {
   const left = Buffer.from(expected);
   const right = Buffer.from(supplied);
   return left.length === right.length && timingSafeEqual(left, right);
+}
+
+export interface PreparedPeerBotWebhookRequest {
+  readonly request: Request;
+  readonly peerBot: TelegramBotConfig | null;
+  readonly assignmentId: string | null;
+  readonly duplicateAssignment: boolean;
+}
+
+function stripPeerField(msg: Record<string, unknown>): {
+  readonly cleaned: Record<string, unknown>;
+  readonly stripped: boolean;
+} {
+  let stripped = false;
+  const cleaned: Record<string, unknown> = { ...msg };
+  if (TELEGRAM_PEER_BOT_FROM_FIELD in cleaned) {
+    Reflect.deleteProperty(cleaned, TELEGRAM_PEER_BOT_FROM_FIELD);
+    stripped = true;
+  }
+  if (Array.isArray(cleaned.iva_parts)) {
+    cleaned.iva_parts = cleaned.iva_parts.map((part: unknown): unknown => {
+      if (!isRecord(part) || !(TELEGRAM_PEER_BOT_FROM_FIELD in part)) {
+        return part;
+      }
+      stripped = true;
+      const copy = { ...part };
+      Reflect.deleteProperty(copy, TELEGRAM_PEER_BOT_FROM_FIELD);
+      return copy;
+    });
+  }
+  return { cleaned, stripped };
+}
+
+function rebuildJsonRequest(request: Request, body: unknown): Request {
+  const headers = new Headers(request.headers);
+  headers.delete("content-length");
+  headers.set("content-type", "application/json");
+  return new Request(request.url, {
+    method: request.method,
+    headers,
+    body: JSON.stringify(body),
+  });
+}
+
+/**
+ * Готовит входящий webhook-запрос для eve, не изменяя код eve/:
+ *   1) всегда удаляет внешнее поле `iva_peer_bot_from` (защита от подделки);
+ *   2) если запрос аутентифицирован, опция коллег включена и отправитель `from.is_bot=true`
+ *      является другим настроенным ботом этой установки (can_communicate_with_bots),
+ *      переписывает `from.is_bot=false` и ставит доверенную метку `iva_peer_bot_from`,
+ *      чтобы eve передала сообщение в runTelegramInbound;
+ *   3) для личного поручения бота другому боту (private DM) регистрирует его в ledger
+ *      поручений (дедупликация и однократная видимая строка владельцу в чате коллеги).
+ */
+export async function preparePeerBotWebhookRequest(
+  request: Request,
+  options: {
+    readonly resolvedBot: TelegramBotConfig | null;
+    readonly authenticated?: boolean;
+    readonly env?: NodeJS.ProcessEnv;
+    readonly settingsFile?: string;
+    readonly assignmentsFile?: string;
+    readonly apiBaseUrl?: string;
+    readonly fetchImpl?: typeof fetch;
+  },
+): Promise<PreparedPeerBotWebhookRequest> {
+  const env = options.env ?? process.env;
+  const authenticated =
+    options.authenticated ?? hasValidWebhookSecret(request, env);
+  let body: unknown;
+  try {
+    body = await request.clone().json();
+  } catch {
+    return {
+      request,
+      peerBot: null,
+      assignmentId: null,
+      duplicateAssignment: false,
+    };
+  }
+  if (!isRecord(body) || !isRecord(body.message)) {
+    return {
+      request,
+      peerBot: null,
+      assignmentId: null,
+      duplicateAssignment: false,
+    };
+  }
+  const { cleaned: cleanMessage, stripped } = stripPeerField(body.message);
+  const from = isRecord(cleanMessage.from) ? cleanMessage.from : null;
+  const peerBot =
+    authenticated &&
+    isColleaguesEnabled(options.settingsFile) &&
+    from !== null &&
+    from.is_bot === true
+      ? isConfiguredPeerBot(
+          from.id as string | number | null | undefined,
+          options.resolvedBot?.botId,
+          env,
+        )
+      : null;
+
+  if (peerBot === null) {
+    return {
+      request: stripped
+        ? rebuildJsonRequest(request, { ...body, message: cleanMessage })
+        : request,
+      peerBot: null,
+      assignmentId: null,
+      duplicateAssignment: false,
+    };
+  }
+
+  const origin = {
+    botId: peerBot.botId as string,
+    ...(peerBot.username ? { username: peerBot.username } : {}),
+  };
+  const nextMessage: Record<string, unknown> = {
+    ...cleanMessage,
+    from: { ...from, is_bot: false },
+    [TELEGRAM_PEER_BOT_FROM_FIELD]: origin,
+  };
+  if (Array.isArray(nextMessage.iva_parts)) {
+    nextMessage.iva_parts = nextMessage.iva_parts.map(
+      (part: unknown): unknown => {
+        if (
+          !isRecord(part) ||
+          !isRecord(part.from) ||
+          part.from.is_bot !== true
+        ) {
+          return part;
+        }
+        const partFromId =
+          typeof part.from.id === "string" || typeof part.from.id === "number"
+            ? String(part.from.id)
+            : "";
+        if (partFromId !== peerBot.botId) return part;
+        return {
+          ...part,
+          from: { ...part.from, is_bot: false },
+          [TELEGRAM_PEER_BOT_FROM_FIELD]: origin,
+        };
+      },
+    );
+  }
+
+  let assignmentId: string | null = null;
+  const chat = isRecord(nextMessage.chat) ? nextMessage.chat : null;
+  if (chat?.type === "private" && options.resolvedBot?.botId) {
+    const text =
+      typeof nextMessage.text === "string"
+        ? nextMessage.text
+        : typeof nextMessage.caption === "string"
+          ? nextMessage.caption
+          : "";
+    const messageId =
+      typeof nextMessage.message_id === "number" ||
+      typeof nextMessage.message_id === "string"
+        ? nextMessage.message_id
+        : typeof body.update_id === "number"
+          ? body.update_id
+          : 0;
+    const claimed = await claimInboundPeerAssignment({
+      fromBotId: peerBot.botId as string,
+      toBotId: options.resolvedBot.botId,
+      messageId,
+      text,
+      env,
+      settingsFile: options.settingsFile,
+      storeFile: options.assignmentsFile,
+      apiBaseUrl: options.apiBaseUrl,
+      fetchImpl: options.fetchImpl,
+    });
+    assignmentId = claimed.assignmentId;
+    if (claimed.duplicate) {
+      return {
+        request,
+        peerBot,
+        assignmentId,
+        duplicateAssignment: true,
+      };
+    }
+  }
+
+  return {
+    request: rebuildJsonRequest(request, { ...body, message: nextMessage }),
+    peerBot,
+    assignmentId,
+    duplicateAssignment: false,
+  };
 }
 
 function configuredBotId(): string | null {
@@ -322,21 +529,22 @@ export async function handleAcceptedTelegramWebhook<TState>(
   args: RouteHandlerArgs<TState>,
   options: AcceptedWebhookOptions = {},
 ): Promise<Response> {
+  const env = options.env ?? process.env;
   const {
     botId: requestedBotId,
     receipt,
     reroute,
     updateId,
   } = await metadataFromRequest(request);
-  const authenticated = hasValidWebhookSecret(request);
-  const resolvedBot = resolveTelegramBot(requestedBotId);
+  const authenticated = hasValidWebhookSecret(request, env);
+  const resolvedBot = resolveTelegramBot(requestedBotId, env);
   if (requestedBotId !== null && authenticated && resolvedBot === null) {
     return new Response(`unknown Telegram bot ${requestedBotId}`, {
       status: 404,
     });
   }
   const colleagueId = colleagueBotIdOf(resolvedBot);
-  if (colleagueId !== null && !isColleaguesEnabled()) {
+  if (colleagueId !== null && !isColleaguesEnabled(options.settingsFile)) {
     return new Response(null, {
       status: 204,
       headers: { [TELEGRAM_ACCEPTANCE_KIND_HEADER]: "handled" },
@@ -363,6 +571,22 @@ export async function handleAcceptedTelegramWebhook<TState>(
       headers: { [TELEGRAM_ACCEPTANCE_KIND_HEADER]: "handled" },
     });
   }
+  const prepared = await preparePeerBotWebhookRequest(request, {
+    resolvedBot,
+    authenticated,
+    env,
+    settingsFile: options.settingsFile,
+    assignmentsFile: options.assignmentsFile,
+    apiBaseUrl: options.apiBaseUrl,
+    fetchImpl: options.fetchImpl,
+  });
+  if (prepared.duplicateAssignment) {
+    return new Response(null, {
+      status: 204,
+      headers: { [TELEGRAM_ACCEPTANCE_KIND_HEADER]: "handled" },
+    });
+  }
+  const effectiveRequest = prepared.request;
   const inFlightKey =
     updateId !== null && authenticated && botId !== null
       ? `${botId}:${updateId}`
@@ -519,7 +743,7 @@ export async function handleAcceptedTelegramWebhook<TState>(
           background.push(Promise.resolve(task));
         },
       };
-      const invoke = () => handler(request, wrappedArgs);
+      const invoke = () => handler(effectiveRequest, wrappedArgs);
       const response = await (resolvedBot
         ? withTelegramBot(resolvedBot, invoke)
         : invoke());
@@ -528,6 +752,18 @@ export async function handleAcceptedTelegramWebhook<TState>(
       await Promise.allSettled(background);
       const handled = receiptContext.getStore()?.handled === true;
       if (accepted || handled) {
+        if (accepted && prepared.assignmentId !== null) {
+          try {
+            await completeInboundPeerAssignment(prepared.assignmentId, {
+              storeFile: options.assignmentsFile,
+            });
+          } catch (error) {
+            console.error(
+              "[telegram] не смог завершить запись поручения:",
+              error,
+            );
+          }
+        }
         if (updateId !== null && authenticated && botId !== null) {
           try {
             await recordCompletedUpdate(completedFile, botId, updateId);

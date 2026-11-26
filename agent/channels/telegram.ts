@@ -16,11 +16,14 @@ import { POST, type ChannelSource, type RouteHandlerArgs } from "eve/channels";
 import {
   botIdFromUpdate,
   botScopedKey,
+  configuredTelegramBotIds,
+  isConfiguredPeerBot,
   resolveTelegramBot,
   TELEGRAM_BOT_ID_HEADER,
   validTelegramBotId,
   type TelegramBotConfig,
 } from "../../packages/telegram-bots/index.ts";
+import { completeInboundPeerAssignment } from "../lib/colleague-assignments.ts";
 import {
   activeTelegramBot,
   activeTelegramBotToken,
@@ -48,7 +51,10 @@ import {
   type StatusTransport,
 } from "../lib/outbox.js";
 import { hasRichButtons } from "../lib/telegram-format.js";
-import { parseTelegramDelivery } from "../lib/telegram-delivery.js";
+import {
+  parseTelegramDelivery,
+  parseTelegramQuiet,
+} from "../lib/telegram-delivery.js";
 import {
   TELEGRAM_RICH_REPLIES,
   type RichReplies,
@@ -58,6 +64,7 @@ import { TELEGRAM_WIDGETS } from "../lib/telegram-widget.ts";
 // запись в Vault, медиа со зрением и транскрипцией, inbound-Gate и контекст хода.
 // Канал приносит ему эффекты и сам про разбор входящего ничего не знает.
 import {
+  isExplicitlyAddressedInGroup,
   runTelegramInbound,
   type TelegramInboundMessage,
 } from "../lib/telegram-inbound.js";
@@ -108,6 +115,7 @@ import {
 } from "../lib/telegram-compact-route.ts";
 import {
   handleAcceptedTelegramWebhook,
+  preparePeerBotWebhookRequest,
   TELEGRAM_ACCEPTANCE_ROUTE,
   wrapTelegramQueueOnMessage,
   telegramTurnPolicy,
@@ -828,6 +836,24 @@ export function createTelegramChannel(
             }
             await closeTelegramDraftChat(tg, ctx.session.id, data.turnId);
             if (!data.message) return;
+            // В общей группе коллег (и в межоботовой личке) молчание `<!-- iva:none -->` —
+            // нормальный исход хода без отправки сообщения в Telegram (ADR-0030, T911).
+            const isGroupOrPeerChat =
+              channel.state.chatType === "group" ||
+              channel.state.chatType === "supergroup" ||
+              (channel.state.chatType === "private" &&
+                isConfiguredPeerBot(
+                  channel.state.chatId,
+                  bot?.botId,
+                  getEnv(),
+                ) !== null);
+            if (
+              isGroupOrPeerChat &&
+              isColleaguesEnabled() &&
+              parseTelegramQuiet(data.message).quiet
+            ) {
+              return;
+            }
             const { text: message, silent } = parseTelegramDelivery(
               data.message,
             );
@@ -932,9 +958,11 @@ export function createTelegramChannel(
     },
     // Вход: канал только подаёт эффекты, разбор апдейта живёт в пайплайне.
     onMessage: wrapTelegramQueueOnMessage((ctx, message) => {
-      const bot = activeTelegramBot(getEnv());
+      const env = getEnv();
+      const bot = activeTelegramBot(env);
       const colleagueId = colleagueBotIdOf(bot);
-      if (colleagueId !== null && !isColleaguesEnabled()) {
+      const colleaguesActive = isColleaguesEnabled();
+      if (colleagueId !== null && !colleaguesActive) {
         return null;
       }
       const tg = bot ? wrapTelegramHandle(ctx.telegram, bot) : ctx.telegram;
@@ -948,13 +976,23 @@ export function createTelegramChannel(
       const receivedDuringTurn =
         telegramTurnPolicy() === "steer" &&
         (receivedState === "turn" || receivedState === "accepted");
+      const botUsername = bot?.username ?? tg.botUsername;
+      const unaddressedGroup =
+        colleaguesActive &&
+        (message.chat.type === "group" || message.chat.type === "supergroup") &&
+        !isExplicitlyAddressedInGroup(message, botUsername);
       return rememberAccepted(
         chatKey,
         message,
         runTelegramInbound(message, {
           ...(colleagueId !== null ? { botId: colleagueId } : {}),
+          ...(bot?.botId ? { selfBotId: bot.botId } : {}),
           ...(bot?.token ? { botToken: bot.token } : {}),
-          botUsername: bot?.username ?? tg.botUsername,
+          botUsername,
+          colleaguesEnabled: colleaguesActive,
+          ...(colleaguesActive
+            ? { peerBotIds: configuredTelegramBotIds(env) }
+            : {}),
           request: (method, body) => tg.request(method, body),
           sendMessage: noticeSender((text) => tg.sendMessage(text)),
           startTyping: () => tg.startTyping(),
@@ -969,7 +1007,9 @@ export function createTelegramChannel(
               getStatusImpl: getChatStatus,
               setStatusIfImpl: setChatStatusIf,
             });
-            if (claimed) startTelegramAcceptedTyping(tg, claimed);
+            if (claimed && !unaddressedGroup) {
+              startTelegramAcceptedTyping(tg, claimed);
+            }
           },
           onAbandoned: async () => {
             closeTelegramAcceptedTyping(tg, ingressId);
@@ -1040,8 +1080,9 @@ export function createTelegramChannel(
     request: Request,
     args: RouteHandlerArgs<TelegramChannelState>,
   ): Promise<Response> => {
+    const env = getEnv();
     const requestedBotId = await botIdFromWebhookRequest(request);
-    const bot = resolveTelegramBot(requestedBotId, getEnv());
+    const bot = resolveTelegramBot(requestedBotId, env);
     if (requestedBotId !== null && bot === null) {
       return new Response(`unknown Telegram bot ${requestedBotId}`, {
         status: 404,
@@ -1050,12 +1091,29 @@ export function createTelegramChannel(
     if (colleagueBotIdOf(bot) !== null && !isColleaguesEnabled()) {
       return new Response(null, { status: 204 });
     }
+    const prepared = await preparePeerBotWebhookRequest(request, {
+      resolvedBot: bot,
+      env,
+      apiBaseUrl: options.api?.apiBaseUrl,
+      fetchImpl: options.api?.fetch,
+    });
+    if (prepared.duplicateAssignment) {
+      return new Response(null, { status: 204 });
+    }
     const scopedArgs = scopeWebhookArgs(args, bot);
-    return bot
+    const response = await (bot
       ? withTelegramBot(bot, () =>
-          telegramWebhookRoute.handler(request, scopedArgs),
+          telegramWebhookRoute.handler(prepared.request, scopedArgs),
         )
-      : telegramWebhookRoute.handler(request, scopedArgs);
+      : telegramWebhookRoute.handler(prepared.request, scopedArgs));
+    if (response.ok && prepared.assignmentId !== null) {
+      try {
+        await completeInboundPeerAssignment(prepared.assignmentId);
+      } catch (error) {
+        console.error("[telegram] не смог завершить запись поручения:", error);
+      }
+    }
+    return response;
   };
 
   return {
@@ -1082,6 +1140,11 @@ export function createTelegramChannel(
           telegramWebhookRoute.handler,
           request,
           args,
+          {
+            env: getEnv(),
+            apiBaseUrl: options.api?.apiBaseUrl,
+            fetchImpl: options.api?.fetch,
+          },
         ),
       ),
       POST(TELEGRAM_COMPACT_ROUTE, (req, args) =>
