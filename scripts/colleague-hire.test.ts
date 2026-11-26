@@ -513,7 +513,9 @@ test(`property: buildManagedBotHireUrl always produces valid t.me/newbot URLs wi
 //     ставит имя и описание роли, коллега начинает принимать сообщения ---
 test("п.2: managed_bot fetches token, stores it in .env beside TELEGRAM_BOT_TOKEN, sets profile, and colleague immediately accepts messages", async (t) => {
   const settingsFile = join(dataPath, "settings.json");
+  const hireStateDir = join(dataPath, "colleague-hires-p2.d");
   rmSync(settingsFile, { force: true });
+  rmSync(hireStateDir, { recursive: true, force: true });
   // Reset clean .env without colleague tokens.
   writeFileSync(
     envPath,
@@ -630,6 +632,7 @@ test("п.2: managed_bot fetches token, stores it in .env beside TELEGRAM_BOT_TOK
         primaryBotToken: IVA_TOKEN,
         envPath,
         settingsFile,
+        hireStateDir,
         env: localEnv,
         tgImpl: (method, body, options) => {
           botApiCalls.push({ method, token: options?.token, body });
@@ -1505,7 +1508,13 @@ test("T940: persistent temporary getManagedBotToken failure is bounded, releases
       logImpl: () => {},
     });
     assert.deepEqual(completed, { attempted: 1, completed: 1 });
-    assert.equal(existsSync(stateFile), false);
+    assert.equal(existsSync(stateFile), true);
+    const completedState = JSON.parse(readFileSync(stateFile, "utf8")) as {
+      phase?: string;
+      updateId?: number;
+    };
+    assert.equal(completedState.phase, "completed");
+    assert.equal(completedState.updateId, 1010);
     assert.equal(hiredBots.length, 1);
     assert.equal(ownerNotices.length, 1);
     const cfg = parseColleaguesConfig(
@@ -1669,6 +1678,7 @@ test("T940 avatar-settings write failure releases ingress and keeps avatar retry
               assert.ok(avatarSettingsLock, "test must hold settings lock");
               return Promise.resolve(successfulAvatar);
             },
+            replyImpl: () => Promise.resolve({ message_id: 1 }),
             logImpl: () => {},
           }),
       });

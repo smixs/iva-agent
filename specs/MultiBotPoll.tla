@@ -55,7 +55,8 @@ VARIABLES
   wrongBotBad,    \* апдейт бота потерялся из-за столкновения update_id другого бота
   colleaguesEnabled, \* опция коллег в настройках; по умолчанию FALSE
   initialized,      \* [Procs -> [Bots -> BOOLEAN]] — lazy init бота завершён в этом процессе
-  hireStage,        \* durable найм colleague: none/profile/settings/complete/terminal
+  hireStage,        \* durable найм colleague: none/token/profile/settings/complete/terminal;
+                     \* complete — сохраняемая отметка идемпотентности update_id против повторной доставки
   hireEventBlocked  \* управляющее событие ещё держит acknowledgement ingress
 
 vars == <<lockHolder, procState, tgUpdates, diskOffset, memOffset, pendingSave,
@@ -245,8 +246,9 @@ ManagedHireDeferEvent ==
                  pendingSave, botSlow, admitted, inboxUntagged, restarts, overlapBad,
                  wrongBotBad, colleaguesEnabled, initialized>>
 
-\* Фоновая сверка durable журнала найма завершает запись settings.json. Только после
-\* этого коллега допускается к lazy init и опросу: одного токена в .env недостаточно.
+\* Фоновая сверка durable журнала найма завершает запись settings.json и оставляет
+\* durable complete-отметку update_id против повторной доставки. Только после этого коллега
+\* допускается к lazy init и опросу: одного токена в .env недостаточно.
 ManagedHireComplete ==
   /\ hireStage = "settings"
   /\ hireStage' = "complete"
