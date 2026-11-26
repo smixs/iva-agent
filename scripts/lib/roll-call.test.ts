@@ -662,6 +662,9 @@ test("the branch is the one iva update reads: unset is main, an unknown one or n
     assert.equal(await updateBranchOf(root), "main");
     git("config", "--local", "iva.updateBranch", "beta");
     assert.equal(await updateBranchOf(root), "beta");
+    // A value of several lines that looks like the key further down does not pass for it.
+    git("config", "--local", "iva.note", "x\niva.updatebranch=main");
+    assert.equal(await updateBranchOf(root), "beta");
     git("config", "--local", "iva.updateBranch", "my-feature");
     assert.equal(await updateBranchOf(root), "other");
   } finally {
