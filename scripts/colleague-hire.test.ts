@@ -1515,7 +1515,7 @@ test("последний круг B1: incomplete hire does not start polling aft
         replyImpl: () => Promise.resolve({ message_id: 1 }),
         lang: () => "ru",
         logImpl: () => {},
-      } as Parameters<typeof handleManagedBotUpdate>[1],
+      },
     );
     assert.equal(first.status, "failed");
     if (first.status === "failed") assert.equal(first.retry, true);
@@ -1655,7 +1655,7 @@ test("последний круг B2: settings failure is consumed without losin
         replyImpl: () => Promise.resolve({ message_id: 1 }),
         lang: () => "ru",
         logImpl: () => {},
-      } as Parameters<typeof handleManagedBotUpdate>[1],
+      },
     );
     assert.equal(outcome.status, "failed");
     if (outcome.status === "failed") {

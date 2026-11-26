@@ -900,7 +900,7 @@ export interface HireReconcileDeps {
   readonly replyImpl?: (
     chatId: number | string,
     text: string,
-  ) => Promise<{ message_id?: number } | unknown>;
+  ) => Promise<unknown>;
   readonly onColleagueHired?: (bot: TelegramBotConfig) => void;
   readonly now?: () => number;
   readonly lang?: () => "ru" | "en";
@@ -966,7 +966,7 @@ export async function reconcilePendingColleagueHires(
   let completed = 0;
 
   for (const name of names.sort()) {
-    let state: ColleagueHireState | null = null;
+    let state: ColleagueHireState | null;
     try {
       state = parseHireState(
         JSON.parse(readFileSync(join(hireStateDir, name), "utf8")),
