@@ -27,6 +27,7 @@ const ISLAND_FILES = [
   "scripts/lib/env-file.ts",
   "scripts/lib/link-target.ts",
   "packages/notification-chat/index.ts",
+  "packages/telegram-bots/index.ts",
   "scripts/cli/remind.ts",
 ];
 

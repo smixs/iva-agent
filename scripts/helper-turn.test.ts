@@ -105,6 +105,9 @@ test("R7 Telegram chat and existing turns retain 91dd9bb6 wire bytes except appr
     previous.tools.filter((tool) => removed.has(tool.name)).length,
     4,
   );
+  const colleague = enabled.tools.find((tool) => tool.name === "colleague");
+  assert.ok(colleague);
+  tools.splice(enabled.tools.indexOf(colleague), 0, colleague);
   const goal = enabled.tools.find((tool) => tool.name === "goal");
   assert.ok(goal);
   tools.splice(enabled.tools.indexOf(goal), 0, goal);
@@ -131,7 +134,11 @@ test("R7 Telegram chat and existing turns retain 91dd9bb6 wire bytes except appr
         assert.equal(turn.authored.auth?.attributes?.chat_id, "41");
         assert.equal(turn.authored.auth?.attributes?.chat_type, "private");
       }
-      assert.equal(turn.wire.tools.length, 139, kind);
+      assert.equal(turn.wire.tools.length, 140, kind);
+      assert.ok(
+        turn.wire.tools.some((t) => t.name === "colleague"),
+        kind,
+      );
       assert.ok(
         turn.wire.tools.some((t) => t.name === "goal"),
         kind,
