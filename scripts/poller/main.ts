@@ -348,6 +348,8 @@ export type BotPollLoopOptions = {
   readonly onConflictAlert?: (bot: TelegramBotConfig) => Promise<boolean>;
   readonly alertResolvedImpl?: (bot: TelegramBotConfig) => void;
   readonly colleaguesEnabledImpl?: () => boolean;
+  /** Lazy per-bot startup for colleagues: runs only after the option is enabled, never while it is off. */
+  readonly initializeOffsetImpl?: () => Promise<number>;
   readonly shouldContinue?: () => boolean;
   readonly logImpl?: (...args: unknown[]) => void;
 };
@@ -371,6 +373,7 @@ export async function runBotPollLoop({
   alertResolvedImpl,
   colleaguesEnabledImpl = () =>
     isColleaguesEnabled(join(DATA_DIR, "settings.json")),
+  initializeOffsetImpl,
   shouldContinue = () => true,
   logImpl = log,
 }: BotPollLoopOptions): Promise<{ offset: number }> {
@@ -395,6 +398,7 @@ export async function runBotPollLoop({
     });
 
   let offset = initialOffset;
+  let initializeOffset = initializeOffsetImpl;
   let consecutiveConflicts = 0;
 
   while (shouldContinue()) {
@@ -402,6 +406,22 @@ export async function runBotPollLoop({
     if (!bot.isPrimary && !colleaguesEnabledImpl()) {
       await sleepImpl(3000);
       continue;
+    }
+    if (initializeOffset !== undefined) {
+      try {
+        offset = await initializeOffset();
+        initializeOffset = undefined;
+        // The owner may have switched the option back off while webhook/offset
+        // initialization was in flight; the gate is checked again before the first poll.
+        if (!bot.isPrimary && !colleaguesEnabledImpl()) continue;
+      } catch (error) {
+        // A lost lease is fatal for the whole bridge; a bad or unreachable colleague
+        // token must only retry this colleague and must not stop Iva's own polling.
+        assertLease();
+        logImpl(`[${label}] offset init:`, errorMessage(error));
+        await sleepImpl(3000);
+        continue;
+      }
     }
     const pollSeconds = pollTimeoutSeconds();
     let data: TelegramResponse;
@@ -608,26 +628,26 @@ export async function main({
   }
 
   const scanHelperOutcomes = createHelperOutcomeScan();
-  const colleaguesEnabledAtStart = isColleaguesEnabled(
-    join(DATA_DIR, "settings.json"),
-  );
-  const bots = colleaguesEnabledAtStart
-    ? BOTS
-    : BOTS.filter((candidate) => candidate.isPrimary);
+  // Configured colleague loops exist even while the option is off: their poll loop
+  // sleeps before touching Telegram and wakes up on `iva colleague on` without a
+  // bridge restart. Offset/webhook initialization is lazy for the same reason.
+  const bots = BOTS;
   const multiBot = bots.length > 1;
   const wakeSignal = createWakeSignal();
   const fatalBotState: { error: Error | null } = { error: null };
 
   if (multiBot) {
-    const botStates: Array<{ bot: TelegramBotConfig; offset: number }> = [
-      { bot: bots[0], offset },
-    ];
+    const botStates: Array<{
+      bot: TelegramBotConfig;
+      offset: number;
+      initializeOffset?: () => Promise<number>;
+    }> = [{ bot: bots[0], offset }];
     for (const colleague of bots.slice(1)) {
-      const colleagueOffset = await initColleagueBotOffset(
-        colleague,
-        processLease,
-      );
-      botStates.push({ bot: colleague, offset: colleagueOffset });
+      botStates.push({
+        bot: colleague,
+        offset: 0,
+        initializeOffset: () => initColleagueBotOffset(colleague, processLease),
+      });
     }
     log(
       `multi-bot polling active: ${botStates.map(({ bot }) => (bot.isPrimary ? "iva" : `bot:${bot.botId}`)).join(", ")}`,
@@ -639,6 +659,7 @@ export async function main({
       void runBotPollLoop({
         bot: entry.bot,
         initialOffset: entry.offset,
+        initializeOffsetImpl: entry.initializeOffset,
         assertLease: () => assertTelegramProcessLease(processLease),
         onUpdates: () => wakeSignal.wake(),
         onConflictAlert: async () => {

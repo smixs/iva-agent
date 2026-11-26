@@ -337,6 +337,51 @@ void test("lagging or stalled bot does not delay another bot polling in the same
   assert.equal(ivaResult.offset, 100);
 });
 
+void test("colleague offset initialization waits for enablement and retries without stopping the loop", async () => {
+  let enabled = false;
+  let initAttempts = 0;
+  let running = true;
+  const events: string[] = [];
+
+  const result = await runBotPollLoop({
+    bot: COLLEAGUE_BOT,
+    initialOffset: 0,
+    assertLease: () => {},
+    colleaguesEnabledImpl: () => enabled,
+    initializeOffsetImpl: () => {
+      events.push("init");
+      initAttempts += 1;
+      if (initAttempts === 1) {
+        return Promise.reject(new Error("bad colleague token"));
+      }
+      return Promise.resolve(10);
+    },
+    shouldContinue: () => running,
+    tgImpl: (method, body, options) => {
+      assert.equal(method, "getUpdates");
+      assert.equal(options?.token, COLLEAGUE_BOT.token);
+      events.push(`poll:${String((body as { offset: number }).offset)}`);
+      running = false;
+      return Promise.resolve({ ok: true, result: [] });
+    },
+    sleepImpl: () => {
+      events.push(enabled ? "sleep:enabled" : "sleep:disabled");
+      if (!enabled) enabled = true;
+      return Promise.resolve();
+    },
+    logImpl: () => {},
+  });
+
+  assert.equal(result.offset, 10);
+  assert.deepEqual(events, [
+    "sleep:disabled",
+    "init",
+    "sleep:enabled",
+    "init",
+    "poll:10",
+  ]);
+});
+
 void test("per-bot startup and restart preserve independent offsets under one process lock", async (t) => {
   const { dir, lease } = await tempDirWithLease(t);
   const ivaOffsetFile = botOffsetFile(IVA_BOT, dir);

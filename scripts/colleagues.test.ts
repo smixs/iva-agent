@@ -113,6 +113,8 @@ process.env.CUSTOM_BASE_URL = `${mockBaseUrl}/custom`;
 process.env.CUSTOM_MODEL = "colleague-custom-model";
 process.env.CUSTOM_API_KEY = "custom-test-key";
 process.env.ASSISTANT_BEARER = "test-bearer-secret";
+// The bridge regression test drives the real collector through main(); zero quiet keeps it fast.
+process.env.TELEGRAM_COLLECT_QUIET_MS = "0";
 
 process.on("exit", () => {
   mockServer.close();
@@ -143,7 +145,7 @@ const [
   { add: addReminder, fireDue, list: listReminders },
   { runReminderFire },
   { admitTelegramUpdate },
-  { runBotPollLoop },
+  { main: runPollerMain, runBotPollLoop },
   { acquireTelegramProcessLock },
   { enqueueQueueFile },
   { chatKeyOf, getChatStatus },
@@ -287,6 +289,26 @@ function webhookRequest(
   });
 }
 
+function jsonResponse(payload: unknown): Response {
+  return new Response(JSON.stringify(payload), {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  });
+}
+
+async function waitForCondition(
+  condition: () => boolean,
+  timeoutMs: number,
+  label: string,
+): Promise<void> {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    if (condition()) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`timed out waiting for ${label}`);
+}
+
 // --- Пункт 1: опция выключена по умолчанию, при выключенной опции сообщения ботам коллег не обрабатываются ---
 test("п.1: clean configuration has colleagues disabled and blocks colleague messages in Bridge and Channel", async (t) => {
   // Чистая конфигурация: settings.json отсутствует.
@@ -389,6 +411,195 @@ test("п.1: clean configuration has colleagues disabled and blocks colleague mes
     );
     assert.equal(res.status, 204);
     assert.equal(harness.sent.length, 0, `colleague turn started in ${state}`);
+  }
+});
+
+// Мост, запущенный с выключенной опцией, обязан принять апдейт коллеги
+// после `iva colleague on` без ручного перезапуска.
+test("п.1 regression: bridge started with colleagues off accepts a colleague update after iva colleague on", async (t) => {
+  writeRawSettings({ colleagues: { enabled: false, items: {} } });
+
+  // Изолированное состояние Bridge внутри общего временного data/ этого тест-файла.
+  for (const name of readdirSync(dataPath)) {
+    if (
+      /^telegram-(queue|inbox|offset|backlog)/u.test(name) ||
+      name === "telegram-offsets.d"
+    ) {
+      rmSync(join(dataPath, name), { recursive: true, force: true });
+    }
+  }
+  writeFileSync(
+    join(dataPath, "telegram-offset.json"),
+    JSON.stringify({ offset: 1 }),
+    {
+      mode: 0o600,
+    },
+  );
+  mkdirSync(join(dataPath, "telegram-offsets.d"), { recursive: true });
+  for (const botId of [CRITIC_BOT_ID, CODER_BOT_ID, SECRETARY_BOT_ID]) {
+    writeFileSync(
+      join(dataPath, "telegram-offsets.d", `${botId}.json`),
+      JSON.stringify({ offset: 1 }),
+      { mode: 0o600 },
+    );
+  }
+
+  const guardDir = mkdtempSync(join(tmpdir(), "iva-col-main-lock-"));
+  const lease = await acquireTelegramProcessLock({
+    testGuard: {
+      identity: `col-main-${process.pid}`,
+      directory: guardDir,
+    },
+  });
+  t.after(async () => {
+    await lease.close();
+    rmSync(guardDir, { recursive: true, force: true });
+  });
+
+  const colleagueUpdate = {
+    update_id: 6201,
+    message: {
+      message_id: 620,
+      date: 1_700_000_000,
+      chat: { id: 42, type: "private" },
+      from: { id: 42, is_bot: false, first_name: "Owner" },
+      text: "hello critic after enabling without restart",
+    },
+  };
+  const botApiCalls: Array<{
+    readonly token: string;
+    readonly method: string;
+    readonly body: Record<string, unknown>;
+  }> = [];
+  const acceptedRequests: Array<{
+    readonly headers: Record<string, unknown>;
+    readonly body: string;
+  }> = [];
+  let colleagueUpdateServed = false;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (input, init) => {
+    const url = input instanceof Request ? input.url : String(input);
+    const botApi = /\/bot([^/]+)\/([^/?]+)/u.exec(url);
+    if (url.startsWith("https://api.telegram.org/bot") && botApi) {
+      const [, token, method] = botApi;
+      const body =
+        typeof init?.body === "string"
+          ? (JSON.parse(init.body) as Record<string, unknown>)
+          : {};
+      botApiCalls.push({ token, method, body });
+      if (method === "getUpdates") {
+        if (
+          token === CRITIC_TOKEN &&
+          !colleagueUpdateServed &&
+          isColleaguesEnabled(settingsFile)
+        ) {
+          colleagueUpdateServed = true;
+          return Promise.resolve(
+            jsonResponse({ ok: true, result: [colleagueUpdate] }),
+          );
+        }
+        return new Promise((resolve) => {
+          setTimeout(() => resolve(jsonResponse({ ok: true, result: [] })), 10);
+        });
+      }
+      return Promise.resolve(jsonResponse({ ok: true, result: true }));
+    }
+    if (url === "http://127.0.0.1:8723/eve/v1/telegram/accepted") {
+      acceptedRequests.push({
+        headers: { ...((init?.headers ?? {}) as Record<string, unknown>) },
+        body: typeof init?.body === "string" ? init.body : "",
+      });
+      return Promise.resolve(
+        new Response(null, {
+          status: 204,
+          headers: { "x-iva-telegram-acceptance": "turn" },
+        }),
+      );
+    }
+    return originalFetch(input, init);
+  };
+
+  const mainErrors: Error[] = [];
+  const mainOutcome = runPollerMain({
+    acquireProcessLockImpl: () => Promise.resolve(lease),
+  }).then(
+    () => {
+      mainErrors.push(
+        new Error("telegram-poll main returned without a lease loss"),
+      );
+    },
+    (error: unknown) => {
+      mainErrors.push(
+        error instanceof Error ? error : new Error(String(error)),
+      );
+    },
+  );
+
+  try {
+    // Ждём первый опрос Ивы: к этому моменту выбор bots при старте уже произошёл
+    // при colleagues.enabled=false. Затем владелец включает опцию без перезапуска.
+    await waitForCondition(
+      () =>
+        botApiCalls.some(
+          (call) => call.token === IVA_TOKEN && call.method === "getUpdates",
+        ),
+      2_000,
+      "primary bot startup poll",
+    );
+    assert.equal(
+      botApiCalls.some((call) => call.token === CRITIC_TOKEN),
+      false,
+      "colleague bot touched Telegram while the option was still off",
+    );
+
+    const cliRoot = mkdtempSync(join(tmpdir(), "iva-cli-col-main-"));
+    try {
+      writeFileSync(
+        join(cliRoot, ".env"),
+        `ASSISTANT_DATA_DIR=${dataPath}\nMODEL_PROVIDER=ollama\n`,
+      );
+      const cmdColleague = createColleagueCommand(createCliRuntime(cliRoot));
+      await cmdColleague(["on"]);
+    } finally {
+      rmSync(cliRoot, { recursive: true, force: true });
+    }
+    assert.equal(isColleaguesEnabled(settingsFile), true);
+
+    await waitForCondition(
+      () => acceptedRequests.length > 0,
+      8_000,
+      "colleague update acceptance after enabling the option",
+    );
+    assert.equal(
+      botApiCalls.some(
+        (call) => call.token === CRITIC_TOKEN && call.method === "getUpdates",
+      ),
+      true,
+      "colleague bot never polled Telegram after iva colleague on",
+    );
+    const accepted = acceptedRequests[0];
+    assert.equal(
+      accepted?.headers[TELEGRAM_BOT_ID_HEADER],
+      CRITIC_BOT_ID,
+      "acceptance request lost the colleague bot id header",
+    );
+    assert.match(
+      accepted?.body ?? "",
+      /hello critic after enabling without restart/u,
+    );
+  } finally {
+    await lease.close();
+    await Promise.race([
+      mainOutcome,
+      new Promise((resolve) => setTimeout(resolve, 5_000)),
+    ]);
+    globalThis.fetch = originalFetch;
+    assert.equal(
+      mainErrors.length,
+      1,
+      "telegram-poll main did not stop after closing its lease",
+    );
+    assert.match(mainErrors[0]?.message ?? "", /active process lease/u);
   }
 });
 
