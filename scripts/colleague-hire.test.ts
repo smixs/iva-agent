@@ -110,6 +110,7 @@ const [
     COLLEAGUE_ROLES,
     colleagueAvatarPhase,
     colleagueProfileCopy,
+    consumeColleagueHireProposal,
     parseColleaguesConfig,
     readColleagueHireProposals,
     withColleague,
@@ -1216,6 +1217,260 @@ test("возврат 3: profile write failure blocks the success path and is com
   }
 });
 
+test("T941: repeat after setMyName 503 completes the journaled researcher hire after proposal expiry", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "iva-hire-t941-repeat-"));
+  const localSettings = join(dir, "settings.json");
+  const localEnvPath = join(dir, ".env");
+  const hireStateDir = join(dir, "colleague-hires.d");
+  writeHireTestEnv(localEnvPath);
+  try {
+    const ttlMs = 24 * 60 * 60 * 1000;
+    const createdAt = 1_700_000_000_000;
+    const beforeExpiry = createdAt + ttlMs - 1_000;
+    let currentTime = beforeExpiry;
+    let settings = withColleaguesEnabled({}, true);
+    settings = withColleagueHireProposal(
+      settings,
+      {
+        botUsername: "iva_main_helpers_bot",
+        role: "researcher",
+        provider: "openrouter",
+        model: "approved-researcher-model",
+        name: "Исследователь",
+      },
+      createdAt,
+    );
+    writeFileSync(localSettings, JSON.stringify(settings), { mode: 0o600 });
+
+    const update = makeManagedHireUpdate(
+      1100,
+      HIRED_BOT_ID,
+      "iva_main_helpers_bot",
+      "Helper",
+    );
+    const localEnv: NodeJS.ProcessEnv = {
+      TELEGRAM_BOT_TOKEN: IVA_TOKEN,
+      TELEGRAM_BOT_USERNAME: "iva_main_bot",
+      MODEL_PROVIDER: "ollama",
+      OLLAMA_MODEL: "fallback-ollama-model",
+    };
+    const profileCalls: {
+      method: string;
+      body: Record<string, unknown>;
+    }[] = [];
+    let setMyNameCalls = 0;
+    const deps = {
+      allowedUserIds: new Set(["42"]),
+      primaryBotId: IVA_BOT_ID,
+      primaryBotToken: IVA_TOKEN,
+      envPath: localEnvPath,
+      settingsFile: localSettings,
+      hireStateDir,
+      env: localEnv,
+      tgImpl: (method: string, body: Record<string, unknown>) => {
+        if (
+          method === "setMyName" ||
+          method === "setMyDescription" ||
+          method === "setMyShortDescription"
+        ) {
+          profileCalls.push({ method, body });
+        }
+        if (method === "getManagedBotToken") {
+          return Promise.resolve({ ok: true, result: HIRED_TOKEN });
+        }
+        if (method === "setMyName") {
+          setMyNameCalls += 1;
+          if (setMyNameCalls === 1) {
+            return Promise.resolve({
+              ok: false,
+              error_code: 503,
+              description: "Bot API temporarily unavailable",
+            });
+          }
+        }
+        return Promise.resolve({ ok: true, result: true });
+      },
+      replyImpl: () => Promise.resolve({ message_id: 1 }),
+      applyAvatarImpl: () => Promise.resolve(successfulAvatar),
+      now: () => currentTime,
+      lang: () => "ru" as const,
+      logImpl: () => {},
+    };
+
+    const first = await handleManagedBotUpdate(update, deps);
+    assert.equal(first.status, "failed");
+    if (first.status === "failed") assert.equal(first.retry, true);
+    assert.equal(
+      parseColleaguesConfig(
+        JSON.parse(readFileSync(localSettings, "utf8")) as unknown,
+        () => {},
+      ).items[HIRED_BOT_ID],
+      undefined,
+    );
+
+    currentTime = beforeExpiry + 3_000;
+    const second = await handleManagedBotUpdate(update, deps);
+    assert.equal(second.status, "hired");
+
+    const rawSettings = JSON.parse(
+      readFileSync(localSettings, "utf8"),
+    ) as Record<string, unknown>;
+    const cfg = parseColleaguesConfig(rawSettings, () => {});
+    assert.equal(cfg.items[HIRED_BOT_ID]?.role, "researcher");
+    assert.equal(cfg.items[HIRED_BOT_ID]?.provider, "openrouter");
+    assert.equal(cfg.items[HIRED_BOT_ID]?.model, "approved-researcher-model");
+    assert.equal(cfg.items[HIRED_BOT_ID]?.name, "Исследователь");
+    const rawColleagues = rawSettings.colleagues as
+      Record<string, unknown> | undefined;
+    assert.equal(rawColleagues?.pendingHires, undefined);
+    const lastNameCall = profileCalls.findLast(
+      (call) => call.method === "setMyName",
+    );
+    assert.equal(lastNameCall?.body.name, "Исследователь");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("T941: background reconciliation completes the same journaled hire with the saved role and model", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "iva-hire-t941-reconcile-"));
+  const localSettings = join(dir, "settings.json");
+  const localEnvPath = join(dir, ".env");
+  const hireStateDir = join(dir, "colleague-hires.d");
+  writeHireTestEnv(localEnvPath);
+  try {
+    const ttlMs = 24 * 60 * 60 * 1000;
+    const createdAt = 1_700_000_000_000;
+    const beforeExpiry = createdAt + ttlMs - 1_000;
+    let settings = withColleaguesEnabled({}, true);
+    settings = withColleagueHireProposal(
+      settings,
+      {
+        botUsername: "iva_main_helpers_bot",
+        role: "researcher",
+        provider: "openrouter",
+        model: "approved-researcher-model",
+        name: "Исследователь",
+      },
+      createdAt,
+    );
+    writeFileSync(localSettings, JSON.stringify(settings), { mode: 0o600 });
+
+    const localEnv: NodeJS.ProcessEnv = {
+      TELEGRAM_BOT_TOKEN: IVA_TOKEN,
+      TELEGRAM_BOT_USERNAME: "iva_main_bot",
+      MODEL_PROVIDER: "ollama",
+      OLLAMA_MODEL: "fallback-ollama-model",
+    };
+    let failFirstName = true;
+    const tgImpl = (method: string) => {
+      if (method === "getManagedBotToken") {
+        return Promise.resolve({ ok: true, result: HIRED_TOKEN });
+      }
+      if (method === "setMyName" && failFirstName) {
+        failFirstName = false;
+        return Promise.resolve({
+          ok: false,
+          error_code: 503,
+          description: "Bot API temporarily unavailable",
+        });
+      }
+      return Promise.resolve({ ok: true, result: true });
+    };
+    const first = await handleManagedBotUpdate(
+      makeManagedHireUpdate(
+        1100,
+        HIRED_BOT_ID,
+        "iva_main_helpers_bot",
+        "Helper",
+      ),
+      {
+        allowedUserIds: new Set(["42"]),
+        primaryBotId: IVA_BOT_ID,
+        primaryBotToken: IVA_TOKEN,
+        envPath: localEnvPath,
+        settingsFile: localSettings,
+        hireStateDir,
+        env: localEnv,
+        tgImpl,
+        replyImpl: () => Promise.resolve({ message_id: 1 }),
+        applyAvatarImpl: () => Promise.resolve(successfulAvatar),
+        now: () => beforeExpiry,
+        lang: () => "ru",
+        logImpl: () => {},
+      },
+    );
+    assert.equal(first.status, "failed");
+
+    const afterExpiryAndRetryDelay = beforeExpiry + 31_000;
+    const completed = await reconcilePendingColleagueHires({
+      settingsFile: localSettings,
+      envPath: localEnvPath,
+      hireStateDir,
+      env: localEnv,
+      tgImpl,
+      replyImpl: () => Promise.resolve({ message_id: 1 }),
+      now: () => afterExpiryAndRetryDelay,
+      lang: () => "ru",
+      logImpl: () => {},
+    });
+    assert.deepEqual(completed, { attempted: 1, completed: 1 });
+
+    const rawSettings = JSON.parse(
+      readFileSync(localSettings, "utf8"),
+    ) as Record<string, unknown>;
+    const cfg = parseColleaguesConfig(rawSettings, () => {});
+    assert.equal(cfg.items[HIRED_BOT_ID]?.role, "researcher");
+    assert.equal(cfg.items[HIRED_BOT_ID]?.provider, "openrouter");
+    assert.equal(cfg.items[HIRED_BOT_ID]?.model, "approved-researcher-model");
+    assert.equal(cfg.items[HIRED_BOT_ID]?.name, "Исследователь");
+    const rawColleagues = rawSettings.colleagues as
+      Record<string, unknown> | undefined;
+    assert.equal(rawColleagues?.pendingHires, undefined);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("T941: hire proposal boundary uses the exact username and the 24h deadline", () => {
+  const ttlMs = 24 * 60 * 60 * 1000;
+  const createdAt = 1_700_000_000_000;
+  const settings = withColleagueHireProposal(
+    withColleaguesEnabled({}, true),
+    {
+      botUsername: "iva_main_helpers_bot",
+      role: "researcher",
+      provider: "openrouter",
+      model: "approved-researcher-model",
+      name: "Исследователь",
+    },
+    createdAt,
+  );
+
+  const atDeadline = consumeColleagueHireProposal(
+    settings,
+    { username: "iva_main_helpers_bot" },
+    createdAt + ttlMs,
+  );
+  assert.equal(atDeadline.proposal?.role, "researcher");
+  assert.equal(atDeadline.proposal?.provider, "openrouter");
+  assert.equal(atDeadline.proposal?.model, "approved-researcher-model");
+
+  const afterDeadline = consumeColleagueHireProposal(
+    settings,
+    { username: "iva_main_helpers_bot" },
+    createdAt + ttlMs + 1,
+  );
+  assert.equal(afterDeadline.proposal, null);
+
+  const wrongUsername = consumeColleagueHireProposal(
+    settings,
+    { username: "iva_main_other_bot" },
+    createdAt + 1_000,
+  );
+  assert.equal(wrongUsername.proposal, null);
+});
+
 test("возврат 4: concurrent avatar reconciliation shares one in-flight upload per colleague", async () => {
   const dir = mkdtempSync(join(tmpdir(), "iva-avatar-single-flight-"));
   const localSettings = join(dir, "settings.json");
@@ -2223,8 +2478,9 @@ test("T940 arbiter token-stage write failure: reconciliation reuses the token al
     assert.deepEqual(failedWrite, { attempted: 1, completed: 0 });
     assert.equal(tokenCalls, 1);
     assert.ok(
-      parseEnvText(readFileSync(localEnvPath, "utf8"))
-        .TELEGRAM_COLLEAGUE_BOT_TOKENS?.includes(HIRED_TOKEN),
+      parseEnvText(
+        readFileSync(localEnvPath, "utf8"),
+      ).TELEGRAM_COLLEAGUE_BOT_TOKENS?.includes(HIRED_TOKEN),
       "first reconciliation must leave the fetched token in .env",
     );
 
