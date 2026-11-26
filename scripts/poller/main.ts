@@ -715,8 +715,8 @@ export async function main({
   const wakeSignal = createWakeSignal();
   const fatalBotState: { error: Error | null } = { error: null };
   const activeColleagueTokens = new Map<string, string>();
-  let pendingInboxCount = 0;
-  let pendingQueueCount = 0;
+  let latestPendingInboxCount = 0;
+  let latestPendingQueueCount = 0;
   let primaryLoopLaunched = false;
 
   const launchBotLoop = (
@@ -736,7 +736,7 @@ export async function main({
       handleControlImpl: primaryControlImpl,
       shouldContinue,
       pollTimeoutSeconds: () =>
-        pollTimeout(pendingQueueCount, pendingInboxCount),
+        pollTimeout(latestPendingQueueCount, latestPendingInboxCount),
       assertLease: () => assertTelegramProcessLease(processLease),
       onUpdates: () => wakeSignal.wake(),
       onConflictAlert: async () => {
@@ -858,10 +858,12 @@ export async function main({
     scheduleBridgeTask("colleague-avatars", async () => {
       await reconcilePendingColleagueAvatars();
     });
-    pendingInboxCount = await promoteReadyInbox({
+    const pendingInboxCount = await promoteReadyInbox({
       collectorOptions: { quietMs: configuredCollectQuietMs },
     });
-    pendingQueueCount = await drainReadyQueueHeads();
+    const pendingQueueCount = await drainReadyQueueHeads();
+    latestPendingInboxCount = pendingInboxCount;
+    latestPendingQueueCount = pendingQueueCount;
     const pollSeconds = pollTimeout(pendingQueueCount, pendingInboxCount);
     if (!primaryLoopLaunched && activeColleagueTokens.size > 0) {
       primaryLoopLaunched = true;
