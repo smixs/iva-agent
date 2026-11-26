@@ -21,6 +21,10 @@ import {
 } from "../lib/telegram-collect.ts";
 import { traceBridgeAdmission } from "#lib/trace.ts";
 import { ALLOWED, BOT_USERNAME, DATA_DIR, log } from "./config.ts";
+import {
+  tagUpdateWithBot,
+  type TelegramBotConfig,
+} from "../../packages/telegram-bots/index.ts";
 import { chatKey } from "./offset.ts";
 import { resetEpochFor } from "./queue.ts";
 import { routeMessageUpdate, type RouteMessageResult } from "./routing.ts";
@@ -179,8 +183,7 @@ export function selectReadyInboxBatch(
     const update = item.update;
     if (updateIds.length === 0) {
       arrivedAt = item.enqueuedAt;
-      resetFence =
-        typeof item.resetFence === "number" ? item.resetFence : null;
+      resetFence = typeof item.resetFence === "number" ? item.resetFence : null;
     }
     updateIds.push(item.updateId);
     const offered = collectorOffer(collector, update, item.enqueuedAt);
@@ -210,6 +213,7 @@ export async function admitTelegramUpdate(
   {
     allowedUserIds = ALLOWED,
     botUsername = BOT_USERNAME,
+    bot,
     trustedLocal = false,
     enqueueImpl = (key: string, candidate: TelegramQueueUpdate) =>
       enqueueQueueFile(TELEGRAM_INBOX_FILE, key, candidate, {
@@ -220,6 +224,8 @@ export async function admitTelegramUpdate(
   }: {
     allowedUserIds?: ReadonlySet<string>;
     botUsername?: unknown;
+    /** Бот, получивший апдейт; для коллеги вешает метку iva_bot_id и задаёт его username. */
+    bot?: Pick<TelegramBotConfig, "botId" | "username" | "isPrimary">;
     /** Already-authorized local payload; bypasses external sender/group policy, never key validation. */
     trustedLocal?: boolean;
     enqueueImpl?: (
@@ -229,26 +235,28 @@ export async function admitTelegramUpdate(
     logImpl?: (...parts: unknown[]) => void;
   } = {},
 ): Promise<InboxAdmissionResult> {
-  const trustedKey = trustedLocal ? inboxKeyFor(update) : null;
+  const tagged = bot ? tagUpdateWithBot(update, bot) : update;
+  const effectiveBotUsername = bot?.username ?? botUsername;
+  const trustedKey = trustedLocal ? inboxKeyFor(tagged) : null;
   const decision = trustedLocal
     ? trustedKey === null
       ? { action: "unownable" as const }
       : { action: "own" as const, key: trustedKey }
-    : admissionPolicy(update, allowedUserIds, botUsername);
+    : admissionPolicy(tagged, allowedUserIds, effectiveBotUsername);
   // Trace: мост принял апдейт или отбросил его своей политикой — первое звено цепочки
   // хода, и пишется оно из ПРОЦЕССА МОСТА в тот же дневной файл (ADR-0010).
   if (decision.action !== "own") {
-    traceBridgeAdmission(update, decision.action);
+    traceBridgeAdmission(tagged, decision.action);
     return decision.action;
   }
   try {
-    await enqueueImpl(decision.key, update);
-    traceBridgeAdmission(update, "owned");
+    await enqueueImpl(decision.key, tagged);
+    traceBridgeAdmission(tagged, "owned");
     return "owned";
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    logImpl(`inbox write failed for update ${update.update_id}:`, message);
-    traceBridgeAdmission(update, "write-failed");
+    logImpl(`inbox write failed for update ${tagged.update_id}:`, message);
+    traceBridgeAdmission(tagged, "write-failed");
     return "write-failed";
   }
 }

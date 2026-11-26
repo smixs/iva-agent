@@ -3,9 +3,11 @@
 
 import secretKeyInventory from "../skills/security-defense/outbound-sensitive-keys.json" with { type: "json" };
 import {
+  isSecretValue,
   redactSecretValues,
   secretEntriesFromEnv,
 } from "../../packages/secret-redaction/index.ts";
+import { allTelegramBotTokens } from "../../packages/telegram-bots/index.ts";
 import { traceInboundGate } from "./trace.ts";
 
 const INVISIBLE_RE = /[\p{Cf}\p{Cc}\u034F]/gu;
@@ -588,9 +590,12 @@ const REDACTED = "[REDACTED]";
 
 export function scanOutbound(input: string, redact = true): OutboundResult {
   const findings: OutboundFinding[] = [];
-  const values = secretEntriesFromEnv(process.env, secretKeyInventory).map(
-    ({ value }) => value,
-  );
+  const values = [
+    ...secretEntriesFromEnv(process.env, secretKeyInventory).map(
+      ({ value }) => value,
+    ),
+    ...allTelegramBotTokens(process.env).filter(isSecretValue),
+  ];
   // Values precede shapes: a shape can otherwise cut a prefix and leave the credential's tail.
   const valueText = redactSecretValues(input, values);
   const secretText =

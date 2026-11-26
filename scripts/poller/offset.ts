@@ -1,9 +1,13 @@
-/* eslint-disable @typescript-eslint/no-base-to-string, @typescript-eslint/no-unnecessary-type-assertion -- persisted Telegram payloads and injected I/O retain the original permissive runtime boundary. */
+/* eslint-disable @typescript-eslint/no-base-to-string -- persisted Telegram payloads and injected I/O retain the original permissive runtime boundary. */
 import { readFile } from "node:fs/promises";
 import { writeFileAtomic } from "#lib/fs-atomic.ts";
 import { parseOffsetFile, serializeOffsetFile } from "../lib/offset-store.ts";
 import { OFFSET_FILE, log } from "./config.ts";
 import { tg } from "./transport.ts";
+import {
+  botIdFromUpdate,
+  botScopedKey,
+} from "../../packages/telegram-bots/index.ts";
 
 type ErrorLike = { code?: unknown; message?: unknown };
 type TelegramUpdate = {
@@ -52,14 +56,19 @@ async function loadOffset({
 // First run: jump to the tail of the queue (last update_id + 1) to avoid replaying the
 // install backlog. drop_pending already clears Telegram's queue — this is a belt over suspenders.
 async function fastForwardOffset({
-  tgImpl = tg as TelegramImpl,
+  tgImpl,
+  token,
   logImpl = log,
 }: {
   tgImpl?: TelegramImpl;
+  token?: string;
   logImpl?: (...parts: unknown[]) => void;
 } = {}) {
   try {
-    const data = await tgImpl("getUpdates", { offset: -1, timeout: 0 });
+    const call: TelegramImpl =
+      tgImpl ??
+      ((method, body) => tg(method, body, token ? { token } : undefined));
+    const data = await call("getUpdates", { offset: -1, timeout: 0 });
     const result = data as TelegramResponse | null;
     if (result?.ok !== true || !Array.isArray(result.result)) {
       throw new Error(
@@ -102,7 +111,8 @@ function chatKey(update: TelegramUpdate) {
   const chatId = msg?.chat?.id;
   if (chatId === undefined) return null;
   const threadId = msg?.message_thread_id;
-  return `${String(chatId)}:${String(threadId ?? "")}`;
+  const base = `${String(chatId)}:${String(threadId ?? "")}`;
+  return botScopedKey(base, botIdFromUpdate(update));
 }
 async function saveOffset(
   offset: number,

@@ -22,6 +22,14 @@ import { traceInboundOutcome } from "./trace.ts";
 import { TELEGRAM_QUEUE_RECEIPT_FIELD } from "./telegram-parts.ts";
 import { readSettings } from "./settings.ts";
 import { isRecord } from "../../packages/guards/index.ts";
+import {
+  botIdFromUpdate,
+  botScopedKey,
+  resolveTelegramBot,
+  TELEGRAM_BOT_ID_HEADER,
+  validTelegramBotId,
+} from "../../packages/telegram-bots/index.ts";
+import { colleagueBotIdOf, withTelegramBot } from "./telegram-bot-context.ts";
 
 export const TELEGRAM_ACCEPTANCE_ROUTE = "/eve/v1/telegram/accepted";
 export const TELEGRAM_ACCEPTANCE_KIND_HEADER = "x-iva-telegram-acceptance";
@@ -41,6 +49,7 @@ type TelegramReroute = {
   state: TelegramChannelState & { chatId: string };
 };
 type RequestMetadata = {
+  botId: string | null;
   receipt: string | null;
   reroute: TelegramReroute | null;
   updateId: number | null;
@@ -163,9 +172,10 @@ export function wrapTelegramQueueOnMessage(
     // Trace: чем кончился inbound-пайплайн и каким апдейтом вызван начинающийся ход.
     // Место выбрано снаружи пайплайна: только здесь видны и сообщение, и его результат,
     // а сам пайплайн остаётся с одной точкой журнала (ADR-0010).
+    const colleagueId = botIdFromUpdate({ message: raw });
     traceInboundOutcome(
       message,
-      chatKeyOf(message.chat.id, message.messageThreadId),
+      chatKeyOf(message.chat.id, message.messageThreadId, colleagueId),
       result?.context,
       result !== null && result !== undefined,
     );
@@ -178,6 +188,8 @@ export function wrapTelegramQueueOnMessage(
 }
 
 async function metadataFromRequest(request: Request): Promise<RequestMetadata> {
+  const headerBotId = request.headers.get(TELEGRAM_BOT_ID_HEADER)?.trim();
+  const validHeaderBotId = validTelegramBotId(headerBotId) ? headerBotId : null;
   try {
     const body: unknown = await request.clone().json();
     const receipt =
@@ -185,6 +197,7 @@ async function metadataFromRequest(request: Request): Promise<RequestMetadata> {
         ? body.message[TELEGRAM_QUEUE_RECEIPT_FIELD]
         : undefined;
     return {
+      botId: validHeaderBotId ?? botIdFromUpdate(body),
       receipt: validReceipt(receipt) ? receipt : null,
       reroute: telegramReroute(body),
       updateId:
@@ -199,7 +212,12 @@ async function metadataFromRequest(request: Request): Promise<RequestMetadata> {
     console.error(
       `[telegram] не разобрал тело входящего запроса, dedup по update_id выключен: ${String(error)}`,
     );
-    return { receipt: null, reroute: null, updateId: null };
+    return {
+      botId: validHeaderBotId,
+      receipt: null,
+      reroute: null,
+      updateId: null,
+    };
   }
 }
 
@@ -303,11 +321,29 @@ export async function handleAcceptedTelegramWebhook<TState>(
   args: RouteHandlerArgs<TState>,
   options: AcceptedWebhookOptions = {},
 ): Promise<Response> {
-  const { receipt, reroute, updateId } = await metadataFromRequest(request);
+  const {
+    botId: requestedBotId,
+    receipt,
+    reroute,
+    updateId,
+  } = await metadataFromRequest(request);
   const authenticated = hasValidWebhookSecret(request);
-  const botId = configuredBotId();
+  const resolvedBot = resolveTelegramBot(requestedBotId);
+  if (requestedBotId !== null && authenticated && resolvedBot === null) {
+    return new Response(`unknown Telegram bot ${requestedBotId}`, {
+      status: 404,
+    });
+  }
+  const colleagueId = colleagueBotIdOf(resolvedBot);
+  const botId = resolvedBot?.botId ?? configuredBotId();
   const completedFile =
-    options.completedUpdatesFile ?? join(dataDir(), "completed-updates.json");
+    options.completedUpdatesFile ??
+    join(
+      dataDir(),
+      colleagueId !== null
+        ? `completed-updates.${colleagueId}.json`
+        : "completed-updates.json",
+    );
   // Старые/нестандартные payload без update_id сохраняют прежний путь обработки.
   if (
     updateId !== null &&
@@ -328,6 +364,19 @@ export async function handleAcceptedTelegramWebhook<TState>(
     inFlightKey === null ? undefined : inFlightUpdates.get(inFlightKey);
   if (existing) return (await existing).clone();
 
+  const stateWithBot = (state: TState | undefined): TState | undefined => {
+    if (colleagueId === null || state === undefined || !isRecord(state)) {
+      return state;
+    }
+    return {
+      ...state,
+      botId: colleagueId,
+      ...(resolvedBot?.username ? { botUsername: resolvedBot.username } : {}),
+    };
+  };
+  const scopedAddress = (address: string): string =>
+    botScopedKey(address, colleagueId);
+
   const processing = receiptContext.run(
     { receipt, handled: false },
     async () => {
@@ -337,15 +386,23 @@ export async function handleAcceptedTelegramWebhook<TState>(
       const updateLabel = updateId === null ? "unknown" : String(updateId);
 
       const wrappedFrom: RouteHandlerArgs<TState>["from"] = (address) => {
-        const source = args.from(address);
+        const source = args.from(scopedAddress(address));
         const send: ChannelSource<TState>["send"] = async (
           message,
           options,
         ) => {
-          const active = await source.send(message, {
-            ...options,
-            turnPolicy: telegramTurnPolicy(),
-          });
+          const nextOptions =
+            options && "state" in options && options.state !== undefined
+              ? {
+                  ...options,
+                  state: stateWithBot(options.state),
+                  turnPolicy: telegramTurnPolicy(),
+                }
+              : {
+                  ...options,
+                  turnPolicy: telegramTurnPolicy(),
+                };
+          const active = await source.send(message, nextOptions);
           accepted = true;
           return active;
         };
@@ -353,7 +410,7 @@ export async function handleAcceptedTelegramWebhook<TState>(
           inputResponses,
           options,
         ) => {
-          const active = await args.resolveSession(address);
+          const active = await args.resolveSession(scopedAddress(address));
           if (active !== undefined) {
             if (reroute !== null) {
               const scanStartedAt = Date.now();
@@ -364,6 +421,7 @@ export async function handleAcceptedTelegramWebhook<TState>(
                   chatKeyOf(
                     reroute.state.chatId,
                     reroute.state.messageThreadId,
+                    colleagueId,
                   ),
                   active.id,
                 );
@@ -389,7 +447,7 @@ export async function handleAcceptedTelegramWebhook<TState>(
                 }
                 return send(reroute.message, {
                   ...options,
-                  state: reroute.state as TState,
+                  state: stateWithBot(reroute.state as TState),
                 } as Parameters<ChannelSource<TState>["send"]>[1]);
               }
             }
@@ -414,7 +472,7 @@ export async function handleAcceptedTelegramWebhook<TState>(
               );
               return send(reroute.message, {
                 ...options,
-                state: reroute.state as TState,
+                state: stateWithBot(reroute.state as TState),
               } as Parameters<ChannelSource<TState>["send"]>[1]);
             }
             if (result.status === "accepted") {
@@ -432,7 +490,7 @@ export async function handleAcceptedTelegramWebhook<TState>(
           );
           return send(reroute.message, {
             ...options,
-            state: reroute.state as TState,
+            state: stateWithBot(reroute.state as TState),
           } as Parameters<ChannelSource<TState>["send"]>[1]);
         };
         return {
@@ -448,11 +506,16 @@ export async function handleAcceptedTelegramWebhook<TState>(
       const wrappedArgs: RouteHandlerArgs<TState> = {
         ...args,
         from: wrappedFrom,
+        resolveSession: (address) =>
+          args.resolveSession(scopedAddress(address)),
         waitUntil: (task: Promise<unknown>) => {
           background.push(Promise.resolve(task));
         },
       };
-      const response = await handler(request, wrappedArgs);
+      const invoke = () => handler(request, wrappedArgs);
+      const response = await (resolvedBot
+        ? withTelegramBot(resolvedBot, invoke)
+        : invoke());
 
       if (!response.ok) return response;
       await Promise.allSettled(background);

@@ -26,7 +26,11 @@ async function readCompactRequest(req: Request, secretToken?: string) {
   }
   const key = body?.chatKey;
   const target = parseTelegramResetTarget(body?.target);
-  if (typeof key !== "string" || !/^-?\d+:\d*$/u.test(key) || !target)
+  if (
+    typeof key !== "string" ||
+    !/^(?:bot:[1-9]\d*:)?-?\d+:\d*$/u.test(key) ||
+    !target
+  )
     return new Response("chatKey and target are required", { status: 400 });
   return { key, target };
 }

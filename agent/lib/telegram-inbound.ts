@@ -76,6 +76,7 @@ export type TelegramInboundTurn = {
 };
 
 export type TelegramInboundEffects = TelegramMediaEffects & {
+  readonly botId?: string;
   readonly botUsername?: string;
   readonly startTyping: () => Promise<unknown>;
   // Апдейт наш и дальше идёт медленная работа (медиа, провайдеры, гейт) —
@@ -309,7 +310,10 @@ function digestRequest(msg: TelegramInboundMessage): string {
 }
 
 // Воспроизводит дефолтный auth-контекст eve для Telegram-актора.
-function buildAuth(msg: TelegramInboundMessage): TelegramInboundAuth | null {
+function buildAuth(
+  msg: TelegramInboundMessage,
+  botId?: string,
+): TelegramInboundAuth | null {
   const u = msg.from;
   if (!u) return null;
   const isGroup = msg.chat.type === "group" || msg.chat.type === "supergroup";
@@ -319,6 +323,7 @@ function buildAuth(msg: TelegramInboundMessage): TelegramInboundAuth | null {
     message_id: msg.messageId,
     user_id: u.id,
   };
+  if (botId !== undefined && botId.length > 0) attributes.bot_id = botId;
   if (msg.chat.title !== undefined) attributes.chat_title = msg.chat.title;
   if (msg.messageThreadId !== undefined)
     attributes.message_thread_id = String(msg.messageThreadId);
@@ -691,7 +696,7 @@ export async function runTelegramInbound(
     raw,
     sanitizeInbound,
     hasInboundAttackSignal,
-    process.env.TELEGRAM_BOT_TOKEN?.trim().split(":")[0],
+    effects.botId ?? process.env.TELEGRAM_BOT_TOKEN?.trim().split(":")[0],
   );
   if (replyContext !== null) {
     if (replyContext.flagged) {
@@ -706,6 +711,7 @@ export async function runTelegramInbound(
   }
 
   // Обёртка диспатчащих return'ов: preContext едет ПЕРЕД остальным контекстом хода.
+  const auth = () => buildAuth(message, effects.botId);
   const withPre = (res: TelegramInboundTurn): TelegramInboundTurn =>
     preContext.length
       ? { ...res, context: [...preContext, ...(res.context ?? [])] }
@@ -723,7 +729,7 @@ export async function runTelegramInbound(
       appendDaily("[text]", dailyMessageText(cmdText, raw));
       await effects.startTyping();
       return withPre({
-        auth: buildAuth(message),
+        auth: auth(),
         context: [
           rest
             ? tr(
@@ -738,7 +744,7 @@ export async function runTelegramInbound(
       appendDaily("[text]", dailyMessageText(cmdText, raw));
       await effects.startTyping();
       return withPre({
-        auth: buildAuth(message),
+        auth: auth(),
         context: [
           tr(
             "Show my task list (call the tasks tool).",
@@ -751,7 +757,7 @@ export async function runTelegramInbound(
       appendDaily("[text]", dailyMessageText(cmdText, raw));
       await effects.startTyping();
       return withPre({
-        auth: buildAuth(message),
+        auth: auth(),
         context: [digestRequest(message)],
       });
     }
@@ -768,7 +774,7 @@ export async function runTelegramInbound(
       raw,
     );
     return withPre({
-      auth: buildAuth(message),
+      auth: auth(),
       context: [
         ...carrier.entries,
         ...(await richMediaEntries(effects, singleReading.rich)),
@@ -785,13 +791,13 @@ export async function runTelegramInbound(
       await effects.onAbandoned();
       return null;
     }
-    return withPre({ auth: buildAuth(message), context: result.context });
+    return withPre({ auth: auth(), context: result.context });
   }
 
   if (singleLocationContext !== null) {
     await effects.startTyping();
     return withPre({
-      auth: buildAuth(message),
+      auth: auth(),
       context: [singleLocationContext],
     });
   }
@@ -808,8 +814,8 @@ export async function runTelegramInbound(
     // Пересылку переопределяем всегда: eve несёт модели голый текст, и без контекстной
     // записи метка до модели не доедет.
     if ((carrier.flagged || label !== null) && carrier.entries.length)
-      return withPre({ auth: buildAuth(message), context: carrier.entries });
-    return withPre({ auth: buildAuth(message) });
+      return withPre({ auth: auth(), context: carrier.entries });
+    return withPre({ auth: auth() });
   }
 
   await effects.startTyping();
@@ -852,7 +858,7 @@ export async function runTelegramInbound(
     if (!isCleanCarrierText) context.push(...carrier.entries);
   }
   return withPre({
-    auth: buildAuth(message),
+    auth: auth(),
     ...(context.length ? { context } : {}),
   });
 }

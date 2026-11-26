@@ -82,6 +82,7 @@
 |---|---|---|---|
 | `agent/channels/telegram.ts` | 108, 205 | **бот адресата** | `credentials.botToken` динамический по активному боту; `sendWidget` берёт токен адресата (фолбэк `TELEGRAM_BOT_TOKEN`) |
 | `agent/lib/telegram-acceptance.ts` | 113 | **бот адресата** | `botId` берётся из запроса/метки апдейта (фолбэк `TELEGRAM_BOT_TOKEN`); отдельный ledger `completed-updates.<botId>.json` на коллегу |
+| `agent/lib/telegram-bot-context.ts` | 29 | **бот адресата** | Новый модуль контекста активного бота (`AsyncLocalStorage`): возвращает токен активного бота, при отсутствии бросает `TELEGRAM_BOT_TOKEN is required.` |
 | `agent/lib/telegram-inbound.ts` | 694 | **бот адресата** | `botId` адресата передаётся в `buildTelegramReplyContext` и `auth.attributes.bot_id` (фолбэк `TELEGRAM_BOT_TOKEN`) |
 | `agent/lib/telegram-media.ts` | 72, 366 | **бот адресата** | Скачивание файла `/file/bot<token>/…` и маскирование токена в ошибке используют токен адресата |
 | `agent/tools/send_file.ts` | 282 | **бот адресата** | Отправка файла в чат хода берёт токен по `bot_id` хода (фолбэк `TELEGRAM_BOT_TOKEN`); проверка утечки проверяет и токены коллег |
@@ -167,6 +168,7 @@
 - `scripts/poller/deliver.test.ts`
 - `scripts/poller/entrypoint.test.ts`
 - `scripts/poller/ingress-chaos-deepseek-3-3.property.test.ts`
+- `scripts/poller/multi-bot.test.ts`
 - `scripts/poller/plugin-proposal-tap.test.ts`
 - `scripts/poller/queue-batch.test.ts`
 - `scripts/poller/queued-sign.test.ts`
@@ -199,6 +201,7 @@
 - `scripts/telegram-compact.test.ts`
 - `scripts/telegram-failure-events.test.ts`
 - `scripts/telegram-media-identity.test.ts`
+- `scripts/telegram-multi-bot-channel.test.ts`
 - `scripts/telegram-poll-entrypoint.test.ts`
 - `scripts/telegram-poll-reset.test.ts`
 - `scripts/telegram-poll.test.ts`

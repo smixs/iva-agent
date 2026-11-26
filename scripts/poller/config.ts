@@ -6,6 +6,10 @@ import {
   dataDirSetting,
   resolveDataDir,
 } from "../../packages/data-dir/index.ts";
+import {
+  configuredTelegramBots,
+  type TelegramBotConfig,
+} from "../../packages/telegram-bots/index.ts";
 
 export const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 export const NODE = process.execPath;
@@ -30,6 +34,30 @@ export const RESET_ROUTE = `${ROUTE}/reset`;
 export const CANCEL_ROUTE = `${HOST}${TELEGRAM_CANCEL_ROUTE}`;
 export const API = `https://api.telegram.org/bot${TOKEN}`;
 export const OFFSET_FILE = join(DATA_DIR, "telegram-offset.json");
+export const OFFSETS_DIR = join(DATA_DIR, "telegram-offsets.d");
+export const BOTS: readonly TelegramBotConfig[] = configuredTelegramBots(
+  process.env,
+);
+
+/** Файл offset для конкретного бота: основной бот хранит legacy-путь без миграции. */
+export function botOffsetFile(
+  bot: Pick<TelegramBotConfig, "botId" | "isPrimary">,
+  dataDir = DATA_DIR,
+): string {
+  if (bot.isPrimary || !bot.botId) return join(dataDir, "telegram-offset.json");
+  return join(dataDir, "telegram-offsets.d", `${bot.botId}.json`);
+}
+
+/** Файл маркера первого запуска для конкретного бота. */
+export function botBacklogMarkerFile(
+  bot: Pick<TelegramBotConfig, "botId" | "isPrimary">,
+  dataDir = DATA_DIR,
+): string {
+  if (bot.isPrimary || !bot.botId) {
+    return join(dataDir, "telegram-backlog-drop.json");
+  }
+  return join(dataDir, "telegram-offsets.d", `${bot.botId}.backlog-drop.json`);
+}
 // Acceptance returns 204 only after the turn starts. Ninety seconds is deliberately
 // generous so no legitimate start should hit the deadline, while a wedged eve cannot
 // block the bridge's single polling loop forever.

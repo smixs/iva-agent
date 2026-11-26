@@ -6,11 +6,28 @@ import {
 import { randomInt, randomUUID } from "node:crypto";
 import {
   telegramChannel,
+  type TelegramApiOptions,
+  type TelegramChannel,
   type TelegramChannelState,
   type TelegramHandle,
   type TelegramMessageBody,
 } from "eve/channels/telegram";
-import { POST } from "eve/channels";
+import { POST, type ChannelSource, type RouteHandlerArgs } from "eve/channels";
+import {
+  botIdFromUpdate,
+  botScopedKey,
+  resolveTelegramBot,
+  TELEGRAM_BOT_ID_HEADER,
+  validTelegramBotId,
+  type TelegramBotConfig,
+} from "../../packages/telegram-bots/index.ts";
+import {
+  activeTelegramBot,
+  activeTelegramBotToken,
+  botFromChannelState,
+  colleagueBotIdOf,
+  withTelegramBot,
+} from "../lib/telegram-bot-context.ts";
 import {
   flushSettledTelegramQuestions,
   postTelegramQuestion,
@@ -123,6 +140,7 @@ export function outboxTransport(
   tg: Pick<TelegramHandle, "chatId" | "messageThreadId" | "request" | "post">,
   richReplies: RichReplies,
   silent = false,
+  botToken?: string,
 ): OutboxTransport {
   const transport: OutboxTransport = {
     async sendHtml(html) {
@@ -202,7 +220,8 @@ export function outboxTransport(
                 error: "TELEGRAM_RICH_REPLIES=never",
                 retryPlain: false,
               };
-  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const token =
+    botToken ?? activeTelegramBot()?.token ?? process.env.TELEGRAM_BOT_TOKEN;
   if (TELEGRAM_WIDGETS === "auto" && token)
     transport.sendWidget = (html, caption) =>
       sendWidget(token, tg, html, caption, silent);
@@ -262,9 +281,43 @@ export function statusTransport(
   };
 }
 
+type ScopedTelegramHandle = TelegramHandle & { readonly botId?: string | null };
+
+function wrapTelegramHandle(
+  tg: TelegramHandle,
+  bot: TelegramBotConfig,
+): ScopedTelegramHandle {
+  const botId = colleagueBotIdOf(bot);
+  return {
+    botId,
+    botUsername: bot.username ?? tg.botUsername,
+    chatId: tg.chatId,
+    chatType: tg.chatType,
+    conversationId: tg.conversationId,
+    messageThreadId: tg.messageThreadId,
+    request: (method, body) =>
+      withTelegramBot(bot, () => tg.request(method, body)),
+    post: (message) => withTelegramBot(bot, () => tg.post(message)),
+    postEphemeral: (userId, message, options) =>
+      withTelegramBot(bot, () => tg.postEphemeral(userId, message, options)),
+    sendMessage: (message) =>
+      withTelegramBot(bot, () => tg.sendMessage(message)),
+    startTyping: (action) => withTelegramBot(bot, () => tg.startTyping(action)),
+    answerCallbackQuery: (input) =>
+      withTelegramBot(bot, () => tg.answerCallbackQuery(input)),
+    editMessageReplyMarkup: (input) =>
+      withTelegramBot(bot, () => tg.editMessageReplyMarkup(input)),
+    editMessageText: (input) =>
+      withTelegramBot(bot, () => tg.editMessageText(input)),
+  };
+}
+
 // finishTelegramStatus удаляет сообщение-статус после своей записи и берёт для этого транспорт канала.
 const withStatusTransport = (channel: {
-  telegram: Pick<TelegramHandle, "chatId" | "messageThreadId" | "request">;
+  telegram: Pick<
+    ScopedTelegramHandle,
+    "chatId" | "messageThreadId" | "request" | "botId"
+  >;
 }) => ({
   telegram: channel.telegram,
   statusTransport: statusTransport(channel.telegram),
@@ -339,10 +392,13 @@ export async function rememberAccepted<T>(
 
 // Что сообщение об обрыве знает о вопросе. Чат не личный или тип неизвестен — цитаты нет:
 // её увидели бы все участники.
-function chatQuestion(channel: {
-  telegram: Pick<TelegramHandle, "chatId" | "messageThreadId">;
-  state: Pick<TelegramChannelState, "chatType">;
-}): {
+function chatQuestion(
+  channel: {
+    telegram: Pick<TelegramHandle, "chatId" | "messageThreadId">;
+    state: Pick<TelegramChannelState, "chatType">;
+  },
+  botId: string | null = null,
+): {
   question?: string;
   media?: boolean;
   group: boolean;
@@ -351,7 +407,7 @@ function chatQuestion(channel: {
   const tg = channel.telegram;
   const group = channel.state.chatType !== "private";
   const asked = tg.chatId
-    ? turnQuestion(chatKeyOf(tg.chatId, tg.messageThreadId))
+    ? turnQuestion(chatKeyOf(tg.chatId, tg.messageThreadId, botId))
     : undefined;
   return asked === undefined
     ? { group, chatId: tg.chatId }
@@ -366,12 +422,13 @@ function failureSender(
     TelegramHandle,
     "chatId" | "messageThreadId" | "request" | "post" | "sendMessage"
   >,
+  botToken?: string,
 ): NoticeSend {
   return noticeSender(async (text) => {
     if (!hasRichButtons(text)) return tg.sendMessage(text);
     const sent = await sendThroughOutbox(
       text,
-      outboxTransport(tg, TELEGRAM_RICH_REPLIES),
+      outboxTransport(tg, TELEGRAM_RICH_REPLIES, false, botToken),
     );
     if (!sent.ok) throw new Error(sent.error);
     return sent;
@@ -383,11 +440,13 @@ function failureSender(
 function keepTurnAlive(
   channel: { telegram: Pick<TelegramHandle, "chatId" | "messageThreadId"> },
   ctx: { session: { id: string } },
+  botId: string | null = null,
 ): void {
   markTelegramTurnAlive({
     chatKey: chatKeyOf(
       channel.telegram.chatId,
       channel.telegram.messageThreadId,
+      botId,
     ),
     sessionId: ctx.session.id,
     getStatusImpl: getChatStatus,
@@ -399,9 +458,7 @@ let bearerMissingLogged = false;
 
 // Поставить сессии пометку свёртки: eve возьмёт её в той же свёртке перед следующим шагом
 // модели. Без общего токена роут недоступен — причину один раз пишем в журнал.
-async function compactTelegramSession(
-  sessionId: string,
-): Promise<boolean> {
+async function compactTelegramSession(sessionId: string): Promise<boolean> {
   const bearer = process.env.ASSISTANT_BEARER?.trim();
   if (!bearer) {
     if (!bearerMissingLogged)
@@ -417,398 +474,633 @@ async function compactTelegramSession(
   });
 }
 
-const telegram = telegramChannel({
-  botUsername: process.env.TELEGRAM_BOT_USERNAME ?? "my_bot",
-  // Картинку/файл НЕ суём в запрос к модели (это и ломалось: octet-stream → reject, потом
-  // инлайн → Bad Request от провайдера, плюс привязка к конкретному vision-API). "disabled" →
-  // eve не качает и не инлайнит вложения вовсе; запрос к модели всегда чистый текст и не
-  // ломается ни на каком провайдере. Файлы качает и сохраняет inbound-пайплайн, а модели отдаёт
-  // ПУТЬ — посмотреть/прочитать она решает сама своими инструментами; не умеет — честно скажет.
-  uploadPolicy: "disabled",
-  api: { fetch: telegramDraftFetch() },
-  // Unknown callbacks receive a quiet acknowledgement.
-  onCallbackQuery: async (ctx, query) => {
-    const ack = async (text?: string) => {
-      try {
-        await ctx.telegram.request("answerCallbackQuery", {
-          callback_query_id: query.id,
-          ...(text === undefined ? {} : { text }),
-        });
-      } catch {
-        /* протухший callback_query_id Telegram отвергает штатно */
-      }
-    };
-    await ack();
-  },
-  events: {
-    async "input.requested"(data, channel, ctx) {
-      await closeTelegramDraftTurn(
-        ctx.session.id,
-        data.turnId,
-        undefined,
-        true,
-      );
-      for (const request of data.requests)
-        await postTelegramQuestion(request, channel.state, channel.telegram, {
-          rich: TELEGRAM_RICH_REPLIES === "auto",
-          continuation: channel.continuation,
-        });
-    },
-    async "input.resolved"(data, channel) {
-      try {
-        detachQueuedSignTime({
-          chatKey: chatKeyOf(
-            channel.telegram.chatId,
-            channel.telegram.messageThreadId,
-          ),
-          getStatusImpl: getChatStatus,
-          setStatusIfImpl: setChatStatusIf,
-        });
-      } catch (error) {
-        console.error("[telegram] знак очереди не отвязан от ответа:", error);
-      }
-      await settleTelegramQuestions(
-        data.resolutions,
-        channel.state,
-        channel.telegram,
-      );
-    },
-    async "turn.started"(data, channel, ctx) {
-      const tg = channel.telegram;
-      // Сообщение-статус прошлого хода, не снятое его концом (сброс, жнец, обрыв связи), уходит до нового.
-      await retireProgressMessage(
-        chatKeyOf(tg.chatId, tg.messageThreadId),
-        statusTransport(tg, STATUS_RETIRE_TIMEOUT_MS),
-      );
-      const draftId = randomInt(1, 2 ** 31);
-      const published = await publishTelegramTurnStarted({
-        chatKey: chatKeyOf(tg.chatId, tg.messageThreadId),
-        sessionId: ctx.session.id,
-        turnId: data.turnId,
-        draftId,
-        getStatusImpl: getChatStatus,
-        setStatusIfImpl: setChatStatusIf,
-        onWorkingStatusError: (error) =>
-          console.error("[telegram] turn claim failed:", error),
-      });
-      telegramDraftTurn(
-        tg,
-        ctx.session.id,
-        data.turnId,
-        published &&
-          channel.state.chatType === "private" &&
-          tg.messageThreadId === undefined,
-        { sessionId: ctx.session.id, turnId: data.turnId, draftId },
-        published,
-      );
-      await flushSettledTelegramQuestions(channel.state, channel.telegram);
-    },
-    async "turn.completed"(_data, channel, ctx) {
-      if (!ctx?.session) return;
-      await finishHelperOutcomes(
-        { sessionId: ctx.session.id, turnId: _data.turnId },
-        Date.now(),
-      );
-      try {
-        await flushSettledTelegramQuestions(channel.state, channel.telegram);
-      } finally {
-        await finishTelegramStatus(
-          withStatusTransport(channel),
-          ctx.session.id,
-          "completed",
-          _data.turnId,
-        );
-      }
-    },
-    async "turn.cancelled"(_data, channel, ctx) {
-      if (!ctx?.session) return;
-      discardHelperOutcomes(ctx.session.id, _data.turnId);
-      await finishTelegramStatus(
-        withStatusTransport(channel),
-        ctx.session.id,
-        "cancelled",
-        _data.turnId,
-      );
-    },
-    async "session.waiting"(_data, channel, ctx) {
-      await finishTelegramStatus(
-        withStatusTransport(channel),
-        ctx.session.id,
-        "completed",
-        undefined,
-      );
-      await flushSettledTelegramQuestions(channel.state, channel.telegram);
-    },
-    "message.appended"(_data, channel, ctx) {
-      telegramDraftTurn(
-        channel.telegram,
-        ctx.session.id,
-        _data.turnId,
-        channel.state.chatType === "private" &&
-          channel.telegram.messageThreadId === undefined,
-      )?.append(_data.stepIndex, _data.messageDelta);
-      markTelegramFirstOutput({
-        chatKey: chatKeyOf(
-          channel.telegram.chatId,
-          channel.telegram.messageThreadId,
-        ),
-        sessionId: ctx.session.id,
-        getStatusImpl: getChatStatus,
-        setStatusIfImpl: setChatStatusIf,
-      });
-      keepTurnAlive(channel, ctx);
-    },
-    "actions.requested"(_data, channel, ctx) {
-      keepTurnAlive(channel, ctx);
-      telegramDraftTurn(
-        channel.telegram,
-        ctx.session.id,
-        _data.turnId,
-        channel.state.chatType === "private" &&
-          channel.telegram.messageThreadId === undefined,
-      )?.requested(_data.stepIndex, _data.actions);
-    },
-    "action.partial"(_data, channel, ctx) {
-      telegramDraftTurn(
-        channel.telegram,
-        ctx.session.id,
-        _data.turnId,
-        channel.state.chatType === "private" &&
-          channel.telegram.messageThreadId === undefined,
-      );
-      keepTurnAlive(channel, ctx);
-    },
-    "action.result"(_data, channel, ctx) {
-      telegramDraftTurn(
-        channel.telegram,
-        ctx.session.id,
-        _data.turnId,
-        channel.state.chatType === "private" &&
-          channel.telegram.messageThreadId === undefined,
-      )?.result(_data.result.callId);
-      keepTurnAlive(channel, ctx);
-    },
-    async "message.completed"(data, channel, ctx) {
-      if (!ctx?.session) return;
-      if (data.finishReason === "tool-calls") {
-        const stream = telegramDraftTurn(
-          channel.telegram,
-          ctx.session.id,
-          data.turnId,
-          channel.state.chatType === "private" &&
-            channel.telegram.messageThreadId === undefined,
-        );
-        const { text } = parseTelegramDelivery(data.message ?? "");
-        // Redact the complete text before the draft renderer cuts its tail.
-        const progress = draftText(redactNotice(text), true);
-        stream?.completeStep(data.stepIndex, data.message ?? "");
-        if (stream && progress)
-          await traceStatus(
-            { turn: data.turnId, session: ctx.session.id, source: "telegram" },
-            progress,
-            () =>
-              stream.status(
-                data.stepIndex,
-                progress,
-                statusTransport(channel.telegram),
-              ),
-          );
-        return;
-      }
-      await closeTelegramDraftChat(
-        channel.telegram,
-        ctx.session.id,
-        data.turnId,
-      );
-      if (!data.message) return;
-      const { text: message, silent } = parseTelegramDelivery(data.message);
-      const recordDelivery = (delivered: boolean) =>
-        emitTelegramTurnLatency({
-          chatKey: chatKeyOf(
-            channel.telegram.chatId,
-            channel.telegram.messageThreadId,
-          ),
-          sessionId: ctx.session.id,
-          deliveryAt: Date.now(),
-          delivered,
-          getStatusImpl: getChatStatus,
-          setStatusIfImpl: setChatStatusIf,
-        });
-      const result = await traceOutbox(
-        {
-          turn: data.turnId,
-          session: ctx.session.id,
-          source: "telegram",
-        },
-        message,
-        () =>
-          sendThroughOutbox(
-            message,
-            outboxTransport(channel.telegram, TELEGRAM_RICH_REPLIES, silent),
-          ),
-      );
-      if (!result.ok) return;
-      recordDelivery(true);
-      noteHelperReply(
-        { sessionId: ctx.session.id, turnId: data.turnId },
-        message,
-      );
-    },
-    async "turn.failed"(data, channel, ctx) {
-      if (!ctx?.session) return;
-      discardHelperOutcomes(ctx.session.id, data.turnId);
-      try {
-        await finishTelegramStatus(
-          withStatusTransport(channel),
-          ctx.session.id,
-          "failed",
-          data.turnId,
-        );
-      } catch {
-        /* run-status не прибрался — сообщение об ошибке всё равно отправляем */
-      }
-      await notifyTelegramFailure(
-        ctx.session.id,
-        data.turnId,
-        { ...data, ...chatQuestion(channel) },
-        failureSender(channel.telegram),
-      );
-    },
-    async "session.failed"(data, channel) {
-      discardHelperOutcomes(data.sessionId);
-      const tg = channel.telegram;
-      if (tg.chatId) {
-        try {
-          await finishTelegramStatus(
-            withStatusTransport(channel),
-            data.sessionId,
-            "failed",
-          );
-          await dropQueuedStatus({
-            chatKey: chatKeyOf(tg.chatId, tg.messageThreadId),
-            sessionId: data.sessionId,
-            getStatusImpl: getChatStatus,
-            setStatusIfImpl: setChatStatusIf,
-          });
-        } catch {
-          /* best-effort: отсутствие chat-state не должно ломать уведомление */
-        }
-      }
-      await notifyTelegramFailure(
-        data.sessionId,
-        null,
-        { ...data, ...chatQuestion(channel) },
-        failureSender(channel.telegram),
-      );
-    },
-  },
-  // Вход: канал только подаёт эффекты, разбор апдейта живёт в пайплайне.
-  onMessage: wrapTelegramQueueOnMessage((ctx, message) => {
-    const tg = ctx.telegram;
-    const chatKey = chatKeyOf(message.chat.id, message.messageThreadId);
-    const ingressId = randomUUID();
-    const receivedState = chatState(getChatStatus(chatKey));
-    const receivedDuringTurn =
-      telegramTurnPolicy() === "steer" &&
-      (receivedState === "turn" || receivedState === "accepted");
-    return rememberAccepted(
-      chatKey,
-      message,
-      runTelegramInbound(message, {
-        botUsername: tg.botUsername,
-        request: (method, body) => tg.request(method, body),
-        sendMessage: noticeSender((text) => tg.sendMessage(text)),
-        startTyping: () => tg.startTyping(),
-        describeImage,
-        chatModelSeesImages,
-        transcribe,
-        onAccepted: async () => {
-          const claimed = await publishTelegramEarlyStatus({
-            chatKey,
-            ingressId,
-            staleMs: RUN_STALE_MS,
-            getStatusImpl: getChatStatus,
-            setStatusIfImpl: setChatStatusIf,
-          });
-          if (claimed) startTelegramAcceptedTyping(tg, claimed);
-        },
-        onAbandoned: async () => {
-          closeTelegramAcceptedTyping(tg, ingressId);
-          await abandonTelegramEarlyStatus({
-            chatKey,
-            ingressId,
-            getStatusImpl: getChatStatus,
-            setStatusIfImpl: setChatStatusIf,
-          });
-        },
-        receivedDuringTurn,
-        consumeCancelledMark: () => {
-          if (!getChatStatus(chatKey)?.wasCancelled) return false;
-          setChatStatus(chatKey, { wasCancelled: null });
-          return true;
-        },
-      }),
-    );
-  }),
-});
-
-const telegramWebhookRoute = telegram.routes.find(
-  (route) =>
-    route.transport !== "websocket" &&
-    route.method === "POST" &&
-    route.path === "/eve/v1/telegram",
-);
-if (!telegramWebhookRoute || telegramWebhookRoute.transport === "websocket") {
-  throw new Error("telegramChannel did not expose its expected webhook route");
+async function botIdFromWebhookRequest(
+  request: Request,
+): Promise<string | null> {
+  const header = request.headers.get(TELEGRAM_BOT_ID_HEADER)?.trim();
+  if (validTelegramBotId(header)) return header;
+  try {
+    return botIdFromUpdate(await request.clone().json());
+  } catch {
+    return null;
+  }
 }
 
-export default {
-  ...telegram,
-  routes: [
-    ...telegram.routes.map((route) =>
-      route === telegramWebhookRoute
-        ? {
-            ...route,
-            handler: (
-              request: Request,
-              args: Parameters<typeof telegramWebhookRoute.handler>[1],
-            ) =>
-              handleTelegramDraftStopRequest(
-                request,
-                (req) => telegramWebhookRoute.handler(req, args),
-                process.env.TELEGRAM_WEBHOOK_SECRET_TOKEN,
-              ),
-          }
-        : route,
-    ),
-    POST<TelegramChannelState>(TELEGRAM_ACCEPTANCE_ROUTE, (request, args) =>
-      handleAcceptedTelegramWebhook(
-        telegramWebhookRoute.handler,
-        request,
-        args,
-      ),
-    ),
-    POST(TELEGRAM_COMPACT_ROUTE, (req, args) =>
-      handleTelegramCompactRequest(
-        req,
-        args,
-        (id) => compactTelegramSession(id),
-        process.env.TELEGRAM_WEBHOOK_SECRET_TOKEN,
-      ),
-    ),
-    POST("/eve/v1/telegram/reset", (req, args) =>
-      handleTelegramResetRequest(
-        req,
-        args,
-        process.env.TELEGRAM_WEBHOOK_SECRET_TOKEN,
-      ),
-    ),
-    POST(TELEGRAM_CANCEL_ROUTE, (req, { attachSession }) =>
-      handleTelegramCancelRequest(
-        req,
-        attachSession,
-        process.env.TELEGRAM_WEBHOOK_SECRET_TOKEN,
-      ),
-    ),
-  ],
+function scopeWebhookArgs(
+  args: RouteHandlerArgs<TelegramChannelState>,
+  bot: TelegramBotConfig | null,
+): RouteHandlerArgs<TelegramChannelState> {
+  const colleagueId = colleagueBotIdOf(bot);
+  if (colleagueId === null) return args;
+  const scoped = (address: string) => botScopedKey(address, colleagueId);
+  const attachBotState = (
+    state: TelegramChannelState | undefined,
+  ): TelegramChannelState | undefined =>
+    state === undefined
+      ? state
+      : ({
+          ...state,
+          botId: colleagueId,
+          ...(bot?.username ? { botUsername: bot.username } : {}),
+        } as TelegramChannelState);
+  return {
+    ...args,
+    resolveSession: (address) => args.resolveSession(scoped(address)),
+    from: (address) => {
+      const source = args.from(scoped(address));
+      const send: ChannelSource<TelegramChannelState>["send"] = (
+        message,
+        options,
+      ) =>
+        source.send(message, {
+          ...options,
+          ...(options?.state === undefined
+            ? {}
+            : { state: attachBotState(options.state) }),
+        });
+      return {
+        cancel: source.cancel.bind(source),
+        clear: source.clear.bind(source),
+        compact: source.compact.bind(source),
+        reset: source.reset.bind(source),
+        respond: source.respond.bind(source),
+        send,
+      };
+    },
+  };
+}
+
+type RuntimeChannelAdapter = {
+  createAdapterContext?: (base: {
+    state: TelegramChannelState;
+    session: { continuation?: { rekey: (token: string) => void } };
+    ctx: unknown;
+  }) => { telegram?: TelegramHandle; [key: string]: unknown };
+  [key: string]: unknown;
 };
+
+export function createTelegramChannel(
+  options: {
+    readonly api?: Omit<TelegramApiOptions, "credentials">;
+    readonly env?: () => NodeJS.ProcessEnv;
+  } = {},
+): TelegramChannel {
+  const getEnv = options.env ?? (() => process.env);
+  const runWithState = <T>(
+    state: TelegramChannelState,
+    telegramHandle: TelegramHandle,
+    fn: (
+      bot: TelegramBotConfig | null,
+      colleagueId: string | null,
+      tg: ScopedTelegramHandle,
+    ) => T,
+  ): T => {
+    const bot = botFromChannelState(state, getEnv());
+    const colleagueId = colleagueBotIdOf(bot);
+    const tg = bot ? wrapTelegramHandle(telegramHandle, bot) : telegramHandle;
+    return bot
+      ? withTelegramBot(bot, () => fn(bot, colleagueId, tg))
+      : fn(null, null, tg);
+  };
+
+  const telegram = telegramChannel({
+    botUsername: getEnv().TELEGRAM_BOT_USERNAME ?? "my_bot",
+    // Картинку/файл НЕ суём в запрос к модели (это и ломалось: octet-stream → reject, потом
+    // инлайн → Bad Request от провайдера, плюс привязка к конкретному vision-API). "disabled" →
+    // eve не качает и не инлайнит вложения вовсе; запрос к модели всегда чистый текст и не
+    // ломается ни на каком провайдере. Файлы качает и сохраняет inbound-пайплайн, а модели отдаёт
+    // ПУТЬ — посмотреть/прочитать она решает сама своими инструментами; не умеет — честно скажет.
+    uploadPolicy: "disabled",
+    credentials: {
+      botToken: () => activeTelegramBotToken(getEnv()),
+    },
+    api: { ...options.api, fetch: telegramDraftFetch(options.api?.fetch) },
+    // Unknown callbacks receive a quiet acknowledgement.
+    onCallbackQuery: async (ctx, query) => {
+      const ack = async (text?: string) => {
+        try {
+          await ctx.telegram.request("answerCallbackQuery", {
+            callback_query_id: query.id,
+            ...(text === undefined ? {} : { text }),
+          });
+        } catch {
+          /* протухший callback_query_id Telegram отвергает штатно */
+        }
+      };
+      await ack();
+    },
+    events: {
+      async "input.requested"(data, channel, ctx) {
+        await runWithState(
+          channel.state,
+          channel.telegram,
+          async (_bot, _colleagueId, tg) => {
+            await closeTelegramDraftTurn(
+              ctx.session.id,
+              data.turnId,
+              undefined,
+              true,
+            );
+            for (const request of data.requests)
+              await postTelegramQuestion(request, channel.state, tg, {
+                rich: TELEGRAM_RICH_REPLIES === "auto",
+                continuation: channel.continuation,
+              });
+          },
+        );
+      },
+      async "input.resolved"(data, channel) {
+        await runWithState(
+          channel.state,
+          channel.telegram,
+          async (_bot, colleagueId, tg) => {
+            try {
+              detachQueuedSignTime({
+                chatKey: chatKeyOf(tg.chatId, tg.messageThreadId, colleagueId),
+                getStatusImpl: getChatStatus,
+                setStatusIfImpl: setChatStatusIf,
+              });
+            } catch (error) {
+              console.error(
+                "[telegram] знак очереди не отвязан от ответа:",
+                error,
+              );
+            }
+            await settleTelegramQuestions(data.resolutions, channel.state, tg);
+          },
+        );
+      },
+      async "turn.started"(data, channel, ctx) {
+        await runWithState(
+          channel.state,
+          channel.telegram,
+          async (_bot, colleagueId, tg) => {
+            const key = chatKeyOf(tg.chatId, tg.messageThreadId, colleagueId);
+            // Сообщение-статус прошлого хода, не снятое его концом (сброс, жнец, обрыв связи), уходит до нового.
+            await retireProgressMessage(
+              key,
+              statusTransport(tg, STATUS_RETIRE_TIMEOUT_MS),
+            );
+            const draftId = randomInt(1, 2 ** 31);
+            const published = await publishTelegramTurnStarted({
+              chatKey: key,
+              sessionId: ctx.session.id,
+              turnId: data.turnId,
+              draftId,
+              getStatusImpl: getChatStatus,
+              setStatusIfImpl: setChatStatusIf,
+              onWorkingStatusError: (error) =>
+                console.error("[telegram] turn claim failed:", error),
+            });
+            telegramDraftTurn(
+              tg,
+              ctx.session.id,
+              data.turnId,
+              published &&
+                channel.state.chatType === "private" &&
+                tg.messageThreadId === undefined,
+              { sessionId: ctx.session.id, turnId: data.turnId, draftId },
+              published,
+            );
+            await flushSettledTelegramQuestions(channel.state, tg);
+          },
+        );
+      },
+      async "turn.completed"(_data, channel, ctx) {
+        if (!ctx?.session) return;
+        await runWithState(
+          channel.state,
+          channel.telegram,
+          async (_bot, _colleagueId, tg) => {
+            await finishHelperOutcomes(
+              { sessionId: ctx.session.id, turnId: _data.turnId },
+              Date.now(),
+            );
+            try {
+              await flushSettledTelegramQuestions(channel.state, tg);
+            } finally {
+              await finishTelegramStatus(
+                withStatusTransport({ telegram: tg }),
+                ctx.session.id,
+                "completed",
+                _data.turnId,
+              );
+            }
+          },
+        );
+      },
+      async "turn.cancelled"(_data, channel, ctx) {
+        if (!ctx?.session) return;
+        await runWithState(
+          channel.state,
+          channel.telegram,
+          async (_bot, _colleagueId, tg) => {
+            discardHelperOutcomes(ctx.session.id, _data.turnId);
+            await finishTelegramStatus(
+              withStatusTransport({ telegram: tg }),
+              ctx.session.id,
+              "cancelled",
+              _data.turnId,
+            );
+          },
+        );
+      },
+      async "session.waiting"(_data, channel, ctx) {
+        await runWithState(
+          channel.state,
+          channel.telegram,
+          async (_bot, _colleagueId, tg) => {
+            await finishTelegramStatus(
+              withStatusTransport({ telegram: tg }),
+              ctx.session.id,
+              "completed",
+              undefined,
+            );
+            await flushSettledTelegramQuestions(channel.state, tg);
+          },
+        );
+      },
+      "message.appended"(_data, channel, ctx) {
+        runWithState(
+          channel.state,
+          channel.telegram,
+          (_bot, colleagueId, tg) => {
+            telegramDraftTurn(
+              tg,
+              ctx.session.id,
+              _data.turnId,
+              channel.state.chatType === "private" &&
+                tg.messageThreadId === undefined,
+            )?.append(_data.stepIndex, _data.messageDelta);
+            markTelegramFirstOutput({
+              chatKey: chatKeyOf(tg.chatId, tg.messageThreadId, colleagueId),
+              sessionId: ctx.session.id,
+              getStatusImpl: getChatStatus,
+              setStatusIfImpl: setChatStatusIf,
+            });
+            keepTurnAlive({ telegram: tg }, ctx, colleagueId);
+          },
+        );
+      },
+      "actions.requested"(_data, channel, ctx) {
+        runWithState(
+          channel.state,
+          channel.telegram,
+          (_bot, colleagueId, tg) => {
+            keepTurnAlive({ telegram: tg }, ctx, colleagueId);
+            telegramDraftTurn(
+              tg,
+              ctx.session.id,
+              _data.turnId,
+              channel.state.chatType === "private" &&
+                tg.messageThreadId === undefined,
+            )?.requested(_data.stepIndex, _data.actions);
+          },
+        );
+      },
+      "action.partial"(_data, channel, ctx) {
+        runWithState(
+          channel.state,
+          channel.telegram,
+          (_bot, colleagueId, tg) => {
+            telegramDraftTurn(
+              tg,
+              ctx.session.id,
+              _data.turnId,
+              channel.state.chatType === "private" &&
+                tg.messageThreadId === undefined,
+            );
+            keepTurnAlive({ telegram: tg }, ctx, colleagueId);
+          },
+        );
+      },
+      "action.result"(_data, channel, ctx) {
+        runWithState(
+          channel.state,
+          channel.telegram,
+          (_bot, colleagueId, tg) => {
+            telegramDraftTurn(
+              tg,
+              ctx.session.id,
+              _data.turnId,
+              channel.state.chatType === "private" &&
+                tg.messageThreadId === undefined,
+            )?.result(_data.result.callId);
+            keepTurnAlive({ telegram: tg }, ctx, colleagueId);
+          },
+        );
+      },
+      async "message.completed"(data, channel, ctx) {
+        if (!ctx?.session) return;
+        await runWithState(
+          channel.state,
+          channel.telegram,
+          async (bot, colleagueId, tg) => {
+            if (data.finishReason === "tool-calls") {
+              const stream = telegramDraftTurn(
+                tg,
+                ctx.session.id,
+                data.turnId,
+                channel.state.chatType === "private" &&
+                  tg.messageThreadId === undefined,
+              );
+              const { text } = parseTelegramDelivery(data.message ?? "");
+              // Redact the complete text before the draft renderer cuts its tail.
+              const progress = draftText(redactNotice(text), true);
+              stream?.completeStep(data.stepIndex, data.message ?? "");
+              if (stream && progress)
+                await traceStatus(
+                  {
+                    turn: data.turnId,
+                    session: ctx.session.id,
+                    source: "telegram",
+                  },
+                  progress,
+                  () =>
+                    stream.status(
+                      data.stepIndex,
+                      progress,
+                      statusTransport(tg),
+                    ),
+                );
+              return;
+            }
+            await closeTelegramDraftChat(tg, ctx.session.id, data.turnId);
+            if (!data.message) return;
+            const { text: message, silent } = parseTelegramDelivery(
+              data.message,
+            );
+            const recordDelivery = (delivered: boolean) =>
+              emitTelegramTurnLatency({
+                chatKey: chatKeyOf(tg.chatId, tg.messageThreadId, colleagueId),
+                sessionId: ctx.session.id,
+                deliveryAt: Date.now(),
+                delivered,
+                getStatusImpl: getChatStatus,
+                setStatusIfImpl: setChatStatusIf,
+              });
+            const result = await traceOutbox(
+              {
+                turn: data.turnId,
+                session: ctx.session.id,
+                source: "telegram",
+              },
+              message,
+              () =>
+                sendThroughOutbox(
+                  message,
+                  outboxTransport(
+                    tg,
+                    TELEGRAM_RICH_REPLIES,
+                    silent,
+                    bot?.token,
+                  ),
+                ),
+            );
+            if (!result.ok) return;
+            recordDelivery(true);
+            noteHelperReply(
+              { sessionId: ctx.session.id, turnId: data.turnId },
+              message,
+            );
+          },
+        );
+      },
+      async "turn.failed"(data, channel, ctx) {
+        if (!ctx?.session) return;
+        await runWithState(
+          channel.state,
+          channel.telegram,
+          async (bot, colleagueId, tg) => {
+            discardHelperOutcomes(ctx.session.id, data.turnId);
+            try {
+              await finishTelegramStatus(
+                withStatusTransport({ telegram: tg }),
+                ctx.session.id,
+                "failed",
+                data.turnId,
+              );
+            } catch {
+              /* run-status не прибрался — сообщение об ошибке всё равно отправляем */
+            }
+            await notifyTelegramFailure(
+              ctx.session.id,
+              data.turnId,
+              { ...data, ...chatQuestion(channel, colleagueId) },
+              failureSender(tg, bot?.token),
+            );
+          },
+        );
+      },
+      async "session.failed"(data, channel) {
+        await runWithState(
+          channel.state,
+          channel.telegram,
+          async (bot, colleagueId, tg) => {
+            discardHelperOutcomes(data.sessionId);
+            if (tg.chatId) {
+              try {
+                await finishTelegramStatus(
+                  withStatusTransport({ telegram: tg }),
+                  data.sessionId,
+                  "failed",
+                );
+                await dropQueuedStatus({
+                  chatKey: chatKeyOf(
+                    tg.chatId,
+                    tg.messageThreadId,
+                    colleagueId,
+                  ),
+                  sessionId: data.sessionId,
+                  getStatusImpl: getChatStatus,
+                  setStatusIfImpl: setChatStatusIf,
+                });
+              } catch {
+                /* best-effort: отсутствие chat-state не должно ломать уведомление */
+              }
+            }
+            await notifyTelegramFailure(
+              data.sessionId,
+              null,
+              { ...data, ...chatQuestion(channel, colleagueId) },
+              failureSender(tg, bot?.token),
+            );
+          },
+        );
+      },
+    },
+    // Вход: канал только подаёт эффекты, разбор апдейта живёт в пайплайне.
+    onMessage: wrapTelegramQueueOnMessage((ctx, message) => {
+      const bot = activeTelegramBot(getEnv());
+      const colleagueId = colleagueBotIdOf(bot);
+      const tg = bot ? wrapTelegramHandle(ctx.telegram, bot) : ctx.telegram;
+      const chatKey = chatKeyOf(
+        message.chat.id,
+        message.messageThreadId,
+        colleagueId,
+      );
+      const ingressId = randomUUID();
+      const receivedState = chatState(getChatStatus(chatKey));
+      const receivedDuringTurn =
+        telegramTurnPolicy() === "steer" &&
+        (receivedState === "turn" || receivedState === "accepted");
+      return rememberAccepted(
+        chatKey,
+        message,
+        runTelegramInbound(message, {
+          ...(colleagueId !== null ? { botId: colleagueId } : {}),
+          ...(bot?.token ? { botToken: bot.token } : {}),
+          botUsername: bot?.username ?? tg.botUsername,
+          request: (method, body) => tg.request(method, body),
+          sendMessage: noticeSender((text) => tg.sendMessage(text)),
+          startTyping: () => tg.startTyping(),
+          describeImage,
+          chatModelSeesImages,
+          transcribe,
+          onAccepted: async () => {
+            const claimed = await publishTelegramEarlyStatus({
+              chatKey,
+              ingressId,
+              staleMs: RUN_STALE_MS,
+              getStatusImpl: getChatStatus,
+              setStatusIfImpl: setChatStatusIf,
+            });
+            if (claimed) startTelegramAcceptedTyping(tg, claimed);
+          },
+          onAbandoned: async () => {
+            closeTelegramAcceptedTyping(tg, ingressId);
+            await abandonTelegramEarlyStatus({
+              chatKey,
+              ingressId,
+              getStatusImpl: getChatStatus,
+              setStatusIfImpl: setChatStatusIf,
+            });
+          },
+          receivedDuringTurn,
+          consumeCancelledMark: () => {
+            if (!getChatStatus(chatKey)?.wasCancelled) return false;
+            setChatStatus(chatKey, { wasCancelled: null });
+            return true;
+          },
+        }),
+      );
+    }),
+  });
+
+  // Оборачиваем createAdapterContext на скомпилированном адаптере eve:
+  // 1) привязываем rekey() в группах к префиксу bot:<botId>: у коллег;
+  // 2) оборачиваем telegram handle, чтобы даже встроенные события eve
+  //    (authorization.required / authorization.completed) слали токеном коллеги.
+  const compiledAdapter = (
+    telegram as unknown as { adapter?: RuntimeChannelAdapter }
+  ).adapter;
+  if (compiledAdapter?.createAdapterContext) {
+    const originalCreate =
+      compiledAdapter.createAdapterContext.bind(compiledAdapter);
+    compiledAdapter.createAdapterContext = (base) => {
+      const bot = botFromChannelState(base.state, getEnv());
+      const colleagueId = colleagueBotIdOf(bot);
+      const continuation = base.session?.continuation;
+      const scopedSession =
+        colleagueId !== null && continuation
+          ? {
+              ...base.session,
+              continuation: {
+                ...continuation,
+                rekey: (token: string) =>
+                  continuation.rekey(botScopedKey(token, colleagueId)),
+              },
+            }
+          : base.session;
+      const built = originalCreate({ ...base, session: scopedSession });
+      if (bot && built.telegram) {
+        built.telegram = wrapTelegramHandle(built.telegram, bot);
+      }
+      return built;
+    };
+  }
+
+  const telegramWebhookRoute = telegram.routes.find(
+    (route) =>
+      route.transport !== "websocket" &&
+      route.method === "POST" &&
+      route.path === "/eve/v1/telegram",
+  );
+  if (!telegramWebhookRoute || telegramWebhookRoute.transport === "websocket") {
+    throw new Error(
+      "telegramChannel did not expose its expected webhook route",
+    );
+  }
+
+  const dispatchWithBot = async (
+    request: Request,
+    args: RouteHandlerArgs<TelegramChannelState>,
+  ): Promise<Response> => {
+    const requestedBotId = await botIdFromWebhookRequest(request);
+    const bot = resolveTelegramBot(requestedBotId, getEnv());
+    if (requestedBotId !== null && bot === null) {
+      return new Response(`unknown Telegram bot ${requestedBotId}`, {
+        status: 404,
+      });
+    }
+    const scopedArgs = scopeWebhookArgs(args, bot);
+    return bot
+      ? withTelegramBot(bot, () =>
+          telegramWebhookRoute.handler(request, scopedArgs),
+        )
+      : telegramWebhookRoute.handler(request, scopedArgs);
+  };
+
+  return {
+    ...telegram,
+    routes: [
+      ...telegram.routes.map((route) =>
+        route === telegramWebhookRoute
+          ? {
+              ...route,
+              handler: (
+                request: Request,
+                args: RouteHandlerArgs<TelegramChannelState>,
+              ) =>
+                handleTelegramDraftStopRequest(
+                  request,
+                  (req) => dispatchWithBot(req, args),
+                  getEnv().TELEGRAM_WEBHOOK_SECRET_TOKEN,
+                ),
+            }
+          : route,
+      ),
+      POST<TelegramChannelState>(TELEGRAM_ACCEPTANCE_ROUTE, (request, args) =>
+        handleAcceptedTelegramWebhook(
+          telegramWebhookRoute.handler,
+          request,
+          args,
+        ),
+      ),
+      POST(TELEGRAM_COMPACT_ROUTE, (req, args) =>
+        handleTelegramCompactRequest(
+          req,
+          args,
+          (id) => compactTelegramSession(id),
+          getEnv().TELEGRAM_WEBHOOK_SECRET_TOKEN,
+        ),
+      ),
+      POST("/eve/v1/telegram/reset", (req, args) =>
+        handleTelegramResetRequest(
+          req,
+          args,
+          getEnv().TELEGRAM_WEBHOOK_SECRET_TOKEN,
+        ),
+      ),
+      POST(TELEGRAM_CANCEL_ROUTE, (req, { attachSession }) =>
+        handleTelegramCancelRequest(
+          req,
+          attachSession,
+          getEnv().TELEGRAM_WEBHOOK_SECRET_TOKEN,
+        ),
+      ),
+    ],
+  };
+}
+
+export default createTelegramChannel();

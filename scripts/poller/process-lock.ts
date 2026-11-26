@@ -65,7 +65,7 @@ type TestGuard = {
 type SpawnSyncImpl = (
   command: string,
   args: readonly string[],
-  options: { encoding: "utf8"; env: NodeJS.ProcessEnv },
+  options: { encoding: "utf8"; env: NodeJS.ProcessEnv; maxBuffer?: number },
 ) => SpawnSyncReturns<string>;
 type SpawnImpl = (
   command: string,
@@ -222,6 +222,7 @@ function liveGuardHolders(
     {
       encoding: "utf8",
       env: { ...process.env, LC_ALL: "C", LANG: "C" },
+      maxBuffer: 16 * 1024 * 1024,
     },
   );
   if (result.error) throw result.error;

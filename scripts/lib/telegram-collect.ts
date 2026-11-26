@@ -1,4 +1,8 @@
 import { TELEGRAM_BUTTON_TAP_FIELD } from "#lib/telegram-parts.ts";
+import {
+  botIdFromUpdate,
+  botScopedKey,
+} from "../../packages/telegram-bots/index.ts";
 import type {
   TelegramQueueMessage,
   TelegramQueueUpdate,
@@ -76,7 +80,8 @@ export function collectorKeyFor(
   const chatId = message?.chat?.id;
   const fromId = message?.from?.id;
   if (chatId === undefined || fromId === undefined) return null;
-  return `${chatId}:${message!.message_thread_id ?? ""}:${fromId}`;
+  const base = `${chatId}:${message!.message_thread_id ?? ""}:${fromId}`;
+  return botScopedKey(base, botIdFromUpdate(update));
 }
 
 function messageChars(message: TelegramCollectMessage | undefined) {

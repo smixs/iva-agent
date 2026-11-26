@@ -62,13 +62,17 @@ function addressKey(address: TelegramSessionAddress): string {
   return `${address.chatId}:${address.messageThreadId ?? ""}:${address.conversationId ?? ""}`;
 }
 
-// Ключ чата в конверте сброса: «chatId» или «chatId:thread» — обе части
-// целые безопасные числа, thread без ведущего нуля.
-const CHAT_KEY_PATTERN = /^-?\d+:(?:[1-9]\d*)?$/u;
+// Ключ чата в конверте сброса: «chatId:thread» (или «bot:<botId>:chatId:thread»
+// для бота-коллеги) — обе части целые безопасные числа, thread без ведущего нуля.
+const CHAT_KEY_PATTERN = /^(?:bot:[1-9]\d*:)?-?\d+:(?:[1-9]\d*)?$/u;
+
+function stripBotPrefix(value: string): string {
+  return value.replace(/^bot:[1-9]\d*:/u, "");
+}
 
 function isChatKey(value: string): boolean {
   if (!CHAT_KEY_PATTERN.test(value)) return false;
-  const [chatId, thread] = value.split(":");
+  const [chatId, thread] = stripBotPrefix(value).split(":");
   return (
     Number.isSafeInteger(Number(chatId)) &&
     (thread === undefined || Number.isSafeInteger(Number(thread)))
@@ -86,7 +90,7 @@ export function parseTelegramResetTarget(value: unknown): ResetTarget | null {
     if (!Object.hasOwn(value, "chatKey")) return { sessionId };
     if (typeof value.chatKey !== "string" || !isChatKey(value.chatKey))
       return null;
-    const [chatId, thread] = value.chatKey.split(":");
+    const [chatId, thread] = stripBotPrefix(value.chatKey).split(":");
     const address = parseAddress({
       chatId,
       ...(thread ? { messageThreadId: Number(thread) } : {}),

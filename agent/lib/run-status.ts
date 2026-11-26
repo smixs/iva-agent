@@ -249,8 +249,10 @@ export const RUN_STALE_MS = Number(
 export function chatKeyOf(
   chatId: string | number,
   threadId?: string | number | null,
+  botId?: string | null,
 ): string {
-  return `${chatId}:${threadId ?? ""}`;
+  const base = `${chatId}:${threadId ?? ""}`;
+  return botId ? `bot:${botId}:${base}` : base;
 }
 
 function statusFileOf(chatKey: string): string {

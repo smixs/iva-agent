@@ -5,7 +5,15 @@ import { basename, isAbsolute, relative, sep } from "node:path";
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 import { notificationChat } from "../../packages/notification-chat/index.ts";
-import { secretEntriesFromEnv } from "../../packages/secret-redaction/index.ts";
+import {
+  isSecretValue,
+  secretEntriesFromEnv,
+} from "../../packages/secret-redaction/index.ts";
+import {
+  allTelegramBotTokens,
+  resolveTelegramBot,
+  validTelegramBotId,
+} from "../../packages/telegram-bots/index.ts";
 import secretKeyInventory from "../skills/security-defense/outbound-sensitive-keys.json" with { type: "json" };
 import { redactNotice } from "../lib/outbox.ts";
 import type { ReminderChat } from "../lib/reminder-store.ts";
@@ -65,12 +73,17 @@ async function secretInFile(
   data: Buffer,
   signal?: AbortSignal,
 ): Promise<string | null> {
-  const needles = secretEntriesFromEnv(process.env, secretKeyInventory).flatMap(
-    ({ name, value }) =>
-      ["utf8", "utf16le"].map((encoding) => ({
-        name,
-        bytes: Buffer.from(value, encoding as BufferEncoding),
-      })),
+  const entries = [
+    ...secretEntriesFromEnv(process.env, secretKeyInventory),
+    ...allTelegramBotTokens(process.env)
+      .filter(isSecretValue)
+      .map((value) => ({ name: "TELEGRAM_COLLEAGUE_BOT_TOKENS", value })),
+  ];
+  const needles = entries.flatMap(({ name, value }) =>
+    ["utf8", "utf16le"].map((encoding) => ({
+      name,
+      bytes: Buffer.from(value, encoding as BufferEncoding),
+    })),
   );
   const overlap = Math.max(0, ...needles.map(({ bytes }) => bytes.length - 1));
   const chunkBytes = 64 * 1024;
@@ -264,13 +277,31 @@ function targetChat(chat: ReminderChat | null): ReminderChat | null {
   return id ? { id, threadId: null } : null;
 }
 
+function botIdOfTurn(ctx: {
+  readonly session?: {
+    readonly auth?: {
+      readonly current?: { readonly attributes?: unknown } | null;
+    };
+  };
+}): string | null {
+  const attributes = ctx.session?.auth?.current?.attributes;
+  if (attributes === null || typeof attributes !== "object") return null;
+  const raw = (attributes as Record<string, unknown>).bot_id;
+  return validTelegramBotId(raw) ? raw : null;
+}
+
 export async function sendFile(
   input: SendFileInput,
   chat: ReminderChat | null,
   {
     maxBytes = MAX_BYTES,
     signal,
-  }: { readonly maxBytes?: number; readonly signal?: AbortSignal } = {},
+    botId,
+  }: {
+    readonly maxBytes?: number;
+    readonly signal?: AbortSignal;
+    readonly botId?: string | null;
+  } = {},
 ): Promise<SendFileAnswer> {
   const { path, caption, as } = input;
 
@@ -279,8 +310,16 @@ export async function sendFile(
     return fail(
       "нет чата: ход не из Telegram, а TELEGRAM_DIGEST_CHAT_ID и TELEGRAM_ALLOWED_USER_IDS пусты",
     );
-  const token = process.env.TELEGRAM_BOT_TOKEN ?? "";
-  if (!token) return fail("не задан TELEGRAM_BOT_TOKEN");
+  const bot =
+    botId !== undefined && botId !== null
+      ? resolveTelegramBot(botId)
+      : resolveTelegramBot(null);
+  const token =
+    bot?.token ?? (botId ? "" : (process.env.TELEGRAM_BOT_TOKEN ?? ""));
+  if (!token)
+    return fail(
+      botId ? `не найден токен бота ${botId}` : "не задан TELEGRAM_BOT_TOKEN",
+    );
   const file = await readAllowed(path, maxBytes);
   if ("ok" in file) return file;
   const name = await secretInFile(file.data, signal);
@@ -320,6 +359,7 @@ export default defineTool({
     try {
       return await sendFile(input, chatOfTurn(ctx), {
         signal: ctx.abortSignal,
+        botId: botIdOfTurn(ctx),
       });
     } catch (error) {
       return fail(error instanceof Error ? error.message : String(error));

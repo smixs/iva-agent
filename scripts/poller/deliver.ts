@@ -19,6 +19,10 @@ import { traceBridgeDelivery } from "#lib/trace.ts";
 import { tg } from "./transport.ts";
 import { chatKey } from "./offset.ts";
 import type { TelegramQueueUpdate } from "../lib/telegram-queue.ts";
+import {
+  botIdFromUpdate,
+  TELEGRAM_BOT_ID_HEADER,
+} from "../../packages/telegram-bots/index.ts";
 
 type TelegramUpdate = TelegramQueueUpdate;
 type ErrorLike = { message?: unknown; name?: unknown };
@@ -76,6 +80,7 @@ async function deliver(
   const queueReceipt =
     requestedQueueReceipt ?? (expectsAcceptance && Boolean(update?.message));
   const outgoing = queueReceipt ? addTelegramQueueReceipt(update) : update;
+  const botId = botIdFromUpdate(outgoing);
   const reportAcceptanceFailure = async (details: Record<string, unknown>) => {
     if (!onAcceptanceFailure) return;
     try {
@@ -95,6 +100,7 @@ async function deliver(
         headers: {
           "Content-Type": "application/json",
           "X-Telegram-Bot-Api-Secret-Token": SECRET as string,
+          ...(botId !== null ? { [TELEGRAM_BOT_ID_HEADER]: botId } : {}),
         },
         body: JSON.stringify(outgoing),
         ...(timeoutMs === undefined

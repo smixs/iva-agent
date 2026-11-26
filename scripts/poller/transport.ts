@@ -31,9 +31,10 @@ const errorMessage = (error: unknown) => (error as ErrorLike).message;
 async function tg(
   method: string,
   body: unknown,
-  { timeoutMs = 30_000 }: { timeoutMs?: number } = {},
+  { timeoutMs = 30_000, token }: { timeoutMs?: number; token?: string } = {},
 ): Promise<unknown> {
-  const res = await fetch(`${API}/${method}`, {
+  const base = token ? `https://api.telegram.org/bot${token}` : API;
+  const res = await fetch(`${base}/${method}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(await redactTelegramBody(body ?? {})),
@@ -73,19 +74,24 @@ export async function readCappedStream(body: unknown, maxBytes: number) {
 // Download a Telegram file's bytes as UTF-8 text (getFile → file download), hard-capped at maxBytes and
 // deadline-bounded at every step (getFile call, the download connection, and the streamed read — a size
 // cap alone doesn't save the loop from a stalled socket). Returns null on any failure or over-size.
-async function downloadTelegramFile(fileId: string, maxBytes: number) {
+async function downloadTelegramFile(
+  fileId: string,
+  maxBytes: number,
+  { token }: { token?: string } = {},
+) {
   try {
     const info = await tg(
       "getFile",
       { file_id: fileId },
-      { timeoutMs: 10_000 },
+      { timeoutMs: 10_000, token },
     );
     const filePath = (info as TelegramResponse | null)?.result as
       { file_path?: unknown } | undefined;
     const path = filePath?.file_path;
     if (!path) return null;
+    const effectiveToken = token ?? TOKEN;
     const res = await fetch(
-      `https://api.telegram.org/file/bot${TOKEN}/${String(path)}`,
+      `https://api.telegram.org/file/bot${effectiveToken}/${String(path)}`,
       {
         signal: AbortSignal.timeout(15_000),
       },
@@ -103,14 +109,18 @@ async function downloadTelegramFile(fileId: string, maxBytes: number) {
 async function reply(
   chatId: number | string,
   text: string,
-  { silent = false }: { silent?: boolean } = {},
+  { silent = false, token }: { silent?: boolean; token?: string } = {},
 ) {
   try {
-    const data = (await tg("sendMessage", {
-      chat_id: chatId,
-      text,
-      ...(silent ? { disable_notification: true } : {}),
-    })) as TelegramResponse;
+    const data = (await tg(
+      "sendMessage",
+      {
+        chat_id: chatId,
+        text,
+        ...(silent ? { disable_notification: true } : {}),
+      },
+      { token },
+    )) as TelegramResponse;
     if (!data.ok)
       throw new Error(String(data.description || "sendMessage failed"));
     return data.result;
@@ -127,13 +137,18 @@ async function edit(
   chatId: number | string,
   messageId: number,
   markdown: string,
+  { token }: { token?: string } = {},
 ) {
   try {
-    const data = (await tg("editMessageText", {
-      chat_id: chatId,
-      message_id: messageId,
-      ...screenPayload(markdown),
-    })) as TelegramResponse;
+    const data = (await tg(
+      "editMessageText",
+      {
+        chat_id: chatId,
+        message_id: messageId,
+        ...screenPayload(markdown),
+      },
+      { token },
+    )) as TelegramResponse;
     if (!data.ok)
       throw new Error(String(data.description || "editMessageText failed"));
     return data.result;

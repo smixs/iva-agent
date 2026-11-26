@@ -34,6 +34,7 @@ export const STATUS_ERROR_BACKOFF_MS = 50_000;
 export type TelegramDraftHandle = {
   readonly chatId: string;
   readonly messageThreadId?: number;
+  readonly botId?: string | null;
   request(
     method: string,
     body?: Record<string, unknown>,
@@ -271,13 +272,13 @@ export class TelegramDraftStream {
     },
   ) {
     this.#tg = tg;
-    this.chatKey = chatKeyOf(tg.chatId, tg.messageThreadId);
+    this.chatKey = chatKeyOf(tg.chatId, tg.messageThreadId, tg.botId);
     this.#identity = options.identity;
     this.#enabled = options.enabled === true;
     this.#matches = options.matches;
     this.#getStatus =
       options.getStatus ??
-      (() => getChatStatus(chatKeyOf(tg.chatId, tg.messageThreadId)));
+      (() => getChatStatus(chatKeyOf(tg.chatId, tg.messageThreadId, tg.botId)));
     this.#now = options.now ?? Date.now;
     this.#onLost = options.onLost ?? (() => {});
     this.#tick();
@@ -664,7 +665,7 @@ export function startTelegramAcceptedTyping(
   tg: TelegramDraftHandle,
   ingressId: string,
 ): void {
-  const key = chatKeyOf(tg.chatId, tg.messageThreadId);
+  const key = chatKeyOf(tg.chatId, tg.messageThreadId, tg.botId);
   void accepted.get(key)?.stream.close(0);
   const stream = new TelegramDraftStream(tg, {
     matches: (st) =>
@@ -682,7 +683,7 @@ export function closeTelegramAcceptedTyping(
   tg: TelegramDraftHandle,
   ingressId?: string,
 ): void {
-  const key = chatKeyOf(tg.chatId, tg.messageThreadId);
+  const key = chatKeyOf(tg.chatId, tg.messageThreadId, tg.botId);
   const known = accepted.get(key);
   if (!known || (ingressId !== undefined && known.ingressId !== ingressId))
     return;
@@ -701,7 +702,7 @@ export function telegramDraftTurn(
   const key = turnKey(sessionId, turnId);
   const known = turns.get(key);
   if (known) return known;
-  const chatKey = chatKeyOf(tg.chatId, tg.messageThreadId);
+  const chatKey = chatKeyOf(tg.chatId, tg.messageThreadId, tg.botId);
   // A workflow resumed after process restart can emit deltas without another turn.started.
   if (!identity) {
     const st = getChatStatus(chatKey);
@@ -787,7 +788,7 @@ export async function closeTelegramDraftChat(
   await closeTelegramDraftTurn(sessionId, turnId);
   for (const stream of turns.values()) {
     if (
-      stream.chatKey !== chatKeyOf(tg.chatId, tg.messageThreadId) ||
+      stream.chatKey !== chatKeyOf(tg.chatId, tg.messageThreadId, tg.botId) ||
       !stream.closed
     )
       continue;
@@ -814,6 +815,7 @@ export async function finishTelegramStatus(
   const chatKey = chatKeyOf(
     channel.telegram.chatId,
     channel.telegram.messageThreadId,
+    channel.telegram.botId,
   );
   try {
     return Boolean(

@@ -45,6 +45,10 @@ import {
 import { tr } from "#lib/i18n.ts";
 import { appendTrace, type TraceInput } from "#lib/trace.ts";
 import { DATA_DIR, SECRET, RESET_ROUTE, TOKEN, log } from "./config.ts";
+import {
+  parseBotScopedKey,
+  resolveTelegramBot,
+} from "../../packages/telegram-bots/index.ts";
 import { tg } from "./transport.ts";
 
 type ErrorLike = {
@@ -616,7 +620,7 @@ export function resetEpochFor(chatKey: string): number | undefined {
   const pending = pendingResetEpoch(chatKey);
   if (pending !== undefined) return pending;
   const epoch = getChatStatus(chatKey)?.resetEpoch;
-  return Number.isSafeInteger(epoch) ? (epoch) : undefined;
+  return Number.isSafeInteger(epoch) ? epoch : undefined;
 }
 
 const requestResetFromIntent: ResetRequestImpl = ({
@@ -1006,24 +1010,40 @@ export async function reconcileScopedResetIntents({
 
 function telegramTargetOf(
   chatKey: string,
-): { chat_id: string; message_thread_id?: number } | null {
-  const separator = chatKey.indexOf(":");
+): { chat_id: string; message_thread_id?: number; botId?: string } | null {
+  const { botId, key } = parseBotScopedKey(chatKey);
+  const separator = key.indexOf(":");
   if (separator <= 0) return null;
-  const chatId = chatKey.slice(0, separator);
+  const chatId = key.slice(0, separator);
   if (!/^-?\d+$/.test(chatId)) return null;
-  const thread = chatKey.slice(separator + 1);
-  if (thread === "") return { chat_id: chatId };
+  const thread = key.slice(separator + 1);
+  if (thread === "")
+    return botId ? { chat_id: chatId, botId } : { chat_id: chatId };
   if (!/^\d+$/.test(thread)) return null;
   const messageThreadId = Number(thread);
   if (!Number.isSafeInteger(messageThreadId) || messageThreadId <= 0)
     return null;
-  return { chat_id: chatId, message_thread_id: messageThreadId };
+  return {
+    chat_id: chatId,
+    message_thread_id: messageThreadId,
+    ...(botId ? { botId } : {}),
+  };
+}
+
+function tokenForBotId(botId: string | undefined): string {
+  if (!botId) return TOKEN ?? "";
+  return resolveTelegramBot(botId)?.token ?? TOKEN ?? "";
 }
 
 async function sendStaleRunNotice(chatKey: string, text: string) {
   const target = telegramTargetOf(chatKey);
   if (!target) throw new Error(`invalid Telegram chat key: ${chatKey}`);
-  const data = await tg("sendMessage", { ...target, text });
+  const { botId, ...body } = target;
+  const data = await tg(
+    "sendMessage",
+    { ...body, text },
+    botId ? { token: tokenForBotId(botId) } : undefined,
+  );
   const response = data as { ok?: unknown; description?: unknown } | null;
   if (!response?.ok)
     throw new Error(
@@ -1039,14 +1059,19 @@ export async function sendInterruptedTurnNotice(chatKey: string, text: string) {
   const target = telegramTargetOf(chatKey);
   if (!target) throw new Error(`invalid Telegram chat key: ${chatKey}`);
   const signal = AbortSignal.timeout(30_000);
-  const result = await sendTelegramHtml(TOKEN ?? "", target.chat_id, text, {
-    rich: true,
-    trace: { source: "restart-notice" },
-    fetchImpl: (input, init) => fetch(input, { ...init, signal }),
-    ...(target.message_thread_id === undefined
-      ? {}
-      : { threadId: String(target.message_thread_id) }),
-  });
+  const result = await sendTelegramHtml(
+    tokenForBotId(target.botId),
+    target.chat_id,
+    text,
+    {
+      rich: true,
+      trace: { source: "restart-notice" },
+      fetchImpl: (input, init) => fetch(input, { ...init, signal }),
+      ...(target.message_thread_id === undefined
+        ? {}
+        : { threadId: String(target.message_thread_id) }),
+    },
+  );
   if (!result.ok) throw new Error(result.error);
 }
 

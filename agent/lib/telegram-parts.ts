@@ -1,4 +1,8 @@
+import { TELEGRAM_BOT_ID_FIELD } from "../../packages/telegram-bots/index.ts";
+
 export type TelegramRawMessage = Record<string, unknown>;
+
+export { TELEGRAM_BOT_ID_FIELD };
 
 function isTelegramRawMessage(value: unknown): value is TelegramRawMessage {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -65,6 +69,7 @@ export const TELEGRAM_MESSAGE_ENVELOPE_KEYS: ReadonlySet<string> = new Set([
   TELEGRAM_QUEUE_RECEIPT_FIELD,
   TELEGRAM_BUTTON_TAP_FIELD,
   TELEGRAM_BUTTON_TAP_DAILY_TEXT_FIELD,
+  TELEGRAM_BOT_ID_FIELD,
 ]);
 
 // Текстовая проекция Message. Конверт её не судит: содержательность текста решает

@@ -29,6 +29,7 @@ import type { TelegramRawMedia, TelegramRawMessage } from "./telegram-parts.ts";
 import { resolveVaultDir } from "@iva/vault-dir";
 
 export type TelegramMediaEffects = {
+  readonly botToken?: string;
   readonly request: (
     method: string,
     body?: { file_id: string },
@@ -57,6 +58,7 @@ const DOWNLOAD_TIMEOUT_MS = 300_000;
 async function fetchTelegramFile(
   request: TelegramMediaEffects["request"],
   fileId: string,
+  botToken?: string,
 ): Promise<{ bytes: ArrayBuffer } | { tooBig: true } | null> {
   const r = await request("getFile", { file_id: fileId });
   const body = r.body as {
@@ -69,7 +71,7 @@ async function fetchTelegramFile(
       return { tooBig: true };
     return null;
   }
-  const token = process.env.TELEGRAM_BOT_TOKEN ?? "";
+  const token = botToken ?? process.env.TELEGRAM_BOT_TOKEN ?? "";
   const signal = AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS);
   try {
     const dl = await fetch(
@@ -149,7 +151,11 @@ export async function processMediaPart(
         }
       }
       if (!rel) {
-        const file = await fetchTelegramFile(effects.request, media.fileId);
+        const file = await fetchTelegramFile(
+          effects.request,
+          media.fileId,
+          effects.botToken,
+        );
         if (file && "tooBig" in file) {
           appendDaily(
             tag,
@@ -363,7 +369,7 @@ export async function processMediaPart(
     return { kind: "context", context };
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
-    const token = process.env.TELEGRAM_BOT_TOKEN;
+    const token = effects.botToken ?? process.env.TELEGRAM_BOT_TOKEN;
     // Гейт до обрезки: обрезанный ключ гейт уже не узнаёт, и его хвост уехал бы в
     // чат целым куском (правило про runtime-контент — в outbox.ts).
     const contextDetail = redactNotice(

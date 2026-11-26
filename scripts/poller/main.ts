@@ -18,16 +18,19 @@ import { notificationChat } from "../../packages/notification-chat/index.ts";
 import { tr } from "#lib/i18n.ts";
 import {
   ACCEPTANCE_ROUTE,
+  BOTS,
   DATA_DIR,
   ROUTE,
   SECRET,
   TOKEN,
+  botBacklogMarkerFile,
+  botOffsetFile,
   log,
   sleep,
 } from "./config.ts";
 import { tg, reply } from "./transport.ts";
 import { noteDroppedBridgeTasks, scheduleBridgeTask } from "./background.ts";
-import { fastForwardOffset, saveOffset } from "./offset.ts";
+import { fastForwardOffset, loadOffset, saveOffset } from "./offset.ts";
 import {
   admitTelegramUpdate,
   promoteReadyInbox,
@@ -37,7 +40,12 @@ import {
 import {
   acquireTelegramProcessLock,
   assertTelegramProcessLease,
+  type TelegramProcessLease,
 } from "./process-lock.ts";
+import {
+  tagUpdateWithBot,
+  type TelegramBotConfig,
+} from "../../packages/telegram-bots/index.ts";
 import { prepareTelegramStartup } from "./startup-state.ts";
 import * as queue from "./queue.ts";
 import * as routing from "./routing.ts";
@@ -284,16 +292,243 @@ export function scheduleResetIntentReconciliation({
 
 async function deleteWebhookOrThrow(
   dropPendingUpdates: boolean,
+  {
+    token,
+    tgImpl,
+    logImpl = log,
+  }: {
+    token?: string;
+    tgImpl?: (
+      method: string,
+      body: unknown,
+      options?: { timeoutMs?: number; token?: string },
+    ) => Promise<unknown>;
+    logImpl?: (...args: unknown[]) => void;
+  } = {},
 ): Promise<void> {
-  const response = (await tg("deleteWebhook", {
-    drop_pending_updates: dropPendingUpdates,
-  })) as TelegramResponse;
+  const call = tgImpl ?? tg;
+  const response = (await call(
+    "deleteWebhook",
+    { drop_pending_updates: dropPendingUpdates },
+    token ? { token } : undefined,
+  )) as TelegramResponse;
   if (response.ok !== true) {
     throw new Error(
       `deleteWebhook failed: ${response.description ?? "Telegram returned ok:false"}`,
     );
   }
-  log("deleteWebhook:", `ok (drop_pending=${dropPendingUpdates})`);
+  logImpl("deleteWebhook:", `ok (drop_pending=${dropPendingUpdates})`);
+}
+
+const ALLOWED_UPDATES = [
+  "message",
+  "callback_query",
+  "stopped_message_generation",
+] as const;
+
+export type BotPollLoopOptions = {
+  readonly bot: TelegramBotConfig;
+  readonly initialOffset: number;
+  readonly assertLease: () => void;
+  readonly tgImpl?: (
+    method: string,
+    body: unknown,
+    options?: { timeoutMs?: number; token?: string },
+  ) => Promise<unknown>;
+  readonly pollTimeoutSeconds?: () => number;
+  readonly processUpdateImpl?: (
+    update: TelegramQueueUpdate,
+    offset: number,
+  ) => Promise<{ offset: number; ingressBlocked: boolean }>;
+  readonly saveOffsetImpl?: (offset: number) => Promise<void>;
+  readonly sleepImpl?: (ms: number) => Promise<void>;
+  readonly onUpdates?: () => void;
+  readonly onConflictAlert?: (bot: TelegramBotConfig) => Promise<boolean>;
+  readonly alertResolvedImpl?: (bot: TelegramBotConfig) => void;
+  readonly shouldContinue?: () => boolean;
+  readonly logImpl?: (...args: unknown[]) => void;
+};
+
+/**
+ * Независимый цикл long-polling для одного бота внутри общего процесса Bridge (ADR-0030).
+ * Каждый бот держит собственный offset и backoff: зависание или 409-конфликт одного бота
+ * не задерживают опрос и приём обновлений другого.
+ */
+export async function runBotPollLoop({
+  bot,
+  initialOffset,
+  assertLease,
+  tgImpl = tg,
+  pollTimeoutSeconds = () => 30,
+  processUpdateImpl,
+  saveOffsetImpl,
+  sleepImpl = sleep,
+  onUpdates,
+  onConflictAlert,
+  alertResolvedImpl,
+  shouldContinue = () => true,
+  logImpl = log,
+}: BotPollLoopOptions): Promise<{ offset: number }> {
+  const label = bot.isPrimary ? "iva" : `bot:${bot.botId ?? "unknown"}`;
+  const offsetFile = botOffsetFile(bot);
+  const persistOffset =
+    saveOffsetImpl ??
+    ((nextOffset: number) => saveOffset(nextOffset, { file: offsetFile }));
+  const processOne =
+    processUpdateImpl ??
+    ((update: TelegramQueueUpdate, currentOffset: number) => {
+      const tagged = tagUpdateWithBot(update, bot);
+      return processTelegramUpdate(tagged, currentOffset, {
+        handleControlImpl: bot.isPrimary
+          ? handleControl
+          : () => Promise.resolve(false),
+        admitImpl: (candidate) => admitTelegramUpdate(candidate, { bot }),
+        saveOffsetImpl: persistOffset,
+        logImpl,
+      });
+    });
+
+  let offset = initialOffset;
+  let consecutiveConflicts = 0;
+
+  while (shouldContinue()) {
+    assertLease();
+    const pollSeconds = pollTimeoutSeconds();
+    let data: TelegramResponse;
+    try {
+      data = (await tgImpl(
+        "getUpdates",
+        {
+          offset,
+          timeout: pollSeconds,
+          allowed_updates: ALLOWED_UPDATES,
+        },
+        {
+          timeoutMs: pollSeconds > 1 ? 40_000 : 10_000,
+          token: bot.token,
+        },
+      )) as TelegramResponse;
+    } catch (error) {
+      logImpl(`[${label}] getUpdates network:`, errorMessage(error));
+      consecutiveConflicts = 0;
+      await sleepImpl(3000);
+      continue;
+    }
+    if (!data.ok) {
+      logImpl(`[${label}] getUpdates:`, data.description);
+      if (/409|conflict|webhook/i.test(String(data.description || ""))) {
+        consecutiveConflicts += 1;
+        const { sleepMs, shouldAlert } = conflictBackoff(consecutiveConflicts);
+        try {
+          await deleteWebhookOrThrow(false, {
+            token: bot.token,
+            tgImpl,
+            logImpl,
+          });
+        } catch (error) {
+          logImpl(`[${label}] deleteWebhook:`, errorMessage(error));
+        }
+        if (shouldAlert && onConflictAlert) {
+          try {
+            await onConflictAlert(bot);
+          } catch (error) {
+            logImpl(
+              `[${label}] getUpdates conflict alert:`,
+              errorMessage(error),
+            );
+          }
+        }
+        await sleepImpl(sleepMs);
+        continue;
+      }
+      consecutiveConflicts = 0;
+      await sleepImpl(3000);
+      continue;
+    }
+    if (consecutiveConflicts > 0) {
+      consecutiveConflicts = 0;
+      alertResolvedImpl?.(bot);
+    }
+    const items = parseTelegramUpdates(data.result);
+    if (items === null) {
+      logImpl(
+        `[${label}] getUpdates: invalid result`,
+        JSON.stringify(invalidTelegramUpdatesDiagnostic(data.result)),
+      );
+      await sleepImpl(3000);
+      continue;
+    }
+    if (items.length === 0) continue;
+    const batch = await processTelegramBatch(items, offset, {
+      processImpl: processOne,
+      saveOffsetImpl: persistOffset,
+      logImpl,
+    });
+    offset = batch.offset;
+    onUpdates?.();
+    if (batch.ingressBlocked) await sleepImpl(3000);
+  }
+  return { offset };
+}
+
+function createWakeSignal(): {
+  wake: () => void;
+  wait: (maxMs: number) => Promise<void>;
+} {
+  let pending = false;
+  let notify: (() => void) | null = null;
+  return {
+    wake() {
+      if (notify) {
+        const resolve = notify;
+        notify = null;
+        resolve();
+      } else {
+        pending = true;
+      }
+    },
+    wait(maxMs: number) {
+      if (pending) {
+        pending = false;
+        return Promise.resolve();
+      }
+      return new Promise<void>((resolve) => {
+        const timer = setTimeout(() => {
+          if (notify === done) notify = null;
+          resolve();
+        }, maxMs);
+        const done = () => {
+          clearTimeout(timer);
+          resolve();
+        };
+        notify = done;
+      });
+    },
+  };
+}
+
+async function initColleagueBotOffset(
+  bot: TelegramBotConfig,
+  processLease: TelegramProcessLease,
+): Promise<number> {
+  const offsetFile = botOffsetFile(bot);
+  const markerFile = botBacklogMarkerFile(bot);
+  const startup = await prepareTelegramStartup(processLease, {
+    markerFile,
+    loadOffsetImpl: () => loadOffset({ file: offsetFile }),
+  });
+  await deleteWebhookOrThrow(startup.firstRun, { token: bot.token });
+  if (startup.firstRun) {
+    const offset = await fastForwardOffset({ token: bot.token });
+    log(
+      `bot:${bot.botId} first run — offset past the tail of the queue:`,
+      offset,
+    );
+    await saveOffset(offset, { file: offsetFile });
+    return offset;
+  }
+  log(`bot:${bot.botId} starting offset:`, startup.offset);
+  return startup.offset;
 }
 
 const rawCollectQuietMs = Number(
@@ -363,9 +598,67 @@ export async function main({
   }
 
   const scanHelperOutcomes = createHelperOutcomeScan();
+  const bots = BOTS;
+  const multiBot = bots.length > 1;
+  const wakeSignal = createWakeSignal();
+  const fatalBotState: { error: Error | null } = { error: null };
+
+  if (multiBot) {
+    const botStates: Array<{ bot: TelegramBotConfig; offset: number }> = [
+      { bot: bots[0], offset },
+    ];
+    for (const colleague of bots.slice(1)) {
+      const colleagueOffset = await initColleagueBotOffset(
+        colleague,
+        processLease,
+      );
+      botStates.push({ bot: colleague, offset: colleagueOffset });
+    }
+    log(
+      `multi-bot polling active: ${botStates.map(({ bot }) => (bot.isPrimary ? "iva" : `bot:${bot.botId}`)).join(", ")}`,
+    );
+    for (const entry of botStates) {
+      const conflictKey = entry.bot.isPrimary
+        ? "getupdates-conflict"
+        : `getupdates-conflict:${entry.bot.botId}`;
+      void runBotPollLoop({
+        bot: entry.bot,
+        initialOffset: entry.offset,
+        assertLease: () => assertTelegramProcessLease(processLease),
+        onUpdates: () => wakeSignal.wake(),
+        onConflictAlert: async () => {
+          const outcome = await alertOnce(
+            DATA_DIR,
+            conflictKey,
+            "telegram getUpdates conflict",
+            async () => {
+              const chat = notificationChat();
+              if (!chat) return false;
+              const res = (await tg("sendMessage", {
+                chat_id: chat,
+                text: tr(
+                  "Receiving messages has stopped: another bot instance is holding this token. Stop the other instance.",
+                  "Приём сообщений остановлен: другой инстанс бота держит этот токен — останови его.",
+                ),
+              })) as TelegramResponse;
+              return Boolean(res.ok);
+            },
+          );
+          return outcome === "sent";
+        },
+        alertResolvedImpl: () => alertResolved(DATA_DIR, conflictKey),
+      }).catch((error: unknown) => {
+        fatalBotState.error =
+          error instanceof Error ? error : new Error(String(error));
+        wakeSignal.wake();
+      });
+    }
+  }
+
   let consecutiveConflicts = 0;
   for (;;) {
     assertTelegramProcessLease(processLease);
+    if (fatalBotState.error !== null) throw fatalBotState.error;
     // One batch per idle chat/topic per pass. While any queue remains, use a short
     // Telegram long-poll so terminal/stale run-status changes trigger drain quickly.
     scheduleResetIntentReconciliation();
@@ -401,6 +694,10 @@ export async function main({
     });
     const pendingQueueCount = await drainReadyQueueHeads();
     const pollSeconds = pollTimeout(pendingQueueCount, pendingInboxCount);
+    if (multiBot) {
+      await wakeSignal.wait(pollSeconds * 1_000);
+      continue;
+    }
     let data: TelegramResponse;
     try {
       data = (await tg(

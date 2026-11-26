@@ -15,6 +15,7 @@ import {
 import { tr } from "./i18n.ts";
 import { isPrivateTelegramChat } from "./telegram-private-chat.ts";
 import { traceStop } from "./trace.ts";
+import { botIdFromUpdate } from "../../packages/telegram-bots/index.ts";
 
 // Исходы не смешиваются: «отмену запросили, ждём факта», «отменять нечего» и «отменить не
 // вышло из-за конфига» — разные факты с разным следующим шагом. Ответил ли роут и пришло ли
@@ -260,7 +261,8 @@ export async function handleTelegramDraftStop(
     );
     return "ignored";
   }
-  const key = chatKeyOf(event.chat.id, event.message_thread_id);
+  const botId = botIdFromUpdate({ stopped_message_generation: event });
+  const key = chatKeyOf(event.chat.id, event.message_thread_id, botId);
   const snapshot = getStatusImpl(key);
   if (
     snapshot?.draftId !== event.draft_id ||
