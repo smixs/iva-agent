@@ -117,6 +117,7 @@ export interface ManagedBotHandlerDeps {
 type TelegramApiEnvelope = {
   ok?: unknown;
   description?: unknown;
+  error_code?: unknown;
   result?: unknown;
 };
 
@@ -173,6 +174,31 @@ function redactError(error: unknown, secrets: readonly string[]): string {
 
 function failedOutcome(reason: string, retry = true): ManagedBotOutcome {
   return { status: "failed", reason, retry };
+}
+
+function telegramErrorCode(response: TelegramApiEnvelope | null): number | null {
+  const code = response?.error_code;
+  return typeof code === "number" && Number.isFinite(code) ? code : null;
+}
+
+/** Сетевые ошибки, 429 и 5xx временны; 4xx Bot API — окончательный отказ этого события. */
+function temporaryTelegramFailure(response: TelegramApiEnvelope | null): boolean {
+  const code = telegramErrorCode(response);
+  if (code === null) return true;
+  return code === 429 || code >= 500;
+}
+
+function terminalManagedFailure(
+  update: TelegramQueueUpdate,
+  botId: string,
+  reason: string,
+  logImpl: (...args: unknown[]) => void,
+): ManagedBotOutcome {
+  logImpl(
+    `managed_bot update_id=${update.update_id} bot ${botId}: terminal failure acknowledged:`,
+    reason,
+  );
+  return failedOutcome(reason, false);
 }
 
 /** Известные токены установки до вызова Bot API: рядом с новым могут лежать уже нанятые коллеги. */
@@ -358,6 +384,9 @@ export async function handleManagedBotUpdate(
         : "getManagedBotToken returned no token";
     const reason = redactError(detail, secrets);
     logImpl(`managed_bot ${event.botId}: getManagedBotToken rejected:`, reason);
+    if (!temporaryTelegramFailure(tokenResponse)) {
+      return terminalManagedFailure(update, event.botId, reason, logImpl);
+    }
     return failedOutcome(reason);
   }
   secrets.push(token);
@@ -369,7 +398,12 @@ export async function handleManagedBotUpdate(
     logImpl(
       `managed_bot ${event.botId}: returned token failed botId/env validation`,
     );
-    return failedOutcome("invalid managed bot token", false);
+    return terminalManagedFailure(
+      update,
+      event.botId,
+      "invalid managed bot token",
+      logImpl,
+    );
   }
 
   // Сохраняем токен коллеги рядом с токеном Ивы в `.env` (0600, атомарно) и обновляем env процесса.
