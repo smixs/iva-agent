@@ -303,3 +303,28 @@ test("the endpoint answers 204 to a roll call, 400 to anything else, 413 to a la
     [{ total: 7 }],
   );
 });
+
+test("a stream that will not cancel still gets its 413", async () => {
+  const stream = (cancel: () => Promise<void>) =>
+    new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(new Uint8Array(MAX_ROLL_CALL_BODY + 1));
+      },
+      cancel,
+    });
+  for (const body of [
+    stream(() => new Promise(() => {})),
+    stream(() => Promise.reject(new Error("no"))),
+  ])
+    assert.equal(
+      await textUpTo(
+        new Request("https://iva-agent.com/api/roll-call", {
+          method: "POST",
+          body,
+          duplex: "half",
+        } as RequestInit),
+        MAX_ROLL_CALL_BODY,
+      ),
+      null,
+    );
+});

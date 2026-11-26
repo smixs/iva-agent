@@ -16,7 +16,8 @@ export async function textUpTo(
     if (done) break;
     size += value.byteLength;
     if (size > max) {
-      await reader.cancel();
+      // Not awaited: a stream that refuses or never finishes cancelling still gets its 413.
+      reader.cancel().catch(() => {});
       return null;
     }
     chunks.push(value);
