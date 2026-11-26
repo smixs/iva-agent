@@ -337,6 +337,21 @@ test("childEnv keeps the caller's PATH order when the stable NODE_BIN_DIR is alr
   assert.deepEqual(entries, [stubBin, nodeBinDir, tailBin]);
 });
 
+test("childEnv preserves three occurrences of the stable Node bin dir in caller order", async (t) => {
+  const root = await sandbox(t);
+  const originalPath = process.env.PATH;
+  t.after(() => {
+    process.env.PATH = originalPath;
+  });
+  const stableBin = dirname(stableNodeExecutable(process.execPath));
+  const stubBin = join(root, "stub-bin");
+  const tailBin = join(root, "tail-bin");
+  const entries = [stubBin, stableBin, tailBin, stableBin, stableBin];
+  process.env.PATH = entries.join(":");
+
+  assert.equal(createCliRuntime(root).childEnv.PATH, entries.join(":"));
+});
+
 test("childEnv keeps the caller's PATH order when the original Node bin dir is on it", async (t) => {
   const root = await sandbox(t);
   const originalPath = process.env.PATH;
@@ -478,31 +493,18 @@ test("property: childEnv stably filters PATH and prepends the stable bin dir onl
       segments: fc.array(fc.oneof(fc.constant(""), otherSegment), {
         maxLength: 12,
       }),
-      nodePosition: fc.nat(),
-      originalPosition: fc.nat(),
-      includeNode: fc.boolean(),
-      includeOriginal: fc.boolean(),
+      nodeEntries: fc.array(
+        fc.tuple(fc.constantFrom(nodeBinDir, originalBinDir), fc.nat()),
+        { maxLength: 6 },
+      ),
     })
-    .map(
-      ({
-        segments,
-        nodePosition,
-        originalPosition,
-        includeNode,
-        includeOriginal,
-      }) => {
-        const withNode = [...segments];
-        if (includeNode)
-          withNode.splice(nodePosition % (withNode.length + 1), 0, nodeBinDir);
-        if (includeOriginal)
-          withNode.splice(
-            originalPosition % (withNode.length + 1),
-            0,
-            originalBinDir,
-          );
-        return withNode;
-      },
-    );
+    .map(({ segments, nodeEntries }) => {
+      const withNode = [...segments];
+      for (const [directory, position] of nodeEntries) {
+        withNode.splice(position % (withNode.length + 1), 0, directory);
+      }
+      return withNode;
+    });
 
   fc.assert(
     fc.property(pathSegments, (inputSegments) => {
