@@ -177,7 +177,7 @@ test(`no value of .env leaves the machine except through the closed lists (seed 
     fc.string({ maxLength: 40 }),
     fc.constantFrom(
       "https://my.internal/v1/model",
-      "/home/owner/models/secret.gguf",
+      "/srv/models/secret.gguf",
       "My Fine-Tune",
       "owner@example.com",
       "gpt-5.5",
@@ -388,7 +388,7 @@ test("one roll call a UTC day: the day is kept only after the site took the call
       JSON.parse(await readFile(join(storage, ROLL_CALL_FILE), "utf8")),
       { day: "2026-11-26" },
     );
-    // A restart, a second timer run, a run just before midnight: the same day sends nothing.
+    // A restart, a second daily run, a run just before midnight: the same day sends nothing.
     assert.deepEqual(await run("2026-11-26T23:59:59Z"), {
       status: "already-today",
     });
