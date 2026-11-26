@@ -1,6 +1,0 @@
-OK MultiBotPoll: no error (15552 distinct states)
-OK MultiBotPoll-shared-offset: NoSkippedUpdate violated (expected)
-OK MultiBotPoll-drop-activation-backlog: NoSkippedUpdate violated (expected)
-OK MultiBotPoll-no-lock: SinglePollerLock violated (expected)
-OK MultiBotPoll-no-bot-tag: ExactBotAttribution violated (expected)
-OK MultiBotPoll-independent-witness: NoIndependentProgress violated (expected)

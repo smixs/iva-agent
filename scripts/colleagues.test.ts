@@ -417,7 +417,14 @@ test("п.1: clean configuration has colleagues disabled and blocks colleague mes
 // Мост, запущенный с выключенной опцией, обязан принять апдейт коллеги
 // после `iva colleague on` без ручного перезапуска.
 test("п.1 regression: bridge started with colleagues off accepts a colleague update after iva colleague on", async (t) => {
-  writeRawSettings({ colleagues: { enabled: false, items: {} } });
+  writeRawSettings(
+    withColleague(withColleaguesEnabled({}, false), {
+      botId: CRITIC_BOT_ID,
+      role: "critic",
+      provider: "custom",
+      model: "critic-custom-model-v1",
+    }),
+  );
 
   // Изолированное состояние Bridge внутри общего временного data/ этого тест-файла.
   for (const name of readdirSync(dataPath)) {

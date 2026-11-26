@@ -2826,6 +2826,11 @@ test("последний круг B1: incomplete hire does not start polling aft
       initialOffset: 0,
       assertLease: () => {},
       colleaguesEnabledImpl: () => true,
+      colleagueCompleteImpl: () =>
+        parseColleaguesConfig(
+          JSON.parse(readFileSync(localSettings, "utf8")) as unknown,
+          () => {},
+        ).items[HIRED_BOT_ID] !== undefined,
       tgImpl: (method) => {
         if (method === "getUpdates") prematurePolls += 1;
         return Promise.resolve({ ok: true, result: [] });
