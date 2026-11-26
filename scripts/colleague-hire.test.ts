@@ -104,6 +104,8 @@ const [
     colleagueProfileCopy,
     parseColleaguesConfig,
     readColleagueHireProposals,
+    withColleague,
+    withColleagueHireProposal,
     withColleaguesEnabled,
   },
   { colleagueExecute },
@@ -117,7 +119,7 @@ const [
     reconcilePendingColleagueAvatars,
   },
   { handleControl },
-  { runBotPollLoop },
+  { processTelegramUpdate, runBotPollLoop },
   { acquireTelegramProcessLock, assertTelegramProcessLease },
 ] = await Promise.all([
   import("#lib/colleagues.ts"),
@@ -846,6 +848,494 @@ test("п.2: managed_bot fetches token, stores it in .env beside TELEGRAM_BOT_TOK
   await cliCmd(["remove", HIRED_BOT_ID]);
   const envAfterRemove = parseEnvText(readFileSync(envPath, "utf8"));
   assert.equal(envAfterRemove.TELEGRAM_COLLEAGUE_BOT_TOKENS, undefined);
+});
+
+function makeManagedHireUpdate(
+  updateId: number,
+  botId: string,
+  username: string,
+  firstName = "Критик",
+): TelegramQueueUpdate {
+  return {
+    update_id: updateId,
+    managed_bot: {
+      user: { id: 42, is_bot: false, first_name: "Sergei" },
+      bot: {
+        id: Number(botId),
+        is_bot: true,
+        first_name: firstName,
+        username,
+      },
+    },
+  };
+}
+
+function writeHireTestEnv(file: string, colleagueLine?: string): void {
+  writeFileSync(
+    file,
+    [
+      `TELEGRAM_BOT_TOKEN=${IVA_TOKEN}`,
+      "TELEGRAM_BOT_USERNAME=iva_main_bot",
+      ...(colleagueLine === undefined
+        ? []
+        : [`TELEGRAM_COLLEAGUE_BOT_TOKENS=${colleagueLine}`]),
+      "",
+    ].join("\n"),
+    { mode: 0o600 },
+  );
+}
+
+const successfulAvatar = {
+  ok: true as const,
+  logo: {
+    id: 1,
+    name: "Test Talisman",
+    category: "test",
+    source: "unit-test",
+  },
+  jpegBytes: 640,
+};
+
+test("возврат 1: temporary getManagedBotToken failure holds the update and the same update hires after recovery", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "iva-hire-retry-"));
+  const localSettings = join(dir, "settings.json");
+  const localEnvPath = join(dir, ".env");
+  writeHireTestEnv(localEnvPath);
+  try {
+    const localEnv: NodeJS.ProcessEnv = {
+      TELEGRAM_BOT_TOKEN: IVA_TOKEN,
+      TELEGRAM_BOT_USERNAME: "iva_main_bot",
+      MODEL_PROVIDER: "ollama",
+    };
+    const update = makeManagedHireUpdate(
+      901,
+      HIRED_BOT_ID,
+      "iva_main_critic_bot",
+    );
+    const savedOffsets: number[] = [];
+    const hiredBots: TelegramBotConfig[] = [];
+    const ownerNotices: string[] = [];
+    let tokenCalls = 0;
+
+    const controlImpl = (u: TelegramQueueUpdate) =>
+      handleControl(u, {
+        managedBotImpl: (managedUpdate) =>
+          handleManagedBotUpdate(managedUpdate, {
+            allowedUserIds: new Set(["42"]),
+            primaryBotId: IVA_BOT_ID,
+            primaryBotToken: IVA_TOKEN,
+            envPath: localEnvPath,
+            settingsFile: localSettings,
+            env: localEnv,
+            tgImpl: (method) => {
+              if (method === "getManagedBotToken") {
+                tokenCalls += 1;
+                if (tokenCalls === 1) {
+                  return Promise.reject(new Error("token API timeout"));
+                }
+                return Promise.resolve({ ok: true, result: HIRED_TOKEN });
+              }
+              return Promise.resolve({ ok: true, result: true });
+            },
+            replyImpl: (_chatId, text) => {
+              ownerNotices.push(text);
+              return Promise.resolve({ message_id: 1 });
+            },
+            applyAvatarImpl: () => Promise.resolve(successfulAvatar),
+            onColleagueHired: (bot) => hiredBots.push(bot),
+            lang: () => "ru",
+            logImpl: () => {},
+          }),
+      });
+
+    const first = await processTelegramUpdate(update, 901, {
+      handleControlImpl: controlImpl,
+      saveOffsetImpl: (next) => {
+        savedOffsets.push(next);
+        return Promise.resolve();
+      },
+      logImpl: () => {},
+    });
+    assert.deepEqual(first, { offset: 901, ingressBlocked: true });
+    assert.deepEqual(savedOffsets, []);
+    assert.equal(hiredBots.length, 0);
+    assert.equal(ownerNotices.length, 0);
+
+    const second = await processTelegramUpdate(update, 901, {
+      handleControlImpl: controlImpl,
+      saveOffsetImpl: (next) => {
+        savedOffsets.push(next);
+        return Promise.resolve();
+      },
+      logImpl: () => {},
+    });
+    assert.deepEqual(second, { offset: 902, ingressBlocked: false });
+    assert.deepEqual(savedOffsets, [902]);
+    assert.equal(tokenCalls, 2);
+    assert.equal(hiredBots.length, 1);
+    assert.equal(ownerNotices.length, 1);
+    const cfg = parseColleaguesConfig(
+      JSON.parse(readFileSync(localSettings, "utf8")) as unknown,
+      () => {},
+    );
+    assert.equal(cfg.enabled, true);
+    assert.equal(cfg.items[HIRED_BOT_ID]?.role, "critic");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("возврат 2: repeated managed_bot keeps the existing role and disabled option, and does not consume another proposal", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "iva-hire-repeat-"));
+  const localSettings = join(dir, "settings.json");
+  const localEnvPath = join(dir, ".env");
+  writeHireTestEnv(localEnvPath, `iva_main_critic_bot=${HIRED_TOKEN}`);
+  try {
+    let settings = withColleaguesEnabled({}, false);
+    settings = withColleague(settings, {
+      botId: HIRED_BOT_ID,
+      role: "critic",
+      provider: "ollama",
+      model: "critic-model",
+      name: "Критик",
+      username: "iva_main_critic_bot",
+      avatarPhase: "set",
+      avatarLogoId: 10,
+      avatarName: "Old Talisman",
+    });
+    settings = withColleagueHireProposal(
+      settings,
+      {
+        botUsername: "iva_main_researcher_bot",
+        role: "researcher",
+        provider: "openrouter",
+        model: "researcher-model",
+        name: "Исследователь",
+      },
+      1_700_000_000_000,
+    );
+    writeFileSync(localSettings, JSON.stringify(settings), { mode: 0o600 });
+
+    const localEnv: NodeJS.ProcessEnv = {
+      TELEGRAM_BOT_TOKEN: IVA_TOKEN,
+      TELEGRAM_BOT_USERNAME: "iva_main_bot",
+      MODEL_PROVIDER: "ollama",
+    };
+    const update = makeManagedHireUpdate(
+      910,
+      HIRED_BOT_ID,
+      "iva_main_critic_bot",
+    );
+    let avatarCalls = 0;
+    const controlImpl = (u: TelegramQueueUpdate) =>
+      handleControl(u, {
+        managedBotImpl: (managedUpdate) =>
+          handleManagedBotUpdate(managedUpdate, {
+            allowedUserIds: new Set(["42"]),
+            primaryBotId: IVA_BOT_ID,
+            primaryBotToken: IVA_TOKEN,
+            envPath: localEnvPath,
+            settingsFile: localSettings,
+            env: localEnv,
+            tgImpl: (method) =>
+              Promise.resolve(
+                method === "getManagedBotToken"
+                  ? { ok: true, result: HIRED_TOKEN }
+                  : { ok: true, result: true },
+              ),
+            replyImpl: () => Promise.resolve({ message_id: 1 }),
+            applyAvatarImpl: () => {
+              avatarCalls += 1;
+              return Promise.resolve(successfulAvatar);
+            },
+            now: () => 1_700_000_000_100,
+            lang: () => "ru",
+            logImpl: () => {},
+          }),
+      });
+
+    const processed = await processTelegramUpdate(update, 910, {
+      handleControlImpl: controlImpl,
+      saveOffsetImpl: () => Promise.resolve(),
+      logImpl: () => {},
+    });
+    assert.equal(processed.ingressBlocked, false);
+    assert.equal(avatarCalls, 0);
+
+    const rawSettings = JSON.parse(
+      readFileSync(localSettings, "utf8"),
+    ) as Record<string, unknown>;
+    const cfg = parseColleaguesConfig(rawSettings, () => {});
+    assert.equal(cfg.enabled, false);
+    assert.equal(cfg.items[HIRED_BOT_ID]?.role, "critic");
+    assert.equal(cfg.items[HIRED_BOT_ID]?.provider, "ollama");
+    assert.equal(cfg.items[HIRED_BOT_ID]?.model, "critic-model");
+    const proposals = readColleagueHireProposals(
+      rawSettings,
+      1_700_000_000_100,
+    );
+    assert.equal(proposals.length, 1);
+    assert.equal(proposals[0]?.role, "researcher");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("возврат 3: profile write failure blocks the success path and is completed when the same update is retried", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "iva-hire-profile-retry-"));
+  const localSettings = join(dir, "settings.json");
+  const localEnvPath = join(dir, ".env");
+  writeHireTestEnv(localEnvPath);
+  try {
+    let settings = withColleaguesEnabled({}, false);
+    settings = withColleagueHireProposal(
+      settings,
+      {
+        botUsername: "iva_main_critic_bot",
+        role: "critic",
+        provider: "openrouter",
+        model: "critic-model",
+        name: "Критик",
+      },
+      1_700_000_000_000,
+    );
+    writeFileSync(localSettings, JSON.stringify(settings), { mode: 0o600 });
+
+    const localEnv: NodeJS.ProcessEnv = {
+      TELEGRAM_BOT_TOKEN: IVA_TOKEN,
+      TELEGRAM_BOT_USERNAME: "iva_main_bot",
+      MODEL_PROVIDER: "ollama",
+    };
+    const update = makeManagedHireUpdate(
+      920,
+      HIRED_BOT_ID,
+      "iva_main_critic_bot",
+    );
+    const profileCalls: string[] = [];
+    const savedOffsets: number[] = [];
+    const hiredBots: TelegramBotConfig[] = [];
+    const ownerNotices: string[] = [];
+
+    const controlImpl = (u: TelegramQueueUpdate) =>
+      handleControl(u, {
+        managedBotImpl: (managedUpdate) =>
+          handleManagedBotUpdate(managedUpdate, {
+            allowedUserIds: new Set(["42"]),
+            primaryBotId: IVA_BOT_ID,
+            primaryBotToken: IVA_TOKEN,
+            envPath: localEnvPath,
+            settingsFile: localSettings,
+            env: localEnv,
+            tgImpl: (method) => {
+              if (method === "getManagedBotToken") {
+                return Promise.resolve({ ok: true, result: HIRED_TOKEN });
+              }
+              if (
+                method === "setMyName" ||
+                method === "setMyDescription" ||
+                method === "setMyShortDescription"
+              ) {
+                profileCalls.push(method);
+                if (profileCalls.length <= 3) {
+                  return Promise.resolve({
+                    ok: false,
+                    description: "Bot API temporarily unavailable",
+                  });
+                }
+              }
+              return Promise.resolve({ ok: true, result: true });
+            },
+            replyImpl: (_chatId, text) => {
+              ownerNotices.push(text);
+              return Promise.resolve({ message_id: 1 });
+            },
+            applyAvatarImpl: () => Promise.resolve(successfulAvatar),
+            onColleagueHired: (bot) => hiredBots.push(bot),
+            now: () => 1_700_000_000_100,
+            lang: () => "ru",
+            logImpl: () => {},
+          }),
+      });
+    const processOnce = () =>
+      processTelegramUpdate(update, 920, {
+        handleControlImpl: controlImpl,
+        saveOffsetImpl: (next) => {
+          savedOffsets.push(next);
+          return Promise.resolve();
+        },
+        logImpl: () => {},
+      });
+
+    const first = await processOnce();
+    assert.deepEqual(first, { offset: 920, ingressBlocked: true });
+    assert.deepEqual(savedOffsets, []);
+    assert.equal(hiredBots.length, 0);
+    assert.equal(ownerNotices.length, 0);
+    assert.equal(
+      parseColleaguesConfig(readFileSync(localSettings, "utf8"), () => {})
+        .items[HIRED_BOT_ID],
+      undefined,
+    );
+
+    const second = await processOnce();
+    assert.deepEqual(second, { offset: 921, ingressBlocked: false });
+    assert.deepEqual(savedOffsets, [921]);
+    assert.equal(hiredBots.length, 1);
+    assert.equal(ownerNotices.length, 1);
+    assert.equal(
+      profileCalls.filter((method) => method === "setMyName").length,
+      2,
+    );
+    const cfg = parseColleaguesConfig(
+      JSON.parse(readFileSync(localSettings, "utf8")) as unknown,
+      () => {},
+    );
+    assert.equal(cfg.enabled, true);
+    assert.equal(cfg.items[HIRED_BOT_ID]?.role, "critic");
+    assert.equal(cfg.items[HIRED_BOT_ID]?.provider, "openrouter");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("возврат 4: concurrent avatar reconciliation shares one in-flight upload per colleague", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "iva-avatar-single-flight-"));
+  const localSettings = join(dir, "settings.json");
+  const localEnvPath = join(dir, ".env");
+  writeHireTestEnv(localEnvPath, `iva_main_critic_bot=${HIRED_TOKEN}`);
+  try {
+    writeFileSync(
+      localSettings,
+      JSON.stringify({
+        colleagues: {
+          enabled: true,
+          items: {
+            [HIRED_BOT_ID]: {
+              botId: HIRED_BOT_ID,
+              role: "critic",
+              provider: "ollama",
+              model: "critic-model",
+              username: "iva_main_critic_bot",
+              avatarPhase: "pending",
+            },
+          },
+        },
+      }),
+      { mode: 0o600 },
+    );
+    const localEnv: NodeJS.ProcessEnv = {
+      TELEGRAM_BOT_TOKEN: IVA_TOKEN,
+      MODEL_PROVIDER: "ollama",
+    };
+    let avatarCalls = 0;
+    let releaseAvatar!: () => void;
+    const avatarGate = new Promise<void>((resolve) => {
+      releaseAvatar = resolve;
+    });
+    const deps = {
+      settingsFile: localSettings,
+      envPath: localEnvPath,
+      env: localEnv,
+      now: () => 1_700_000_000_000,
+      applyAvatarImpl: () => {
+        avatarCalls += 1;
+        return avatarGate.then(() => successfulAvatar);
+      },
+      logImpl: () => {},
+    };
+
+    const first = reconcilePendingColleagueAvatars(deps);
+    const second = reconcilePendingColleagueAvatars(deps);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(avatarCalls, 1);
+    releaseAvatar();
+    await Promise.all([first, second]);
+    assert.equal(avatarCalls, 1);
+    assert.equal(
+      colleagueAvatarPhase(
+        parseColleaguesConfig(
+          JSON.parse(readFileSync(localSettings, "utf8")) as unknown,
+          () => {},
+        ).items[HIRED_BOT_ID],
+      ),
+      "set",
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("возврат 5: known colleague tokens are redacted from managed_bot and getUpdates error logs", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "iva-token-log-redaction-"));
+  const localSettings = join(dir, "settings.json");
+  const localEnvPath = join(dir, ".env");
+  writeHireTestEnv(localEnvPath, `iva_main_critic_bot=${HIRED_TOKEN}`);
+  try {
+    const localEnv: NodeJS.ProcessEnv = {
+      TELEGRAM_BOT_TOKEN: IVA_TOKEN,
+      TELEGRAM_BOT_USERNAME: "iva_main_bot",
+      MODEL_PROVIDER: "ollama",
+    };
+    const managedLogs: string[] = [];
+    const failed = await handleManagedBotUpdate(
+      makeManagedHireUpdate(930, HIRED_BOT_ID, "iva_main_critic_bot"),
+      {
+        allowedUserIds: new Set(["42"]),
+        primaryBotId: IVA_BOT_ID,
+        primaryBotToken: IVA_TOKEN,
+        envPath: localEnvPath,
+        settingsFile: localSettings,
+        env: localEnv,
+        tgImpl: (method) => {
+          if (method === "getManagedBotToken") {
+            return Promise.reject(
+              new Error(
+                `timeout calling https://api.telegram.org/bot${HIRED_TOKEN}/getManagedBotToken`,
+              ),
+            );
+          }
+          return Promise.resolve({ ok: true, result: true });
+        },
+        logImpl: (...args: unknown[]) =>
+          managedLogs.push(args.map(String).join(" ")),
+      },
+    );
+    assert.equal(failed.status, "failed");
+    assert.equal(managedLogs.join("\n").includes(HIRED_TOKEN), false);
+
+    const pollLogs: string[] = [];
+    const { lease } = await tempLease(t);
+    let pollCalls = 0;
+    await runBotPollLoop({
+      bot: {
+        botId: HIRED_BOT_ID,
+        token: HIRED_TOKEN,
+        username: "iva_main_critic_bot",
+        isPrimary: false,
+      },
+      initialOffset: 0,
+      assertLease: () => assertTelegramProcessLease(lease),
+      colleaguesEnabledImpl: () => true,
+      tgImpl: (method) => {
+        if (method === "getUpdates") {
+          pollCalls += 1;
+          return Promise.resolve({
+            ok: false,
+            description: `upstream echoed ${HIRED_TOKEN}`,
+          });
+        }
+        return Promise.resolve({ ok: true, result: true });
+      },
+      sleepImpl: () => Promise.resolve(),
+      shouldContinue: () => pollCalls < 1,
+      logImpl: (...args: unknown[]) =>
+        pollLogs.push(args.map(String).join(" ")),
+    });
+    assert.equal(pollCalls, 1);
+    assert.equal(pollLogs.join("\n").includes(HIRED_TOKEN), false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 // --- Пункт 3: Аватарка — случайный талисман ip-as-logo, JPG 640×640;
