@@ -18,6 +18,7 @@ import {
   botScopedKey,
   configuredTelegramBotIds,
   isConfiguredPeerBot,
+  liveTelegramEnv,
   resolveTelegramBot,
   TELEGRAM_BOT_ID_HEADER,
   validTelegramBotId,
@@ -554,7 +555,7 @@ export function createTelegramChannel(
     readonly env?: () => NodeJS.ProcessEnv;
   } = {},
 ): TelegramChannel {
-  const getEnv = options.env ?? (() => process.env);
+  const getEnv = options.env ?? (() => liveTelegramEnv(process.env));
   const runWithState = <T>(
     state: TelegramChannelState,
     telegramHandle: TelegramHandle,

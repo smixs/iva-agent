@@ -1,0 +1,13 @@
+
+> iva@0.5.15 lint
+> eslint --flag unstable_native_nodejs_ts_config .
+
+
+/Users/majento/dev/factory-work/iva/scripts/colleague-hire.test.ts
+  1326:11  error  Unsafe assignment of an error typed value                     @typescript-eslint/no-unsafe-assignment
+  1326:26  error  Unsafe call of a type that could not be resolved              @typescript-eslint/no-unsafe-call
+  1327:22  error  Unsafe member access .method on an `any` value                @typescript-eslint/no-unsafe-member-access
+  1329:32  error  Unsafe member access .body on a type that cannot be resolved  @typescript-eslint/no-unsafe-member-access
+
+✖ 4 problems (4 errors, 0 warnings)
+

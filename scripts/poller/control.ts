@@ -35,6 +35,11 @@ import {
 } from "#lib/error-humanizer.ts";
 import { claimInterruptedTap, turnQuestion } from "#lib/turn-question.ts";
 import { readEnvFresh } from "../lib/env-file.ts";
+import { redactSecretValues } from "../../packages/secret-redaction/index.ts";
+import {
+  configuredTelegramBots,
+  liveTelegramEnv,
+} from "../../packages/telegram-bots/index.ts";
 import {
   formatUsageReport,
   parseWindow,
@@ -89,6 +94,10 @@ import {
   type PluginTap,
   type PluginTapOutcome,
 } from "./plugin-proposal-tap.ts";
+import {
+  handleManagedBotUpdate,
+  type ManagedBotOutcome,
+} from "./managed-bot.ts";
 
 type ControlCallbackQuery = TelegramCallbackQuery & { data: string };
 type PendingFlow = {
@@ -151,6 +160,8 @@ export type ControlDeps = {
     messageId: number,
     edit: TapEdit,
   ) => Promise<boolean>;
+  // Событие Bot API 9.6 `managed_bot` (найм коллеги по ссылке с подтверждением владельца).
+  managedBotImpl?: (update: TelegramUpdate) => Promise<ManagedBotOutcome>;
 };
 
 const controlTg = tg as unknown as ControlTransport;
@@ -629,6 +640,7 @@ const DEFAULT_CONTROL_IO: Omit<ControlIo, "cancelImpl"> = {
   pluginTapImpl: (tap) => handlePluginProposalTap(tap),
   deleteImpl: deleteGotItMessage,
   editTapImpl: editTappedMessage,
+  managedBotImpl: (update) => handleManagedBotUpdate(update),
 };
 
 // Переданный undefined значит «по умолчанию» — как у деструктуризации с дефолтами.
@@ -640,6 +652,15 @@ function controlIo(deps: ControlDeps): ControlIo {
   };
 }
 
+function redactControlLogValue(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  const envFile = process.env.IVA_ENV_FILE?.trim() || ENV_PATH;
+  const secrets = configuredTelegramBots(
+    liveTelegramEnv(process.env, envFile),
+  ).map((bot) => bot.token);
+  return redactSecretValues(value, secrets);
+}
+
 // Ошибка обработчика не должна уронить мост: пишем её в журнал и отдаём исход по умолчанию.
 function settleLogged<T>(
   work: Promise<T>,
@@ -647,7 +668,7 @@ function settleLogged<T>(
   fallback: T,
 ): Promise<T> {
   return work.catch((e: unknown) => {
-    log(label, errorDetails(e).message);
+    log(label, redactControlLogValue(errorDetails(e).message));
     return fallback;
   });
 }
@@ -693,6 +714,21 @@ async function handleControl(
       cancelImpl: io.cancelImpl,
       logImpl: log,
     });
+    return true;
+  }
+  if (update.managed_bot) {
+    const outcome = await settleLogged(
+      io.managedBotImpl(update),
+      "managed_bot error:",
+      {
+        status: "failed",
+        reason: "unhandled managed_bot error",
+        retry: true,
+      },
+    );
+    // Обработчик держит событие для повтора, пока не подтвердит окончательный
+    // отказ или передачу найма фоновой сверке через запись на диске.
+    if (outcome.status === "failed" && outcome.retry) return "retry";
     return true;
   }
   const claimed = await handleCallback(update, io);

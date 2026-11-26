@@ -1,0 +1,6 @@
+
+> iva@0.5.15 typecheck
+> tsgo
+
+scripts/colleague-hire.test.ts(1326,39): error TS2550: Property 'findLast' does not exist on type '{ method: string; body: Record<string, unknown>; }[]'. Do you need to change your target library? Try changing the 'lib' compiler option to 'es2023' or later.
+scripts/colleague-hire.test.ts(1327,8): error TS7006: Parameter 'call' implicitly has an 'any' type.

@@ -1,0 +1,225 @@
+✔ п.1: buildColleagueHireLink, colleague tool action=hire, and CLI build valid t.me/newbot links (70.331416ms)
+✔ property: buildManagedBotHireUrl always produces valid t.me/newbot URLs with round-tripping name (seed 20261126) (6.303583ms)
+✔ п.2: managed_bot fetches token, stores it in .env beside TELEGRAM_BOT_TOKEN, sets profile, and colleague immediately accepts messages (461.535083ms)
+✔ возврат 1: temporary getManagedBotToken failure holds the update and the same update hires after recovery (27.895625ms)
+✔ возврат 2: repeated managed_bot keeps the existing role and disabled option, and does not consume another proposal (31.20825ms)
+✔ возврат 3: profile write failure blocks the success path and is completed when the same update is retried (50.651167ms)
+✔ возврат 4: concurrent avatar reconciliation shares one in-flight upload per colleague (26.883292ms)
+✔ возврат 5: known colleague tokens are redacted from managed_bot and getUpdates error logs (200.06775ms)
+✔ последний круг A: permanent getManagedBotToken failure is acknowledged and the next message enters (0.73275ms)
+✔ последний круг A: successful token response without a token is terminal (0.49475ms)
+✔ последний круг B1: incomplete hire does not start polling after restart and is completed without a repeated event (31.980458ms)
+✔ последний круг B2: settings failure is consumed without losing the hire and never turns a disabled existing colleague on (31.900333ms)
+✔ последний круг C: colleague token is redacted from polling initialization errors (207.9595ms)
+✔ п.3a: random ip-as-logo talisman converts to 640x640 JPG without role filter and uploads via setMyProfilePhoto (20.358625ms)
+[security] outbound leak redacted: api_key:installation_secret
+[security] outbound leak redacted: api_key:installation_secret
+[security] outbound leak redacted: api_key:installation_secret, api_key:named_secret
+[security] outbound leak redacted: api_key:installation_secret
+[security] outbound leak redacted: api_key:installation_secret
+[security] outbound leak redacted: api_key:installation_secret
+✔ п.3b: when ip-as-logo is unavailable, colleague is hired without photo and later retry sets the avatar (60.581625ms)
+✔ п.4: colleague token is inventoried in outbound-sensitive-keys.json and redacted from logs, errors, and outbound messages (70.804375ms)
+✔ upsertColleagueBotToken and removeColleagueBotToken maintain clean .env lists (0.155167ms)
+✔ primary runBotPollLoop subscribes to managed_bot in allowed_updates (199.154167ms)
+✔ colleague config stays disabled by default even after hiring proposals exist (0.12575ms)
+2026-11-26T09:36:33.071Z scoped reset remote failed for 7:: eve reset timed out
+✔ a second /new during reset backoff is consumed without pinning offset (24.877834ms)
+2026-11-26T09:36:33.077Z scoped reset intent failed for 7:: disk full
+✔ an intent-write backoff holds the offset without another status message (0.837417ms)
+2026-11-26T09:36:33.078Z scoped reset intent failed for 7:: disk remains read-only
+2026-11-26T09:36:33.078Z scoped reset intent failed for 7:: disk remains read-only
+2026-11-26T09:36:33.078Z scoped reset intent failed for 7:: disk remains read-only
+2026-11-26T09:36:33.078Z scoped reset intent failed for 7:: disk remains read-only
+2026-11-26T09:36:33.078Z scoped reset intent failed for 7:: disk remains read-only
+2026-11-26T09:36:33.078Z scoped reset intent failed for 7:: disk remains read-only
+2026-11-26T09:36:33.079Z scoped reset intent failed for 7:: disk remains read-only
+2026-11-26T09:36:33.079Z scoped reset intent failed for 7:: disk remains read-only
+2026-11-26T09:36:33.079Z scoped reset intent failed for 7:: disk remains read-only
+2026-11-26T09:36:33.079Z scoped reset intent failed for 7:: disk remains read-only
+2026-11-26T09:36:33.231Z draft stop ignored: no running turn with this draft {"chatId":7,"chatType":"private","draftId":41,"threadId":null}
+2026-11-26T09:36:33.249Z draft stop ignored: no running turn with this draft {"chatId":7,"chatType":"private","draftId":41,"threadId":null}
+2026-11-26T09:36:33.267Z draft stop ignored: not an allowed private chat {"chatId":999,"chatType":"private","draftId":41,"threadId":null}
+2026-11-26T09:36:33.283Z turn cancel failed: Error: chat record 7: breaks TurnFieldsOnlyWhenBusy (specs/ChatRecord.tla): ingressId: not allowed on a free chat
+    at enforcedRecord (file:///Users/majento/dev/factory-work/iva/agent/lib/run-status.ts?control-test=1795685793017:191:29)
+    at updateChatStatus (file:///Users/majento/dev/factory-work/iva/agent/lib/run-status.ts?control-test=1795685793017:554:20)
+    at Module.setChatStatus (file:///Users/majento/dev/factory-work/iva/agent/lib/run-status.ts?control-test=1795685793017:567:10)
+    at stopTurn (file:///Users/majento/dev/factory-work/iva/scripts/poller/control.test.ts:538:10)
+    at Object.cancelImpl (file:///Users/majento/dev/factory-work/iva/scripts/poller/control.test.ts:574:7)
+    at sendTurnCancel (file:///Users/majento/dev/factory-work/iva/agent/lib/telegram-stop.ts:200:28)
+    at cancelTurnAndConfirm (file:///Users/majento/dev/factory-work/iva/agent/lib/telegram-stop.ts:176:25)
+    at requestTurnCancel (file:///Users/majento/dev/factory-work/iva/agent/lib/telegram-stop.ts:144:10)
+    at handleTelegramDraftStop (file:///Users/majento/dev/factory-work/iva/agent/lib/telegram-stop.ts:278:10)
+    at handleControl (file:///Users/majento/dev/factory-work/iva/scripts/poller/control.ts?control-test=1795685792869:710:11)
+✔ persistent intent-write failure escalates and releases the global offset (1.960459ms)
+✔ secret document capture deletes before download and never reaches Eve (0.180417ms)
+✔ failed deletion consumes a secret document without downloading it (0.069ms)
+✔ the ⏹ Stop button cancels through the channel route, never through Eve (58.839541ms)
+✔ /stop takes the same door and stays silent while the status message speaks (73.571458ms)
+✔ Stop on an idle chat explains itself and never calls cancel (22.974125ms)
+✔ an early running status without a session is not cancellable (14.429167ms)
+✔ an untrusted tap on someone else's Stop button is swallowed (17.724208ms)
+✔ a stale run record still reaches the cancel route while it remembers the session (15.887417ms)
+✔ a stale run record whose turn is already gone ends as idle (21.861125ms)
+✔ /start is answered by the bridge and never becomes a model turn (0.174417ms)
+✔ /start from an untrusted user is not answered by the bridge (0.049583ms)
+✔ non-private group-safe commands leave stale pending flows unchanged (0.286792ms)
+✔ settings commands reject every non-private chat before state or Bot API effects (0.258791ms)
+✔ local callbacks reject non-private chats before cancellation or dispatch (133.175417ms)
+✔ a non-private rejection does not reveal controls to an untrusted user (395.188833ms)
+✔ тап по кнопке модели уходит дальше обычным сообщением (0.567167ms)
+✔ тап отвечает от нажавшего и в чат кнопки, а не в чат бота (0.083958ms)
+✔ колбэки eve мост не подменяет сообщением (0.301792ms)
+✔ незнакомый iva-колбэк остаётся в пространстве моста (0.045667ms)
+✔ чужой тап гасит спиннер и не становится сообщением (0.053667ms)
+✔ тап в группе отвечает подсказкой про личный чат (0.044291ms)
+✔ неполный конверт тапа не превращается в сообщение (0.067417ms)
+✔ тап без отправителя не подменяется, его снимает admission (0.038958ms)
+✔ malformed update callback is not claimed as a local control (0.053583ms)
+✔ a falsey local reply does not authorize offset acknowledgement (0.051458ms)
+✔ a falsey callback ack does not claim a local control (249.627125ms)
+✔ a false callback ack result does not claim a local control (235.678833ms)
+✔ /model is retained when its initial Bot API screen fails (1.496167ms)
+✔ /think is retained when its initial Bot API screen fails (1.075167ms)
+✔ model keep callback is retained when only spinner ack succeeds (1.09775ms)
+✔ a dead menu tap leaves the live menu's pending input alone (0.610416ms)
+✔ adoption drops a pending input the target screen cannot handle (0.459791ms)
+2026-11-26T09:36:34.327Z wizard callback error: network down
+2026-11-26T09:36:34.328Z menu callback error: network down
+2026-11-26T09:36:34.328Z menu capture error: network down
+2026-11-26T09:36:34.328Z wizard key error: network down
+2026-11-26T09:36:34.329Z menu error: network down
+2026-11-26T09:36:34.337Z reply failed: sendMessage failed
+2026-11-26T09:36:34.337Z reply failed: sendMessage failed
+2026-11-26T09:36:34.337Z reply failed: sendMessage failed
+✔ a stale menu tap cannot take the pending key away from the /model wizard (1.286125ms)
+✔ a wizard callback that throws is retained for the inbox (0.229ms)
+✔ a menu callback that throws is still consumed (0.290875ms)
+✔ a command while input is awaited ends the wait and still runs (0.240667ms)
+✔ a menu screen claims the awaited text and never delivers it (0.231959ms)
+✔ a failing menu capture still consumes the secret (0.074875ms)
+✔ a failing wizard key intake still consumes the key (0.072208ms)
+✔ a photo while a secret is awaited is deleted and never reaches eve (0.263417ms)
+✔ a photo during a non-secret wait goes on to eve untouched (0.047833ms)
+✔ /menu opens the menu in a private chat (0.256375ms)
+✔ a failing /menu is still consumed (0.204459ms)
+✔ /usage answers from the usage log without the model (1.970458ms)
+✔ /usage names the reason when the log cannot be summarized (5.228875ms)
+✔ /usage skips non-object rows and replies with an empty report (0.4245ms)
+✔ /usage is retained when its reply fails (0.25425ms)
+✔ /update checks upstream and /update --force asks for a rebuild (0.331625ms)
+2026-11-26T09:36:34.338Z wizard /model error: network down
+✔ /model that throws is retained for the inbox (0.893083ms)
+2026-11-26T09:36:34.338Z wizard /think error: network down
+✔ /think that throws is retained for the inbox (0.24575ms)
+✔ /new resets this private conversation and reports completion (15.777042ms)
+✔ /restart restarts the service after the reset (528.245625ms)
+✔ /restart says so when the service cannot restart (260.583ms)
+✔ /new in a group without an addressed message names the problem (1.251666ms)
+✔ an unidentified /new whose status reply failed is retained (0.617208ms)
+2026-11-26T09:36:35.146Z scoped reset unknown failed for -100:: cleanup failed
+✔ a failed group reset keeps the shared queue and is consumed (1.182959ms)
+2026-11-26T09:36:35.155Z scoped reset unknown failed for 7:: cleanup failed
+✔ a failed private reset of unknown phase is thrown back for retry (10.060958ms)
+2026-11-26T09:36:35.166Z scoped reset remote failed for 7:: eve down
+✔ a remote reset failure is left to recovery (10.756708ms)
+2026-11-26T09:36:35.176Z scoped reset backoff failed for 7:: backoff
+2026-11-26T09:36:35.177Z scoped reset backoff failed for 7:: backoff
+✔ a backoff failure is consumed only while the reset intent is saved (10.2205ms)
+2026-11-26T09:36:35.188Z scoped reset intent failed for 7:: disk
+✔ an escalated intent failure tells the owner to run iva reset (11.2915ms)
+2026-11-26T09:36:35.200Z scoped reset intent failed for 7:: disk
+2026-11-26T09:36:35.212Z plugin proposal tap ignored: not the owner in a private chat 999
+2026-11-26T09:36:35.212Z plugin proposal tap ignored: not the owner in a private chat 42
+2026-11-26T09:36:35.212Z plugin proposal tap ignored: not the owner in a private chat
+2026-11-26T09:36:35.212Z plugin proposal tap error: disk full
+2026-11-26T09:36:35.214Z tap marked 7:501 editMessageText
+✔ an intent failure below the escalation bar is thrown back for retry (11.911791ms)
+✔ a pending reset retry without saved intent holds the offset (9.54ms)
+✔ an oversized secret file is deleted and never downloaded (0.227292ms)
+✔ an unreadable secret file asks for the contents as text (0.112625ms)
+✔ a photo for a file prompt is deleted with a hint about the json file (0.085875ms)
+✔ a document outside the menu is deleted, not captured (0.072459ms)
+✔ a plugin proposal tap from the owner in a private chat reaches the installer (0.304583ms)
+✔ a plugin proposal tap from a stranger or from a group installs nothing and says nothing (0.236459ms)
+✔ a malformed plugin proposal tap never reaches the installer (0.212792ms)
+✔ a failing installer does not crash the bridge and the tap stays consumed (0.244209ms)
+2026-11-26T09:36:35.215Z tap marked 7:521 editMessageText
+2026-11-26T09:36:35.215Z tap marked 7:521 editMessageText
+✔ a model button tap shows ✅ with its label and marks the button in the rich message (2.605375ms)
+2026-11-26T09:36:35.216Z tap marked 7:511 editMessageText
+✔ a second button of the same message keeps the first button's mark in its edit (0.746584ms)
+2026-11-26T09:36:35.216Z tap marked 7:511 editMessageText
+2026-11-26T09:36:35.216Z tap marked 7:521 editMessageText
+2026-11-26T09:36:35.217Z tap marked 7:521 editMessageText
+✔ a second tap on the same button by another update is «already chosen» and no message (0.625875ms)
+✔ the same update handed out again after write-failed passes as fresh (0.405375ms)
+2026-11-26T09:36:35.217Z tap marked 7:531 editMessageText
+2026-11-26T09:36:35.218Z tap mark failed 7:541 editMessageText
+✔ a tap that cannot become a message is not marked and not remembered (0.680875ms)
+✔ a failed edit keeps the key: the next tap is still «already chosen» (0.602833ms)
+2026-11-26T09:36:35.219Z tap marked 7:571 editMessageText
+✔ an inaccessible message, one without buttons or with media gets only the hint and still remembers (0.96825ms)
+✔ a rejected callback answer does not stop the tap: it is a message and remembered (0.371ms)
+2026-11-26T09:36:35.220Z tap marked 7:581 editMessageText
+2026-11-26T09:36:35.248Z tap marked 7:591 editMessageText
+✔ a stranger's tap and a group tap are neither marked nor remembered (0.804875ms)
+✔ tap memory keeps the first button after 256, 1000 and 3000 other taps (26.925958ms)
+2026-11-26T09:36:35.248Z tap marked 7:402 editMessageReplyMarkup
+✔ a tap handed out again while its edit is in flight schedules no second edit (0.581625ms)
+2026-11-26T09:36:35.248Z tap marked 7:404 editMessageText
+✔ «Install» that started marks the button: classic by default, rich too; a second tap is «already chosen» (0.366833ms)
+✔ «Install» that did not start or is stale stays live and is not marked (0.171375ms)
+✔ the edit goes on the wire as editMessageText with blocks or editMessageReplyMarkup (1.109834ms)
+✔ «Я в курсе: Иван» deletes the Watch message, shows ✅ and never reaches the model (0.200958ms)
+✔ a second «Я в курсе» on the deleted message is a hint, no second delete, no model (0.085375ms)
+2026-11-26T09:36:35.250Z got-it tap ignored: not the owner in a private chat 99
+2026-11-26T09:36:35.250Z got-it tap ignored: not the owner in a private chat 42
+2026-11-26T09:36:35.251Z tap marked 7:852 editMessageText
+2026-11-26T09:36:35.260Z tap marked 7:1911 editMessageText
+2026-11-26T09:36:35.260Z tap marked 7:1923 editMessageText
+2026-11-26T09:36:35.291Z tap marked 7:1931 editMessageText
+[eve] setEveAttributes failed; suppressing further warnings this process. {
+  keys: [
+    '$eve.model',
+    '$eve.input_tokens',
+    '$eve.output_tokens',
+    '$eve.cache_read_tokens',
+    '$eve.cache_write_tokens',
+    '$eve.tool_count'
+  ],
+  error: "setAttributes() must be called from a 'use workflow' or 'use step' function. Calling it from plain host code is not supported."
+}
+2026-11-26T09:36:35.574Z draft stop ignored: no running turn with this draft {"chatId":7,"chatType":"private","draftId":41,"threadId":null}
+2026-11-26T09:36:35.580Z draft stop ignored: no running turn with this draft {"chatId":7,"chatType":"private","draftId":41,"threadId":null}
+✔ a refused or failed deleteMessage gives the «could not delete» hint and nothing else (0.177959ms)
+✔ «Я в курсе» from a stranger or from a group deletes nothing and never reaches the model (0.076708ms)
+✔ the default deleteImpl calls deleteMessage on the wire; a refusal is the hint (0.166042ms)
+✔ an English owner's «Got it: Ivan» is the bridge's; the Russian words then go to the model (0.449167ms)
+✔ property: only the exact «Я в курсе: <name>» stays in the bridge; any other data reaches the model (seed 389463321) (8.866958ms)
+✔ a tap under a plain message carries the message text to the turn (0.082292ms)
+✔ a tap under a rich message carries paragraphs, lists and tables, not the buttons (0.475ms)
+✔ a tap under a message without text is the data alone, as before (0.206667ms)
+✔ a long message text is cut to the limit with a mark at the end (0.133083ms)
+✔ property: the message text for a tap never throws and never exceeds the limit (seed 389463321) (17.979167ms)
+✔ a Try again tap after a first-request break brings the question to an empty history (255.936875ms)
+✔ a model's own «Повторить» button under another message brings no stored question (8.3915ms)
+✔ native stop is handled before admission and leaves the next turn and compaction alone (36.933667ms)
+✔ conflictBackoff alerts starting at 10 consecutive conflicts (0.383417ms)
+✔ conflictBackoff sleep grows and caps at 60000 (0.096959ms)
+✔ conflictBackoff resets to a short sleep after conflicts clear (0.046875ms)
+✔ control timeout does not escape the polling-loop boundary (0.328792ms)
+✔ the polling cycle survives a tagged control failure and holds its offset (0.114375ms)
+✔ an ordinary control failure releases its offset after ten attempts and logs once (1.6625ms)
+✔ background reset reconciliation never holds the polling cycle (0.150833ms)
+✔ reset cleanup and post-intent enqueue cannot overwrite each other (0.314625ms)
+✔ an invalid update in a batch is skipped and the message after it is processed (0.406459ms)
+✔ a skipped update without update_id never moves the offset back or stalls the batch (0.15225ms)
+ℹ tests 131
+ℹ suites 0
+ℹ pass 131
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2878.619042

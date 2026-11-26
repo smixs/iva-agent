@@ -257,6 +257,15 @@ export function secretValuesFromEnv(env: Record<string, string>): string[] {
     )
       continue;
     values.push(value);
+    if (key === "TELEGRAM_COLLEAGUE_BOT_TOKENS") {
+      for (const part of value.split(/[,\s]+/u)) {
+        const entry = part.trim();
+        if (entry.length === 0) continue;
+        const eq = entry.indexOf("=");
+        const token = (eq >= 0 ? entry.slice(eq + 1) : entry).trim();
+        if (token.length > 0) values.push(token);
+      }
+    }
     const password = URL_PASSWORD.exec(value)?.[1];
     if (password) values.push(password);
   }

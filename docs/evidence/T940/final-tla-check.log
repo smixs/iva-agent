@@ -1,0 +1,55 @@
+Command: PATH=/opt/homebrew/opt/openjdk/bin:$PATH TLC=<adapter to dark-factory ops/tlc.sh> sh specs/multi-bot-poll-check.sh
+OK MultiBotPoll: no error (16848 distinct states)
+OK MultiBotPoll-shared-offset: NoSkippedUpdate violated (expected)
+OK MultiBotPoll-drop-activation-backlog: NoSkippedUpdate violated (expected)
+OK MultiBotPoll-no-lock: SinglePollerLock violated (expected)
+OK MultiBotPoll-no-bot-tag: ExactBotAttribution violated (expected)
+OK MultiBotPoll-independent-witness: NoIndependentProgress violated (expected)
+OK ColleagueHireLock: no error (48 distinct states)
+OK ColleagueHireLock-no-lock: SingleHireWriter violated (expected)
+OK ColleagueHireLock-blind-write: CompleteNotOverwritten violated (expected)
+
+exit=0
+
+ColleagueHireLock-blind-write.log
+tlc: ColleagueHireLock.tla → zenbook, таймаут 120 с
+Error: Invariant CompleteNotOverwritten is violated.
+253 states generated, 121 distinct states found, 44 states left on queue.
+
+ColleagueHireLock-no-lock.log
+tlc: ColleagueHireLock.tla → zenbook, таймаут 120 с
+Error: Invariant SingleHireWriter is violated.
+7 states generated, 7 distinct states found, 4 states left on queue.
+
+ColleagueHireLock.log
+tlc: ColleagueHireLock.tla → zenbook, таймаут 120 с
+90 states generated, 48 distinct states found, 0 states left on queue.
+
+MultiBotPoll-drop-activation-backlog.log
+tlc: MultiBotPoll.tla → zenbook, таймаут 120 с
+Error: Invariant NoSkippedUpdate is violated.
+13312 states generated, 2972 distinct states found, 1280 states left on queue.
+
+MultiBotPoll-independent-witness.log
+tlc: MultiBotPoll.tla → zenbook, таймаут 120 с
+Error: Invariant NoIndependentProgress is violated.
+21324 states generated, 3840 distinct states found, 605 states left on queue.
+
+MultiBotPoll-no-bot-tag.log
+tlc: MultiBotPoll.tla → zenbook, таймаут 120 с
+Error: Invariant ExactBotAttribution is violated.
+45501 states generated, 8154 distinct states found, 1850 states left on queue.
+
+MultiBotPoll-no-lock.log
+tlc: MultiBotPoll.tla → zenbook, таймаут 120 с
+Error: Invariant SinglePollerLock is violated.
+13 states generated, 13 distinct states found, 10 states left on queue.
+
+MultiBotPoll-shared-offset.log
+tlc: MultiBotPoll.tla → zenbook, таймаут 120 с
+Error: Invariant NoSkippedUpdate is violated.
+665 states generated, 280 distinct states found, 205 states left on queue.
+
+MultiBotPoll.log
+tlc: MultiBotPoll.tla → zenbook, таймаут 120 с
+104497 states generated, 16848 distinct states found, 0 states left on queue.
