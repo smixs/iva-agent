@@ -62,16 +62,16 @@ test("queue is the default and callbacks stay stable in both languages", () => {
   assert.deepEqual(labels(english), [
     ["✓ Queue", "iva_menu:turn:set:queue"],
     ["○ Interrupt", "iva_menu:turn:set:steer"],
-    ["‹ Menu", "iva_menu:r:o"],
+    ["‹ Back", "iva_menu:gm:o"],
   ]);
 
   const russian = screen.render({ page: 0 }, makeContext("ru"));
   assert.deepEqual(labels(russian), [
     ["✓ Очередь", "iva_menu:turn:set:queue"],
     ["○ Перебивать", "iva_menu:turn:set:steer"],
-    ["‹ Меню", "iva_menu:r:o"],
+    ["‹ Назад", "iva_menu:gm:o"],
   ]);
-  assert.equal(screen.parent, "r");
+  assert.equal(screen.parent, "gm");
 });
 
 // Экран — заголовок и кнопки, без пояснений (решение владельца 17.11.2026).
@@ -96,7 +96,7 @@ test("steer renders selected and a selection preserves other settings", async ()
   assert.deepEqual(labels(screen.render({ page: 0 }, makeContext("en"))), [
     ["○ Queue", "iva_menu:turn:set:queue"],
     ["✓ Interrupt", "iva_menu:turn:set:steer"],
-    ["‹ Menu", "iva_menu:r:o"],
+    ["‹ Back", "iva_menu:gm:o"],
   ]);
 
   const redrawn: string[] = [];

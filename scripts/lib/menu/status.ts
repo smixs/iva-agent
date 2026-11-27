@@ -16,7 +16,9 @@ import {
   userbotStateLabel,
   type UserbotHealth,
 } from "../userbot-health.ts";
-import { button, escapeRichText } from "../telegram-buttons.ts";
+import { button, escapeRichText, menuBackLine } from "../telegram-buttons.ts";
+
+const PARENT = "gsys";
 
 type Env = Record<string, string | undefined>;
 type VersionPackage = { version?: unknown };
@@ -133,12 +135,13 @@ function buildView(
     `# ${T("📊 Status", "📊 Статус")}`,
     table,
     button(T("🔄 Refresh", "🔄 Обновить"), "iva_menu:st:rf", "success"),
+    menuBackLine(ctx, PARENT),
   ].join("\n\n");
   return { text };
 }
 
 export default {
-  parent: "r",
+  parent: PARENT,
   async render(st: StatusState, ctx: MenuContext) {
     const env = (await readEnvValues(ctx.deps.envPath)) as Env;
     const d = fastFields(env, ctx);

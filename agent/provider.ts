@@ -173,15 +173,68 @@ function wireSessionId(sessionId?: string): string {
   return id.length > 0 ? id : PROCESS_SESSION_ID;
 }
 
-/** Заголовки клиента для активного провайдера. Требует их только Go; остальным — ничего. */
+/** Заголовки клиента для провайдера. Требует их только Go; остальным — ничего. */
 export function providerRequestHeaders(
   sessionId?: string,
+  provider: ModelProviderName = providerName,
 ): Record<string, string> | undefined {
-  if (providerName !== "opencode") return undefined;
+  if (provider !== "opencode") return undefined;
   return {
     "x-opencode-session": wireSessionId(sessionId),
     "user-agent": IVA_USER_AGENT,
   };
+}
+
+/** Возвращает ли провайдер рассуждение прошлых шагов обратно модели. */
+export function providerReplaysReasoning(
+  provider: ModelProviderName = providerName,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  if (!MODEL_PROVIDERS[provider].replaysReasoning) return false;
+  if (provider !== "opencode") return true;
+  const protocol =
+    provider === providerName
+      ? providerConfig.opencodeProtocol
+      : resolveOpenCodeProtocol(env.OPENCODE_PROTOCOL);
+  return protocol === "chat-completions";
+}
+
+function providerEndpoint(
+  provider: ModelProviderName,
+  env: NodeJS.ProcessEnv = process.env,
+): { readonly baseURL: string; readonly apiKey: string | undefined } {
+  if (provider === providerName) {
+    return {
+      baseURL: providerConfig.baseURL,
+      apiKey: providerConfig.apiKey,
+    };
+  }
+  switch (provider) {
+    case "ollama":
+      return {
+        baseURL: env.OLLAMA_BASE_URL ?? "https://ollama.com/v1",
+        apiKey: env.OLLAMA_API_KEY,
+      };
+    case "opencode":
+      return {
+        baseURL: "https://opencode.ai/zen/go/v1",
+        apiKey: env.OPENCODE_API_KEY,
+      };
+    case "openrouter":
+      return {
+        baseURL: "https://openrouter.ai/api/v1",
+        apiKey: env.OPENROUTER_API_KEY,
+      };
+    case "codex":
+      return { baseURL: CODEX_BASE_URL, apiKey: undefined };
+    case "claude":
+      return { baseURL: "process://claude", apiKey: undefined };
+    case "custom":
+      return {
+        baseURL: (env.CUSTOM_BASE_URL ?? "").trim().replace(/\/+$/, ""),
+        apiKey: env.CUSTOM_API_KEY,
+      };
+  }
 }
 
 // AI SDK ставит свой User-Agent (`ai/… ai-sdk/… runtime/node.js`) поверх заголовков
@@ -803,36 +856,41 @@ const liveWireObserver = (model: string): LanguageModelMiddleware => ({
   },
 });
 /**
- * Текстовая модель активного провайдера. Общая для КАЖДОГО узла графа: корень и субагенты
- * обязаны говорить с одним провайдером, свои createOpenAICompatible/env в субагентах не заводим.
+ * Текстовая модель выбранного провайдера (по умолчанию активный провайдер Ивы,
+ * для хода коллеги — любой провайдер из MODEL_PROVIDER_NAMES).
  */
 export function makeTextModel(options: {
+  provider?: ModelProviderName;
   model?: string;
   sessionId?: string;
   chatModelSeesImages: ImageCapability;
   // Чей шаг ведёт модель: расход компактации eve уходит в usage.jsonl под этим ходом.
   usage?: UsageLabel;
+  env?: NodeJS.ProcessEnv;
 }) {
+  const targetProvider = options.provider ?? providerName;
+  const targetModel = options.model ?? providerConfig.textModel;
   return wrapLanguageModel({
     model: makeBareTextModel(
-      options.model ?? providerConfig.textModel,
+      targetModel,
       options.sessionId,
       options.usage,
+      targetProvider,
+      options.env,
     ),
     middleware: [
       repeatGuardMiddleware,
       attachImagesMiddleware(options.chatModelSeesImages),
       toolSchemaRetryMiddleware,
-      ...(providerName === "claude" ? [] : [modelFirstChunkDeadlineMiddleware]),
+      ...(targetProvider === "claude"
+        ? []
+        : [modelFirstChunkDeadlineMiddleware]),
       adjacentUserMessagesMiddleware,
       // Порядок свободен: кодирование идемпотентно, других читателей toolName в цепочке нет.
-      toolNameWireMiddleware(MODEL_PROVIDERS[providerName].toolNameMax),
-      compactionUsageMiddleware(
-        options.usage,
-        options.model ?? providerConfig.textModel,
-      ),
+      toolNameWireMiddleware(MODEL_PROVIDERS[targetProvider].toolNameMax),
+      compactionUsageMiddleware(options.usage, targetModel),
       // prettier-ignore
-      ...(process.env.IVA_LIVE_WIRE === "1" ? [liveWireObserver(options.model ?? providerConfig.textModel)] : []),
+      ...(process.env.IVA_LIVE_WIRE === "1" ? [liveWireObserver(targetModel)] : []),
     ],
   });
 }
@@ -842,15 +900,20 @@ export function makeOpenCodeModel(
   model: string,
   protocol: OpenCodeProtocol,
   sessionId?: string,
+  env: NodeJS.ProcessEnv = process.env,
 ) {
-  if (!PROVIDERS.opencode.apiKey)
+  const apiKey =
+    env === process.env
+      ? (PROVIDERS.opencode.apiKey ?? env.OPENCODE_API_KEY)
+      : env.OPENCODE_API_KEY;
+  if (!apiKey)
     throw new Error(
       "MODEL_PROVIDER=opencode requires OPENCODE_API_KEY — run: iva config",
     );
   const config = {
     baseURL: PROVIDERS.opencode.baseURL,
-    apiKey: PROVIDERS.opencode.apiKey,
-    headers: providerRequestHeaders(sessionId),
+    apiKey,
+    headers: providerRequestHeaders(sessionId, "opencode"),
     fetch: opencodeFetch,
   };
   return protocol === "responses"
@@ -866,28 +929,38 @@ function makeBareTextModel(
   model: string,
   sessionId?: string,
   usage?: UsageLabel,
+  targetProvider: ModelProviderName = providerName,
+  env: NodeJS.ProcessEnv = process.env,
 ) {
   // Codex-подписка говорит на Responses API — отдельная модель-фабрика (@ai-sdk/openai).
   // Claude-подписка — тоже своя модель: рукописная LanguageModelV4 поверх Claude Code CLI
   // (stream-json), потому что API-адреса у неё нет вовсе.
   // Go выбирает провод явно; остальные API-ключи говорят chat/completions.
-  if (providerName === "codex") return makeCodexModel(model, sessionId);
-  if (providerName === "claude")
+  if (targetProvider === "codex") return makeCodexModel(model, sessionId);
+  if (targetProvider === "claude")
     return makeClaudeCliModel(model, {
       sessionId,
       turn: usage,
       attemptMiddleware: modelFirstChunkDeadlineMiddleware,
     });
-  if (providerName === "opencode")
+  if (targetProvider === "opencode")
     return makeOpenCodeModel(
       model,
-      providerConfig.opencodeProtocol!,
+      targetProvider === providerName
+        ? providerConfig.opencodeProtocol!
+        : resolveOpenCodeProtocol(env.OPENCODE_PROTOCOL),
       sessionId,
+      env,
+    );
+  const endpoint = providerEndpoint(targetProvider, env);
+  if (targetProvider === "custom" && !endpoint.baseURL)
+    throw new Error(
+      "MODEL_PROVIDER=custom requires CUSTOM_BASE_URL (OpenAI-compatible base, e.g. https://api.example.com/v1) — run: iva config",
     );
   return createOpenAICompatible({
-    name: `iva-${providerName}`,
-    baseURL: providerConfig.baseURL,
-    apiKey: providerConfig.apiKey,
+    name: `iva-${targetProvider}`,
+    baseURL: endpoint.baseURL,
+    apiKey: endpoint.apiKey,
     // Без этого стрим OpenAI-совместимых провайдеров НЕ несёт usage (нет stream_options:
     // {include_usage:true}) → событие step.completed приходит без поля usage, и учёт токенов
     // (agent/hooks/usage.ts) пуст. Включаем, чтобы провайдер отдавал расход в финальном чанке.

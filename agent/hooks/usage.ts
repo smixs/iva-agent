@@ -1,5 +1,10 @@
 import { defineHook } from "eve/hooks";
-import { TURN_KINDS, isHelperTurn } from "../lib/eve-auth.js";
+import {
+  TURN_KINDS,
+  colleagueBotIdOfTurn,
+  isHelperTurn,
+} from "../lib/eve-auth.js";
+import { readColleague } from "../lib/colleagues.ts";
 import { resolveModelProvider } from "../lib/model-provider.js";
 import {
   appendUsage,
@@ -43,11 +48,18 @@ interface StepData {
 
 /** Чей шаг: сессия, канал, имя инлайн-субагента и родитель сессии-ребёнка. */
 interface StepOwner {
+  readonly provider: string;
   readonly model: string;
   readonly sessionId: string;
   readonly source: string;
   readonly subagent?: string;
   readonly parent?: ParentLike;
+}
+
+function providerOf(ctx: Parameters<typeof colleagueBotIdOfTurn>[0]): string {
+  const botId = colleagueBotIdOfTurn(ctx);
+  if (botId === null) return PROVIDER;
+  return readColleague(botId)?.provider ?? PROVIDER;
 }
 
 /** Кто начал сессию; ребёнок встроенного `agent` получает того же, что родитель. */
@@ -97,7 +109,7 @@ function record(data: StepData, owner: StepOwner): void {
   const row = usageRecord(
     {
       source,
-      provider: PROVIDER,
+      provider: owner.provider,
       model: owner.model,
       sessionId,
       turnId: data.turnId ?? "",
@@ -117,6 +129,7 @@ export default defineHook({
       // Ребёнок встроенного `agent` пишет свои шаги сам (channel.kind = subagent) под своей
       // сессией; связь с ходом родителя eve отдаёт в ctx.session.parent.
       record(event.data, {
+        provider: providerOf(ctx),
         model: event.data.providerModelId ?? TEXT_MODEL,
         sessionId: ctx.session.id,
         source: sourceOf(ctx),
@@ -149,6 +162,7 @@ export default defineHook({
             ),
           },
           {
+            provider: providerOf(ctx),
             model: inner.data.providerModelId ?? TEXT_MODEL,
             sessionId: ctx.session.id,
             source: sourceOf(ctx),

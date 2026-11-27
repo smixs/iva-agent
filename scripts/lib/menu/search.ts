@@ -14,7 +14,7 @@ import { SEARCH_CATALOG, checkSearchKey } from "../search-catalog.ts";
 import { button, buttonRow, menuBackLine } from "../telegram-buttons.ts";
 
 const SID = "srch";
-const PARENT = "r";
+const PARENT = "gm";
 const DEFAULT_PROVIDER = "tavily"; // web_search.ts: провайдер по умолчанию, когда SEARCH_PROVIDER пуст
 
 type Provider = keyof typeof SEARCH_CATALOG;

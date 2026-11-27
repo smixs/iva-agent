@@ -10,6 +10,7 @@ import { createNotifyCommand } from "./notify.ts";
 import { createPluginCommands } from "./plugin.ts";
 import { createPostCommand } from "./post.ts";
 import { createProactiveCommand } from "./proactive.ts";
+import { createColleagueCommand } from "./colleagues.ts";
 import { createNightCommand } from "./night.ts";
 import { createRemindCommand } from "./remind.ts";
 import { createSignalCommand } from "./signal.ts";
@@ -122,6 +123,7 @@ ${C.b}Commands:${C.x}
   ${C.c}iva jobs skip memory-night${C.x} <date>  close a night-memory day without processing it
   ${C.c}iva remind${C.x} <text>    let the agent judge one Reminder, then send it to Telegram
   ${C.c}iva proactive${C.x} show|on|off|set <key> <value>  Watch, Brief and Insight settings
+  ${C.c}iva colleague${C.x} show|on|off|set|model|remove  Colleague bots: option, roles and models
   ${C.c}iva night${C.x} show|set <key> <value>  Night memory limits and ceilings
   ${C.c}iva signal${C.x} <source> <text> [--key <k>]  pass a plugin's Signal to Iva; the same key is skipped while pending
   ${C.c}iva post${C.x} --md-file <p>  rich Telegram post to the digest chat or an allowlisted --chat
@@ -190,6 +192,7 @@ export function createCliMain(root: string) {
     jobs: cmdJobs,
     post: cmdPost,
     proactive: createProactiveCommand(runtime),
+    colleague: createColleagueCommand(runtime),
     night: createNightCommand(runtime),
     signal: cmdSignal,
     start: services.cmdStart,

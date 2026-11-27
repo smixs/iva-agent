@@ -105,7 +105,7 @@ test("language menu renders current-language checkmarks with stable callbacks", 
         ["Русский ✓", "iva_menu:lang:set:ru"],
         ["English", "iva_menu:lang:set:en"],
       ],
-      "‹ Меню",
+      "‹ Назад",
     ],
     [
       "en",
@@ -114,7 +114,7 @@ test("language menu renders current-language checkmarks with stable callbacks", 
         ["Русский", "iva_menu:lang:set:ru"],
         ["English ✓", "iva_menu:lang:set:en"],
       ],
-      "‹ Menu",
+      "‹ Back",
     ],
   ] as const) {
     const context = makeContext(current, join(dataDir, `${current}.env`));
@@ -122,13 +122,13 @@ test("language menu renders current-language checkmarks with stable callbacks", 
 
     assert.match(view.text, new RegExp(`^# ${expectedHeading}$`, "m"));
     assert.deepEqual(buttonsOf(view.text).slice(0, 2), expectedButtons);
-    // Языки — равноправный ряд, «назад» — отдельной строкой с пояснением.
+    // Языки — равноправный ряд, «назад» — отдельной строкой с возвратом в «Общение».
     assert.deepEqual(buttonsOf(view.text).at(-1), [
       expectedBack,
-      "iva_menu:r:o",
+      "iva_menu:gc:o",
     ]);
   }
-  assert.equal(language.parent, "r");
+  assert.equal(language.parent, "gc");
 });
 
 test("language selection persists settings and env before redrawing root", async () => {

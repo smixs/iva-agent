@@ -1,4 +1,8 @@
-import { TURN_KINDS, isHelperTurn } from "../lib/eve-auth.ts";
+import {
+  TURN_KINDS,
+  colleagueBotIdOfTurn,
+  isHelperTurn,
+} from "../lib/eve-auth.ts";
 import { defineHook } from "eve/hooks";
 // Двусторонний транскрипт: финальный ответ Iva дозаписывается в ТОТ ЖЕ дневной файл
 // vault, что и реплики юзера (agent/lib/telegram-inbound.ts).
@@ -12,7 +16,13 @@ export default defineHook({
     // пишем только финальные реплики Iva.
     "message.completed": (event, ctx) => {
       // ctx.session.parent — типизированная связь eve с родительским ходом при любом адаптере.
-      if (ctx.session.parent || isHelperTurn(ctx)) return;
+      // Коллеги ведут свою переписку отдельно и не пишут в дневник Ивы vault/daily/.
+      if (
+        ctx.session.parent ||
+        isHelperTurn(ctx) ||
+        colleagueBotIdOfTurn(ctx) !== null
+      )
+        return;
       const initiator = ctx.session.auth?.initiator;
       // Видимые фоновые ответы названы bearer-атрибутом; остальные CLI/http — служебные.
       if (

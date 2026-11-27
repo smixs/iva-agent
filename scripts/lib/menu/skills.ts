@@ -12,6 +12,7 @@ import {
 } from "../telegram-buttons.ts";
 
 const PER_PAGE = 8;
+const PARENT = "gmem";
 
 interface SkillsContext {
   deps: { root: string };
@@ -50,7 +51,7 @@ function displayText(value: unknown, fallback: string): string {
 }
 
 export default {
-  parent: "r",
+  parent: PARENT,
   render(st: SkillsState, ctx: SkillsContext) {
     const T = ctx.tr;
     let skills: unknown[] | null;
@@ -71,7 +72,7 @@ export default {
             "Skill list is unavailable — .eve/agent-summary.json not found (it appears after a build).",
             "Список недоступен — .eve/agent-summary.json не найден (появляется после сборки).",
           ),
-          menuBackLine({ tr: T }, "r"),
+          menuBackLine({ tr: T }, PARENT),
         ].join("\n\n"),
       };
     }
@@ -80,7 +81,7 @@ export default {
         text: [
           `# ${T("🧩 Skills", "🧩 Скиллы")}`,
           T("No skills registered.", "Скиллов не зарегистрировано."),
-          menuBackLine({ tr: T }, "r"),
+          menuBackLine({ tr: T }, PARENT),
         ].join("\n\n"),
       };
     }
@@ -117,7 +118,7 @@ export default {
         ]),
       );
     }
-    lines.push(menuBackLine({ tr: T }, "r"));
+    lines.push(menuBackLine({ tr: T }, PARENT));
     return { text: lines.join("\n\n") };
   },
   on(...args: unknown[]) {

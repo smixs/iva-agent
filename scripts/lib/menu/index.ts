@@ -8,7 +8,7 @@
 //
 // Грамматика callback_data: "iva_menu:<sid>:<verb>[:<arg>[:<arg>]]" — ASCII, только
 // enum/индексы, <=64 байта (тот же принцип, что m:<index> в /model). Никаких user data.
-// sid: r srch rich voice lang chr core ub gws cron ntc sk st turn svc (+псевдо mdl/thk — хендофф в визарды).
+// sid: r, разделы gm gc gmem gcon gsch gsys, экраны srch rich voice lang chr core ub gws col cron ntc sk st turn svc (+псевдо mdl/thk — хендофф в визарды).
 // verbs: o(навигация) x(закрыть) pg:<n> rf(обновить) + data-вербы экрана (set key rs go
 // q:<i>:<v> skip fin redo apply do; ntc: ins:<0|0930|1130|1730>).
 
@@ -28,6 +28,14 @@ import type {
 import { isPrivateTelegramChat } from "#lib/telegram-private-chat.ts";
 
 import root from "./root.ts";
+import {
+  modelGroup,
+  chatGroup,
+  memoryGroup,
+  connectionsGroup,
+  scheduleGroup,
+  systemGroup,
+} from "./groups.ts";
 import search from "./search.ts";
 import rich from "./rich.ts";
 import voice from "./voice.ts";
@@ -36,6 +44,7 @@ import character from "./character.ts";
 import core from "./core.ts";
 import userbot from "./userbot.ts";
 import gws from "./gws.ts";
+import colleagues from "./colleagues.ts";
 import crons from "./crons.ts";
 import notices from "./notices.ts";
 import skills from "./skills.ts";
@@ -172,6 +181,12 @@ function telegramCallOk(value: unknown): boolean {
 // /model//think (обрабатывается в onCallback ниже до диспатча на экран).
 export const SCREENS = {
   r: root,
+  gm: modelGroup,
+  gc: chatGroup,
+  gmem: memoryGroup,
+  gcon: connectionsGroup,
+  gsch: scheduleGroup,
+  gsys: systemGroup,
   srch: search,
   rich,
   voice,
@@ -180,6 +195,7 @@ export const SCREENS = {
   core,
   ub: userbot,
   gws,
+  col: colleagues,
   cron: crons,
   ntc: notices,
   sk: skills,

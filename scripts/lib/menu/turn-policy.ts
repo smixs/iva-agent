@@ -1,9 +1,9 @@
 // Экран обработки новых сообщений. Настройка читается каналом перед каждой отправкой,
 // поэтому переключение действует сразу и не требует рестарта.
 import { readSettings, writeSettings } from "#lib/settings.ts";
-import { button, buttonRow } from "../telegram-buttons.ts";
+import { button, buttonRow, menuBackLine } from "../telegram-buttons.ts";
 
-const PARENT = "r";
+const PARENT = "gm";
 
 type TurnPolicy = "queue" | "steer";
 type MenuState = { page: number };
@@ -36,7 +36,7 @@ export default {
         option("queue", "Queue", "Очередь"),
         option("steer", "Interrupt", "Перебивать"),
       ]),
-      button(T("‹ Menu", "‹ Меню"), `iva_menu:${PARENT}:o`),
+      menuBackLine(ctx, PARENT),
     ];
     return { text: text.join("\n\n") };
   },

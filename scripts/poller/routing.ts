@@ -18,21 +18,30 @@ import { join } from "node:path";
 import { joinUpdates, queueBatchLength } from "../lib/telegram-collect.ts";
 import {
   chatBusy,
+  chatHeld,
   chatState,
   getChatStatus,
   isRunning,
+  listChatStatuses,
   RUN_STALE_MS,
   setChatStatusIf,
   type ChatRecord,
   type ChatRecordExpected,
   type ChatRecordPatch,
 } from "#lib/run-status.ts";
+import { isColleaguesEnabled } from "#lib/colleagues.ts";
+import {
+  botIdFromUpdate,
+  configuredTelegramBotIds,
+  groupCoordKeyOf,
+  resolveTelegramBot,
+} from "../../packages/telegram-bots/index.ts";
 import { tr } from "#lib/i18n.ts";
 import { traceBridgeQueued } from "#lib/trace.ts";
 import {
   TELEGRAM_CLOSED_SESSION_KIND,
   telegramTurnPolicy,
-} from "#lib/telegram-acceptance.ts";
+} from "#lib/telegram-acceptance-wire.ts";
 import {
   ACCEPTANCE_ROUTE,
   ALLOWED,
@@ -73,6 +82,39 @@ type DeliverImpl = (
   options?: DeliverOptions,
 ) => MaybePromise<DeliveryResult>;
 type StatusImpl = (key: string) => Status | null;
+type ListStatusesImpl = () => ReadonlyArray<{
+  readonly chatKey: string;
+  readonly status: Status;
+}>;
+
+/**
+ * Проверяет, держит ли сейчас другой бот активный ход или доставку в той же группе
+ * (`specs/GroupAndAssignments.tla`: SingleActiveGroupBot).
+ * Личные чаты (`groupCoordKeyOf(key) === null`) между ботами никогда не пересекаются.
+ */
+export function isOtherBotGroupBusy(
+  key: string,
+  inFlight: ReadonlyMap<string, QueuePhase>,
+  listStatusesImpl: ListStatusesImpl = listChatStatuses,
+): boolean {
+  const groupKey = groupCoordKeyOf(key);
+  if (groupKey === null) return false;
+  for (const activeKey of inFlight.keys()) {
+    if (activeKey !== key && groupCoordKeyOf(activeKey) === groupKey) {
+      return true;
+    }
+  }
+  for (const record of listStatusesImpl()) {
+    if (
+      record.chatKey !== key &&
+      groupCoordKeyOf(record.chatKey) === groupKey &&
+      chatHeld(chatState(record.status))
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
 type SetStatusIfImpl = (
   key: string,
   expected: ChatRecordExpected,
@@ -250,14 +292,14 @@ export async function routeMessageUpdate(
       candidate: TelegramQueueUpdate,
       enqueuedAt?: number,
       resetFence?: number | null,
-    ) =>
-      enqueueTelegramQueueUpdate(key, candidate, enqueuedAt, { resetFence }),
+    ) => enqueueTelegramQueueUpdate(key, candidate, enqueuedAt, { resetFence }),
     arrivedAt,
     resetFence,
     acknowledgeImpl = acknowledgeQueued,
     traceQueuedImpl,
     deliverImpl = pacedDelivery,
     statusImpl = getChatStatus,
+    listStatusesImpl = listChatStatuses,
     setStatusIfImpl = setChatStatusIf,
     sendFailureImpl = sendStaleRunNotice,
     alertImpl = alertOnce,
@@ -267,6 +309,9 @@ export async function routeMessageUpdate(
     trImpl = tr,
     allowedUserIds = ALLOWED,
     botUsername = BOT_USERNAME,
+    colleaguesEnabledImpl = () =>
+      isColleaguesEnabled(join(DATA_DIR, "settings.json")),
+    peerBotIdsImpl = () => configuredTelegramBotIds(),
     logImpl = log,
     resetPendingImpl = hasPrivateResetIntent,
   }: {
@@ -282,6 +327,9 @@ export async function routeMessageUpdate(
       options: {
         allowedUserIds: ReadonlySet<string>;
         botUsername: unknown;
+        colleaguesEnabled?: boolean;
+        peerBotIds?: ReadonlySet<string>;
+        receiverBotId?: string | null;
       },
     ) => boolean;
     enqueueImpl?: (
@@ -307,6 +355,7 @@ export async function routeMessageUpdate(
     ) => void;
     deliverImpl?: DeliverImpl;
     statusImpl?: StatusImpl;
+    listStatusesImpl?: ListStatusesImpl;
     setStatusIfImpl?: SetStatusIfImpl;
     sendFailureImpl?: (key: string, text: string) => MaybePromise<unknown>;
     alertImpl?: typeof alertOnce;
@@ -316,29 +365,47 @@ export async function routeMessageUpdate(
     trImpl?: (en: string, ru: string) => string;
     allowedUserIds?: ReadonlySet<string>;
     botUsername?: unknown;
+    colleaguesEnabledImpl?: () => boolean;
+    peerBotIdsImpl?: () => ReadonlySet<string>;
     logImpl?: (...parts: unknown[]) => void;
     resetPendingImpl?: (chatKey: string) => boolean;
   } = {},
 ): Promise<RouteMessageResult> {
   const key = chatKeyImpl(update);
   const turnPolicy = turnPolicyImpl();
+  const colleaguesEnabled = colleaguesEnabledImpl();
   // Remove this fence when vercel/eve#2876 is fixed in the installed eve.
   const resetPending = key !== null && resetPendingImpl(key);
-  // Ответ на сообщение бота идёт мимо очереди.
+  const otherBotGroupBusy =
+    key !== null && isOtherBotGroupBusy(key, inFlight, listStatusesImpl);
+  // Ответ на сообщение бота идёт мимо очереди, кроме ожидания сброса или занятой группы.
   if (
     update.message &&
     key !== null &&
-    (resetPending || !replyToBotImpl(update.message))
+    (resetPending || otherBotGroupBusy || !replyToBotImpl(update.message))
   ) {
     const queue = await loadQueueImpl();
-    // Прямая доставка не обгоняет очередь чата (specs/QueueDrain.tla, свидетель -switch).
+    // Прямая доставка не обгоняет очередь чата (specs/QueueDrain.tla, свидетель -switch)
+    // и не стартует второй бот в той же группе одновременно (specs/GroupAndAssignments.tla).
     const mustQueue =
       resetPending ||
+      otherBotGroupBusy ||
       inFlight.has(key) ||
       queueCountImpl(queue, key) > 0 ||
       (turnPolicy === "queue" && runningImpl(key));
     if (mustQueue) {
-      if (!shouldQueueImpl(update, { allowedUserIds, botUsername })) {
+      const receiverBotId =
+        botIdFromUpdate(update) ?? resolveTelegramBot(null)?.botId ?? null;
+      const shouldQueueOptions = colleaguesEnabled
+        ? {
+            allowedUserIds,
+            botUsername,
+            colleaguesEnabled: true,
+            peerBotIds: peerBotIdsImpl(),
+            receiverBotId,
+          }
+        : { allowedUserIds, botUsername };
+      if (!shouldQueueImpl(update, shouldQueueOptions)) {
         return "dropped";
       }
       let queued;
@@ -357,13 +424,22 @@ export async function routeMessageUpdate(
         queued,
         resetPending
           ? "reset pending"
-          : chatBusy(state)
-            ? `chat busy: ${state}`
-            : "earlier messages wait",
+          : otherBotGroupBusy
+            ? "group busy: another bot"
+            : chatBusy(state)
+              ? `chat busy: ${state}`
+              : "earlier messages wait",
         logImpl,
         traceQueuedImpl,
       );
-      await acknowledgeImpl(update, queued.count);
+      // В группе при ожидании хода другого бота (или при включённых коллегах, где бот
+      // может решить промолчать) не шлём шумное «В очереди: N» в общий чат.
+      const silentGroupQueue =
+        otherBotGroupBusy ||
+        (colleaguesEnabled && groupCoordKeyOf(key) !== null);
+      if (!silentGroupQueue) {
+        await acknowledgeImpl(update, queued.count);
+      }
       return "queued";
     }
   }
@@ -423,6 +499,7 @@ export async function drainReadyQueueHeads({
   loadImpl = loadQueue,
   runningImpl = isRunning,
   statusImpl = getChatStatus,
+  listStatusesImpl = listChatStatuses,
   deliverImpl = (
     update: TelegramQueueUpdate,
     { timeoutMs }: DeliverOptions = {},
@@ -454,6 +531,7 @@ export async function drainReadyQueueHeads({
   loadImpl?: () => MaybePromise<TelegramQueueDocument>;
   runningImpl?: (key: string) => boolean;
   statusImpl?: StatusImpl;
+  listStatusesImpl?: ListStatusesImpl;
   deliverImpl?: DeliverImpl;
   acknowledgeImpl?: (
     key: string,
@@ -519,7 +597,13 @@ export async function drainReadyQueueHeads({
     }
     const item = queueHead(snapshot, key);
     if (!item) continue;
-    if (running || (settleUntil.get(key) ?? 0) > now()) continue;
+    if (
+      running ||
+      (settleUntil.get(key) ?? 0) > now() ||
+      isOtherBotGroupBusy(key, inFlight, listStatusesImpl)
+    ) {
+      continue;
+    }
     const head = materializeQueueItem(key, item, { legacyAllowedUserIds });
     if (!head) {
       try {

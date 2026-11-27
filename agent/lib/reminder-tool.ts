@@ -1,5 +1,6 @@
 // Общее для действий тула напоминаний: строка напоминания для модели и признак того, что
 // диспетчер жив. Читает таблицу и пульс тика, ничего не решает сам.
+import { colleagueBotIdOfTurn } from "./eve-auth.ts";
 import {
   reminderPhase,
   reminderContent,
@@ -28,17 +29,26 @@ export interface ReminderView {
   readonly error: string | null;
   /** Итог хода, который явно промолчал (phase quiet); null — последнее срабатывание не молчало. */
   readonly quiet_note: string | null;
+  /** Числовой botId коллеги, если напоминание принадлежит коллеге. */
+  readonly bot_id?: string;
 }
 
 /**
- * Чат и тема текущего хода из auth-контекста eve: мост Telegram кладёт их в атрибуты
- * (`chat_id`, `message_thread_id`, agent/lib/telegram-inbound.ts). Ход не из Telegram
- * (CLI, расписание) - null: тогда напоминание идёт в чат владельца из настроек.
+ * Чат, тема и (для коллеги) botId текущего хода из auth-контекста eve: мост Telegram кладёт их
+ * в атрибуты (`chat_id`, `message_thread_id`, `bot_id`, agent/lib/telegram-inbound.ts). Ход не
+ * из Telegram (CLI, расписание) - null: тогда напоминание идёт в чат владельца из настроек.
  */
 export function chatOfTurn(ctx: {
   readonly session?: {
     readonly auth?: {
-      readonly current?: { readonly attributes?: unknown } | null;
+      readonly initiator?: {
+        readonly authenticator: string;
+        readonly attributes?: Readonly<Record<string, unknown>> | null;
+      } | null;
+      readonly current?: {
+        readonly authenticator?: string;
+        readonly attributes?: unknown;
+      } | null;
     };
   };
 }): ReminderChat | null {
@@ -49,9 +59,13 @@ export function chatOfTurn(ctx: {
     unknown
   >;
   if (typeof id !== "string" || id.trim() === "") return null;
+  const botId = colleagueBotIdOfTurn(
+    ctx as Parameters<typeof colleagueBotIdOfTurn>[0],
+  );
   return {
     id,
     threadId: typeof thread === "string" && thread !== "" ? thread : null,
+    ...(botId === null ? {} : { botId }),
   };
 }
 
@@ -73,6 +87,7 @@ export function describeReminder(
     delivered: row.delivered,
     error: row.error,
     quiet_note: row.quietNote ?? null,
+    ...(row.chat?.botId === undefined ? {} : { bot_id: row.chat.botId }),
   };
 }
 

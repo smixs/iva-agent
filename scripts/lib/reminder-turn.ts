@@ -11,6 +11,10 @@ import type { ModelFailure } from "#lib/model-response.ts";
 // has to load on an install whose authored tree is missing or half-written, and the delivery
 // child process runs the same turn.
 import { writtenInLanguage } from "./notice-policy.ts";
+import {
+  TELEGRAM_BOT_ID_HEADER,
+  validTelegramBotId,
+} from "../../packages/telegram-bots/index.ts";
 
 /**
  * Виды хода через этот модуль — одно место списка. Ход называет свой вид заголовком
@@ -36,13 +40,23 @@ export type ReminderClientOptions = {
   readonly headers?: Readonly<Record<string, string>>;
 };
 
-/** Заголовок вида хода; вид не назван — заголовка нет. */
-const turnHeaders = (turn: ReminderTurnKind | undefined) =>
-  turn === undefined ? {} : { headers: { "x-iva-turn": turn } };
+/** Заголовки вида хода и бота-коллеги; пустой набор заголовков опускается. */
+function turnHeaders(
+  turn: ReminderTurnKind | undefined,
+  botId: string | null | undefined,
+):
+  | { readonly headers: Readonly<Record<string, string>> }
+  | Record<never, never> {
+  const headers: Record<string, string> = {};
+  if (turn !== undefined) headers["x-iva-turn"] = turn;
+  if (validTelegramBotId(botId)) headers[TELEGRAM_BOT_ID_HEADER] = botId;
+  return Object.keys(headers).length === 0 ? {} : { headers };
+}
 
 export function reminderClientOptions(
   env: NodeJS.ProcessEnv,
   turn?: ReminderTurnKind,
+  options?: { readonly botId?: string | null },
 ): ReminderClientOptions {
   const bearer = String(env.ASSISTANT_BEARER ?? "").trim();
   if (!bearer) throw new Error("ASSISTANT_BEARER is missing — run: iva doctor");
@@ -51,7 +65,7 @@ export function reminderClientOptions(
   return {
     host,
     auth: { bearer: () => Promise.resolve(bearer) },
-    ...turnHeaders(turn),
+    ...turnHeaders(turn, options?.botId),
   };
 }
 

@@ -7,6 +7,11 @@ import {
   vercelOidc,
   type AuthFn,
 } from "eve/channels/auth";
+import {
+  botIdFromToken,
+  TELEGRAM_BOT_ID_HEADER,
+  validTelegramBotId,
+} from "../../packages/telegram-bots/index.ts";
 
 const SERVICE_AUTH = {
   attributes: {},
@@ -75,16 +80,50 @@ export function usesHelperModel(
   );
 }
 
+/**
+ * Числовой botId коллеги для текущего хода (Telegram-ход коллеги или его Reminder-ход),
+ * либо null для основного бота Ивы.
+ */
+export function colleagueBotIdOfTurn(
+  ctx: Parameters<typeof isHelperTurn>[0],
+  env: NodeJS.ProcessEnv = process.env,
+): string | null {
+  const primaryBotId = botIdFromToken(env.TELEGRAM_BOT_TOKEN);
+  for (const auth of [
+    ctx?.session?.auth?.current,
+    ctx?.session?.auth?.initiator,
+  ]) {
+    if (
+      auth?.authenticator !== "telegram-webhook" &&
+      auth?.authenticator !== "iva-bearer"
+    ) {
+      continue;
+    }
+    const raw = auth.attributes?.bot_id;
+    if (!validTelegramBotId(raw)) continue;
+    if (primaryBotId !== null && raw === primaryBotId) continue;
+    return raw;
+  }
+  return null;
+}
+
 /** Service attributes are accepted only after bearer authentication. */
 function serviceAuth(
   request: Request,
 ): NonNullable<Awaited<ReturnType<AuthFn<Request>>>> {
   const turn = request.headers.get("x-iva-turn");
   if (turn === null || !TURN_KINDS.has(turn)) return SERVICE_AUTH;
-  const attributes = {
+  const rawBotId = request.headers.get(TELEGRAM_BOT_ID_HEADER)?.trim();
+  const primaryBotId = botIdFromToken(process.env.TELEGRAM_BOT_TOKEN);
+  const colleagueBotId =
+    validTelegramBotId(rawBotId) && rawBotId !== primaryBotId
+      ? rawBotId
+      : undefined;
+  const attributes: Record<string, string> = {
     iva_turn: turn,
     iva_max_steps: String(TURN_MAX_STEPS[turn]),
     iva_max_input_tokens: String(TURN_MAX_INPUT_TOKENS),
+    ...(colleagueBotId === undefined ? {} : { bot_id: colleagueBotId }),
   };
   if (turn !== "helper") return { ...SERVICE_AUTH, attributes };
   const id = request.headers.get("x-iva-helper");

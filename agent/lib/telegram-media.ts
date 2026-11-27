@@ -29,6 +29,7 @@ import type { TelegramRawMedia, TelegramRawMessage } from "./telegram-parts.ts";
 import { resolveVaultDir } from "@iva/vault-dir";
 
 export type TelegramMediaEffects = {
+  readonly botId?: string;
   readonly botToken?: string;
   readonly request: (
     method: string,
@@ -157,10 +158,12 @@ export async function processMediaPart(
           effects.botToken,
         );
         if (file && "tooBig" in file) {
-          appendDaily(
-            tag,
-            `${tr("(file >20MB — Telegram won't hand it to bots)", "(файл >20MB — Telegram не отдаёт его ботам)")}${capSuffix}`,
-          );
+          if (effects.botId === undefined) {
+            appendDaily(
+              tag,
+              `${tr("(file >20MB — Telegram won't hand it to bots)", "(файл >20MB — Telegram не отдаёт его ботам)")}${capSuffix}`,
+            );
+          }
           try {
             await effects.sendMessage(
               tr(
@@ -261,10 +264,15 @@ export async function processMediaPart(
     }
 
     const body = vision || transcript;
-    const dailyPath = appendDaily(
-      tag,
-      body ? `![[${rel}]]\n\n${body}${capSuffix}` : `![[${rel}]]${capSuffix}`,
-    );
+    const dailyPath =
+      effects.botId === undefined
+        ? appendDaily(
+            tag,
+            body
+              ? `![[${rel}]]\n\n${body}${capSuffix}`
+              : `![[${rel}]]${capSuffix}`,
+          )
+        : undefined;
     if (
       dropSilent &&
       (media.tag === "sticker" || media.tag === "animation") &&

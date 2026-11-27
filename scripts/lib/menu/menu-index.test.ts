@@ -544,34 +544,52 @@ test("group text cannot mutate a pending menu setting", async () => {
   }
 });
 
-// Кнопка корня, чей sid не зарегистрирован в SCREENS, в Telegram превращается в вечный
-// спиннер: движок гасит спиннер, ищет экран, не находит и молча выходит. Ни tsgo, ни линт
-// этого не видят — sid живёт в строке callback_data. Проверяется весь корень разом.
-test("every button on the root screen resolves to a registered screen", () => {
-  const view = root.render(
-    {},
-    {
-      tr: (_english: string, russian: string) => russian,
-    },
-  );
-
+// Кнопка корня или раздела, чей sid не зарегистрирован в SCREENS, в Telegram превращается
+// в вечный спиннер: движок гасит спиннер, ищет экран, не находит и молча выходит. Ни tsgo,
+// ни линт этого не видят — sid живёт в строке callback_data. Обходим всё дерево от корня.
+test("every button in root and its six sections resolves to a registered screen, and no screen is orphaned", () => {
+  const ctx = {
+    tr: (_english: string, russian: string) => russian,
+  };
   // Псевдо-sid — хендофф в визарды /model и /think, их обрабатывает сам движок (index.ts).
   const known = new Set([...Object.keys(SCREENS), "mdl", "thk"]);
-  const sids = [...view.text.matchAll(/<tg-button[^>]*data="([^"]+)"/g)]
-    .map((match) => match[1])
-    .map((data) => data.replace(/^iva_menu:/u, "").split(":")[0]);
+  const sidsOf = (text: string): string[] =>
+    [...text.matchAll(/<tg-button[^>]*data="([^"]+)"/g)]
+      .map((match) => match[1])
+      .map((data) => data.replace(/^iva_menu:/u, "").split(":")[0]);
 
-  assert.ok(sids.length > 0, "the root screen must have buttons at all");
-  for (const sid of sids)
+  const rootSids = sidsOf(root.render({}, ctx).text);
+  assert.ok(rootSids.length > 0, "the root screen must have buttons at all");
+
+  const reachable = new Set<string>(["r"]);
+  const queue = [...rootSids];
+  while (queue.length > 0) {
+    const sid = queue.shift()!;
     assert.ok(
       known.has(sid),
-      `root offers "${sid}", which no screen in SCREENS answers — the button would spin forever`,
+      `menu offers "${sid}", which no screen in SCREENS answers — the button would spin forever`,
     );
-  // И наоборот: экран, до которого из корня не дойти, — мёртвый код в реестре.
-  const reachable = new Set(sids);
+    if (reachable.has(sid)) continue;
+    reachable.add(sid);
+    // Разделы (parent === "r") раскрываем дальше до листовых экранов.
+    if (Object.hasOwn(SCREENS, sid)) {
+      const mod = SCREENS[sid as keyof typeof SCREENS] as {
+        parent?: string | null;
+        render?: (
+          st: Record<string, unknown>,
+          c: typeof ctx,
+        ) => { text: string } | Promise<{ text: string }>;
+      };
+      if (mod.parent === "r" && typeof mod.render === "function") {
+        const view = mod.render({}, ctx) as { text: string };
+        for (const childSid of sidsOf(view.text)) queue.push(childSid);
+      }
+    }
+  }
+
   for (const sid of Object.keys(SCREENS))
     assert.ok(
       reachable.has(sid),
-      `SCREENS holds "${sid}", but no root button leads there`,
+      `SCREENS holds "${sid}", but no path from root leads there`,
     );
 });

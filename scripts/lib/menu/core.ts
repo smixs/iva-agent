@@ -27,7 +27,7 @@ import { button, escapeRichText, menuBackLine } from "../telegram-buttons.ts";
 import { readSettings, writeSettings } from "#lib/settings.ts";
 
 const SID = "core";
-const PARENT = "r";
+const PARENT = "gmem";
 const EXCERPT_LIMIT = 400;
 
 type Lang = "en" | "ru";

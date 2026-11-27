@@ -17,6 +17,11 @@ const dataPath = join(root, "data");
 const vaultPath = join(root, "vault");
 mkdirSync(dataPath, { recursive: true });
 mkdirSync(vaultPath, { recursive: true });
+// Multi-bot channel tests verify active colleague routing with the option enabled.
+writeFileSync(
+  join(dataPath, "settings.json"),
+  JSON.stringify({ colleagues: { enabled: true, items: {} } }),
+);
 process.env.ASSISTANT_DATA_DIR = dataPath;
 process.env.ASSISTANT_VAULT_DIR = vaultPath;
 process.env.ASSISTANT_TIMEZONE = "UTC";

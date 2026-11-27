@@ -8,18 +8,22 @@ The menu lives in the long-poll bridge, not the agent. That has three consequenc
 
 ```
 ⚙️ Settings
-[🧠 Model]     [🤔 Thinking]
-[🔍 Search]    [🌐 Language]
-[💬 Rich replies] [🎤 Voice]
-[🎭 Character] [💾 Memory]
-[📡 Userbot]   [🔗 Google]
-[⏰ Timers]    [🔔 Notices]
-[🧩 Skills]    [📊 Status]
-[🛠 Maintenance]
+[🧠 Model]     [💬 Chat]
+[💾 Memory]    [🔗 Connections]
+[⏰ Schedule]  [🛠 System]
 [✖ Close]
 ```
 
-**🧠 Model** and **🤔 Thinking** hand off to the existing `/model` and `/think` wizards, rendered into the same message; a **‹ Menu** button walks you back. Every other sub-screen has a **‹ Back** button; **✖ Close** drops the menu and strips the keyboard.
+Each of the six sections opens its own sub-menu with a **‹ Menu** button back to the root, and every leaf screen has a **‹ Back** button back to its section:
+
+- **🧠 Model** — 🧠 Model (`/model`), 🤔 Thinking (`/think`), 🔍 Search, 🔀 New messages
+- **💬 Chat** — 💬 Rich replies, 🎤 Voice, 🌐 Language, 🎭 Character
+- **💾 Memory** — 💾 Memory, 🧩 Skills
+- **🔗 Connections** — 🔗 Google, 📡 Userbot, 🤝 Colleagues (off by default)
+- **⏰ Schedule** — ⏰ Timers, 🔔 Notices
+- **🛠 System** — 📊 Status, 🛠 Maintenance, ✨ New menu / ◀︎ Classic menu
+
+**🧠 Model** and **🤔 Thinking** hand off to the existing `/model` and `/think` wizards, rendered into the same message; a **‹ Menu** button walks you back. **✖ Close** drops the menu and strips the keyboard.
 
 ## What applies when
 

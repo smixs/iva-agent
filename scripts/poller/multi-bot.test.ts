@@ -25,12 +25,14 @@ import {
   type TelegramQueueUpdate,
 } from "../lib/telegram-queue.ts";
 import { collectorKeyFor } from "../lib/telegram-collect.ts";
-import { botBacklogMarkerFile, botOffsetFile } from "./config.ts";
+import { botOffsetFile } from "./config.ts";
 import { deliver } from "./deliver.ts";
 import { admitTelegramUpdate, inboxKeyFor } from "./inbox.ts";
 import { chatKey, loadOffset, saveOffset } from "./offset.ts";
-import { acquireTelegramProcessLock } from "./process-lock.ts";
-import { prepareTelegramStartup } from "./startup-state.ts";
+import {
+  acquireTelegramProcessLock,
+  assertTelegramProcessLease,
+} from "./process-lock.ts";
 import { runBotPollLoop } from "./main.ts";
 import { scanOutbound } from "#lib/security-gate.ts";
 
@@ -207,6 +209,7 @@ void test("colleague message arrives with its bot tag and isolated inbox/chat ke
   const r2 = await admitTelegramUpdate(colleagueUpdate, {
     allowedUserIds: allowed,
     bot: COLLEAGUE_BOT,
+    colleaguesEnabledImpl: () => true,
     enqueueImpl: (key, candidate) =>
       enqueueQueueFile(inboxFile, key, candidate, { strict: true }),
     logImpl: () => {},
@@ -293,6 +296,8 @@ void test("lagging or stalled bot does not delay another bot polling in the same
     assertLease: () => {
       assert.ok(lease);
     },
+    colleaguesEnabledImpl: () => true,
+    colleagueCompleteImpl: () => true,
     shouldContinue: () => keepRunningColleague,
     tgImpl: (_method, body, options) => {
       assert.equal(options?.token, COLLEAGUE_BOT.token);
@@ -335,44 +340,101 @@ void test("lagging or stalled bot does not delay another bot polling in the same
   assert.equal(ivaResult.offset, 100);
 });
 
-void test("per-bot startup and restart preserve independent offsets under one process lock", async (t) => {
+void test("colleague offset initialization waits for enablement and retries without stopping the loop", async () => {
+  let enabled = false;
+  let initAttempts = 0;
+  let running = true;
+  const events: string[] = [];
+
+  const result = await runBotPollLoop({
+    bot: COLLEAGUE_BOT,
+    initialOffset: 0,
+    assertLease: () => {},
+    colleaguesEnabledImpl: () => enabled,
+    colleagueCompleteImpl: () => true,
+    initializeOffsetImpl: () => {
+      events.push("init");
+      initAttempts += 1;
+      if (initAttempts === 1) {
+        return Promise.reject(new Error("bad colleague token"));
+      }
+      return Promise.resolve(10);
+    },
+    shouldContinue: () => running,
+    tgImpl: (method, body, options) => {
+      assert.equal(method, "getUpdates");
+      assert.equal(options?.token, COLLEAGUE_BOT.token);
+      events.push(`poll:${String((body as { offset: number }).offset)}`);
+      running = false;
+      return Promise.resolve({ ok: true, result: [] });
+    },
+    sleepImpl: () => {
+      events.push(enabled ? "sleep:enabled" : "sleep:disabled");
+      if (!enabled) enabled = true;
+      return Promise.resolve();
+    },
+    logImpl: () => {},
+  });
+
+  assert.equal(result.offset, 10);
+  assert.deepEqual(events, [
+    "sleep:disabled",
+    "init",
+    "sleep:enabled",
+    "init",
+    "poll:10",
+  ]);
+});
+
+void test("lease loss during lazy colleague initialization stops before the first getUpdates", async (t) => {
+  const { lease } = await tempDirWithLease(t);
+  const telegramCalls: string[] = [];
+  let running = true;
+
+  await assert.rejects(
+    runBotPollLoop({
+      bot: COLLEAGUE_BOT,
+      initialOffset: 0,
+      assertLease: () => assertTelegramProcessLease(lease),
+      colleaguesEnabledImpl: () => true,
+      colleagueCompleteImpl: () => true,
+      initializeOffsetImpl: async () => {
+        await lease.close();
+        return 10;
+      },
+      shouldContinue: () => running,
+      tgImpl: (method) => {
+        telegramCalls.push(method);
+        running = false;
+        return Promise.resolve({ ok: true, result: [] });
+      },
+      sleepImpl: () => Promise.resolve(),
+      logImpl: () => {},
+    }),
+    /active process lease/u,
+  );
+  assert.deepEqual(telegramCalls, []);
+});
+
+void test("per-bot restart preserves independent offsets under one process lock", async (t) => {
   const { dir, lease } = await tempDirWithLease(t);
+  assert.ok(lease);
   const ivaOffsetFile = botOffsetFile(IVA_BOT, dir);
-  const ivaMarkerFile = botBacklogMarkerFile(IVA_BOT, dir);
   const colOffsetFile = botOffsetFile(COLLEAGUE_BOT, dir);
-  const colMarkerFile = botBacklogMarkerFile(COLLEAGUE_BOT, dir);
 
   // Existing installation: Iva already has offset 50; Colleague is brand new.
   await writeFile(ivaOffsetFile, serializeOffsetFile(50), { mode: 0o600 });
 
-  const ivaStart = await prepareTelegramStartup(lease, {
-    markerFile: ivaMarkerFile,
-    loadOffsetImpl: () => loadOffset({ file: ivaOffsetFile }),
-  });
-  const colStart = await prepareTelegramStartup(lease, {
-    markerFile: colMarkerFile,
-    loadOffsetImpl: () => loadOffset({ file: colOffsetFile }),
-  });
-
-  assert.deepEqual(ivaStart, { firstRun: false, offset: 50 });
-  assert.deepEqual(colStart, { firstRun: true, offset: null });
+  assert.deepEqual(await loadOffset({ file: ivaOffsetFile }), { offset: 50 });
+  assert.deepEqual(await loadOffset({ file: colOffsetFile }), { offset: null });
 
   // Colleague saves its own offset 12; Iva advances to 55.
   await saveOffset(12, { file: colOffsetFile });
   await saveOffset(55, { file: ivaOffsetFile });
 
   // Simulated restart: both resume from their own persisted offsets.
-  const ivaResume = await prepareTelegramStartup(lease, {
-    markerFile: ivaMarkerFile,
-    loadOffsetImpl: () => loadOffset({ file: ivaOffsetFile }),
-  });
-  const colResume = await prepareTelegramStartup(lease, {
-    markerFile: colMarkerFile,
-    loadOffsetImpl: () => loadOffset({ file: colOffsetFile }),
-  });
-
-  assert.deepEqual(ivaResume, { firstRun: false, offset: 55 });
-  assert.deepEqual(colResume, { firstRun: false, offset: 12 });
+  assert.deepEqual(await loadOffset({ file: ivaOffsetFile }), { offset: 55 });
+  assert.deepEqual(await loadOffset({ file: colOffsetFile }), { offset: 12 });
 });
 
 void test("deliver forwards colleague bot id in X-Iva-Telegram-Bot-Id header and omits it for primary", async () => {

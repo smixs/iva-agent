@@ -1,6 +1,6 @@
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { TELEGRAM_ACCEPTANCE_ROUTE } from "#lib/telegram-acceptance.ts";
+import { TELEGRAM_ACCEPTANCE_ROUTE } from "#lib/telegram-acceptance-wire.ts";
 import { TELEGRAM_CANCEL_ROUTE } from "#lib/telegram-cancel-route.ts";
 import {
   dataDirSetting,
@@ -48,16 +48,6 @@ export function botOffsetFile(
   return join(dataDir, "telegram-offsets.d", `${bot.botId}.json`);
 }
 
-/** Файл маркера первого запуска для конкретного бота. */
-export function botBacklogMarkerFile(
-  bot: Pick<TelegramBotConfig, "botId" | "isPrimary">,
-  dataDir = DATA_DIR,
-): string {
-  if (bot.isPrimary || !bot.botId) {
-    return join(dataDir, "telegram-backlog-drop.json");
-  }
-  return join(dataDir, "telegram-offsets.d", `${bot.botId}.backlog-drop.json`);
-}
 // Acceptance returns 204 only after the turn starts. Ninety seconds is deliberately
 // generous so no legitimate start should hit the deadline, while a wedged eve cannot
 // block the bridge's single polling loop forever.

@@ -2,7 +2,8 @@ import {
   claudeContextWindow,
   providerContextWindow,
 } from "../packages/context-window/index.ts";
-import { usesHelperModel } from "./lib/eve-auth.ts";
+import { colleagueBotIdOfTurn, usesHelperModel } from "./lib/eve-auth.ts";
+import { readColleague, type ColleagueEntry } from "./lib/colleagues.ts";
 import { MODEL_PROVIDERS } from "./lib/model-provider.ts";
 import { defineAgent, defineDynamic } from "eve";
 // Провайдер и его модели — единый источник в provider.ts (тот же конфиг у agent/vision.ts
@@ -12,6 +13,7 @@ import {
   providerName,
   compatibleThinkingEffort,
   providerConfig as cfg,
+  providerReplaysReasoning,
   withReplayableReasoning,
   makeTextModel,
 } from "./provider.js";
@@ -21,7 +23,39 @@ import { chatModelSeesImages } from "./vision.js";
 
 export function stepModelChoice(
   ctx: Parameters<typeof usesHelperModel>[0] & { session: { id: string } },
+  deps: {
+    readonly readColleague?: (botId: string) => ColleagueEntry | null;
+    readonly env?: NodeJS.ProcessEnv;
+  } = {},
 ) {
+  const colleagueBotId = colleagueBotIdOfTurn(ctx, deps.env);
+  if (colleagueBotId !== null) {
+    const colleague = (deps.readColleague ?? readColleague)(colleagueBotId);
+    if (colleague !== null) {
+      const targetProvider = colleague.provider;
+      const model = colleague.model;
+      const contextWindow =
+        targetProvider === "claude"
+          ? Math.min(
+              providerContextWindow(targetProvider, model),
+              claudeContextWindow(model),
+            )
+          : providerContextWindow(targetProvider, model);
+      return Object.freeze({
+        provider: targetProvider,
+        model,
+        contextWindow,
+        seesImages:
+          targetProvider === providerName
+            ? () => chatModelSeesImages(model)
+            : () =>
+                Promise.resolve(
+                  targetProvider === "codex" || targetProvider === "claude",
+                ),
+        sessionId: ctx.session.id,
+      });
+    }
+  }
   const helperModel = usesHelperModel(ctx);
   const model = helperModel
     ? process.env.HELPER_MODEL === undefined
@@ -63,6 +97,7 @@ export default defineAgent({
               chatModelSeesImages: choice.seesImages,
               usage: stepUsageLabel(event, choice.sessionId),
             }),
+            providerReplaysReasoning(choice.provider),
           ),
           modelContextWindowTokens: choice.contextWindow,
           modelCompactionThresholdPercent: compactionThresholdPercent(

@@ -10,9 +10,9 @@ TLC=${TLC:-$(command -v tlc || echo "$HOME/.local/bin/tlc")}
 META=$(mktemp -d) || exit 2
 trap 'rm -rf "$META"' EXIT
 failed=0
-check() { # config expected
-  cfg=$1; expect=$2; log="$META/$cfg.log"
-  "$TLC" -workers 1 -deadlock -metadir "$META/$cfg.states" -config "$cfg.cfg" MultiBotPoll.tla >"$log" 2>&1
+check() { # config expected [module]
+  cfg=$1; expect=$2; module=${3:-MultiBotPoll}; log="$META/$cfg.log"
+  "$TLC" -workers 1 -deadlock -metadir "$META/$cfg.states" -config "$cfg.cfg" "$module.tla" >"$log" 2>&1
   code=$?
   if tlc_expect "$log" "$code" "$cfg.cfg" "$expect" ""; then
     if [ "$got" = none ]; then
@@ -26,7 +26,11 @@ check() { # config expected
 }
 check MultiBotPoll none
 check MultiBotPoll-shared-offset NoSkippedUpdate
+check MultiBotPoll-drop-activation-backlog NoSkippedUpdate
 check MultiBotPoll-no-lock SinglePollerLock
 check MultiBotPoll-no-bot-tag ExactBotAttribution
 check MultiBotPoll-independent-witness NoIndependentProgress
+check ColleagueHireLock none ColleagueHireLock
+check ColleagueHireLock-no-lock SingleHireWriter ColleagueHireLock
+check ColleagueHireLock-blind-write CompleteNotOverwritten ColleagueHireLock
 exit "$failed"

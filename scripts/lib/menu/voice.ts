@@ -35,7 +35,7 @@ import {
 import type { AwaitText } from "../tg-flow.ts";
 
 const SID = "voice";
-const PARENT = "r";
+const PARENT = "gc";
 const KEY_VAR = "DEEPGRAM_API_KEY";
 const LANG_VAR = "DEEPGRAM_LANGUAGE";
 const TERMS_VAR = "DEEPGRAM_KEYTERMS";

@@ -15,6 +15,7 @@ process.env.ASSISTANT_TIMEZONE = "UTC";
 const { default: helperTool } = await import("../agent/tools/helper.ts");
 const { default: goalTool } = await import("../agent/tools/goal.ts");
 const { default: tasksTool } = await import("../agent/tools/tasks.ts");
+const { default: colleagueTool } = await import("../agent/tools/colleague.ts");
 type Wire = {
   tools: { name: string; [key: string]: unknown }[];
   prefix: unknown[];
@@ -130,7 +131,7 @@ test("real installed framework registry removes only the three automatic task to
     assert.ok(paths.includes(`tools/${kept}.ts`));
   assert.ok(paths.includes("agent.ts"));
 });
-test("enabled tools keep retained schemas and descriptions except the approved helper/goal/schedule additions and current tasks/remind/memory_search/send_file definitions", async () => {
+test("enabled tools keep retained schemas and descriptions except the approved helper/goal/schedule/colleague additions and current tasks/remind/memory_search/send_file definitions", async () => {
   const previous = Object.values(base.wires)[0];
   const removed = new Set(["agent", "task_cancel", "task_update", "planner"]);
   const tasks = enabled.tools.find((t) => t.name === "tasks");
@@ -157,7 +158,7 @@ test("enabled tools keep retained schemas and descriptions except the approved h
   );
   assert.deepEqual(
     enabled.tools.filter(
-      (t) => !["helper", "goal", "schedule"].includes(t.name),
+      (t) => !["helper", "goal", "schedule", "colleague"].includes(t.name),
     ),
     previous.tools
       .filter((t) => !removed.has(t.name))
@@ -172,6 +173,10 @@ test("enabled tools keep retained schemas and descriptions except the approved h
   assert.equal(
     enabled.tools.find((t) => t.name === "helper")?.description,
     helperTool.description,
+  );
+  assert.equal(
+    enabled.tools.find((t) => t.name === "colleague")?.description,
+    colleagueTool.description,
   );
   const goal = enabled.tools.find((t) => t.name === "goal");
   assert.equal(goal?.description, goalTool.description);
