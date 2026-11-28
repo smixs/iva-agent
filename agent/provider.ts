@@ -193,8 +193,35 @@ export const opencodeFetch: typeof fetch = (input, init) => {
     init?.headers ?? (input instanceof Request ? input.headers : undefined),
   );
   headers.set("user-agent", IVA_USER_AGENT);
+  const body = withMaxEffort(init?.body);
+  if (body !== undefined) {
+    // Длина тела изменилась: заголовок SDK пересчитывать нечем, пусть его считает fetch.
+    headers.delete("content-length");
+    return fetch(input, { ...init, headers, body });
+  }
   return fetch(input, { ...init, headers });
 };
+
+/**
+ * max effort: каталог Go отдаёт уровни low|high|max, а eve знает только xhigh и молча
+ * подменяет им max. При THINKING_EFFORT=max правило ставит reasoning_effort:max в тело
+ * запроса уже на проводе; при любом другом уровне тело не трогаем.
+ */
+const MAX_EFFORT_REQUESTED =
+  (process.env.THINKING_EFFORT ?? "").toLowerCase() === "max";
+
+function withMaxEffort(body: unknown): string | undefined {
+  if (!MAX_EFFORT_REQUESTED || typeof body !== "string") return undefined;
+  try {
+    const parsed: unknown = JSON.parse(body);
+    if (!isRecord(parsed)) return undefined;
+    if (String(parsed.reasoning_effort ?? "").toLowerCase() === "max") return undefined;
+    parsed.reasoning_effort = "max";
+    return JSON.stringify(parsed);
+  } catch {
+    return undefined;
+  }
+}
 
 // THINKING_EFFORT (.env, пишут /model и /think в Telegram): reasoning-усилие модели.
 // Codex получает его через providerOptions.openai.reasoningEffort ниже. Ollama Cloud
@@ -205,16 +232,21 @@ const effortRaw = (process.env.THINKING_EFFORT ?? "").toLowerCase();
 export const thinkingEffort = EFFORTS.includes(effortRaw)
   ? effortRaw
   : undefined;
-const COMPATIBLE_EFFORTS = ["low", "medium", "high"] as const;
+// eve нормализует поле reasoning по своему списку
+// (provider-default|none|minimal|low|medium|high|xhigh) — канонического "max" там нет,
+// и с ним определение агента не проходит сборку. Поэтому max уезжает как xhigh:
+// OpenAI-compatible шлюзы (OpenCode Go) понимают xhigh и сами упираются в свой потолок.
+const COMPATIBLE_EFFORTS = ["minimal", "low", "medium", "high", "xhigh"] as const;
 type CompatibleEffort = (typeof COMPATIBLE_EFFORTS)[number];
+const compatibleEffort = effortRaw === "max" ? "xhigh" : effortRaw;
 // CUSTOM_REASONING=1 (.env): владелец custom-эндпоинта подтверждает, что тот понимает
 // reasoning_effort (Meta Model API, vLLM с reasoning-моделью). По умолчанию — не шлём.
 const customReasoning =
   selected.name === "custom" && process.env.CUSTOM_REASONING === "1";
 export const compatibleThinkingEffort: CompatibleEffort | undefined =
   (selected.compatibleReasoning || customReasoning) &&
-  (COMPATIBLE_EFFORTS as readonly string[]).includes(effortRaw)
-    ? (effortRaw as CompatibleEffort)
+  (COMPATIBLE_EFFORTS as readonly string[]).includes(compatibleEffort)
+    ? (compatibleEffort as CompatibleEffort)
     : undefined;
 
 // --- Codex (подписка ChatGPT): Responses API через @ai-sdk/openai ----------------------------

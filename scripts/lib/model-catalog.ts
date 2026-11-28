@@ -317,6 +317,44 @@ const optionsFor = (
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object";
 
+// Уровни усилия из живого каталога: Go отдаёт их в capabilities.reasoning.effort.
+// Без этого /think рисовал консервативный фолбэк, хотя /model уже показывал max.
+// Рантайм отдаёт движку только эти уровни (agent/provider.ts: COMPATIBLE_EFFORTS), а
+// канонический «max» на его стороне зовётся xhigh. Чужое в кнопки не пускаем: иначе
+// выбор сохранится в THINKING_EFFORT и молча не уедет на провод.
+const SENDABLE_LEVELS = ["minimal", "low", "medium", "high", "xhigh"] as const;
+const SENDABLE_ALIASES: Record<string, string> = { max: "xhigh" };
+// Через compatibleThinkingEffort (agent/provider.ts) идут только OpenAI-compatible
+// провайдеры. Нативный Codex получает свой level как есть (providerOptions.reasoningEffort),
+// поэтому его уровни не переводим и не фильтруем — иначе max уехал бы как xhigh.
+const COMPATIBLE_PROVIDERS = new Set(["ollama", "opencode", "custom"]);
+
+const sendableLevels = (provider: string, levels: readonly unknown[]): string[] => {
+  const compatible = COMPATIBLE_PROVIDERS.has(provider);
+  const out: string[] = [];
+  for (const value of levels) {
+    if (typeof value !== "string") continue;
+    const key = value.toLowerCase();
+    const level = compatible ? (SENDABLE_ALIASES[key] ?? key) : key;
+    if (compatible && !(SENDABLE_LEVELS as readonly string[]).includes(level)) continue;
+    if (!out.includes(level)) out.push(level);
+  }
+  return out;
+};
+
+const capabilitiesReasoningLevels = (
+  provider: string,
+  entry: Record<string, unknown> | null,
+): string[] => {
+  const capabilities = entry?.capabilities;
+  if (!isRecord(capabilities)) return [];
+  const reasoning = capabilities.reasoning;
+  if (!isRecord(reasoning)) return [];
+  const effort = reasoning.effort;
+  if (!Array.isArray(effort)) return [];
+  return sendableLevels(provider, effort);
+};
+
 const validOptions = (provider: string, entries: unknown): ModelOption[] => {
   if (!Array.isArray(entries)) {
     throw new ModelCatalogError(
@@ -339,10 +377,15 @@ const validOptions = (provider: string, entries: unknown): ModelOption[] => {
     seen.add(id);
     options.push({
       id,
-      reasoningLevels:
-        entry && Array.isArray(entry.reasoningLevels)
-          ? ([...(entry.reasoningLevels as unknown[])] as string[])
-          : providerFallbackReasoningLevels(provider),
+      reasoningLevels: (() => {
+        const live = capabilitiesReasoningLevels(provider, entry);
+        if (live.length > 0) return live;
+        const flat =
+          entry && Array.isArray(entry.reasoningLevels)
+            ? sendableLevels(provider, entry.reasoningLevels as unknown[])
+            : [];
+        return flat.length > 0 ? flat : providerFallbackReasoningLevels(provider);
+      })(),
     });
   }
   if (!options.length) {
